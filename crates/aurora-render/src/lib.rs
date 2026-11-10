@@ -67,6 +67,8 @@ mod test_gpu;
 pub mod tex_anim;
 pub mod textures;
 pub mod thread_cpu;
+#[cfg(test)]
+mod tone_curves;
 pub mod types;
 mod ui_blur;
 mod ui_frame;

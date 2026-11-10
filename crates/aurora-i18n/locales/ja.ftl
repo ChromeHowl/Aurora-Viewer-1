@@ -13517,3 +13517,8 @@ ui-options-attached-particles-hint = アバターが装着しているものの�
 # Preferences › Graphics: progressive draw distance (FSRenderFarClipStepping)
 ui-options-draw-distance-stepping = 描画距離を段階的に広げる
 ui-options-draw-distance-stepping-hint = ログイン後と別のリージョンへのテレポート後、描画距離を32mから始めて設定値まで倍々に広げ、近くのものから読み込みます。
+
+# Preferences › Graphics › Tone mapping: Aurora's own tone curves
+tone-curves-reinhard = Reinhard
+tone-curves-uncharted2 = Uncharted 2（フィルミック）
+tone-curves-agx = AgX

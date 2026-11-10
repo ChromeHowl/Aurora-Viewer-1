@@ -879,14 +879,26 @@ fn image(cx: &mut Cx) {
         } else {
             tr!("ui-options-needs-hdr-emissive")
         };
-        cx.keywords("ACES Khronos PBR Neutral").row(
+        cx.keywords("ACES Khronos PBR Neutral Reinhard Uncharted Hable filmic AgX").row(
             tr!("ui-options-tone-mapping"),
             tr!("ui-options-tone-mapping-help"),
             &field!(tonemapper),
             |ui, s| {
                 let mut changed = false;
                 ui.add_enabled_ui(mapped, |ui| {
-                    changed = super::super::combo(ui, &mut s.tonemapper, &[(0, tr!("ui-options-khronos-pbr-neutral")), (1, "ACES")]);
+                    // the Legacy Viewer's two, then Aurora's own
+                    // (settings::tonemapper_of)
+                    changed = super::super::combo(
+                        ui,
+                        &mut s.tonemapper,
+                        &[
+                            (0, tr!("ui-options-khronos-pbr-neutral")),
+                            (1, "ACES"),
+                            (2, tr!("tone-curves-reinhard")),
+                            (3, tr!("tone-curves-uncharted2")),
+                            (4, tr!("tone-curves-agx")),
+                        ],
+                    );
                 })
                 .response
                 .on_disabled_hover_text(why);

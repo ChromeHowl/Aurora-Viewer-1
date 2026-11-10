@@ -1333,6 +1333,9 @@ fn apply_test_overrides(settings: &mut Settings) {
     if let Ok(v) = std::env::var("AURORA_HDR") {
         settings.hdr_emissive = v != "0";
     }
+    if let Some(v) = std::env::var("AURORA_TONEMAPPER").ok().and_then(|v| v.parse::<u8>().ok()) {
+        settings.tonemapper = v.min(crate::settings::TONEMAPPER_MAX);
+    }
     if let Ok(v) = std::env::var("AURORA_OCCLUSION") {
         settings.occlusion_culling = v != "0";
     }

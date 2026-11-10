@@ -1040,7 +1040,31 @@ pub enum Tonemapper {
     /// Khronos PBR Neutral (Second Life's tone mapper).
     KhronosNeutral,
     Aces,
+    /// Reinhard's extended curve on the luminance.
+    Reinhard,
+    /// Uncharted 2's filmic curve (Hable).
+    Uncharted2,
+    /// AgX, base look.
+    Agx,
 }
+
+impl Tonemapper {
+    /// `PostParams::tonemapper` of post.wgsl; 2 is "none" there (classic
+    /// skies, "HDR and Emissive" off), which no choice takes.
+    pub(crate) fn shader_id(self) -> f32 {
+        match self {
+            Self::KhronosNeutral => 0.0,
+            Self::Aces => 1.0,
+            Self::Reinhard => 3.0,
+            Self::Uncharted2 => 4.0,
+            Self::Agx => 5.0,
+        }
+    }
+}
+
+/// `PostParams::tonemapper` without a tone mapper (see
+/// [`Tonemapper::shader_id`]).
+pub(crate) const TONEMAPPER_NONE: f32 = 2.0;
 
 /// Quality settings applied with `Renderer::apply_settings`.
 /// The ambient occlusion method (Preferences › Graphics).

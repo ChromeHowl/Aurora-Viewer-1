@@ -7016,12 +7016,9 @@ impl Backend {
             },
             // classic skies are not tone mapped (Firestorm: no_post + legacy gamma)
             tonemapper: if f.sky.no_post || !hdr {
-                2.0
+                crate::types::TONEMAPPER_NONE
             } else {
-                match self.settings.tonemapper {
-                    Tonemapper::KhronosNeutral => 0.0,
-                    Tonemapper::Aces => 1.0,
-                }
+                self.settings.tonemapper.shader_id()
             },
             fxaa: if self.settings.aa == AntiAliasing::Fxaa { 1.0 } else { 0.0 },
             // FSR sharpens with its own RCAS: CAS on top of it turns FSR's
