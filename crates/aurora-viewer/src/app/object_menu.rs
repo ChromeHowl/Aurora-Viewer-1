@@ -642,12 +642,103 @@ impl App {
         }
         if let Some(queue) = self.object_menu.queue.as_mut() {
             queue.step(&mut self.build, &self.world, Instant::now());
+            let next = queue.next_compile(Instant::now());
+            self.send_recompile(next);
+        }
+        if let Some(queue) = self.object_menu.queue.as_mut() {
             let open = ui::script_queue::show(ctx, p, queue);
             if !open {
                 self.object_menu.queue = None;
             }
             self.flush_build();
         }
+    }
+}
+
+impl App {
+    /// The network side of the recompile queue (LLFloaterCompileQueue):
+    /// the requests its script under way needs.
+    fn send_recompile(&mut self, request: Option<script_queue::CompileRequest>) {
+        use aurora_net::scripts::{ScriptOptions, ScriptTarget};
+        use script_queue::CompileRequest as R;
+        let Some(request) = request else { return };
+        let (object, item) = match &request {
+            R::Experience { object, item, .. } | R::Source { object, item, .. } | R::Save { object, item, .. } => (*object, *item),
+        };
+        let target = ScriptTarget { object, item };
+        let handle = self
+            .world
+            .objects
+            .index_of_uuid(&object)
+            .and_then(|idx| self.world.objects.get(idx))
+            .map(|o| o.key.region);
+        let it = self
+            .build
+            .contents
+            .objects
+            .get(&object)
+            .and_then(|inv| inv.items.iter().find(|it| it.item_id == item))
+            .map(|it| (it.owner_id, it.asset_id));
+        let (Some(handle), Some((owner, asset))) = (handle, it) else {
+            if let Some(queue) = self.object_menu.queue.as_mut() {
+                queue.give_up();
+            }
+            return;
+        };
+        let command = match request {
+            R::Experience { request, .. } => NetCommand::LoadScriptExperiences { request, target, handle },
+            R::Source { request, .. } => NetCommand::LoadScript {
+                request,
+                target,
+                handle,
+                owner,
+                asset,
+            },
+            R::Save {
+                request,
+                mono,
+                experience,
+                source,
+                ..
+            } => NetCommand::SaveScript {
+                request,
+                target,
+                handle,
+                // LLQueuedScriptAssetUpload: saved running
+                options: ScriptOptions {
+                    mono,
+                    running: true,
+                    experience,
+                },
+                source,
+            },
+        };
+        self.send(command);
+    }
+
+    /// A script reply that belongs to the recompile queue: false when it
+    /// is someone else's.
+    pub(super) fn recompile_reply(&mut self, ev: &NetEvent) -> bool {
+        let Some(queue) = self.object_menu.queue.as_mut() else {
+            return false;
+        };
+        let now = Instant::now();
+        let next = match ev {
+            NetEvent::ScriptExperiences { request, result, .. } if queue.owns(*request) => {
+                queue.experience(*request, result.associated.clone(), now)
+            }
+            NetEvent::ScriptLoaded { request, result, .. } if queue.owns(*request) => queue.source(*request, result.clone(), now),
+            NetEvent::ScriptSaved { request, result, .. } if queue.owns(*request) => {
+                queue.saved(
+                    *request,
+                    result.as_ref().map(|s| (s.compiled, s.errors.clone())).map_err(Clone::clone),
+                );
+                None
+            }
+            _ => return false,
+        };
+        self.send_recompile(next);
+        true
     }
 }
 

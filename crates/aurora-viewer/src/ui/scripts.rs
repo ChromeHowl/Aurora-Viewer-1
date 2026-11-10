@@ -161,6 +161,8 @@ pub struct Editors {
     includes: std::collections::HashMap<Uuid, PendingInclude>,
     pub agent: Uuid,
     pub agent_name: String,
+    /// The script editor link's state, shown in the preferences.
+    pub link_status: Option<String>,
 }
 
 struct PendingInclude {
@@ -175,6 +177,16 @@ impl Editors {
     }
     pub fn open_debug(&mut self) {
         self.debug.open = true;
+    }
+
+    /// The scripts open in an external editor now: their target and name
+    /// (the script editor link offers them to its clients).
+    pub fn externally_edited(&self) -> Vec<(ScriptTarget, String)> {
+        self.documents
+            .iter()
+            .filter(|e| !e.closed && e.tools.external.is_some())
+            .map(|e| (e.target, e.name.clone()))
+            .collect()
     }
 
     pub fn disconnected(&mut self) {
@@ -627,7 +639,7 @@ impl Editors {
         }
         let colors_before = color_prefs.clone();
         let mut actions = Vec::new();
-        if self.panels.preferences.show(ctx, p, settings) {
+        if self.panels.preferences.show(ctx, p, settings, self.link_status.as_deref()) {
             actions.push(Action::SettingsChanged);
         }
         for e in &mut self.documents {

@@ -13832,3 +13832,19 @@ b1-open-inventory-hint = 写真がインベントリに保存されると、イ�
 b1-log-to-chat = 保存した写真のファイル名を近くのチャットに書き込む
 b1-log-to-chat-hint = ディスクに保存した写真ごとに、フォルダを含むファイル名を近くのチャット履歴に記録します
 b1-saved-chat = 写真を保存しました：{ $path }
+
+## Build and edit tools (b7)
+b7-link-enable = 外部エディター（VS Code）とのスクリプトエディター連携
+b7-link-port = ポート
+b7-link-hint = 外部エディターで開いたスクリプトを追跡し、コンパイル結果を表示できるようにします。このコンピューター（127.0.0.1）でのみ待ち受け、エディターがあなたのアカウントで動作していることを確認してから情報を共有します。
+b7-link-listening = ポート { $port } で待ち受け中
+b7-link-failed = ポート { $port } を使用できません：{ $reason }
+b7-recompile-mono = スクリプトを再コンパイル（Mono）
+b7-recompile-lsl = スクリプトを再コンパイル（LSL）
+b7-compile-title = 再コンパイルの進行状況
+b7-compile-start = 再コンパイル
+b7-compile-compiling = 「{ $script }」をコンパイル中...
+b7-compile-skipping = スキップ：{ $script }（権限）
+b7-compile-success = 「{ $script }」のコンパイルに成功しました
+b7-compile-failure = 「{ $script }」のコンパイルに失敗しました：
+b7-compile-cannot = 「再コンパイル」を実行できません。

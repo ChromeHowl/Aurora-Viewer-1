@@ -13861,3 +13861,19 @@ b1-open-inventory-hint = L'inventaire s'ouvre sur une photo dès qu'elle y est e
 b1-log-to-chat = Écrire le nom de fichier des photos enregistrées dans le chat local
 b1-log-to-chat-hint = Chaque photo enregistrée sur le disque est notée dans l'historique du chat local, avec son dossier
 b1-saved-chat = Photo enregistrée : { $path }
+
+## Build and edit tools (b7)
+b7-link-enable = Liaison de l'éditeur de scripts avec les éditeurs externes (VS Code)
+b7-link-port = Port
+b7-link-hint = Permet à un éditeur externe de suivre les scripts que vous y ouvrez et d'en voir les résultats de compilation. N'écoute que sur cet ordinateur (127.0.0.1) ; l'éditeur prouve qu'il tourne sous votre compte avant tout échange.
+b7-link-listening = En écoute sur le port { $port }
+b7-link-failed = Port { $port } indisponible : { $reason }
+b7-recompile-mono = Recompiler les scripts (Mono)
+b7-recompile-lsl = Recompiler les scripts (LSL)
+b7-compile-title = Progression de la recompilation
+b7-compile-start = recompilation
+b7-compile-compiling = Compilation de « { $script } »...
+b7-compile-skipping = Ignoré : { $script } (droits)
+b7-compile-success = Compilation de « { $script } » réussie
+b7-compile-failure = Échec de la compilation de « { $script } » :
+b7-compile-cannot = Impossible d'effectuer la « recompilation ».

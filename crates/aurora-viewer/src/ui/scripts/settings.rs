@@ -110,6 +110,12 @@ pub struct ScriptSettings {
     pub recompile: bool,
     pub external_editor: String,
     pub help_follows_cursor: bool,
+    /// The script editor link for external editors (script_ws.rs):
+    /// ExternalWebsocketSyncEnable. On in the Legacy Viewer; off here, as a
+    /// listening port is the user's choice.
+    pub websocket_sync: bool,
+    /// ExternalWebsocketSyncPort.
+    pub websocket_port: u16,
 }
 
 impl Default for ScriptSettings {
@@ -131,6 +137,8 @@ impl Default for ScriptSettings {
             recompile: false,
             external_editor: String::new(),
             help_follows_cursor: false,
+            websocket_sync: false,
+            websocket_port: crate::script_ws::protocol::DEFAULT_PORT,
         }
     }
 }
@@ -155,6 +163,8 @@ mod tests {
         assert!(!settings.search_prefer_left && !settings.search_inline);
         assert!(settings.convert_tabs && settings.optimize && settings.switches && settings.lazy_lists);
         assert!(!settings.preprocessor && !settings.disk_includes && !settings.owner_say_debug && !settings.recompile);
+        assert!(!settings.websocket_sync);
+        assert_eq!(settings.websocket_port, 9020);
         let p = crate::theme::Theme::default().palette();
         settings.colors.insert(ColorRole::Function, p.teal.to_srgba_unmultiplied());
         settings.preprocessor = true;

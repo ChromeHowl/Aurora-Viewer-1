@@ -70,6 +70,9 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 softbuffer = "0.4.8"
 sha2 = "0.11.0"
+# The WebSocket handshake's accept key of the script editor link
+# (script_ws/wire.rs, RFC 6455); already in the tree, MIT/Apache-2.0.
+sha1 = "0.10.6"
 # spell checking of the text fields with Hunspell dictionaries (spelling.rs);
 # pure Rust, MPL-2.0
 spellbook = "0.4.2"

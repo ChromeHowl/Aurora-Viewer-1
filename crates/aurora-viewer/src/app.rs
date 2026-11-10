@@ -1090,6 +1090,8 @@ pub struct App {
     task_notecards: std::collections::HashMap<(uuid::Uuid, uuid::Uuid), task_notecards::TaskNotecard>,
     demo_documents: std::collections::HashMap<uuid::Uuid, Vec<u8>>,
     script_editors: ui::scripts::Editors,
+    /// The script editor link for external editors (script_ws.rs).
+    script_link: crate::script_ws::Link,
     demo_script_sources: std::collections::HashMap<aurora_net::scripts::ScriptTarget, String>,
     demo_script_experiences: std::collections::HashMap<aurora_net::scripts::ScriptTarget, uuid::Uuid>,
     inventory_images: inventory_thumbnail::ImageJobs,
@@ -1937,6 +1939,7 @@ impl App {
             task_notecards: Default::default(),
             demo_documents: Default::default(),
             script_editors: Default::default(),
+            script_link: Default::default(),
             demo_script_sources: Default::default(),
             demo_script_experiences: Default::default(),
             inventory_images: Default::default(),
@@ -3585,6 +3588,9 @@ impl App {
         } = ev
         {
             self.task_notecard_saved(request, object, item, result);
+            return;
+        }
+        if self.recompile_reply(&ev) {
             return;
         }
         if let NetEvent::ScriptLoaded { request, target, result } = ev {

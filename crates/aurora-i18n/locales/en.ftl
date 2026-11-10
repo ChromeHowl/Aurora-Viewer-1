@@ -13865,3 +13865,19 @@ b1-open-inventory-hint = The inventory opens on a photo once it is saved to it
 b1-log-to-chat = Write the file name of saved photos in the nearby chat
 b1-log-to-chat-hint = Each photo saved to disk is noted in the nearby chat history, with its folder
 b1-saved-chat = Photo saved: { $path }
+
+## Build and edit tools (b7)
+b7-link-enable = Script editor link for external editors (VS Code)
+b7-link-port = Port
+b7-link-hint = Lets an external editor follow the scripts you open in it and see their compile results. Listens on this computer only (127.0.0.1); the editor proves it runs under your account before anything is shared.
+b7-link-listening = Listening on port { $port }
+b7-link-failed = Port { $port } unavailable: { $reason }
+b7-recompile-mono = Recompile scripts (Mono)
+b7-recompile-lsl = Recompile scripts (LSL)
+b7-compile-title = Recompilation progress
+b7-compile-start = recompile
+b7-compile-compiling = Compiling "{ $script }"...
+b7-compile-skipping = Skipping: { $script } (permissions)
+b7-compile-success = Compilation of "{ $script }" succeeded
+b7-compile-failure = Compilation of "{ $script }" failed:
+b7-compile-cannot = Not able to perform 'recompilation'.

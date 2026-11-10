@@ -180,11 +180,20 @@ impl Drop for Watch {
     }
 }
 
-pub(super) fn external(name: String, source: String, command_line: String, convert_tabs: bool) -> Job {
+pub(super) fn external(
+    name: String,
+    target: aurora_net::scripts::ScriptTarget,
+    source: String,
+    command_line: String,
+    convert_tabs: bool,
+) -> Job {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
         let directory = std::env::temp_dir().join(format!("AuroraScript-{}", uuid::Uuid::new_v4()));
-        let path = directory.join(format!("{}.lsl", safe_name(&name)));
+        // The Legacy Viewer's name (getTmpFileName): the script id in it
+        // tells an external editor which script the file is, for the script
+        // editor link (script_ws.rs).
+        let path = directory.join(crate::script_ws::protocol::file_name(&safe_name(&name), target.object, target.item));
         let command_line = if command_line.trim().is_empty() {
             std::env::var("LL_SCRIPT_EDITOR").unwrap_or_default()
         } else {

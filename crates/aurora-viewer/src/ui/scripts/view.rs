@@ -157,6 +157,7 @@ fn run(
             e.tools.file_snapshot.clone_from(&e.source);
             e.tools.file_job = Some(files::external(
                 e.name.clone(),
+                e.target,
                 e.source.clone(),
                 settings.external_editor.clone(),
                 settings.convert_tabs,
