@@ -27,7 +27,9 @@ struct Dof {
     tiles: vec4<f32>,
     // focus peaking: colour, w 1 when on
     peak: vec4<f32>,
-    // x: the far end of the sharp zone (m), lens.y its near end
+    // x: the far end of the sharp zone (m), lens.y its near end; y: 1 when
+    // what is in front of the focus is blurred too; z: the bokeh's
+    // dispersion (pixels of red and blue apart per pixel of blur)
     band: vec4<f32>,
 };
 @group(0) @binding(5) var<uniform> dof: Dof;
@@ -68,7 +70,11 @@ fn view_depth(d: f32, uv: vec2<f32>) -> f32 {
 // point in front of it, its farther end for one behind, z itself inside.
 fn coc(z: f32) -> f32 {
     let s = clamp(z, dof.lens.y, max(dof.band.x, dof.lens.y));
-    let c = dof.lens.x * dof.lens.y * (s - z) / (z * s);
+    var c = dof.lens.x * dof.lens.y * (s - z) / (z * s);
+    if (dof.band.y < 0.5) {
+        // no front blur: what is in front of the focus stays sharp
+        c = min(c, 0.0);
+    }
     return clamp(c, -dof.lens.z, dof.lens.z);
 }
 
@@ -239,6 +245,44 @@ fn peaking(col: vec3<f32>, sharp: vec3<f32>, px: vec2<i32>, c: f32) -> vec3<f32>
     return mix(col, dof.peak.rgb * max(1.5, luma(col) * 1.5), edge);
 }
 
+// The far field (premultiplied colour, weight) and the near field (colour
+// and coverage) at `uv`, upsampled from half resolution.
+struct Taps {
+    far: vec4<f32>,
+    near: vec4<f32>,
+};
+
+fn field_taps(uv: vec2<f32>) -> Taps {
+    // the far field around: a bilinear filter that leaves out its sharp texels
+    let half_size = vec2<i32>(textureDimensions(t_b));
+    let hp = uv * vec2<f32>(half_size) - 0.5;
+    let h0 = vec2<i32>(floor(hp));
+    let fr = hp - floor(hp);
+    var t: Taps;
+    t.far = vec4<f32>(0.0);
+    for (var i = 0; i < 4; i++) {
+        let o = vec2<i32>(i & 1, i >> 1u);
+        let q = clamp(h0 + o, vec2<i32>(0), half_size - vec2<i32>(1));
+        let s = textureLoad(t_b, q, 0);
+        let bw = select(1.0 - fr.x, fr.x, o.x == 1) * select(1.0 - fr.y, fr.y, o.y == 1);
+        t.far += vec4<f32>(s.rgb * bw * s.a, bw * s.a);
+    }
+    // four bilinear taps around: the gather's grain smoothed out
+    let texel = 1.0 / vec2<f32>(half_size);
+    t.near = vec4<f32>(0.0);
+    for (var i = 0; i < 4; i++) {
+        let o = vec2<f32>(select(-0.75, 0.75, (i & 1) == 1), select(-0.75, 0.75, (i >> 1u) == 1));
+        t.near += 0.25 * textureSampleLevel(t_c, samp, uv + o * texel, 0.0);
+    }
+    return t;
+}
+
+// Bokeh dispersion: how far, in uv, red is read outwards from the image's
+// centre (and blue inwards) for a blur of `c` pixels; dof.rs mirrors it.
+fn dispersion_shift(uv: vec2<f32>, c: f32) -> vec2<f32> {
+    return (uv - vec2<f32>(0.5)) * abs(c) * dof.band.z / dof.sizes.xy;
+}
+
 // Full resolution: the sharp image, the far field where the pixel is
 // behind the focus, then the near field over both.
 @fragment
@@ -246,35 +290,25 @@ fn fs_composite(in: Out) -> @location(0) vec4<f32> {
     let px = vec2<i32>(in.clip.xy);
     let sharp = textureLoad(t_a, px, 0);
     let c = coc_at(px);
-    // the far field around: a bilinear filter that leaves out its sharp texels
-    let half_size = vec2<i32>(textureDimensions(t_b));
-    let hp = in.uv * vec2<f32>(half_size) - 0.5;
-    let h0 = vec2<i32>(floor(hp));
-    let fr = hp - floor(hp);
-    var far = vec3<f32>(0.0);
-    var far_w = 0.0;
-    for (var i = 0; i < 4; i++) {
-        let o = vec2<i32>(i & 1, i >> 1u);
-        let q = clamp(h0 + o, vec2<i32>(0), half_size - vec2<i32>(1));
-        let s = textureLoad(t_b, q, 0);
-        let bw = select(1.0 - fr.x, fr.x, o.x == 1) * select(1.0 - fr.y, fr.y, o.y == 1);
-        far += s.rgb * bw * s.a;
-        far_w += bw * s.a;
-    }
-    // four bilinear taps around: the gather's grain smoothed out
-    let texel = 1.0 / vec2<f32>(half_size);
-    var near = vec4<f32>(0.0);
-    for (var i = 0; i < 4; i++) {
-        let o = vec2<f32>(select(-0.75, 0.75, (i & 1) == 1), select(-0.75, 0.75, (i >> 1u) == 1));
-        near += 0.25 * textureSampleLevel(t_c, samp, in.uv + o * texel, 0.0);
+    let t = field_taps(in.uv);
+    let far_w = t.far.a;
+    var far = t.far.rgb / max(far_w, 1e-4);
+    var near_rgb = t.near.rgb / max(t.near.a, 1e-4);
+    let near_a = t.near.a;
+    if (dof.band.z > 0.0) {
+        // red and blue of both fields read apart along the radius
+        let d = dispersion_shift(in.uv, c);
+        let r = field_taps(in.uv + d);
+        let b = field_taps(in.uv - d);
+        far = vec3<f32>(r.far.r / max(r.far.a, 1e-4), far.g, b.far.b / max(b.far.a, 1e-4));
+        near_rgb = vec3<f32>(r.near.r / max(r.near.a, 1e-4), near_rgb.g, b.near.b / max(b.near.a, 1e-4));
     }
     var col = sharp.rgb;
     if (far_w > 1e-4) {
-        col = mix(sharp.rgb, far / far_w, smoothstep(1.0, 3.0, -c));
+        col = mix(sharp.rgb, far, smoothstep(1.0, 3.0, -c));
     }
     // the near field over both, spread over its surroundings
-    let near_rgb = near.rgb / max(near.a, 1e-4);
-    col = mix(col, near_rgb, near.a);
+    col = mix(col, near_rgb, near_a);
     col = peaking(col, sharp.rgb, px, c);
     if (dof.tiles.z > 0.5) {
         // debug: near in red, far in blue, sharp in grey
@@ -284,6 +318,6 @@ fn fs_composite(in: Out) -> @location(0) vec4<f32> {
     }
     // a cut-out photo: a blurred foreground covers the empty pixels around
     // it as much as it hides what would be behind them
-    let alpha = select(sharp.a, sharp.a * (1.0 - near.a), dof.tiles.w > 0.5);
+    let alpha = select(sharp.a, sharp.a * (1.0 - near_a), dof.tiles.w > 0.5);
     return vec4<f32>(col, alpha);
 }

@@ -49,6 +49,11 @@ pub struct LightView {
     pub projector_shadow_limit: u8,
     /// Keep lights worn by other residents (Preferences › Graphics).
     pub others_attached_lights: bool,
+    /// Keep the lights of the scene, those no avatar wears (Preferences ›
+    /// Graphics; Develop › Render Scene Lights).
+    pub scene_lights: bool,
+    /// Every light's intensity times this (1: as sent).
+    pub strength: f32,
 }
 
 /// A light that may enter the frame's list.
@@ -197,9 +202,12 @@ fn worn(world: &World, o: &crate::world::objects::Object) -> Option<Uuid> {
 /// (`Scene::attached_lights`) drops every worn light, as the Legacy Viewer's
 /// RenderAttachedLights does; the Graphics preference (#2474) drops only
 /// those of other avatars and keeps ours, beyond the Legacy Viewer's
-/// all-or-nothing setting.
-fn light_visible(wearer: Option<Uuid>, agent: Uuid, photo_attached: bool, others_attached: bool) -> bool {
-    wearer.is_none() || (photo_attached && (others_attached || wearer == Some(agent)))
+/// all-or-nothing setting; `scene` off drops those nobody wears.
+fn light_visible(wearer: Option<Uuid>, agent: Uuid, photo_attached: bool, others_attached: bool, scene: bool) -> bool {
+    match wearer {
+        None => scene,
+        Some(w) => photo_attached && (others_attached || w == agent),
+    }
 }
 
 /// Whether the photo's isolation (`snapshot::isolate`) puts out the light of
@@ -249,8 +257,16 @@ impl Scene {
             }
             // the wearer is looked up only while a switch drops worn lights
             // (with both on, every light is kept: no walk up its links)
-            let filtered = !self.attached_lights || !view.others_attached_lights;
-            if filtered && !light_visible(worn(world, o), world.agent_id, self.attached_lights, view.others_attached_lights) {
+            let filtered = !self.attached_lights || !view.others_attached_lights || !view.scene_lights;
+            if filtered
+                && !light_visible(
+                    worn(world, o),
+                    world.agent_id,
+                    self.attached_lights,
+                    view.others_attached_lights,
+                    view.scene_lights,
+                )
+            {
                 continue;
             }
             let dist = light_dist(center, l.radius, eye);
@@ -276,7 +292,7 @@ impl Scene {
             // the packed light color is already linear (LLLightParams::unpack ->
             // setLinearColor; pipeline.cpp sends getLightLinearColor() as is),
             // times 3.25 for the PBR punctual intensity (multiPointLightF)
-            let color = Vec3::new(l.color[0], l.color[1], l.color[2]) * l.color[3] * 3.25;
+            let color = Vec3::new(l.color[0], l.color[1], l.color[2]) * l.color[3] * 3.25 * view.strength;
             lights.push(Candidate {
                 in_view: view.frustum.sphere_visible(position, radius),
                 dist,
@@ -383,16 +399,26 @@ mod tests {
         let agent = Uuid::from_u128(1);
         let other = Uuid::from_u128(2);
         // preference off: ours kept, others dropped, unworn kept
-        assert!(light_visible(Some(agent), agent, true, false));
-        assert!(!light_visible(Some(other), agent, true, false));
-        assert!(light_visible(None, agent, true, false));
-        assert!(light_visible(Some(other), agent, true, true));
+        assert!(light_visible(Some(agent), agent, true, false, true));
+        assert!(!light_visible(Some(other), agent, true, false, true));
+        assert!(light_visible(None, agent, true, false, true));
+        assert!(light_visible(Some(other), agent, true, true, true));
         // photo switch off: every worn light dropped, whatever the preference
         for others in [true, false] {
-            assert!(!light_visible(Some(agent), agent, false, others));
-            assert!(!light_visible(Some(other), agent, false, others));
-            assert!(light_visible(None, agent, false, others));
+            assert!(!light_visible(Some(agent), agent, false, others, true));
+            assert!(!light_visible(Some(other), agent, false, others, true));
+            assert!(light_visible(None, agent, false, others, true));
         }
+    }
+
+    #[test]
+    fn scene_lights_can_be_hidden_while_worn_ones_stay() {
+        let agent = Uuid::from_u128(1);
+        let other = Uuid::from_u128(2);
+        assert!(!light_visible(None, agent, true, true, false));
+        assert!(light_visible(Some(agent), agent, true, true, false));
+        assert!(light_visible(Some(other), agent, true, true, false));
+        assert!(!light_visible(Some(other), agent, true, false, false));
     }
 
     /// #2474: the wearer is found from a child prim of an attachment, ours
@@ -626,6 +652,8 @@ mod tests {
             projector_shadows: true,
             projector_shadow_limit: 2,
             others_attached_lights: true,
+            scene_lights: true,
+            strength: 1.0,
         }
     }
 

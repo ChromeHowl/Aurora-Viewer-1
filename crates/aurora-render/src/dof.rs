@@ -24,6 +24,12 @@ pub fn tile_reach(max_coc: f32) -> u32 {
     max_coc.max(0.0).ceil() as u32 + 2 * 2 * TILE + 2
 }
 
+/// The bokeh's dispersion the shader gets: 0 (off, no extra taps) for
+/// odd values, at most one pixel apart per pixel of blur.
+fn dispersion(d: f32) -> f32 {
+    if d.is_finite() { d.clamp(0.0, 1.0) } else { 0.0 }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct DofU {
@@ -33,7 +39,8 @@ struct DofU {
     tiles: [f32; 4],
     /// Focus peaking: colour, 1 when on.
     peak: [f32; 4],
-    /// The far end of the sharp zone (m), then padding.
+    /// The far end of the sharp zone (m), 1 with the front blur, the
+    /// bokeh's dispersion, then padding.
     band: [f32; 4],
 }
 
@@ -269,7 +276,12 @@ impl Dof {
                 Some([r, g, b]) => [r, g, b, 1.0],
                 None => [0.0; 4],
             },
-            band: [params.focus_far.max(params.focus), 0.0, 0.0, 0.0],
+            band: [
+                params.focus_far.max(params.focus),
+                if params.front_blur { 1.0 } else { 0.0 },
+                dispersion(params.dispersion),
+                0.0,
+            ],
         };
         queue.write_buffer(&self.buffer, 0, bytemuck::bytes_of(&u));
         self.ensure_targets(device, size, hdr, post);
@@ -345,5 +357,58 @@ impl Dof {
         run(encoder, "dof blur", &[&t.far, &t.near], blur, &bg(&t.half, &t.dilated, &t.tiles));
         run(encoder, "dof composite", &[&t.out], composite, &bg(input, &t.far, &t.near));
         &t.post_bg
+    }
+}
+
+#[cfg(test)]
+mod extras_tests {
+    use glam::Vec2;
+
+    const SHADER: &str = include_str!("shaders/dof.wgsl");
+
+    /// dof.wgsl `dispersion_shift`.
+    fn dispersion_shift(uv: Vec2, c: f32, k: f32, size: Vec2) -> Vec2 {
+        (uv - Vec2::splat(0.5)) * c.abs() * k / size
+    }
+
+    /// dof.wgsl `coc` without front blur: what is in front stays sharp.
+    fn front(c: f32, front_blur: bool) -> f32 {
+        if front_blur { c } else { c.min(0.0) }
+    }
+
+    #[test]
+    fn the_dispersion_grows_outwards_with_the_blur_and_is_off_at_zero() {
+        let size = Vec2::new(1920.0, 1080.0);
+        assert_eq!(
+            dispersion_shift(Vec2::splat(0.5), 20.0, 1.0, size),
+            Vec2::ZERO,
+            "none at the centre"
+        );
+        assert_eq!(dispersion_shift(Vec2::new(1.0, 0.2), 20.0, 0.0, size), Vec2::ZERO);
+        assert_eq!(
+            dispersion_shift(Vec2::new(1.0, 0.2), 0.0, 1.0, size),
+            Vec2::ZERO,
+            "none where sharp"
+        );
+        let edge = dispersion_shift(Vec2::new(1.0, 0.5), 20.0, 1.0, size);
+        // half the width out, 20 pixels of blur: 10 pixels
+        assert!((edge.x * size.x - 10.0).abs() < 1e-3 && edge.y == 0.0);
+        assert_eq!(dispersion_shift(Vec2::new(1.0, 0.5), -20.0, 1.0, size), edge, "near and far alike");
+        assert_eq!(super::dispersion(f32::NAN), 0.0);
+        assert_eq!(super::dispersion(3.0), 1.0);
+    }
+
+    #[test]
+    fn without_front_blur_only_what_is_behind_the_focus_blurs() {
+        assert_eq!(front(5.0, false), 0.0);
+        assert_eq!(front(-5.0, false), -5.0);
+        assert_eq!(front(5.0, true), 5.0);
+        for line in [
+            "return (uv - vec2<f32>(0.5)) * abs(c) * dof.band.z / dof.sizes.xy;",
+            "if (dof.band.y < 0.5) {",
+            "c = min(c, 0.0);",
+        ] {
+            assert!(SHADER.contains(line), "dof.wgsl lost: {line}");
+        }
     }
 }

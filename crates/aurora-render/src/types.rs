@@ -1046,6 +1046,8 @@ pub enum Tonemapper {
     Uncharted2,
     /// AgX, base look.
     Agx,
+    /// A fixed filmic curve (Hejl and Burgess-Dawson's).
+    Filmic,
 }
 
 impl Tonemapper {
@@ -1058,6 +1060,7 @@ impl Tonemapper {
             Self::Reinhard => 3.0,
             Self::Uncharted2 => 4.0,
             Self::Agx => 5.0,
+            Self::Filmic => 6.0,
         }
     }
 }
@@ -1116,6 +1119,14 @@ pub struct RenderSettings {
     /// Mirrors (reflection probes flagged as mirror): fraction of the screen
     /// resolution (0 = off).
     pub mirror_scale: f32,
+    /// RenderHeroProbeResolution: the mirror image's longer side in pixels,
+    /// in place of `mirror_scale`'s fraction of the screen (0: the
+    /// fraction; never more than the screen).
+    pub mirror_resolution: u32,
+    /// RenderHeroProbeUpdateRate: the mirror is drawn again every this many
+    /// frames (1: every frame), reflected through the camera of the frame
+    /// it was drawn in meanwhile.
+    pub mirror_update_rate: u32,
     /// Screen-space reflections on glossy surfaces.
     pub ssr: bool,
     /// Anisotropic texture filtering (1 = off, 2, 4, 8, 16).
@@ -1148,6 +1159,8 @@ impl Default for RenderSettings {
             specular_aa: true,
             water_reflection_scale: 0.25,
             mirror_scale: 0.25,
+            mirror_resolution: 0,
+            mirror_update_rate: 1,
             ssr: false,
             anisotropy: 8,
             probe_slots: 32,
@@ -1450,6 +1463,16 @@ pub struct FrameParams {
     /// The photo's look (looks.rs), over the image once tone mapped; None:
     /// none, at no cost.
     pub look: Option<crate::looks::PhotoLook>,
+    /// The colour grade of the post pass (grade.rs); neutral by default.
+    pub grade: crate::grade::Grade,
+    /// Debanding of the post pass, in 8-bit levels (0 off; grade.rs).
+    pub deband: f32,
+    /// No post-processing (RenderDisablePostProcessing): neither exposure
+    /// nor tone curve, as on a sky without probe ambiance.
+    pub no_post: bool,
+    /// The sky is not drawn (the rendering type of the Legacy Viewer's
+    /// Develop menu): the clear colour shows behind the world.
+    pub hide_sky: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1485,6 +1508,12 @@ pub struct DepthOfField {
     /// Focus peaking (the photo viewfinder's manual focus): the sharp
     /// edges painted this linear colour.
     pub peaking: Option<[f32; 3]>,
+    /// What is in front of the focus is blurred too (on); off, only what
+    /// is behind it.
+    pub front_blur: bool,
+    /// Bokeh dispersion: the blur's red and blue spread apart, in pixels of
+    /// the image per pixel of blur (0 none, at no cost).
+    pub dispersion: f32,
 }
 
 /// Views shown instead of the image, and checks painted over it

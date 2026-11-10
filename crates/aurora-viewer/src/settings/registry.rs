@@ -242,6 +242,7 @@ impl Settings {
         self.radar.alert_sounds = current.radar.alert_sounds;
         self.world_overlays.land_owners = current.world_overlays.land_owners;
         self.world_overlays.hide_particles = current.world_overlays.hide_particles;
+        self.render_extras.types = current.render_extras.types;
     }
 }
 

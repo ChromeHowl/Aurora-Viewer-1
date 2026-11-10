@@ -9,6 +9,7 @@ pub mod backup;
 pub mod draw_stepping;
 mod hover_height;
 pub mod registry;
+pub mod render_extras;
 mod saver;
 pub mod stream_list;
 
@@ -1370,7 +1371,7 @@ pub struct Settings {
     pub colored_sky_ambient: bool,
     /// 0 Khronos PBR Neutral, 1 ACES (RenderTonemapType: ACES by default,
     /// like the Legacy Viewer), then Aurora's own: 2 Reinhard, 3 Uncharted 2,
-    /// 4 AgX ([`tonemapper_of`])
+    /// 4 AgX, 5 a fixed Filmic ([`tonemapper_of`])
     pub tonemapper: u8,
     /// Share of the tone mapped color over the exposed linear one, on skies
     /// that are not classic (RenderTonemapMix, 0.7 like the Legacy Viewer).
@@ -1430,13 +1431,16 @@ pub struct Settings {
     pub water_reflections: u8,
     /// Mirrors: 0 off, 1 low, 2 medium, 3 high, 4 ultra.
     pub mirrors: u8,
+    /// Mirror resolution and update rate, shadow and terrain scales,
+    /// rendering types, colour grade, light switches (settings/render_extras.rs).
+    pub render_extras: render_extras::RenderExtras,
     /// Reflection probes (RenderReflectionProbeLevel): 0 none (sky only),
     /// 1 manual, 2 manual + terrain, 3 full scene.
     pub reflection_probes: u8,
     /// Reflection probe cube slots (RenderReflectionProbeCount; 8..=256).
     pub probe_count: u32,
     /// How far automatic reflection probes are placed around the camera
-    /// (m, 32..=512), within the draw distance. The Legacy Viewer has no
+    /// (m, 64..=512, never nearer than 64 m), within the draw distance. The Legacy Viewer has no
     /// such limit (the draw distance); 512 keeps its reach.
     pub probe_range: f32,
     /// RenderAvatarMaxComplexity: avatars above it show as grey silhouettes
@@ -1578,7 +1582,7 @@ pub(crate) const FONT_SCALE_MAX: f32 = 2.0;
 pub(crate) const BLOOM_STRENGTH: f32 = 0.5;
 
 /// The largest `Settings::tonemapper`.
-pub(crate) const TONEMAPPER_MAX: u8 = 4;
+pub(crate) const TONEMAPPER_MAX: u8 = 5;
 
 /// The tone curve of a `Settings::tonemapper`: the Legacy Viewer's numbers
 /// for its two (RenderTonemapType), Aurora's three after them. Any other
@@ -1590,9 +1594,14 @@ pub(crate) fn tonemapper_of(setting: u8) -> aurora_render::Tonemapper {
         2 => Tonemapper::Reinhard,
         3 => Tonemapper::Uncharted2,
         4 => Tonemapper::Agx,
+        5 => Tonemapper::Filmic,
         _ => Tonemapper::KhronosNeutral,
     }
 }
+
+/// The nearest the automatic reflection probes may stop (m): never under
+/// 64 m, whatever the setting or the draw distance.
+pub(crate) const PROBE_RANGE_MIN: f32 = 64.0;
 
 /// RenderTonemapMix's default (settings.xml).
 pub(crate) const TONEMAP_MIX: f32 = 0.7;
@@ -2319,6 +2328,7 @@ impl Default for Settings {
             trim_resident: true,
             display_name_notices: true,
             mirrors: 1,
+            render_extras: Default::default(),
             ssr: false,
             anisotropy: 8,
             cache_size_mb: 20480,
@@ -3038,10 +3048,11 @@ impl Settings {
         self.reflection_probes = self.reflection_probes.min(3);
         self.probe_count = self.probe_count.clamp(8, 256);
         self.probe_range = if self.probe_range.is_finite() {
-            self.probe_range.clamp(32.0, 512.0)
+            self.probe_range.clamp(PROBE_RANGE_MIN, 512.0)
         } else {
             512.0
         };
+        self.render_extras.sanitize();
         self.tonemapper = self.tonemapper.min(TONEMAPPER_MAX);
         self.tonemap_mix = if self.tonemap_mix.is_finite() {
             self.tonemap_mix.clamp(0.0, 1.0)
@@ -3260,7 +3271,7 @@ impl Settings {
             fsr_sharpness: (self.fsr_sharpness > 0).then(|| self.fsr_sharpness.min(100) as f32 / 100.0),
             tonemapper: tonemapper_of(self.tonemapper),
             hdr: self.hdr_emissive,
-            shadow_resolution: self.shadow_params().0,
+            shadow_resolution: self.render_extras.shadow_resolution(self.shadow_params().0),
             projector_shadow_limit: if self.projector_shadows { self.projector_shadow_limit } else { 0 },
             ssao: self.ssao,
             ao_method: if self.ao_method == 1 {
@@ -3276,6 +3287,8 @@ impl Settings {
             specular_aa: self.specular_aa,
             water_reflection_scale: Self::reflection_scale(self.water_reflections),
             mirror_scale: Self::reflection_scale(self.mirrors),
+            mirror_resolution: self.render_extras.mirror_resolution,
+            mirror_update_rate: self.render_extras.mirror_update_rate.max(1),
             probe_slots: self.probe_count.clamp(8, 256),
             ssr: self.ssr,
             anisotropy: self.anisotropy,
@@ -4191,7 +4204,8 @@ mod tests {
         assert_eq!(tonemapper_of(1), Tonemapper::Aces);
         assert_eq!(tonemapper_of(2), Tonemapper::Reinhard);
         assert_eq!(tonemapper_of(3), Tonemapper::Uncharted2);
-        assert_eq!(tonemapper_of(TONEMAPPER_MAX), Tonemapper::Agx);
+        assert_eq!(tonemapper_of(4), Tonemapper::Agx);
+        assert_eq!(tonemapper_of(TONEMAPPER_MAX), Tonemapper::Filmic);
         for n in 0..=TONEMAPPER_MAX {
             let s = Settings {
                 tonemapper: n,

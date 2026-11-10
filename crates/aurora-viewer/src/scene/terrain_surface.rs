@@ -134,10 +134,12 @@ impl SurfaceGpu {
         true
     }
 
-    fn record(&self, offset: Vec3) -> DrawRecord {
+    /// `scale`: metres per repeat of the classic detail textures
+    /// (RenderTerrainScale, LLDrawPoolTerrain::sDetailScale's inverse).
+    fn record(&self, offset: Vec3, scale: f32) -> DrawRecord {
         DrawRecord {
             model: Mat4::from_translation(offset).to_cols_array_2d(),
-            uv_st: [12.0, 12.0, 0.0, 0.0],
+            uv_st: [scale, scale, 0.0, 0.0],
             tex: self.slots,
             // Terrain-only record fields: paintmap slot and region extent.
             mat_uv: self.input.map_or([1.0; 4], |i| [i.size[0] as f32, i.size[1] as f32, 0.0, 0.0]),
@@ -292,6 +294,7 @@ impl Scene {
                 chunks: HashMap::new(),
                 surface: SurfaceGpu::default(),
                 offset: Vec3::NAN,
+                scale: f32::NAN,
             });
             // Surface changes never rebuild terrain geometry or pause streaming.
             let changed = gpu.surface.sync(
@@ -301,12 +304,13 @@ impl Scene {
                 &mut self.materials,
                 region.terrain_surface.paintmap.as_mut(),
             );
-            let record = gpu.surface.record(offset);
-            if changed || gpu.offset != offset {
+            let record = gpu.surface.record(offset, self.terrain_scale);
+            if changed || gpu.offset != offset || gpu.scale != self.terrain_scale {
                 for chunk in gpu.chunks.values() {
                     renderer.records.set_if_changed(chunk.record, record);
                 }
                 gpu.offset = offset;
+                gpu.scale = self.terrain_scale;
             }
             if region.dirty_chunks.is_empty() || built > 6 {
                 continue;
@@ -400,8 +404,9 @@ mod tests {
             slots: [21, 22, 23, 24],
             ..Default::default()
         }
-        .record(Vec3::new(256.0, 0.0, 0.0));
+        .record(Vec3::new(256.0, 0.0, 0.0), 12.0);
         assert_eq!(parent.tex, [21, 22, 23, 24]);
+        assert_eq!(parent.uv_st[..2], [12.0, 12.0], "RenderTerrainScale's metres per repeat");
         assert_eq!(parent.flags[0], flags::PBR | flags::TERRAIN);
     }
 }
@@ -459,6 +464,7 @@ mod crossing_tests {
                     chunks,
                     surface: Default::default(),
                     offset: world.region_offset(handle).unwrap(),
+                    scale: 12.0,
                 },
             );
         }

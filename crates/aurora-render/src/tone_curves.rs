@@ -1,5 +1,5 @@
 //! The tone curves of the post pass (post.wgsl `neutral`, `aces`,
-//! `reinhard`, `hable`, `agx`), mirrored here to test them: the shader must
+//! `reinhard`, `hable`, `agx`, `filmic`), mirrored here to test them: the shader must
 //! keep these in step.
 
 use glam::{Mat3, Vec3};
@@ -88,14 +88,21 @@ fn agx(color_in: Vec3) -> Vec3 {
     (outset * agx_contrast(x)).clamp(Vec3::ZERO, Vec3::ONE).powf(2.2)
 }
 
+fn filmic(color_in: Vec3) -> Vec3 {
+    let x = (color_in.min(Vec3::splat(CURVE_INPUT_MAX)) - Vec3::splat(0.004)).max(Vec3::ZERO);
+    let display = (x * (6.2 * x + 0.5)) / (x * (6.2 * x + 1.7) + 0.06);
+    display.clamp(Vec3::ZERO, Vec3::ONE).powf(2.2)
+}
+
 type Curve = fn(Vec3) -> Vec3;
 
-const CURVES: [(&str, Curve); 5] = [
+const CURVES: [(&str, Curve); 6] = [
     ("neutral", neutral),
     ("aces", aces),
     ("reinhard", reinhard),
     ("hable", hable),
     ("agx", agx),
+    ("filmic", filmic),
 ];
 
 fn near(a: Vec3, b: [f32; 3], tolerance: f32) -> bool {
@@ -140,7 +147,9 @@ fn a_brighter_grey_is_never_darker() {
 fn middle_grey_stays_a_middle_grey() {
     for (name, curve) in CURVES {
         let out = curve(Vec3::splat(0.18));
-        assert!((0.10..=0.22).contains(&out.x), "{name}: {out:?}");
+        // the fixed filmic curve's toe lifts it a little: 130 of 255
+        let top = if name == "filmic" { 0.23 } else { 0.22 };
+        assert!((0.10..=top).contains(&out.x), "{name}: {out:?}");
         // a grey stays neutral (AgX's matrices leave a 0.1 % tint)
         assert!((out.max_element() - out.min_element()).abs() < 2e-3, "{name}: {out:?}");
     }
@@ -269,8 +278,32 @@ fn the_shader_ids_of_the_first_curves_are_kept() {
         Tonemapper::Reinhard,
         Tonemapper::Uncharted2,
         Tonemapper::Agx,
+        Tonemapper::Filmic,
     ]
     .map(Tonemapper::shader_id);
-    assert_eq!(ids, [0.0, 1.0, 3.0, 4.0, 5.0]);
+    assert_eq!(ids, [0.0, 1.0, 3.0, 4.0, 5.0, 6.0]);
     assert_eq!(TONEMAPPER_NONE, 2.0);
+}
+
+/// The fixed filmic curve: known points (double precision, apart from this
+/// file) and its text in the shader.
+#[test]
+fn filmic_matches_its_reference() {
+    // x = 0.176: 0.280051 / 0.551251 = 0.508028, to the power 2.2: 0.225400
+    assert!(
+        (filmic(Vec3::splat(0.18)).x - 0.225_40).abs() < 1e-4,
+        "{:?}",
+        filmic(Vec3::splat(0.18))
+    );
+    // under the toe: black
+    assert_eq!(filmic(Vec3::splat(0.003)), Vec3::ZERO);
+    // x = 0.996: 6.6485 / 7.9037 = 0.841188, to the power 2.2: 0.683542
+    assert!((filmic(Vec3::ONE).x - 0.683_4).abs() < 1e-3, "{:?}", filmic(Vec3::ONE));
+    for line in [
+        "let x = max(min(color_in, vec3<f32>(CURVE_INPUT_MAX)) - vec3<f32>(0.004), vec3<f32>(0.0));",
+        "let display = (x * (6.2 * x + 0.5)) / (x * (6.2 * x + 1.7) + 0.06);",
+        "return pow(clamp(display, vec3<f32>(0.0), vec3<f32>(1.0)), vec3<f32>(2.2));",
+    ] {
+        assert!(SHADER.contains(line), "post.wgsl lost: {line}");
+    }
 }
