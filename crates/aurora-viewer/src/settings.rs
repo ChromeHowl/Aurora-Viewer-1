@@ -8,6 +8,7 @@ pub mod area_search;
 pub mod backup;
 pub mod draw_stepping;
 mod hover_height;
+pub mod inventory_extras;
 pub mod registry;
 pub mod render_extras;
 mod saver;
@@ -508,6 +509,8 @@ pub struct Settings {
     pub friends_list: crate::ui::people::FriendsSettings,
     pub inventory: crate::ui::inventory::InventoryPreferences,
     pub texture_library: crate::ui::texture_library::Preferences,
+    /// Default texture save format (settings/inventory_extras.rs).
+    pub inventory_extras: inventory_extras::InventoryExtras,
     pub gestures: crate::ui::gestures::Settings,
     pub imports: crate::imports::Preferences,
     pub ao: crate::ao::Settings,
@@ -1963,6 +1966,7 @@ impl Default for Settings {
             friends_list: Default::default(),
             inventory: Default::default(),
             texture_library: Default::default(),
+            inventory_extras: Default::default(),
             gestures: Default::default(),
             shape_show_hints: true,
             shape_height_feet: false,

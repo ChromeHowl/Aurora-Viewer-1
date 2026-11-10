@@ -13875,3 +13875,7 @@ b8-export-not-cached = { $count ->
     [one] { $count }枚のテクスチャはまだダウンロードされていないため、IDのみ保存されます。
    *[other] { $count }枚のテクスチャはまだダウンロードされていないため、IDのみ保存されます。
     }
+b8-inventory-textures = テクスチャ
+b8-inventory-save-format = テクスチャの「名前を付けて保存」の形式
+b8-inventory-save-format-help = テクスチャのプレビューから保存するときの形式です。「確認する」を選ぶと毎回PNGとTGAから選べます
+b8-inventory-save-format-ask = 確認する

@@ -319,6 +319,7 @@ impl LibraryUi {
             return true;
         }
         let material = item.asset_type == 57;
+        let save_format = self.save_format;
         let asset = catalogue::asset(&item);
         let path = super::super::inventory::inventory_path(&world.inventory, item.parent);
         let id = window_id(item.id);
@@ -375,6 +376,7 @@ impl LibraryUi {
                     rules::held(&world.inventory, &item),
                     dimensions,
                     &mut window.texture.display,
+                    save_format,
                     actions,
                 );
                 // the picture in exactly the room the description, the

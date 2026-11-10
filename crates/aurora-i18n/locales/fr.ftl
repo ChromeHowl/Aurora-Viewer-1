@@ -13904,3 +13904,7 @@ b8-export-not-cached = { $count ->
     [one] { $count } texture n'est pas encore téléchargée et n'est gardée que par son identifiant.
    *[other] { $count } textures ne sont pas encore téléchargées et ne sont gardées que par leur identifiant.
     }
+b8-inventory-textures = Textures
+b8-inventory-save-format = Format de « Enregistrer sous » des textures
+b8-inventory-save-format-help = Le format dans lequel l'aperçu d'une texture l'enregistre ; Demander propose PNG et TGA à chaque fois
+b8-inventory-save-format-ask = Demander

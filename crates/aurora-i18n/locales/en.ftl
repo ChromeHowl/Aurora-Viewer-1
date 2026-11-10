@@ -13908,3 +13908,7 @@ b8-export-not-cached = { $count ->
     [one] { $count } texture was not downloaded yet and is kept by its id only.
    *[other] { $count } textures were not downloaded yet and are kept by their id only.
     }
+b8-inventory-textures = Textures
+b8-inventory-save-format = Texture "Save as" format
+b8-inventory-save-format-help = The format a texture preview saves to; Ask offers PNG and TGA each time
+b8-inventory-save-format-ask = Ask
