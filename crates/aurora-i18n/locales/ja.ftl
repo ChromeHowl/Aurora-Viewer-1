@@ -13832,3 +13832,46 @@ b1-open-inventory-hint = 写真がインベントリに保存されると、イ�
 b1-log-to-chat = 保存した写真のファイル名を近くのチャットに書き込む
 b1-log-to-chat-hint = ディスクに保存した写真ごとに、フォルダを含むファイル名を近くのチャット履歴に記録します
 b1-saved-chat = 写真を保存しました：{ $path }
+b8-export-title-backup = バックアップとして保存
+b8-export-title-collada = Colladaとして保存
+b8-export-rule = 保存されるのは、あなたが所有し自分で作成したものと、あなたが作成したテクスチャとメッシュだけです。
+b8-export-waiting = オブジェクトのプロパティを読み込んでいます…
+b8-export-no-object = オブジェクトが表示範囲外になりました。
+b8-export-object = オブジェクト：{ $name }
+b8-export-refused = このオブジェクトは保存できません：{ $reason }
+b8-export-prims = { $count ->
+    [one] { $count }個のプリムを保存します
+   *[other] { $count }個のプリムを保存します
+    }
+b8-export-textures-in = { $count ->
+    [one] あなたのテクスチャ{ $count }枚を含めます
+   *[other] あなたのテクスチャ{ $count }枚を含めます
+    }
+b8-export-collada-no-textures = Colladaファイルには形状と面の色だけが保存され、テクスチャは含まれません。
+b8-export-textures-replaced = { $count ->
+    [one] { $count }面があなたの作成していないテクスチャを使っているため、デフォルトのテクスチャになります。
+   *[other] { $count }面があなたの作成していないテクスチャを使っているため、デフォルトのテクスチャになります。
+    }
+b8-export-dropped = { $count ->
+    [one] マテリアルまたはライトテクスチャ{ $count }件を除外します。
+   *[other] マテリアルまたはライトテクスチャ{ $count }件を除外します。
+    }
+b8-export-left-out = { $count ->
+    [one] { $count }個のパーツを除外します：
+   *[other] { $count }個のパーツを除外します：
+    }
+b8-export-unnamed = （名前なし）
+b8-export-why-not-owner = あなたの所有物ではありません
+b8-export-why-not-creator = あなたは作成者ではありません
+b8-export-why-not-full = コピー・修正・再販/プレゼントの権限がありません
+b8-export-why-mesh-backup = メッシュはバックアップに保存できません
+b8-export-why-mesh-creator = このメッシュはあなたがアップロードしたものではありません
+b8-export-why-sculpt = スカルプトマップをあなたが作成していません
+b8-export-why-geometry = 形状が読み込まれていないか、スカルプトです
+b8-export-save = 保存…
+b8-export-saved = { $path } に保存しました。
+b8-export-failed = ファイルを保存できませんでした：{ $reason }
+b8-export-not-cached = { $count ->
+    [one] { $count }枚のテクスチャはまだダウンロードされていないため、IDのみ保存されます。
+   *[other] { $count }枚のテクスチャはまだダウンロードされていないため、IDのみ保存されます。
+    }

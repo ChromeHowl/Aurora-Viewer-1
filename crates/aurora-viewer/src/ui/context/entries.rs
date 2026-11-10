@@ -59,16 +59,6 @@ impl Builder {
         }
     }
 
-    fn todo(&mut self, icon: &'static str, label: &str) {
-        self.0.push(Entry {
-            icon,
-            label: label.into(),
-            enabled: false,
-            checked: None,
-            kind: Kind::Unavailable,
-        });
-    }
-
     fn disabled(&mut self, icon: &'static str, label: &str) {
         self.0.push(Entry {
             icon,
@@ -325,7 +315,7 @@ fn object_menu(ui: &mut Builder, f: &Facts, key: ObjKey, id: Uuid, offset: Vec3,
     }
     ui.item_if("coin-filled", aurora_i18n::tr!("common-pay"), o.pay, CtxAction::Pay(id));
     ui.item_if("shopping-cart-filled", aurora_i18n::tr!("common-buy"), o.buy, CtxAction::Buy(id));
-    ui.todo("device-floppy-filled", aurora_i18n::tr!("common-save-as"));
+    save_as_submenu(ui, id, o.export);
     ui.separator();
     ui.item_if("trash-filled", aurora_i18n::tr!("common-delete"), o.delete, CtxAction::Delete(id));
     ui.separator();
@@ -540,7 +530,7 @@ fn attachment_self_menu(ui: &mut Builder, f: &Facts, key: ObjKey) {
         f.object.detach,
         CtxAction::Detach(key),
     );
-    save_as_submenu(ui);
+    save_as_submenu(ui, f.object.id, true);
     ui.separator();
     sit_stand(ui, f);
     appearance_submenu(ui, f);
@@ -755,7 +745,8 @@ fn avatar_groups(ui: &mut Builder, f: &Facts, id: Uuid, attachment: Option<Uuid>
                 aurora_i18n::tr!("ui-context-refresh-textures"),
                 CtxAction::RefreshTextures(object),
             );
-            save_as_submenu(ui);
+            // someone else's attachment: never exportable
+            save_as_submenu(ui, object, false);
         });
     }
     avatar_moderation(ui, f, id);
@@ -911,12 +902,31 @@ fn derender_items(ui: &mut Builder, id: Uuid, temporary: &str, enabled: bool) {
     );
 }
 
-/// "Save as" (Export Menu): the export has its own task and
-/// rules of rights; its two entries wait for it.
-fn save_as_submenu(ui: &mut Builder) {
-    ui.submenu("device-floppy-filled", aurora_i18n::tr!("common-save-as"), true, |ui| {
-        ui.todo("device-floppy-filled", aurora_i18n::tr!("ui-context-save-backup"));
-        ui.todo("box", aurora_i18n::tr!("ui-context-save-collada"));
+/// "Save as" (Export Menu, menu_object.xml / menu_attachment_self.xml):
+/// Object.Export and Object.ExportCollada open the export window, which
+/// applies the creator rule (`actions::export_prim`) to every prim. Greyed
+/// unless the root is ours (stricter than Object.EnableExport).
+fn save_as_submenu(ui: &mut Builder, id: Uuid, enabled: bool) {
+    use crate::world::inventory::actions::ExportFormat;
+    ui.submenu("device-floppy-filled", aurora_i18n::tr!("common-save-as"), enabled, |ui| {
+        ui.item_if(
+            "device-floppy-filled",
+            aurora_i18n::tr!("ui-context-save-backup"),
+            enabled,
+            CtxAction::Export {
+                id,
+                format: ExportFormat::Backup,
+            },
+        );
+        ui.item_if(
+            "box",
+            aurora_i18n::tr!("ui-context-save-collada"),
+            enabled,
+            CtxAction::Export {
+                id,
+                format: ExportFormat::Collada,
+            },
+        );
     });
 }
 
@@ -1664,9 +1674,8 @@ mod tests {
             .filter(|e| matches!(e.kind, Kind::Unavailable))
             .map(|e| e.label)
             .collect();
-        // The pathfinding windows and exporters are separate subsystems. Script info
-        // is available through the Aurora bridge.
-        let expected = tr(&["common-save-as"]);
+        // Script info is available through the Aurora bridge.
+        let expected: Vec<String> = Vec::new();
         let mut left_sorted = left.clone();
         left_sorted.sort();
         let mut expected_sorted = expected;

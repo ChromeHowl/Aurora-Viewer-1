@@ -13865,3 +13865,46 @@ b1-open-inventory-hint = The inventory opens on a photo once it is saved to it
 b1-log-to-chat = Write the file name of saved photos in the nearby chat
 b1-log-to-chat-hint = Each photo saved to disk is noted in the nearby chat history, with its folder
 b1-saved-chat = Photo saved: { $path }
+b8-export-title-backup = Save as backup
+b8-export-title-collada = Save as Collada
+b8-export-rule = Only what you own and created yourself is saved, with the textures and meshes you created.
+b8-export-waiting = Reading the object's properties…
+b8-export-no-object = The object is no longer in view.
+b8-export-object = Object: { $name }
+b8-export-refused = This object cannot be saved: { $reason }
+b8-export-prims = { $count ->
+    [one] { $count } prim will be saved
+   *[other] { $count } prims will be saved
+    }
+b8-export-textures-in = { $count ->
+    [one] { $count } of your textures is included
+   *[other] { $count } of your textures are included
+    }
+b8-export-collada-no-textures = A Collada file keeps the shapes and face colours only, without textures.
+b8-export-textures-replaced = { $count ->
+    [one] { $count } face uses a texture you did not create: it gets the default texture.
+   *[other] { $count } faces use a texture you did not create: they get the default texture.
+    }
+b8-export-dropped = { $count ->
+    [one] { $count } material or light texture is left out.
+   *[other] { $count } materials or light textures are left out.
+    }
+b8-export-left-out = { $count ->
+    [one] { $count } part is left out:
+   *[other] { $count } parts are left out:
+    }
+b8-export-unnamed = (unnamed)
+b8-export-why-not-owner = you do not own it
+b8-export-why-not-creator = you are not its creator
+b8-export-why-not-full = you do not have copy, modify and transfer rights on it
+b8-export-why-mesh-backup = a mesh cannot be saved in a backup
+b8-export-why-mesh-creator = you did not upload this mesh
+b8-export-why-sculpt = you did not create its sculpt map
+b8-export-why-geometry = its shape is not loaded or is a sculpt
+b8-export-save = Save…
+b8-export-saved = Saved to { $path }.
+b8-export-failed = The file could not be saved: { $reason }
+b8-export-not-cached = { $count ->
+    [one] { $count } texture was not downloaded yet and is kept by its id only.
+   *[other] { $count } textures were not downloaded yet and are kept by their id only.
+    }

@@ -324,6 +324,14 @@ fn action_key(action: &CtxAction) -> String {
         CtxAction::ObjectInfo(..) => "ObjectInfo",
         CtxAction::RefreshTextures(..) => "RefreshTextures",
         CtxAction::RefreshAvatarTextures(..) => "RefreshAvatarTextures",
+        CtxAction::Export {
+            format: crate::world::inventory::actions::ExportFormat::Backup,
+            ..
+        } => "ExportBackup",
+        CtxAction::Export {
+            format: crate::world::inventory::actions::ExportFormat::Collada,
+            ..
+        } => "ExportCollada",
         CtxAction::Rebake => "Rebake",
         CtxAction::Take(..) => "Take",
         CtxAction::TakeCopy(..) => "TakeCopy",

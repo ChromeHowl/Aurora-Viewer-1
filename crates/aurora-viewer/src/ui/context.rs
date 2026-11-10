@@ -118,6 +118,9 @@ pub struct ObjectFacts {
     pub take: bool,
     /// enable_object_take_copy: the root is copyable.
     pub take_copy: bool,
+    /// "Save as ▸ Backup / Collada": the root is ours (the export window
+    /// then applies the creator rule to every prim).
+    pub export: bool,
     /// enable_pay_object: the prim or its parent takes money.
     pub pay: bool,
     /// enable_buy_object: for sale and not ours (once ObjectProperties came).
@@ -168,6 +171,7 @@ impl ObjectFacts {
             stand: sitting_on,
             take: !sitting_on && (you_own || has(root, flags::OBJECT_MODIFY) && has(root, flags::OBJECT_TRANSFER)),
             take_copy: has(root, flags::OBJECT_COPY),
+            export: you_own,
             pay: has(clicked, flags::TAKES_MONEY) || has(parent, flags::TAKES_MONEY),
             buy: for_sale && !you_own && has(root, flags::OBJECT_ANY_OWNER),
             // you can delete what you own or may modify, or what no one owns
@@ -412,6 +416,12 @@ pub enum CtxAction {
     RefreshTextures(Uuid),
     /// "Refresh textures" of an avatar: its bakes (Avatar.TexRefresh).
     RefreshAvatarTextures(Uuid),
+    /// "Save as ▸ Backup / Collada" (Object.Export, Object.ExportCollada):
+    /// opens the export window on the clicked prim's linkset.
+    Export {
+        id: Uuid,
+        format: crate::world::inventory::actions::ExportFormat,
+    },
     /// "Force appearance update (rebake)" (Advanced.RebakeTextures).
     Rebake,
     /// Take / take a copy into the inventory (derez_objects).
