@@ -99,6 +99,17 @@ impl Rlva {
         self.rules_for("setcam", Uuid::nil()).next().map(|(id, _)| id)
     }
 
+    /// Any camera restriction is in force (`setcam` and its family, the
+    /// older `cam…` names included): the Camera Lock and the Camera Path
+    /// give the view back and are refused (`Camera::update`).
+    pub fn camera_restricted(&self) -> bool {
+        self.enabled()
+            && self
+                .rules
+                .values()
+                .any(|rules| rules.iter().any(|r| super::canonical(&r.behaviour).starts_with("setcam")))
+    }
+
     pub fn camera_value(&self, name: &str) -> Option<&str> {
         if !self.enabled() {
             return None;
