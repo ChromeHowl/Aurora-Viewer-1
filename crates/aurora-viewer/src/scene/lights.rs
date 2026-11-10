@@ -202,6 +202,17 @@ fn light_visible(wearer: Option<Uuid>, agent: Uuid, photo_attached: bool, others
     wearer.is_none() || (photo_attached && (others_attached || wearer == Some(agent)))
 }
 
+/// Whether the photo's isolation (`snapshot::isolate`) puts out the light of
+/// the object at `idx`, itself left out of the photo (`hidden`): one carried
+/// by an avatar or by an animated object, whose skeleton `animesh::owner`
+/// finds (the wearer of an attachment, or the root of an animated linkset,
+/// worn or not). A subject is not lit by the torch of someone left out. The
+/// lights of the other objects left out stay, the lamps of the room among
+/// them: the subjects keep the light of the place they stand in.
+fn isolated_out(world: &World, idx: usize, hidden: bool) -> bool {
+    hidden && super::animesh::owner(&world.objects, idx).is_some()
+}
+
 impl Scene {
     /// The lights that reach the view, nearest first, then the other
     /// nearest ones (`select`), and those of them that cast shadows.
@@ -230,10 +241,10 @@ impl Scene {
             let Some(l) = o.extra.light else {
                 continue;
             };
-            let Some((center, hud)) = self.gpu.get(idx).map(|g| (g.center, g.hud)) else {
+            let Some((center, hud, photo_hidden)) = self.gpu.get(idx).map(|g| (g.center, g.hud, g.photo_hidden)) else {
                 continue;
             };
-            if hud || !gives_light(l.color, l.radius) {
+            if hud || !gives_light(l.color, l.radius) || isolated_out(world, idx, photo_hidden) {
                 continue;
             }
             // the wearer is looked up only while a switch drops worn lights
@@ -413,6 +424,82 @@ mod tests {
         assert_eq!((wearer(&w, root), wearer(&w, child)), (Some(other_id), Some(other_id)));
         w.objects.get_mut(root).unwrap().parent_id = own_local;
         assert_eq!(wearer(&w, child), Some(w.agent_id));
+    }
+
+    /// The photo's isolation puts out the lights worn by the avatars it
+    /// leaves out and those of the animated objects it leaves out, never
+    /// those of the scenery nor of what it shows.
+    #[test]
+    fn isolation_puts_out_the_lights_carried_by_what_it_hides() {
+        use crate::snapshot::isolate;
+        let mut w = World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
+        for ev in crate::demo::events().into_iter().chain(crate::demo::action_events()) {
+            w.apply(ev);
+        }
+        let (other, other_id) = w
+            .objects
+            .avatars()
+            .find(|(_, o)| o.full_id != w.agent_id)
+            .map(|(_, o)| (o.key.local_id, o.full_id))
+            .expect("another demo resident");
+        let own_local = w
+            .objects
+            .get(w.objects.index_of_uuid(&w.agent_id).expect("our avatar"))
+            .unwrap()
+            .key
+            .local_id;
+        let root_id = crate::demo::action_id(971);
+        let root = w.objects.index_of_uuid(&root_id).unwrap();
+        let child = w.objects.index_of_uuid(&crate::demo::action_id(974)).unwrap();
+        let out = |w: &World, idx| isolated_out(w, idx, !isolate::object_visible(w, idx));
+        let both = |w: &World| (out(w, root), out(w, child));
+        let animated = |w: &mut World, on: bool| {
+            w.objects.get_mut(root).unwrap().extra.extended_mesh_flags = on.then_some(aurora_prim::extra::EXTENDED_MESH_ANIMATED);
+        };
+        let wear = |w: &mut World, local: u32| w.objects.get_mut(root).unwrap().parent_id = local;
+
+        // no isolation: nothing is put out, worn or animated
+        wear(&mut w, other);
+        animated(&mut w, true);
+        assert_eq!(both(&w), (false, false));
+
+        // our avatar alone: the scenery left out keeps its lights
+        w.photo_isolation.set_own(w.agent_id);
+        w.photo_isolation.set_open(true);
+        w.photo_isolation.set_mode(isolate::Mode::Own);
+        wear(&mut w, 0);
+        animated(&mut w, false);
+        assert!(!isolate::object_visible(&w, root));
+        assert_eq!(both(&w), (false, false), "a lamp of the room");
+        // an animated object left out loses them, every prim of it
+        animated(&mut w, true);
+        assert_eq!(both(&w), (true, true), "an animated object left out");
+        animated(&mut w, false);
+        // worn by an avatar left out: put out; worn by us: kept
+        wear(&mut w, other);
+        assert_eq!(both(&w), (true, true), "worn by an avatar left out");
+        animated(&mut w, true);
+        assert_eq!(both(&w), (true, true), "a worn animated object");
+        wear(&mut w, own_local);
+        assert_eq!(both(&w), (false, false), "what we wear is shown");
+
+        // chosen: the lights of what is chosen stay
+        w.photo_isolation.set_mode(isolate::Mode::Chosen);
+        assert_eq!(both(&w), (true, true), "nothing chosen, our avatar left out");
+        w.photo_isolation.toggle(w.agent_id);
+        assert_eq!(both(&w), (false, false));
+        wear(&mut w, other);
+        assert_eq!(both(&w), (true, true));
+        w.photo_isolation.toggle(other_id);
+        assert_eq!(both(&w), (false, false), "worn by a chosen avatar");
+        wear(&mut w, 0);
+        assert_eq!(both(&w), (true, true), "an animated object not chosen");
+        w.photo_isolation.toggle(root_id);
+        assert_eq!(both(&w), (false, false), "a chosen animated object");
+        // choosing in the scene draws everything, lights included
+        w.photo_isolation.remove(&root_id);
+        w.photo_isolation.set_picking(true);
+        assert_eq!(both(&w), (false, false));
     }
 
     #[test]
