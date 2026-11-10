@@ -18,6 +18,7 @@ pub mod inventory;
 pub mod joystick;
 pub mod layout;
 pub mod media;
+pub mod message_rules;
 pub mod network;
 pub mod privacy;
 pub mod protections;
@@ -67,6 +68,7 @@ pub fn tabs(page: Page) -> Vec<&'static str> {
             aurora_i18n::tr!("ui-options-tab-away-and-replies"),
             aurora_i18n::tr!("ui-options-groups-and-blocking"),
             aurora_i18n::tr!("ui-options-tab-spelling"),
+            aurora_i18n::tr!("chatxl-tab"),
         ],
         Page::Sound => vec![
             aurora_i18n::tr!("ui-options-volumes"),

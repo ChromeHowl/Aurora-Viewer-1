@@ -1,4 +1,5 @@
 use super::*;
+use crate::settings::chat_translation::Service;
 
 /// A computer in memory: what it holds, and what was asked of it.
 #[derive(Default)]
@@ -93,6 +94,9 @@ fn the_plan_lists_only_what_is_ours_and_each_login_once() {
             Part::Secret(Secret::Password(login(ADITI, "Jane Resident"))),
             Part::Secret(Secret::SecondFactor(login(ADITI, "Jane Resident"))),
             Part::Secret(Secret::CrashReports),
+            Part::Secret(Secret::Translation(Service::Azure)),
+            Part::Secret(Secret::Translation(Service::Google)),
+            Part::Secret(Secret::Translation(Service::DeepL)),
             Part::BlenderAddon,
         ]
     );
@@ -119,6 +123,10 @@ fn the_store_entries_are_the_ones_the_viewer_writes() {
     assert_eq!(password.1, format!("{AGNI}|jane resident"));
     assert_eq!(Secret::CacheKey.entry(), ("Aurora Viewer cache", "disk cache key v1".to_owned()));
     assert_eq!(Secret::CrashReports.entry(), ("Aurora Viewer GitHub", "crash-reports".to_owned()));
+    assert_eq!(
+        Secret::Translation(Service::DeepL).entry(),
+        ("Aurora Viewer translation", "deepl".to_owned())
+    );
 }
 
 #[test]

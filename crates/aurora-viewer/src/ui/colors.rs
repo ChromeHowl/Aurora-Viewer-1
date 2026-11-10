@@ -95,7 +95,8 @@ fn is_friend(world: &World, id: &Uuid) -> bool {
 }
 
 /// The keyword colour of a line that holds a keyword while "Change the
-/// colour" is on (Preferences › Chat › Keyword alerts). Ours and the debug
+/// colour" is on (Preferences › Chat › Keyword alerts), or the highlight of
+/// an Omnifilter rule. Ours and the debug
 /// channel's never hold one (chatContainsKeyword); a conversation's lines
 /// are IMs, the rest nearby chat.
 pub fn keyword_color(line: &ChatLine) -> Option<Color32> {
@@ -105,7 +106,10 @@ pub fn keyword_color(line: &ChatLine) -> Option<Color32> {
     ) {
         return None;
     }
-    crate::keywords::color(&line.from, &line.text, line.kind != ChatKind::Im).map(text)
+    crate::keywords::color(&line.from, &line.text, line.kind != ChatKind::Im)
+        // else the colour an Omnifilter rule gave it (`world/omnifilter.rs`)
+        .or_else(|| crate::world::omnifilter::highlight(line.time, line.source))
+        .map(text)
 }
 
 /// Text color of a chat line (LLViewerChat::getChatColor): the keyword

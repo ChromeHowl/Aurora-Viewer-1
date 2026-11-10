@@ -139,7 +139,7 @@ impl Rlva {
         }
     }
 
-    fn has_options(&self, name: &str) -> bool {
+    pub(crate) fn has_options(&self, name: &str) -> bool {
         self.enabled && self.rules.values().any(|rs| rs.iter().any(|r| r.behaviour == name))
     }
 }
