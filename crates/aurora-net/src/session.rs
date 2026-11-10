@@ -3040,6 +3040,7 @@ impl Session<'_> {
             | NetCommand::ObjectRelease { .. }
             | NetCommand::RequestTaskInventory { .. }
             | NetCommand::ChatSession { .. }
+            | NetCommand::ModerateText { .. }
             | NetCommand::Call { .. } => {}
             // handled by on_offline_command
             NetCommand::RequestOfflineMessages
