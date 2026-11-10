@@ -94,7 +94,7 @@ pub const COMMANDS: &[Command] = commands![
     "soundexplorer", "music", "toolbar-command-sound-explorer", true;
     "assetblacklist", "shield-off", "toolbar-command-asset-blacklist", true;
     "phototools", "camera-cog", "toolbar-command-phototools", false;
-    "phototools_view", "video-filled", "toolbar-command-phototools-camera", false;
+    "phototools_view", "video-filled", "toolbar-command-phototools-camera", true;
     "pose_stand", "man-filled", "toolbar-command-pose-stand", false;
     "conversation_log", "file-text-filled", "toolbar-command-conversation-log", false;
     "movelock", "lock-filled", "movelock-title", true;

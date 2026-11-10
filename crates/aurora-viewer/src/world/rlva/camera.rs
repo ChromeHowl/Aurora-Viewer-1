@@ -248,6 +248,11 @@ impl Rlva {
 
     pub fn camera_settings(&self, original: &CameraSettings, aspect: f32) -> CameraSettings {
         let mut s = original.clone();
+        // the extra camera options give way to any camera restriction:
+        // nothing of theirs places or turns the view meanwhile
+        if self.camera_restricted() {
+            s.extra = s.extra.under_rlva();
+        }
         if let Some(v) = self.camera_value("setcam_eyeoffset").and_then(vector) {
             s.camera_offset = v.to_array();
         }

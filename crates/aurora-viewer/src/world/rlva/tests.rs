@@ -165,6 +165,30 @@ fn rlva_fov_bounds_follow_window_aspect_and_leave_unrestricted_native_views_inta
 }
 
 #[test]
+fn rlva_camera_restrictions_turn_the_extra_camera_options_off() {
+    use crate::camera::{CameraExtra, FollowJoint};
+    let mut r = enabled();
+    let native = crate::camera::CameraSettings {
+        extra: CameraExtra {
+            follow_joint: FollowJoint::Head,
+            head_roll: true,
+            realistic_mouselook: true,
+            mouselook_camera_offset: [1.5, 0.0, 0.0],
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    // no restriction: the options as chosen
+    assert_eq!(r.camera_settings(&native, 1.0).extra, native.extra);
+    command(&mut r, A, "@setcam_avdistmax:2=n");
+    let restricted = r.camera_settings(&native, 1.0).extra;
+    assert_eq!(restricted, native.extra.under_rlva());
+    assert!(!restricted.uses_pose());
+    command(&mut r, A, "@clear");
+    assert_eq!(r.camera_settings(&native, 1.0).extra, native.extra);
+}
+
+#[test]
 fn rlva_inventory_wire_order_attachment_groups_and_own_locks_match_the_reference() {
     use crate::world::inventory::{FetchState, Folder};
     use aurora_net::{

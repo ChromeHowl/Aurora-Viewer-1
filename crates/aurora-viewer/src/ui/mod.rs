@@ -172,6 +172,8 @@ pub struct Panels {
     pub region_tracker: bool,
     /// The Camera Path window (World menu).
     pub camera_path: bool,
+    /// The Cameratools window (`ui::options::cameratools`).
+    pub cameratools: bool,
     pub beacons: bool,
     pub owned_land: bool,
     pub settings: bool,
@@ -255,6 +257,7 @@ impl Panels {
             world_map: false,
             region_tracker: false,
             camera_path: false,
+            cameratools: false,
             beacons: false,
             owned_land: false,
             settings: false,

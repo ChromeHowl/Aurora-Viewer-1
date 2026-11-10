@@ -5,6 +5,7 @@
 //! marks it when it differs from its default and resets it.
 
 pub mod backup;
+pub mod cameratools;
 pub(crate) mod cx;
 mod pages;
 mod saved_graphics;

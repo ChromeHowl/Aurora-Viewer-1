@@ -10,6 +10,11 @@ use egui::RichText;
 
 /// Three fields x / y / z (x forward, y left, z up).
 fn offset(ui: &mut egui::Ui, v: &mut [f32; 3]) -> bool {
+    offset_within(ui, v, 10.0)
+}
+
+/// `offset` within ± `limit` metres.
+fn offset_within(ui: &mut egui::Ui, v: &mut [f32; 3], limit: f32) -> bool {
     let mut changed = false;
     for (axis, value) in ["X", "Y", "Z"].iter().zip(v.iter_mut()) {
         ui.label(RichText::new(*axis).size(12.0));
@@ -17,7 +22,7 @@ fn offset(ui: &mut egui::Ui, v: &mut [f32; 3]) -> bool {
             .add(
                 egui::DragValue::new(value)
                     .custom_parser(aurora_i18n::parse_number)
-                    .range(-10.0..=10.0)
+                    .range(-limit..=limit)
                     .speed(0.02)
                     .max_decimals(2),
             )
@@ -171,6 +176,7 @@ pub fn page(cx: &mut Cx, tab: usize) {
                     "",
                 );
             });
+            body_and_head(cx);
             // the headset's starting viewpoint (app.rs, toggle_vr)
             cx.group(tr!("ui-options-camera-vr"), |cx| {
                 use crate::camera::VrView;
@@ -228,6 +234,23 @@ pub fn page(cx: &mut Cx, tab: usize) {
                     tr!("ui-options-camera-no-mouse-wheel-zoom"),
                     tr!("ui-options-camera-the-mouse-wheel-does-not-move-the-camera-closer"),
                     &field!(camera.disable_wheel_zoom),
+                );
+                // FSCameraSmoothLargeMovements, FSInvertThirdPersonCameraPitch,
+                // FSAllowCameraFlipOnSit
+                cx.toggle(
+                    tr!("camx-smooth-large-moves"),
+                    tr!("camx-smooth-large-moves-tip"),
+                    &field!(camera.extra.smooth_large_moves),
+                );
+                cx.toggle(
+                    tr!("camx-invert-orbit-pitch"),
+                    tr!("camx-invert-orbit-pitch-tip"),
+                    &field!(camera.extra.invert_orbit_pitch),
+                );
+                cx.toggle(
+                    tr!("camx-flip-on-sit"),
+                    tr!("camx-flip-on-sit-tip"),
+                    &field!(camera.extra.flip_on_sit),
                 );
             });
             cx.group(tr!("common-limits"), |cx| {
@@ -292,6 +315,79 @@ fn mouselook(cx: &mut Cx) {
             tr!("ui-options-camera-show-interface-tip"),
             &field!(camera.show_interface_in_mouselook),
         );
+        // the mouselook pack (camera/extra.rs)
+        cx.toggle(
+            tr!("camx-mouselook-smoothing"),
+            tr!("camx-mouselook-smoothing-tip"),
+            &field!(camera.extra.mouselook_smoothing),
+        );
+        cx.toggle(
+            tr!("camx-realistic-mouselook"),
+            tr!("camx-realistic-mouselook-tip"),
+            &field!(camera.extra.realistic_mouselook),
+        );
+        cx.toggle(
+            tr!("camx-shrink-head"),
+            tr!("camx-shrink-head-tip"),
+            &field!(camera.extra.shrink_head),
+        );
+        let off = !cx.s.camera.extra.shrink_head;
+        cx.subs(off, |cx| {
+            cx.slider(
+                tr!("camx-head-scale"),
+                tr!("camx-head-scale-tip"),
+                &field!(camera.extra.head_scale),
+                crate::camera::extra::HEAD_SCALE,
+                "×",
+            );
+        });
+        let limit = crate::camera::extra::MOUSELOOK_OFFSET;
+        cx.wide().row(
+            tr!("camx-mouselook-camera-offset"),
+            tr!("camx-mouselook-camera-offset-tip"),
+            &field!(camera.extra.mouselook_camera_offset),
+            |ui, s| offset_within(ui, &mut s.camera.extra.mouselook_camera_offset, limit),
+        );
+        cx.wide().row(
+            tr!("camx-mouselook-focus-offset"),
+            tr!("camx-mouselook-focus-offset-tip"),
+            &field!(camera.extra.mouselook_focus_offset),
+            |ui, s| offset_within(ui, &mut s.camera.extra.mouselook_focus_offset, limit),
+        );
+    });
+}
+
+/// The camera on a body part and the roll with the head
+/// (FSCameraFollowJoint, FSCinematicCamera and its roll damping).
+fn body_and_head(cx: &mut Cx) {
+    use crate::camera::FollowJoint;
+    use aurora_i18n::tr;
+    cx.group(tr!("camx-group-body"), |cx| {
+        let choices: Vec<(FollowJoint, &str)> = FollowJoint::ALL.iter().map(|j| (*j, j.label())).collect();
+        cx.combo(
+            tr!("camx-follow-joint"),
+            tr!("camx-follow-joint-tip"),
+            &field!(camera.extra.follow_joint),
+            &choices,
+        );
+        cx.toggle(tr!("camx-head-roll"), tr!("camx-head-roll-tip"), &field!(camera.extra.head_roll));
+        let off = !cx.s.camera.extra.head_roll;
+        cx.subs(off, |cx| {
+            cx.slider(
+                tr!("camx-roll-damping"),
+                tr!("camx-roll-damping-tip"),
+                &field!(camera.extra.roll_damping),
+                0.0..=1.0,
+                "",
+            );
+            cx.slider(
+                tr!("camx-roll-damping-sitting"),
+                tr!("camx-roll-damping-sitting-tip"),
+                &field!(camera.extra.roll_damping_sitting),
+                0.0..=1.0,
+                "",
+            );
+        });
     });
 }
 

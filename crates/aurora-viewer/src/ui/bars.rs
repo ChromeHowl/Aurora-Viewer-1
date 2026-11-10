@@ -31,6 +31,8 @@ pub enum BarAction {
     ViewStep(bool),
     /// World › Clear view history.
     ViewHistoryClear,
+    /// View › Look at Last Chatter.
+    LookAtLastChatter,
     ToggleVr,
     IkEdit,
     Poser,
@@ -272,6 +274,8 @@ pub struct StatusInfo<'a> {
     /// The Camera Lock is on; the view history has a view to go back to,
     /// and one to go forward to (`App::camera_tools_state`).
     pub camera_tools: (bool, bool, bool),
+    /// View › Look at Last Chatter is offered (`App::can_look_at_last_chatter`).
+    pub last_chatter: bool,
     pub show_name_tags: bool,
     /// The fly override is on (Me › Fly override).
     pub fly_override: bool,
@@ -1260,6 +1264,16 @@ fn main_menus(ui: &mut egui::Ui, p: &Palette, panels: &mut Panels, st: &StatusIn
         if menu::item(ui, p, "camera-filled", aurora_i18n::tr!("ui-bars-reset-camera-esc")) {
             *action = BarAction::ResetCamera;
         }
+        // View › Look at Last Chatter (shortcut control|\\)
+        if menu::item_if(
+            ui,
+            p,
+            "message-filled",
+            aurora_i18n::tr!("camx-look-at-last-chatter"),
+            st.last_chatter,
+        ) {
+            *action = BarAction::LookAtLastChatter;
+        }
         // Aurora's camera tools: the lock, the view history, the path
         let (locked, back, forward) = st.camera_tools;
         let lock = crate::keybinds::chord_label("KeyL", false, true, true);
@@ -1286,6 +1300,15 @@ fn main_menus(ui: &mut egui::Ui, p: &Palette, panels: &mut Panels, st: &StatusIn
             aurora_i18n::tr!("camtools-path-title"),
             super::camera_path::WINDOW,
             &mut panels.camera_path,
+        );
+        // World › Photo and Video › Cameratools (floater_phototools_camera)
+        flip_window(
+            ui,
+            p,
+            "video-filled",
+            aurora_i18n::tr!("camx-cameratools-title"),
+            super::options::cameratools::WINDOW,
+            &mut panels.cameratools,
         );
     });
     menu::submenu(ui, p, "box", aurora_i18n::tr!("common-build"), true, |ui| {
@@ -2225,6 +2248,8 @@ pub fn run_command(ctx: &egui::Context, cmd: &str, panels: &mut Panels) -> BarAc
         "regiontracker" => toggle(super::region_tracker::WINDOW, &mut panels.region_tracker),
         "camera_path" => toggle(super::camera_path::WINDOW, &mut panels.camera_path),
         "camera_lock" => return BarAction::CameraLock,
+        // Floater.Toggle phototools_camera: the Cameratools window
+        "phototools_view" => toggle(super::options::cameratools::WINDOW, &mut panels.cameratools),
         "places" => toggle("places", &mut panels.places),
         "search" => toggle(super::search::WINDOW, &mut panels.search),
         "areasearch" => toggle(super::area_search::WINDOW, &mut panels.area_search),
@@ -2336,6 +2361,7 @@ fn command_active(cmd: &str, panels: &Panels, flying: bool, seated: bool, mousel
         "group_titles" => panels.group_titles,
         "regiontracker" => panels.region_tracker,
         "camera_path" => panels.camera_path,
+        "phototools_view" => panels.cameratools,
         "gridstatus" => panels.grid_status,
         "webbrowser" => panels.web_browser,
         "voice" => panels.voice_controls,

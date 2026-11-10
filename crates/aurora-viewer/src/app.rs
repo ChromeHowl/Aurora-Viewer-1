@@ -853,6 +853,7 @@ pub struct App {
     camera_tools: camera_tools::CameraTools,
     map_tiles: ui::map_tiles::MapTiles,
     options_ui: ui::options::OptionsUi,
+    cameratools_ui: ui::options::cameratools::CameratoolsUi,
     grids_ui: ui::grids::Manager,
     audio_ui: ui::audio::AudioUi,
     notif_ui: ui::notifications::NotifUi,
@@ -1789,6 +1790,7 @@ impl App {
             camera_tools: Default::default(),
             map_tiles: ui::map_tiles::MapTiles::new(),
             options_ui: Default::default(),
+            cameratools_ui: Default::default(),
             grids_ui: Default::default(),
             audio_ui: Default::default(),
             notif_ui: Default::default(),
@@ -4226,10 +4228,16 @@ impl App {
             return;
         }
         let s = self.settings.mouse_sensitivity;
+        // FSInvertThirdPersonCameraPitch: the orbits only, not mouselook
+        let orbit_dy = if self.settings.camera.extra.invert_orbit_pitch { -dy } else { dy };
         if self.camera.mouselook() {
             // Alt held: the grab tool has the free cursor, the view stays
             if !self.alt_cursor.free() {
-                self.camera.look(dx, dy, s, &mut self.world.agent);
+                if self.settings.camera.extra.mouselook_smoothing {
+                    self.camera.look_smoothed(dx, dy, s);
+                } else {
+                    self.camera.look(dx, dy, s, &mut self.world.agent);
+                }
             }
         } else if self.mouse_mode != MouseMode::None {
             // LLToolCamera: steering is the zoom tool on our avatar; the
@@ -4246,6 +4254,7 @@ impl App {
                 _ => crate::camera::ToolMode::from_mods(ctrl, self.shift),
             };
             let width = self.gfx.as_ref().map(|g| g.renderer.size().0 as f32).unwrap_or(1280.0);
+            let dy = if mode == crate::camera::ToolMode::Orbit { orbit_dy } else { dy };
             self.camera.drag(mode, dx, dy, width, &mut self.world.agent);
         } else if self.right_drag {
             if !self.right_gesture.motion(dx, dy, self.egui_ctx.pixels_per_point()) {
@@ -4254,7 +4263,7 @@ impl App {
             match self.camera.free_mut() {
                 // the free camera looks around instead of orbiting
                 Some(free) => free.drag(dx, dy, s),
-                None => self.camera.orbit_drag(dx, dy, s, &mut self.world.agent),
+                None => self.camera.orbit_drag(dx, orbit_dy, s, &mut self.world.agent),
             }
         }
     }
@@ -4648,6 +4657,10 @@ impl App {
             Action::Mouselook => self.toggle_mouselook(),
             Action::CameraControls => self.request_controls(false, true),
             Action::CameraLock => self.toggle_camera_lock(),
+            Action::LookAtLastChatter => self.look_at_last_chatter(),
+            Action::Cameratools => {
+                ui::widgets::toggle_floater(&self.egui_ctx, ui::options::cameratools::WINDOW, &mut self.panels.cameratools)
+            }
             Action::ViewPrevious => self.camera_view_step(true),
             Action::ViewNext => self.camera_view_step(false),
             Action::PathPlayStop => self.path_play_stop(),
@@ -9493,12 +9506,15 @@ impl App {
                     .filter(|id| self.build.edits_object(&self.world, id))
                     .map(|_| self.settings.build.follow_edit_object),
                 eye_offset: None,
+                joint_offset: None,
+                head_rotation: None,
                 draw_distance: self.settings.draw_distance,
                 region_width: self.world.main().map_or(256.0, |r| r.heightmap.size_x as f32),
             };
-            if frame.edit_tracking.is_some() || self.camera.needs_animated_eyes(&self.world.agent, &self.settings.camera) {
+            if frame.edit_tracking.is_some() || self.camera.needs_animated_pose(&self.world.agent, &self.settings.camera) {
                 // Evaluate the focused edit selection after the local drag,
-                // and first-person eyes after this frame's animation.
+                // and first-person eyes, a followed body part or the head
+                // after this frame's animation.
                 late_camera_frame = Some(frame);
             } else {
                 self.camera.update(&mut self.world, &self.settings.camera, &frame);
@@ -10078,7 +10094,15 @@ impl App {
             let camera_changed = late_camera_frame.is_some() || panned;
             if let Some(mut frame) = late_camera_frame {
                 frame.eye_offset = self.scene.eyes_offset(&self.world, &self.world.agent_id);
-                if self.camera.needs_animated_eyes(&self.world.agent, &self.settings.camera) {
+                let extra = &self.settings.camera.extra;
+                frame.joint_offset = extra
+                    .follow_joint
+                    .joint()
+                    .and_then(|joint| crate::scene::Scene::joint_offset(&self.world, &self.world.agent_id, joint));
+                if extra.uses_pose() {
+                    frame.head_rotation = self.scene.head_rotation(&self.world.agent_id);
+                }
+                if self.camera.needs_animated_pose(&self.world.agent, &self.settings.camera) {
                     frame.now = now;
                 }
                 self.camera.update(&mut self.world, &self.settings.camera, &frame);
@@ -10252,6 +10276,8 @@ impl App {
                     .first_person_view()
                     .then_some(self.settings.camera.show_avatar_in_mouselook),
             );
+            let extra = &self.settings.camera.extra;
+            self.scene.own_head_scale = extra.shrink_head.then_some(extra.head_scale);
             self.scene.update_portal_clipping(&mut gfx.renderer, &self.world);
             self.scene.build_lists(&mut gfx.renderer, &cull, self.settings.shadows);
             let preview = if (self.focused || self.demo && self.capture.is_some())
@@ -14026,6 +14052,7 @@ impl App {
             BarAction::CameraLock => self.toggle_camera_lock(),
             BarAction::ViewStep(back) => self.camera_view_step(back),
             BarAction::ViewHistoryClear => self.camera_history_clear(),
+            BarAction::LookAtLastChatter => self.look_at_last_chatter(),
             BarAction::BanLines(v) => self.settings.maps.ban_lines = v,
             BarAction::WorldOverlays(overlays) => {
                 self.settings.world_overlays = overlays;
@@ -15818,6 +15845,7 @@ impl App {
                     quickjump: self.settings.quickjump,
                     friends_only: self.world.friends_only(),
                     camera_tools: self.camera_tools_state(),
+                    last_chatter: self.can_look_at_last_chatter(),
                     show_name_tags: self.settings.show_name_tags,
                     fly_override: self.world.fly_override,
                     quiet_snapshots: !self.settings.snapshot.sound,
@@ -17934,6 +17962,7 @@ impl App {
                     &mut self.panels.world_map,
                 );
                 self.camera_path_window(&ctx, &p);
+                self.cameratools_window(&ctx, &p);
                 for wa in wm {
                     match wa {
                         ui::worldmap::WorldMapAction::TrackRegion(name) => {

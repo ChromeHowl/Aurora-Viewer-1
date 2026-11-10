@@ -2801,8 +2801,12 @@ LUT_3D_SIZE {n}
             (None, false) => {}
         }
         // the textures in view at full resolution only with the whole boost:
-        // lowered, the video memory has no room for them either
-        self.scene.textures.full_resolution = self.settings.photo_held.is_some() && self.snapshots.fit.as_ref().is_none_or(|f| f.step == 0);
+        // lowered, the video memory has no room for them either. A Camera
+        // Path playing (or holding its last shot) asks for them too, so the
+        // shots are sharp; under memory pressure the budget still decides
+        // (`TextureStreamer::recompute_wants`)
+        self.scene.textures.full_resolution =
+            self.settings.photo_held.is_some() && self.snapshots.fit.as_ref().is_none_or(|f| f.step == 0) || self.camera_tools.playing();
     }
 
     /// The last session crashed or was stopped with "Photo quality" on: the
