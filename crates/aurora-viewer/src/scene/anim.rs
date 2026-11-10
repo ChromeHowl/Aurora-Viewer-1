@@ -885,6 +885,11 @@ impl Controller {
         self.posed.head.map(|h| h.1)
     }
 
+    /// Skeleton-space rotation of the head as posed last frame.
+    pub fn head_rotation(&self) -> Option<Quat> {
+        self.posed.head.map(|h| h.0)
+    }
+
     /// Skeleton-space point between the eyes as posed last frame
     /// (`eyes_between`), for the look-at line.
     pub fn eyes_pos(&self) -> Option<Vec3> {

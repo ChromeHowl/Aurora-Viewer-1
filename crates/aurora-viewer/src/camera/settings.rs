@@ -256,6 +256,9 @@ pub struct CameraSettings {
     /// every start crashed PCs that never use VR (#2309); the first
     /// "Restart in VR" turns it on.
     pub vr_at_start: bool,
+    /// The camera on a body part, the roll with the head, the third-person
+    /// and mouselook extras (`camera/extra.rs`).
+    pub extra: super::extra::CameraExtra,
 }
 
 /// Where the headset view starts on VR entry (Preferences › Camera › VR).
@@ -306,6 +309,7 @@ impl Default for CameraSettings {
             show_interface_in_mouselook: false,
             vr_view: VrView::FirstPerson,
             vr_at_start: false,
+            extra: Default::default(),
         }
     }
 }
@@ -444,6 +448,7 @@ impl CameraSettings {
         self.zoom_time = fix(self.zoom_time, 0.0, 4.0, d.zoom_time);
         self.smoothing = fix(self.smoothing, *SMOOTHING_RANGE.start(), *SMOOTHING_RANGE.end(), d.smoothing);
         self.dynamic_strength = fix(self.dynamic_strength, 0.0, 30.0, d.dynamic_strength);
+        self.extra = self.extra.sanitized();
         self
     }
 }

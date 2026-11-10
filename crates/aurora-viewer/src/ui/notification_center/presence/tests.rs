@@ -163,6 +163,7 @@ fn status(classic: bool) -> StatusInfo<'static> {
         quickjump: false,
         friends_only: false,
         camera_tools: (false, false, false),
+        last_chatter: false,
         show_name_tags: true,
         fly_override: false,
         quiet_snapshots: false,

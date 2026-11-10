@@ -362,6 +362,11 @@ pub enum Action {
     /// waypoint (Alt+Shift+K).
     PathPlayStop,
     PathCapture,
+    /// View › Look at Last Chatter (Legacy Viewer shortcut Ctrl+\).
+    LookAtLastChatter,
+    /// The Cameratools window (the Legacy Viewer's Ctrl+Shift+C is the
+    /// Controls window's here: no default).
+    Cameratools,
     /// Change the viewing angle (Legacy Viewer View.ZoomIn / Out / Default).
     LensZoomIn,
     LensZoomOut,
@@ -559,6 +564,8 @@ pub fn sections() -> &'static Vec<(&'static str, Vec<(Action, &'static str)>)> {
                     (Action::ViewNext, aurora_i18n::tr!("camtools-view-next")),
                     (Action::PathPlayStop, aurora_i18n::tr!("camtools-path-key-play")),
                     (Action::PathCapture, aurora_i18n::tr!("camtools-path-key-capture")),
+                    (Action::LookAtLastChatter, aurora_i18n::tr!("camx-look-at-last-chatter")),
+                    (Action::Cameratools, aurora_i18n::tr!("camx-cameratools-title")),
                     (Action::LensZoomIn, aurora_i18n::tr!("keybinds-lens-zoom-in")),
                     (Action::LensZoomOut, aurora_i18n::tr!("keybinds-lens-zoom-out")),
                     (Action::LensZoomDefault, aurora_i18n::tr!("keybinds-lens-zoom-default")),
@@ -790,6 +797,9 @@ impl KeyBindings {
             (Action::ViewNext, [kalt(K::KeyY, false, true), None]),
             (Action::PathPlayStop, [kalt(K::KeyP, false, true), None]),
             (Action::PathCapture, [kalt(K::KeyK, false, true), None]),
+            // menu_viewer.xml: Look at Last Chatter, shortcut="control|\\"
+            (Action::LookAtLastChatter, [kmod(K::Backslash, true, false), None]),
+            (Action::Cameratools, [None, None]),
             (Action::LensZoomIn, [kmod(K::Digit0, true, false), kmod(K::Numpad0, true, false)]),
             (Action::LensZoomOut, [kmod(K::Digit8, true, false), kmod(K::Numpad8, true, false)]),
             (

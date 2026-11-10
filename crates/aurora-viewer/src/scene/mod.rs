@@ -1023,6 +1023,9 @@ pub struct Scene {
     pub agent_idx: Option<usize>,
     /// FirstPersonAvatarVisible while in mouselook; None otherwise.
     pub first_person: Option<bool>,
+    /// MouselookExperimentalHeadScaling: the size our head is drawn at
+    /// while our avatar shows in mouselook (`camera::CameraExtra::shrink_head`).
+    pub own_head_scale: Option<f32>,
     rlva_render_state: (Option<Uuid>, bool, bool),
     pub lists: DrawLists,
     pub creation_preview: creation_preview::CreationPreview,
@@ -1630,6 +1633,7 @@ impl Scene {
             env_tex: [(Uuid::nil(), 0); 6],
             agent_idx: None,
             first_person: None,
+            own_head_scale: None,
             rlva_render_state: (None, false, false),
             lists: DrawLists::default(),
             creation_preview: creation_preview::CreationPreview::default(),
@@ -5749,8 +5753,38 @@ impl Scene {
                     .zip(&rig.default_world_inv)
                     .map(|(m, inv)| Mat4::from_cols_array_2d(m) * *inv),
             );
+            // our head drawn shrunk while our avatar shows in mouselook: only
+            // what is drawn, after the joints the attachments, the camera
+            // and the look-at read were kept above
+            if owner == world.agent_id
+                && self.first_person == Some(true)
+                && let Some(scale) = self.own_head_scale
+                && let Some(&head) = rig.names.get("mHead")
+                && let Some(palette) = self.palettes.get_mut(base..base + joints)
+            {
+                shrink_joint(palette, &rig, head, scale);
+            }
         }
         completed
+    }
+}
+
+/// Joint `root` and all below it drawn `scale` times their size about
+/// `root` (MouselookExperimentalHeadScaling): their posed matrices are
+/// scaled around the joint's posed position.
+fn shrink_joint(palette: &mut [[[f32; 4]; 4]], rig: &anim::Rig, root: usize, scale: f32) {
+    let Some(center) = palette.get(root).map(|m| Mat4::from_cols_array_2d(m).w_axis.truncate()) else {
+        return;
+    };
+    let about = Mat4::from_translation(center) * Mat4::from_scale(Vec3::splat(scale)) * Mat4::from_translation(-center);
+    let mut below = vec![false; rig.parent.len()];
+    for &j in &rig.order {
+        below[j] = j == root || rig.parent[j].is_some_and(|p| below[p]);
+        if below[j]
+            && let Some(m) = palette.get_mut(j)
+        {
+            *m = (about * Mat4::from_cols_array_2d(m)).to_cols_array_2d();
+        }
     }
 }
 
@@ -5794,6 +5828,13 @@ impl Scene {
     pub fn joint_world(&self, world: &World, id: &Uuid, name: &str, now: Instant) -> Option<Vec3> {
         let index = world.objects.index_of_uuid(id)?;
         let (position, rotation, _) = Self::object_transform(world, index, now, 0)?;
+        Some(position + rotation * Self::joint_offset(world, id, name)?)
+    }
+
+    /// Where joint `name` of avatar `id` is as posed last frame, relative to
+    /// the pelvis in the skeleton's frame (as `eyes_offset`): the body part
+    /// the camera follows (`camera::FollowJoint`).
+    pub fn joint_offset(world: &World, id: &Uuid, name: &str) -> Option<Vec3> {
         let rig = &world.avatar_lib.rig;
         let joint = *rig.names.get(name)?;
         let rest = rig.default_world_inv[joint].inverse().w_axis.truncate();
@@ -5803,7 +5844,13 @@ impl Scene {
             .and_then(|pose| pose.get(joint))
             .map(|delta| delta.transform_point3(rest))
             .unwrap_or(rest);
-        Some(position + rotation * (posed - world.avatar_lib.pelvis))
+        Some(posed - world.avatar_lib.pelvis)
+    }
+
+    /// The head's rotation as posed last frame, in the skeleton's frame
+    /// (the camera's roll with the head).
+    pub fn head_rotation(&self, id: &Uuid) -> Option<Quat> {
+        self.motions.get(id)?.head_rotation()
     }
 
     pub fn preview_pose(&self, avatar: &Uuid) -> (Vec<Quat>, Vec<Vec3>) {
@@ -6627,6 +6674,8 @@ mod tests {
                 build_mode: false,
                 edit_tracking: None,
                 eye_offset: scene.eyes_offset(&world, &owner),
+                joint_offset: None,
+                head_rotation: None,
                 draw_distance: 128.0,
                 region_width: 256.0,
                 aspect: 1.0,
@@ -6646,6 +6695,104 @@ mod tests {
             }
             previous = Some(eyes);
         }
+    }
+
+    #[test]
+    fn a_shrunk_head_scales_the_head_and_what_hangs_from_it_only() {
+        let lib = AvatarLibrary::load();
+        let rig = &lib.rig;
+        let rest = rig.world_with(&rig.local_rot, Vec3::ZERO, &rig.local_pos, &rig.scale);
+        let mut palette: Vec<[[f32; 4]; 4]> = rest.iter().map(|m| m.to_cols_array_2d()).collect();
+        let at = |p: &[[[f32; 4]; 4]], name: &str| Mat4::from_cols_array_2d(&p[rig.names[name]]).w_axis.truncate();
+        let head = at(&palette, "mHead");
+        let eye = at(&palette, "mEyeLeft");
+        let (chest, pelvis) = (at(&palette, "mChest"), at(&palette, "mPelvis"));
+        shrink_joint(&mut palette, rig, rig.names["mHead"], 0.1);
+        assert!(at(&palette, "mHead").abs_diff_eq(head, 1e-6), "about the head itself");
+        let shrunk = at(&palette, "mEyeLeft");
+        assert!(shrunk.abs_diff_eq(head + (eye - head) * 0.1, 1e-5), "{shrunk:?}");
+        let scale = Mat4::from_cols_array_2d(&palette[rig.names["mEyeLeft"]])
+            .to_scale_rotation_translation()
+            .0;
+        assert!((scale.x - 0.1 * rest[rig.names["mEyeLeft"]].to_scale_rotation_translation().0.x).abs() < 1e-5);
+        assert!(at(&palette, "mChest").abs_diff_eq(chest, 1e-6) && at(&palette, "mPelvis").abs_diff_eq(pelvis, 1e-6));
+    }
+
+    #[test]
+    fn the_camera_follows_the_animated_body_part_and_rolls_with_the_head() {
+        use crate::camera::{Camera, CameraExtra, CameraSettings, FollowJoint, FrameInput};
+
+        let lib = Arc::new(AvatarLibrary::load());
+        let mut world = World::new(lib.clone());
+        world.agent_id = crate::demo::DEMO_AGENT;
+        for event in crate::demo::sit_events(700) {
+            if let NetEvent::ObjectUpdates { handle, .. } = &event {
+                world.main_region = Some(*handle);
+            }
+            world.apply(event);
+        }
+        let owner = world.agent_id;
+        let mut scene = Scene::new(Default::default(), lib.clone());
+        scene.palette_base(owner);
+        let id = crate::world::body::ANIM_SIT_GROUND_CONSTRAINED;
+        scene.anims.insert(
+            id,
+            Arc::new(anim::BoundAnim::bind(crate::demo::first_person_ground_animation(), &lib.rig)),
+        );
+        world.apply(NetEvent::AvatarAnimations {
+            avatar: owner,
+            anims: vec![(id, 1)],
+            sources: Vec::new(),
+        });
+        let now = Instant::now();
+        scene.update_poses(&mut world, Vec3::ZERO, now);
+        let settings = CameraSettings {
+            hover_affects_camera: true,
+            extra: CameraExtra {
+                follow_joint: FollowJoint::Head,
+                head_roll: true,
+                roll_damping: 0.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let head = scene.joint_world(&world, &owner, "mHead", now).unwrap();
+        let (eye_offset, joint_offset) = (scene.eyes_offset(&world, &owner), Scene::joint_offset(&world, &owner, "mHead"));
+        let input = |head_rotation| FrameInput {
+            dt: 1.0,
+            now,
+            steering: false,
+            build_mode: false,
+            edit_tracking: None,
+            eye_offset,
+            joint_offset,
+            head_rotation,
+            draw_distance: 128.0,
+            region_width: 256.0,
+            aspect: 1.0,
+        };
+        let mut camera = Camera::default();
+        let level = input(Some(Quat::IDENTITY));
+        for _ in 0..3 {
+            camera.update(&mut world, &settings, &level);
+        }
+        assert!(camera.target.abs_diff_eq(head, 1e-4), "{:?} {head:?}", camera.target);
+        assert!(camera.current_view().roll.abs() < 1e-3, "an upright head: level");
+        let up = camera.view_up();
+        // the head leans: the view's up follows it (no damping, a long frame)
+        let leaned = input(Some(Quat::from_rotation_x(0.4)));
+        for _ in 0..3 {
+            camera.update(&mut world, &settings, &leaned);
+        }
+        assert!(camera.current_view().roll.abs() > 0.3, "the view rolled");
+        assert!(camera.view_up().angle_between(up) > 0.3);
+        // whole avatar again: back to the normal focus and level
+        let normal = CameraSettings::default();
+        for _ in 0..3 {
+            camera.update(&mut world, &normal, &level);
+        }
+        assert!(camera.target.distance(head) > 0.05, "back on the avatar's focus point");
+        assert!(camera.current_view().roll.abs() < 1e-3);
     }
 
     #[test]
@@ -6691,6 +6838,8 @@ mod tests {
             build_mode: false,
             edit_tracking: None,
             eye_offset: scene.eyes_offset(&world, &owner),
+            joint_offset: None,
+            head_rotation: None,
             draw_distance: 128.0,
             region_width: 256.0,
             aspect: 1.0,

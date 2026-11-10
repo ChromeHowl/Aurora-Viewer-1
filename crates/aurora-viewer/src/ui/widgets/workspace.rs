@@ -482,6 +482,7 @@ pub(super) fn window_icon(id: &str) -> &'static str {
         "group_titles" => "tags-filled",
         "region_tracker" => "location-filled",
         "camera_path" => "route",
+        "cameratools" => "video-filled",
         "search" => "search-filled",
         "options" => "settings-filled",
         "worldmap" | "minimap" => "map",

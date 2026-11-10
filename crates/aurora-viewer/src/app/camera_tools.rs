@@ -359,7 +359,67 @@ impl App {
         }
     }
 
+    // ------------------------------------------------------- last chatter
+
+    /// View › Look at Last Chatter (LLViewLookAtLastChatter): offered in
+    /// the third-person camera once someone nearby spoke
+    /// (LLViewEnableLastChatter).
+    pub(super) fn can_look_at_last_chatter(&self) -> bool {
+        self.camera.third_person()
+            && self
+                .world
+                .look_at
+                .last_chatter
+                .is_some_and(|id| self.world.objects.index_of_uuid(&id).is_some())
+    }
+
+    pub(super) fn look_at_last_chatter(&mut self) {
+        let Some(id) = self.world.look_at.last_chatter else {
+            return;
+        };
+        let now = std::time::Instant::now();
+        let own = self.world.agent_id;
+        let (Some(own_head), Some(head)) = (
+            self.scene.head_world(&self.world, &own, now),
+            self.scene.head_world(&self.world, &id, now),
+        ) else {
+            return;
+        };
+        let object = crate::camera::focus_object_geom(&self.world, &id, now).map(|g| (id, g));
+        if self
+            .camera
+            .look_at_chatter(own_head, head, object, &mut self.world.agent, &self.settings.camera)
+        {
+            log::info!("camera: looking at the last chatter");
+        }
+    }
+
     // ----------------------------------------------------------------- window
+
+    /// The Cameratools window: Preferences › Camera's rows in a window.
+    pub(super) fn cameratools_window(&mut self, ctx: &egui::Context, p: &Palette) {
+        if !self.panels.cameratools {
+            return;
+        }
+        let before = self.settings.camera.clone();
+        let mut result = crate::ui::options::OptionsResult::default();
+        let changed = self.cameratools_ui.show(
+            ctx,
+            p,
+            &mut self.panels.cameratools,
+            &mut self.settings,
+            &mut self.options_ui,
+            &mut result,
+        );
+        // RLVa keeps the camera values it holds, as in Preferences
+        self.world.rlva.preserve_camera_settings(&mut self.settings.camera, &before);
+        if result.reset_camera {
+            self.reset_camera_all();
+        }
+        if changed && !self.demo {
+            self.settings.save();
+        }
+    }
 
     pub(super) fn camera_path_window(&mut self, ctx: &egui::Context, p: &Palette) {
         if !self.panels.camera_path {
