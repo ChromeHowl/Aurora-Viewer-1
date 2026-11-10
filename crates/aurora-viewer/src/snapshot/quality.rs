@@ -676,8 +676,15 @@ mod tests {
                     let start = ((y * big.0 + draw.x) * 4) as usize;
                     drawn.extend_from_slice(&image[start..start + (draw.width * 4) as usize]);
                 }
-                let skip = ((keep.x - pass.draw.x) * factor, (keep.y - pass.draw.y) * factor);
-                reduce_into(&mut photo, out.0, keep, &drawn, draw.width, skip, factor);
+                // as the photo job does: a pass drawn at the photo's own
+                // size is copied, so a pixel of zero alpha keeps its colour
+                // (as `save::downscale` returns an image it need not reduce)
+                if factor == 1 {
+                    crate::snapshot::stitch(&mut photo, out.0, *pass, &drawn);
+                } else {
+                    let skip = ((keep.x - pass.draw.x) * factor, (keep.y - pass.draw.y) * factor);
+                    reduce_into(&mut photo, out.0, keep, &drawn, draw.width, skip, factor);
+                }
             }
             assert!(photo == whole, "factor {factor}");
         }

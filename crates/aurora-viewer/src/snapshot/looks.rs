@@ -360,6 +360,30 @@ pub fn resolve(id: &str, settings: &Settings, luts: &mut LutLibrary) -> Option<R
     })
 }
 
+/// The depth photo (the Legacy Viewer's "Depth" capture layer,
+/// LLViewerWindow::rawSnapshot's SNAPSHOT_TYPE_DEPTH, indra/newview/
+/// llviewerwindow.cpp, originally LGPL 2.1): the distance from the camera
+/// in grey, linear, black at `near` and white at `far` (the draw distance)
+/// and beyond, the sky white. Drawn by the looks' own reading of the
+/// scene's depth on the GPU, tile by tile as any look: the colours
+/// dropped, then a white fog over the range.
+pub fn depth_map(near: f32, far: f32) -> Resolved {
+    let near = if near.is_finite() { near.max(0.0) } else { 0.1 };
+    let far = if far.is_finite() { far.max(near + 1.0) } else { near + 1.0 };
+    Resolved {
+        ops: Arc::from([
+            LookOp::GradientMap([[0.0; 3]; 3]),
+            LookOp::Fog {
+                start: near,
+                end: far,
+                max: 1.0,
+                color: [1.0; 3],
+            },
+        ]),
+        lut: None,
+    }
+}
+
 /// Where the photo is in a frame drawn and how big it is there.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Placement {
@@ -408,6 +432,21 @@ pub fn frame_look(layers: &[(Resolved, u8)], place: Placement, compare: Option<f
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_depth_photo_greys_the_distance_from_near_to_far() {
+        let look = depth_map(0.1, 256.0);
+        assert!(look.lut.is_none());
+        match &look.ops[..] {
+            [LookOp::GradientMap(black), LookOp::Fog { start, end, max, color }] => {
+                assert_eq!(*black, [[0.0; 3]; 3], "the colours dropped");
+                assert_eq!((*start, *end, *max, *color), (0.1, 256.0, 1.0, [1.0; 3]));
+            }
+            other => panic!("{other:?}"),
+        }
+        // a draw distance below the near plane still spans a metre
+        assert!(matches!(depth_map(2.0, f32::NAN).ops[1], LookOp::Fog { start, end, .. } if start == 2.0 && end == 3.0));
+    }
 
     #[test]
     fn every_look_has_a_name() {

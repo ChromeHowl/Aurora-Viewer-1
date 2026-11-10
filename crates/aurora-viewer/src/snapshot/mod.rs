@@ -6,9 +6,12 @@
 //! sessions. Saving runs on a worker (`save`), the recent photos are listed
 //! by `gallery` and the session's kept by `reel`, a photo for the inventory
 //! is prepared by `inventory`, one for the profile feed posted by
-//! `profile`; what the photo shows is chosen by `isolate`; the window is
+//! `profile`; what the photo shows is chosen by `isolate`; a 360° photo is
+//! joined from its views by `pano`; the guide's look, what follows a save
+//! and the cut-out's matte are kept in `extras`; the window is
 //! `ui::snapshot`, the frames `app::snapshot`.
 
+pub mod extras;
 pub mod full_save;
 pub mod gallery;
 pub mod inventory;
@@ -17,6 +20,7 @@ pub mod knobs;
 pub mod light;
 pub mod looks;
 pub mod luts;
+pub mod pano;
 pub mod profile;
 pub mod quality;
 pub mod reel;
@@ -191,13 +195,17 @@ pub enum Guide {
     Golden,
     Diagonals,
     Center,
+    /// The golden spiral, wound into a corner (FSSnapshotGuideStyle's
+    /// golden_ratio_*).
+    Spiral,
 }
 
 impl Guide {
-    pub const ALL: [Guide; 4] = [Guide::Thirds, Guide::Golden, Guide::Diagonals, Guide::Center];
+    pub const ALL: [Guide; 5] = [Guide::Thirds, Guide::Golden, Guide::Spiral, Guide::Diagonals, Guide::Center];
 
-    /// Lines in unit coordinates of the frame (0..1 both ways, y down).
-    pub fn lines(self) -> Vec<[[f32; 2]; 2]> {
+    /// Lines in unit coordinates of a frame `aspect` wide for 1 high (0..1
+    /// both ways, y down); the spiral wound into `corner`.
+    pub fn lines(self, aspect: f32, corner: extras::Corner) -> Vec<[[f32; 2]; 2]> {
         let v = |x: f32| [[x, 0.0], [x, 1.0]];
         let h = |y: f32| [[0.0, y], [1.0, y]];
         match self {
@@ -210,8 +218,81 @@ impl Guide {
             }
             Guide::Diagonals => vec![[[0.0, 0.0], [1.0, 1.0]], [[1.0, 0.0], [0.0, 1.0]]],
             Guide::Center => vec![v(0.5), h(0.5)],
+            Guide::Spiral => golden_spiral(aspect, corner),
         }
     }
+}
+
+/// The golden spiral and its squares in a frame `aspect` wide for 1 high:
+/// the largest golden rectangle the frame holds, pushed into `corner`,
+/// its squares and the quarter circles across them. Port of
+/// LLPipeline::renderSnapshotGuides' GoldenRatio case (indra/newview/
+/// pipeline.cpp, originally LGPL 2.1), worked with y up as there.
+fn golden_spiral(aspect: f32, corner: extras::Corner) -> Vec<[[f32; 2]; 2]> {
+    let phi = std::f32::consts::GOLDEN_RATIO;
+    let w = if aspect.is_finite() { aspect.clamp(0.05, 20.0) } else { 1.0 };
+    let scale = (w / phi).min(1.0);
+    let (gw, gh) = (phi * scale, scale);
+    let (flip_x, flip_y) = corner.flips();
+    // anchored in the corner: the rest of the frame on the other side
+    let ax = if flip_x { 0.0 } else { w - gw };
+    let ay = if flip_y { 0.0 } else { 1.0 - gh };
+    let map = |x: f32, y: f32| {
+        let x = if flip_x { gw - x } else { x };
+        let y = if flip_y { gh - y } else { y };
+        // (y up to y down, x in shares of the width)
+        [((ax + x) / w).clamp(0.0, 1.0), (1.0 - (ay + y)).clamp(0.0, 1.0)]
+    };
+    let mut out = Vec::new();
+    let mut line = |x0: f32, y0: f32, x1: f32, y1: f32| out.push([map(x0, y0), map(x1, y1)]);
+    line(0.0, 0.0, gw, 0.0);
+    line(0.0, gh, gw, gh);
+    line(0.0, 0.0, 0.0, gh);
+    line(gw, 0.0, gw, gh);
+    // the squares, then the quarter circle across each
+    let (mut x0, mut y0, mut x1, mut y1) = (0.0f32, 0.0f32, gw, gh);
+    let mut arcs = Vec::new();
+    for step in 0..12 {
+        let (width, height) = (x1 - x0, y1 - y0);
+        if width <= 1e-3 || height <= 1e-3 {
+            break;
+        }
+        use std::f32::consts::{FRAC_PI_2, PI};
+        match step % 4 {
+            0 => {
+                arcs.push((x0 + height, y0 + height, height, PI));
+                x0 += height;
+                line(x0, y0, x0, y1);
+            }
+            1 => {
+                arcs.push((x0, y0 + width, width, 1.5 * PI));
+                y0 += width;
+                line(x0, y0, x1, y0);
+            }
+            2 => {
+                arcs.push((x1 - height, y0, height, 0.0));
+                x1 -= height;
+                line(x1, y0, x1, y1);
+            }
+            _ => {
+                arcs.push((x0 + width, y1 - width, width, FRAC_PI_2));
+                y1 -= width;
+                line(x0, y1, x1, y1);
+            }
+        }
+    }
+    const SEGMENTS: usize = 16;
+    for (cx, cy, r, start) in arcs {
+        let at = |i: usize| {
+            let t = start + std::f32::consts::FRAC_PI_2 * i as f32 / SEGMENTS as f32;
+            (cx + t.cos() * r, cy + t.sin() * r)
+        };
+        for i in 0..SEGMENTS {
+            let ((x0, y0), (x1, y1)) = (at(i), at(i + 1));
+            line(x0, y0, x1, y1);
+        }
+    }
+    out
 }
 
 /// Settings of the photo window, kept between sessions (Firestorm keeps
@@ -282,6 +363,9 @@ pub struct Settings {
     /// The photo profiles, by name (`saved`).
     #[serde(deserialize_with = "saved::lenient")]
     pub profiles: std::collections::BTreeMap<String, saved::Profile>,
+    /// The guide's look, what follows a save, the cut-out's matte, the
+    /// 360° photo (`extras`).
+    pub extras: extras::Extras,
 }
 
 impl Default for Settings {
@@ -316,6 +400,7 @@ impl Default for Settings {
             looks: Vec::new(),
             look_settings: Default::default(),
             profiles: Default::default(),
+            extras: Default::default(),
         }
     }
 }
@@ -330,6 +415,7 @@ impl Settings {
         }
         // FSRememberSnapshotPathSessions off: the folder lasts one session
         self.dof.sanitize();
+        self.extras.sanitize();
         if !self.remember_folder {
             self.folder = None;
         }

@@ -6,7 +6,9 @@
 //! world outside the photo's proportions darkened, a composition guide.
 
 use super::widgets::{self, ActionKind, Floater};
+use crate::snapshot::extras::{Corner, Extras, GUIDE_WIDTH};
 use crate::snapshot::inventory::TextureSize;
+use crate::snapshot::pano::Quality as PanoQuality;
 use crate::snapshot::profile::ProfileSize;
 use crate::snapshot::quality::Supersampling;
 use crate::snapshot::{Aspect, FileFormat, Guide, Resolution, Settings};
@@ -53,6 +55,9 @@ pub struct SnapshotUi {
     pub lut_names: Vec<String>,
     /// The name typed for a photo profile (`snapshot::saved`).
     pub profile_name: String,
+    /// A photo to disk is the depth of the scene (the Legacy Viewer's
+    /// "Depth" capture layer; never saved, as there).
+    pub depth: bool,
 }
 
 /// Where a photo goes (Firestorm's snapshot panels; the profile feed
@@ -162,6 +167,8 @@ pub struct View<'a> {
     pub back_key: Option<crate::keybinds::Binding>,
     /// The photo quality is lowered to stay within the video memory.
     pub quality_reduced: bool,
+    /// A 360° photo can be taken (no RLVa camera limit).
+    pub pano_allowed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -210,6 +217,10 @@ pub enum Action {
     ProfileLoad(String),
     ProfileSave(String),
     ProfileDelete(String),
+    /// "Reset all" (None) or one part of the window back to its defaults.
+    ProfileReset(Option<crate::snapshot::saved::Part>),
+    /// A 360° photo to disk (`snapshot::pano`).
+    Pano,
 }
 
 impl SnapshotUi {
@@ -390,7 +401,7 @@ impl SnapshotUi {
                 }
             }
             (None, None, None) => {
-                let take_w = ui.available_width() - 68.0;
+                let take_w = ui.available_width() - 102.0;
                 ui.add_enabled_ui(!busy, |ui| {
                     if widgets::action_button(
                         ui,
@@ -416,6 +427,20 @@ impl SnapshotUi {
                     {
                         out.push(Action::FullSave);
                     }
+                    let tip = if view.pano_allowed {
+                        aurora_i18n::tr!("b1-pano-tip")
+                    } else {
+                        aurora_i18n::tr!("b1-pano-rlva")
+                    };
+                    ui.add_enabled_ui(view.pano_allowed, |ui| {
+                        if widgets::action_button(ui, p, "rotate-360", "", ActionKind::Flat, Vec2::new(30.0, 32.0))
+                            .on_hover_text(tip)
+                            .on_disabled_hover_text(tip)
+                            .clicked()
+                        {
+                            out.push(Action::Pano);
+                        }
+                    });
                 });
             }
         });
@@ -658,6 +683,25 @@ impl SnapshotUi {
                         ui.add(egui::Slider::new(&mut s.jpeg_quality, 1..=100));
                     });
                 }
+                // floater_snapshot.xml's layer_types (Colors, Depth)
+                row(
+                    ui,
+                    p,
+                    aurora_i18n::tr!("b1-capture"),
+                    Some(aurora_i18n::tr!("b1-capture-hint")),
+                    |ui| {
+                        let mut i = usize::from(self.depth);
+                        let options = [
+                            (aurora_i18n::tr!("b1-capture-colors"), true),
+                            (aurora_i18n::tr!("b1-capture-depth"), true),
+                        ];
+                        if widgets::segmented(ui, p, &mut i, &options) {
+                            self.depth = i == 1;
+                            out.push(Action::Changed);
+                        }
+                    },
+                );
+                pano_rows(ui, p, &mut s.extras);
             }
         }
 
@@ -787,6 +831,9 @@ impl SnapshotUi {
         }
 
         ui.add_space(2.0);
+        widgets::collapsing(ui, p, "photo_guide", aurora_i18n::tr!("b1-guide-section"), false, |ui| {
+            guide_rows(ui, p, s);
+        });
         widgets::collapsing(ui, p, "photo_file", aurora_i18n::tr!("photo-section-file"), false, |ui| {
             row(ui, p, aurora_i18n::tr!("photo-base-name"), None, |ui| {
                 ui.add(egui::TextEdit::singleline(&mut s.base_name).desired_width(150.0));
@@ -919,7 +966,7 @@ impl SnapshotUi {
             painter.rect_filled(r, 0.0, mask);
         }
         painter.rect_stroke(frame, 0.0, Stroke::new(1.0, p.ink.gamma_multiply(0.7)), egui::StrokeKind::Inside);
-        guide_lines(&painter, frame, s.guide, p.ink.gamma_multiply(0.55));
+        guide_lines(&painter, frame, s.guide, &s.extras, p.ink.gamma_multiply(0.55));
 
         let tag = |id: &str, pos: Pos2, align: egui::Align2, icon: &str, text: String| {
             egui::Area::new(egui::Id::unique(id))
@@ -1465,18 +1512,111 @@ pub fn outside(screen: Rect, frame: Rect) -> Vec<Rect> {
 fn guide_face(g: Guide) -> (&'static str, &'static str) {
     match g {
         Guide::Thirds => ("grid-3x3", aurora_i18n::tr!("photo-guide-thirds")),
-        Guide::Golden => ("spiral", aurora_i18n::tr!("photo-guide-golden")),
+        Guide::Golden => ("grid-pattern-filled", aurora_i18n::tr!("photo-guide-golden")),
+        Guide::Spiral => ("spiral", aurora_i18n::tr!("b1-guide-spiral")),
         Guide::Diagonals => ("slash", aurora_i18n::tr!("photo-guide-diagonals")),
         Guide::Center => ("focus-centered", aurora_i18n::tr!("photo-guide-center")),
         Guide::None => ("x", aurora_i18n::tr!("photo-guide-off")),
     }
 }
 
-pub(crate) fn guide_lines(painter: &egui::Painter, frame: Rect, guide: Guide, color: Color32) {
+/// The guide over `frame`, in the colour and width chosen (`theme`: the
+/// colour without a choice).
+pub(crate) fn guide_lines(painter: &egui::Painter, frame: Rect, guide: Guide, style: &Extras, theme: Color32) {
     let at = |v: [f32; 2]| Pos2::new(frame.left() + v[0] * frame.width(), frame.top() + v[1] * frame.height());
-    for [a, b] in guide.lines() {
-        painter.line_segment([at(a), at(b)], Stroke::new(1.0, color));
+    let color = style.guide_color.map_or(theme, guide_color);
+    let stroke = Stroke::new(style.guide_width, color);
+    for [a, b] in guide.lines(frame.width() / frame.height().max(1.0), style.guide_corner) {
+        painter.line_segment([at(a), at(b)], stroke);
     }
+}
+
+/// A guide colour chosen by the user (sRGB, straight alpha).
+fn guide_color(c: [u8; 4]) -> Color32 {
+    Color32::from_rgba_unmultiplied(c[0], c[1], c[2], c[3])
+}
+
+/// The guide: which one, its colour (or the theme's), the width of its
+/// lines and the corner of the golden spiral
+/// (floater_snapshot_guide_settings.xml).
+fn guide_rows(ui: &mut egui::Ui, p: &Palette, s: &mut Settings) {
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
+        for g in std::iter::once(Guide::None).chain(Guide::ALL) {
+            let (icon, tip) = guide_face(g);
+            if widgets::icon_toggle(ui, p, icon, tip, s.guide == g) {
+                s.guide = g;
+            }
+        }
+    });
+    let e = &mut s.extras;
+    row(ui, p, aurora_i18n::tr!("b1-guide-color"), None, |ui| {
+        let mut own = e.guide_color.is_some();
+        if widgets::switch(ui, p, &mut own).changed() {
+            // (FSSnapshotFrameGuideColor's yellow at half its opacity)
+            e.guide_color = own.then_some([255, 255, 0, 128]);
+        }
+        if let Some(c) = &mut e.guide_color {
+            widgets::color_button(ui, p, "photo_guide_color", c, true);
+        }
+    });
+    row(ui, p, aurora_i18n::tr!("b1-guide-width"), None, |ui| {
+        ui.spacing_mut().slider_width = 110.0;
+        ui.add(egui::Slider::new(&mut e.guide_width, GUIDE_WIDTH).step_by(0.5).suffix(" px"));
+    });
+    if s.guide == Guide::Spiral {
+        row(ui, p, aurora_i18n::tr!("b1-guide-corner"), None, |ui| {
+            let labels = [
+                aurora_i18n::tr!("b1-corner-top-left"),
+                aurora_i18n::tr!("b1-corner-top-right"),
+                aurora_i18n::tr!("b1-corner-bottom-left"),
+                aurora_i18n::tr!("b1-corner-bottom-right"),
+            ];
+            let e = &mut s.extras;
+            egui::ComboBox::from_id_salt("photo_guide_corner")
+                .width(150.0)
+                .selected_text(labels[Corner::ALL.iter().position(|c| *c == e.guide_corner).unwrap_or(0)])
+                .show_ui(ui, |ui| {
+                    for (c, label) in Corner::ALL.into_iter().zip(labels) {
+                        ui.selectable_value(&mut e.guide_corner, c, label);
+                    }
+                });
+        });
+    }
+}
+
+/// The 360° photo's quality and whether it leaves the avatars out
+/// (floater_360capture.xml); it is taken by the button beside the
+/// shutter.
+fn pano_rows(ui: &mut egui::Ui, p: &Palette, e: &mut Extras) {
+    row(
+        ui,
+        p,
+        aurora_i18n::tr!("b1-pano-quality"),
+        Some(aurora_i18n::tr!("b1-pano-quality-hint")),
+        |ui| {
+            let labels = [
+                aurora_i18n::tr!("b1-pano-preview"),
+                aurora_i18n::tr!("b1-pano-medium"),
+                aurora_i18n::tr!("b1-pano-high"),
+                aurora_i18n::tr!("b1-pano-maximum"),
+                aurora_i18n::tr!("b1-pano-ultra"),
+            ];
+            let current = PanoQuality::ALL.iter().position(|q| *q == e.pano_quality).unwrap_or(0);
+            egui::ComboBox::from_id_salt("photo_pano_quality")
+                .width(150.0)
+                .selected_text(labels[current])
+                .show_ui(ui, |ui| {
+                    for (q, label) in PanoQuality::ALL.into_iter().zip(labels) {
+                        let (w, h) = crate::snapshot::pano::output_size(q.face());
+                        ui.selectable_value(&mut e.pano_quality, q, format!("{label} · {w} × {h}"));
+                    }
+                });
+        },
+    );
+    row(ui, p, aurora_i18n::tr!("b1-pano-hide-avatars"), None, |ui| {
+        widgets::switch(ui, p, &mut e.pano_hide_avatars);
+    });
 }
 
 /// Preview with its guide, size badge and refresh button; true when the
@@ -1508,7 +1648,7 @@ fn preview(ui: &mut egui::Ui, p: &Palette, s: &Settings, view: &View) -> bool {
             );
         }
     }
-    guide_lines(ui.painter(), rect, s.guide, p.ink.gamma_multiply(0.55));
+    guide_lines(ui.painter(), rect, s.guide, &s.extras, p.ink.gamma_multiply(0.55));
     // the size badge
     let badge = match (&view.email, &view.inventory, &view.profile) {
         (Some(mail), _, _) => format!("{} × {} · JPEG", mail.size.0, mail.size.1),
@@ -1743,7 +1883,33 @@ impl SnapshotUi {
             if (widgets::icon_button(ui, p, "device-floppy", tip, valid) || enter) && valid {
                 out.push(Action::ProfileSave(self.profile_name.trim().to_owned()));
             }
+            widgets::icon_menu(ui, p, "restore", aurora_i18n::tr!("b1-reset"), |ui| {
+                if crate::ui::menu::item(ui, p, "restore", aurora_i18n::tr!("b1-reset-all")) {
+                    out.push(Action::ProfileReset(None));
+                }
+                crate::ui::menu::separator(ui, p);
+                for part in crate::snapshot::saved::Part::ALL {
+                    if crate::ui::menu::item(ui, p, "arrow-back-up", reset_label(part)) {
+                        out.push(Action::ProfileReset(Some(part)));
+                    }
+                }
+            });
         });
+    }
+}
+
+/// "Reset" and the part of the window (the Legacy Viewer's "Reset tab").
+fn reset_label(part: crate::snapshot::saved::Part) -> &'static str {
+    use crate::snapshot::saved::Part;
+    match part {
+        Part::Format => aurora_i18n::tr!("b1-reset-format"),
+        Part::File => aurora_i18n::tr!("b1-reset-file"),
+        Part::Quality => aurora_i18n::tr!("b1-reset-quality"),
+        Part::Lens => aurora_i18n::tr!("b1-reset-lens"),
+        Part::Light => aurora_i18n::tr!("b1-reset-light"),
+        Part::Looks => aurora_i18n::tr!("b1-reset-looks"),
+        Part::Isolation => aurora_i18n::tr!("b1-reset-isolation"),
+        Part::Guide => aurora_i18n::tr!("b1-reset-guide"),
     }
 }
 

@@ -126,6 +126,78 @@ impl Profile {
     }
 }
 
+/// A part of the window's settings a profile holds, reset on its own (the
+/// Legacy Viewer's photo tools reset a tab: here a part of the window).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Part {
+    /// Proportions and size.
+    Format,
+    /// File format and JPEG quality.
+    File,
+    /// Photo quality and supersampling.
+    Quality,
+    /// The window's depth of field.
+    Lens,
+    /// Exposure and the quick light switches.
+    Light,
+    /// The looks and their settings.
+    Looks,
+    /// What the photo shows.
+    Isolation,
+    /// The composition guide.
+    Guide,
+}
+
+impl Part {
+    pub const ALL: [Part; 8] = [
+        Part::Format,
+        Part::File,
+        Part::Quality,
+        Part::Lens,
+        Part::Light,
+        Part::Looks,
+        Part::Isolation,
+        Part::Guide,
+    ];
+}
+
+/// "Reset all" (None) or "Reset tab" (Some): the part's settings, or all
+/// those a profile holds, back to their defaults, the others as they are.
+/// The looks' settings are forgotten with them.
+pub fn reset(part: Option<Part>, s: &mut Settings, light: &mut PhotoLight, iso: &mut Isolation) {
+    let d = Profile::default();
+    let mut p = Profile::capture(s, light, iso);
+    let all = part.is_none();
+    let is = |x: Part| all || part == Some(x);
+    if is(Part::Format) {
+        (p.aspect, p.resolution, p.custom, p.keep_ratio) = (d.aspect, d.resolution, d.custom, d.keep_ratio);
+    }
+    if is(Part::File) {
+        (p.format, p.jpeg_quality) = (d.format, d.jpeg_quality);
+    }
+    if is(Part::Quality) {
+        (p.supersampling, p.quality) = (d.supersampling, d.quality);
+    }
+    if is(Part::Lens) {
+        p.dof = d.dof.clone();
+    }
+    if is(Part::Light) {
+        (p.exposure, p.clouds_paused, p.attached_lights) = (d.exposure, d.clouds_paused, d.attached_lights);
+    }
+    if is(Part::Looks) {
+        p.looks = d.looks.clone();
+        p.look_settings = d.look_settings.clone();
+        s.look_settings.clear();
+    }
+    if is(Part::Isolation) {
+        (p.isolation, p.transparent) = (d.isolation, d.transparent);
+    }
+    if is(Part::Guide) {
+        p.guide = d.guide;
+    }
+    p.apply(s, light, iso);
+}
+
 /// Names are labels, never file paths: one line, at most 64 characters.
 pub fn valid_name(name: &str) -> bool {
     crate::graphics_presets::saved::valid_name(name)
@@ -202,6 +274,55 @@ mod tests {
         let value = serde_json::to_value(&profile).expect("value");
         for unrelated in ["draw_distance", "shadows", "fov", "folder", "base_name", "camera"] {
             assert!(value.get(unrelated).is_none(), "{unrelated}");
+        }
+    }
+
+    #[test]
+    fn reset_all_or_one_part_brings_back_the_defaults() {
+        let mut s = Settings {
+            aspect: Aspect::R1x1,
+            format: FileFormat::Bmp,
+            supersampling: Supersampling::X4,
+            guide: Guide::Center,
+            quality_warned: true,
+            quality: true,
+            folder: Some("keep/me".into()),
+            ..Settings::default()
+        };
+        s.looks = vec![looks::Layer::new("Sepia")];
+        s.look_settings.insert("aurora:haze".into(), vec![0.5]);
+        let mut light = PhotoLight {
+            exposure: Some(2.0),
+            ..PhotoLight::default()
+        };
+        let mut iso = Isolation::default();
+        iso.set_mode(isolate::Mode::Own);
+
+        reset(Some(Part::File), &mut s, &mut light, &mut iso);
+        assert_eq!(s.format, FileFormat::Png);
+        assert_eq!(
+            (s.aspect, s.guide, s.supersampling),
+            (Aspect::R1x1, Guide::Center, Supersampling::X4),
+            "the rest kept"
+        );
+        assert_eq!(light.exposure, Some(2.0));
+
+        reset(Some(Part::Looks), &mut s, &mut light, &mut iso);
+        assert!(s.looks.is_empty() && s.look_settings.is_empty());
+        assert_eq!(iso.mode, isolate::Mode::Own);
+
+        reset(None, &mut s, &mut light, &mut iso);
+        let defaults = Profile::default();
+        assert_eq!(Profile::capture(&s, &light, &iso), defaults);
+        assert_eq!(s.folder, Some("keep/me".into()), "what a profile does not hold is kept");
+        for part in Part::ALL {
+            let (mut s2, mut l2, mut i2) = (Settings::default(), PhotoLight::default(), Isolation::default());
+            reset(Some(part), &mut s2, &mut l2, &mut i2);
+            assert_eq!(
+                Profile::capture(&s2, &l2, &i2),
+                defaults,
+                "{part:?} of the defaults changes nothing"
+            );
         }
     }
 

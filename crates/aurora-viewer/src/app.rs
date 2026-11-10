@@ -9411,10 +9411,16 @@ impl App {
         let photo_scale = photo.as_ref().map_or(1.0, |f| f.scale);
         let photo_context = photo.as_ref().map_or(aurora_render::PhotoContext::None, |f| f.context);
         let lod_height = photo.as_ref().map_or(h, |f| f.height);
-        let frame_proj = |camera: &crate::camera::Camera| match &photo {
-            Some(f) => photo_tile * camera.photo_proj(f.aspect, window_aspect),
-            None => camera.proj(aspect),
+        // a view of a 360° photo looks its own way (`snapshot::pano`)
+        let cube = photo.as_ref().and_then(|f| f.cube);
+        let frame_proj = |camera: &crate::camera::Camera| match (&photo, cube) {
+            (Some(_), Some((_, proj))) => photo_tile * proj,
+            (Some(f), None) => photo_tile * camera.photo_proj(f.aspect, window_aspect),
+            (None, _) => camera.proj(aspect),
         };
+        let frame_view = |camera: &crate::camera::Camera| cube.map_or_else(|| camera.view(), |(view, _)| view);
+        // (the way it looks: the textures in view come first)
+        let frame_forward = |camera: &crate::camera::Camera| cube.map_or_else(|| camera.forward(), |(view, _)| -view.row(2).truncate());
 
         // ---- agent / camera
         let typing = self.egui_ctx.egui_wants_keyboard_input();
@@ -9780,12 +9786,12 @@ impl App {
             self.world.agent.pitch = pitch;
             gfx.renderer.cut_motion_history();
         }
-        let mut view = self.camera.view();
+        let mut view = frame_view(&self.camera);
         let mut proj = frame_proj(&self.camera);
         let mut vp = proj * view;
         let camera_fast = self.texture_motion.update(self.camera.position, self.camera.forward(), dt);
         let mut cull = CullView::new(vp, self.camera.position, lod_height as f32, self.camera.fov_y).with_texture_camera(
-            self.camera.forward(),
+            frame_forward(&self.camera),
             aspect,
             camera_fast,
         );
@@ -10126,11 +10132,11 @@ impl App {
                 self.net.send(NetCommand::SetFov(self.sent_fov));
             }
             if camera_changed {
-                view = self.camera.view();
+                view = frame_view(&self.camera);
                 proj = frame_proj(&self.camera);
                 vp = proj * view;
                 cull = CullView::new(vp, self.camera.position, lod_height as f32, self.camera.fov_y).with_texture_camera(
-                    self.camera.forward(),
+                    frame_forward(&self.camera),
                     aspect,
                     camera_fast,
                 );
@@ -10832,7 +10838,10 @@ impl App {
             all_lights: self.frame_profile.all_lights(),
             probe_walk_list: self.frame_profile.probe_walk_list(),
             debug: self.settings.debug.render(),
-            dof: {
+            dof: if cube.is_some() {
+                // (a 360° photo is sharp all around: no lens)
+                None
+            } else {
                 // the image's own vertical field of view (a photo's may be
                 // wider than the window's)
                 let lens_proj = match &photo {
