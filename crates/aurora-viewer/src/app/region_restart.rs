@@ -355,7 +355,7 @@ impl App {
 
     /// The landmarks of the inventory, out of the trash and the library,
     /// with where each leads once its asset is known.
-    fn restart_landmarks(&mut self) -> Vec<Landmark> {
+    pub(super) fn restart_landmarks(&mut self) -> Vec<Landmark> {
         let inv = &self.world.inventory;
         if self.region_restart.landmarks.0 != Some(inv.generation) {
             let list = inv
@@ -364,6 +364,7 @@ impl App {
                 .filter(|it| it.asset_type == ASSET_LANDMARK && !it.asset_id.is_nil())
                 .filter(|it| inv.folders.get(&it.parent).is_some_and(|f| !f.library) && !inv.in_folder_type(it.id, FOLDER_TRASH))
                 .map(|it| Landmark {
+                    item: it.id,
                     asset: it.asset_id,
                     name: it.name.clone(),
                     detail: String::new(),
@@ -466,7 +467,8 @@ impl App {
                 return;
             }
             let mut open = true;
-            let actions = alert::legacy_box(ctx, p, &a, &landmarks, &mut self.region_restart.legacy_pick, &mut open);
+            let evacuate = self.restart_evacuate_offered();
+            let actions = alert::legacy_box(ctx, p, &a, &landmarks, &mut self.region_restart.legacy_pick, &mut open, evacuate);
             self.region_restart.legacy_open = open;
             for action in actions {
                 self.region_restart_action(action);
@@ -494,6 +496,7 @@ impl App {
             still: self.settings.reduce_motion,
             frozen: demo.as_ref().is_some_and(|d| d.still),
             destinations: &destinations,
+            evacuate: self.restart_evacuate_offered(),
         };
         let actions = alert::show(ctx, p, &mut self.region_restart.ui, &view);
         for action in actions {
@@ -533,6 +536,7 @@ impl App {
                 self.places_ui.open_tab(crate::ui::places::TAB_LANDMARKS);
                 self.panels.places = true;
             }
+            Action::Evacuate => self.start_restart_evacuation(),
             Action::Minimize => self.world.region_restart.minimize(true),
             Action::Expand => self.world.region_restart.minimize(false),
             Action::Close => {

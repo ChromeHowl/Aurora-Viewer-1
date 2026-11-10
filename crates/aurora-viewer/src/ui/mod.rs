@@ -19,6 +19,7 @@ pub mod sound_explorer;
 pub mod voice_controls;
 // Bug report form (disabled, see main.rs):
 // pub mod bug_report;
+pub mod auto_relogin;
 pub mod beacons;
 pub mod buy_currency;
 pub mod buy_land;
@@ -114,6 +115,7 @@ pub mod region_tracker;
 pub mod remote_object;
 pub mod report_abuse;
 pub(crate) mod resource_drop;
+pub mod restart_evacuation;
 pub mod rlva;
 pub mod script_queue;
 pub mod scripts;

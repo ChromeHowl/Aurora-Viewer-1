@@ -82,6 +82,7 @@ mod gpu_recovery;
 mod gpu_stall;
 mod parcel_music;
 pub(crate) use gpu_stall::withdraw_all as withdraw_gpu_notices;
+mod auto_relogin;
 mod debug_settings;
 mod draw_stepping;
 mod graphics_start;
@@ -122,6 +123,7 @@ mod region_window;
 mod relogin;
 mod report_abuse;
 mod reset_skeleton;
+mod restart_evacuation;
 mod revoke_on_sit;
 mod rlva;
 mod safe_graphics;
@@ -459,6 +461,10 @@ pub struct App {
     demo_mfa_challenge: Option<std::time::Instant>,
     /// The wait for a previous session still on the grid (#956).
     relogin: relogin::Relogin,
+    /// Automatic reconnection after a lost session (app/auto_relogin.rs).
+    auto_relogin: auto_relogin::AutoRelogin,
+    /// Leaving a restarting region and coming back (app/restart_evacuation.rs).
+    restart_evac: restart_evacuation::State,
     /// The viewer's part of Linden Lab's viewer statistics (app/viewer_stats.rs).
     viewer_stats: viewer_stats::Tracker,
     panels: Panels,
@@ -1555,6 +1561,8 @@ impl App {
             login_progress: None,
             demo_mfa_challenge: None,
             relogin: Default::default(),
+            auto_relogin: Default::default(),
+            restart_evac: Default::default(),
             viewer_stats: Default::default(),
             startup_windows: ui::StartupWindows::new(&panels),
             panels,
@@ -3176,6 +3184,7 @@ impl App {
         let demo = self.region_restart.take_demo();
         self.region_restart = region_restart::State::default();
         self.region_restart.put_demo(demo);
+        self.restart_evac = Default::default();
         self.move_complete_at = None;
         self.static_eyes.on_arrival();
         self.set_mouselook_grab(false);
@@ -3738,6 +3747,7 @@ impl App {
                 critical_required,
                 bad_credentials,
                 previous_session,
+                network,
             } => {
                 // A refused login spends its code, whatever the reason: the next
                 // attempt sends none, so the server can ask for a new one
@@ -3778,11 +3788,20 @@ impl App {
                 } else {
                     self.login_form.error = Some(error);
                 }
+                self.auto_relogin_login_failed(crate::auto_relogin::End::LoginFailed {
+                    mfa_required,
+                    tos_required,
+                    critical_required,
+                    bad_credentials,
+                    previous_session,
+                    network,
+                });
             }
             NetEvent::LoggedIn(l) => {
                 self.parcel_music
                     .enter(!self.demo && self.settings.parcel_music_accounts.contains(&l.agent_id));
                 self.session_started(l.session_id);
+                self.auto_relogin_logged_in();
                 self.refresh_grid_helper();
                 self.world.grid_currency = buy_currency::grid_currency(&l.raw, self.settings.grid == crate::settings::GridChoice::Custom);
                 self.named_teleport = Default::default();
@@ -4087,6 +4106,7 @@ impl App {
                 }
             }
             NetEvent::LoggedOut => {
+                self.note_user_logout();
                 self.session_ended();
                 self.back_to_login(None);
             }
@@ -6088,6 +6108,7 @@ impl App {
             self.record_inventory_logout();
             self.want_scene_capture = true;
             self.release_bridge();
+            self.note_user_logout();
             self.net.send(NetCommand::Logout);
         }
     }
@@ -7369,6 +7390,7 @@ impl App {
     /// Preflight before UI/simulation side effects, including offline demos.
     fn request_user_teleport(&mut self, command: NetCommand, dest: String, show_progress: bool) -> bool {
         if self.user_teleport_allowed(&command) {
+            self.restart_evac_user_teleport();
             if matches!(command, NetCommand::TeleportHome) {
                 // LLAgent::teleportViaLandmark with no landmark (home):
                 // resetView before the request, so a home inside the region
@@ -7393,6 +7415,7 @@ impl App {
         let remote = Some(handle) != self.world.main_region;
         let dest = self.world.map.track.as_ref().map(|t| t.label.clone()).unwrap_or_default();
         if self.user_teleport_allowed(&command) {
+            self.restart_evac_user_teleport();
             self.begin_teleport(dest, remote);
             if remote {
                 self.world
@@ -9559,6 +9582,8 @@ impl App {
         self.update_radar();
         self.update_bridge();
         self.update_region_restart();
+        self.update_restart_evacuation();
+        self.auto_relogin_in_world();
         if self.demo
             && let Ok(mode) = std::env::var("AURORA_DEMO_HAND_IK").or_else(|_| {
                 std::env::var("AURORA_DEMO_IK_EDIT").and_then(|m| {
@@ -13764,6 +13789,7 @@ impl App {
         }
         if a.cancel_loading {
             self.release_bridge();
+            self.note_user_logout();
             self.net.send(NetCommand::Logout);
             self.back_to_login(Some(aurora_i18n::tr!("app-login-canceled").into()));
         }
@@ -13858,6 +13884,7 @@ impl App {
                 self.ik_editor.stop_editing();
                 self.want_scene_capture = true;
                 self.release_bridge();
+                self.note_user_logout();
                 self.net.send(NetCommand::Logout);
                 self.world.system_message(aurora_i18n::tr!("app-logging-out"));
             }
@@ -14054,6 +14081,10 @@ impl App {
                 }
                 // as the camera controls' presets (LLFloaterCamera::switchToPreset)
                 self.switch_camera_view(preset);
+            }
+            BarAction::StayOnlinePreferences => {
+                ui::widgets::open_floater(&self.egui_ctx, ui::options::WINDOW, &mut self.panels.settings);
+                self.options_ui.open(ui::options::Page::Confirmations, 0);
             }
             BarAction::GraphicsPreferences => {
                 ui::widgets::open_floater(&self.egui_ctx, ui::options::WINDOW, &mut self.panels.settings);
@@ -15052,6 +15083,13 @@ impl App {
         self.options_ui.login_favorites = self.login_favorites.key().map(|key| self.login_form.favorites.shown(key));
         self.options_ui.friends_only = (!self.world.agent_id.is_nil()).then_some(self.world.friends_only());
         self.options_ui.friends_only_keep = (!self.world.agent_id.is_nil()).then_some(self.world.friends_only.keep_after_teleport);
+        self.options_ui.restart_landmarks = if self.panels.settings && self.world.login.is_some() {
+            let mut list: Vec<_> = self.restart_landmarks().into_iter().map(|l| (l.item, l.name)).collect();
+            list.sort_by_key(|(_, name)| crate::natural_order::key(name));
+            list
+        } else {
+            Vec::new()
+        };
         let time_of_day = self.settings.time_of_day;
         if self.options_ui.anti_spam_version != self.world.anti_spam.version {
             self.options_ui.anti_spam_version = self.world.anti_spam.version;
@@ -15358,6 +15396,7 @@ impl App {
                         critical_required: !tos,
                         bad_credentials: false,
                         previous_session: false,
+                        network: false,
                     });
                 } else if self.demo_mfa_challenge.is_some_and(|at| std::time::Instant::now() >= at) {
                     self.demo_mfa_challenge = None;
@@ -15377,6 +15416,7 @@ impl App {
                         critical_required: false,
                         bad_credentials: refused,
                         previous_session: false,
+                        network: false,
                     });
                 } else if self.demo_mfa_challenge.is_some() {
                     ctx.request_repaint_after(std::time::Duration::from_millis(100));
@@ -15402,6 +15442,7 @@ impl App {
                 );
                 self.grid_link_question(&ctx, &p);
                 self.sync_remembered_password();
+                self.poll_auto_relogin(&ctx, &p);
                 // the cogwheel of the login screen (settings before login);
                 // the screen's cards are areas of the same order, and a click
                 // on one would raise it over the window
@@ -17326,6 +17367,7 @@ impl App {
                 // the region restart over the toasts, under the open list
                 self.show_region_restart(&ctx, &p);
                 self.show_link_health(&ctx, &p);
+                self.show_restart_return(&ctx, &p);
                 self.order_region_restart(&ctx, aurora);
                 for ask in asks {
                     self.on_notification_ask(&ctx, ask);

@@ -240,6 +240,10 @@ pub struct WorldMap {
     pub agents: HashMap<(u32, u32), Vec<(u32, u32, i32)>>,
     agents_asked: HashMap<(u32, u32), Instant>,
     named_region_asked: HashMap<String, Instant>,
+    /// When the grid last told each region's state (a MapBlockReply): what
+    /// tells a fresh "up" from the one the map already held
+    /// (`restart_evacuation::ReturnTrip::observe`).
+    answered: HashMap<(u32, u32), Instant>,
     pub track: Option<Track>,
     /// The friend `track` follows, if any.
     pub avatar: Option<AvatarTrack>,
@@ -485,6 +489,7 @@ impl WorldMap {
             }
             self.null_sims.remove(&key);
             self.ratings.learn(&b.name, b.access);
+            self.answered.insert(key, Instant::now());
             self.sims.insert(
                 key,
                 SimInfo {
@@ -978,6 +983,11 @@ impl WorldMap {
         };
         self.track_location(sx as f64 * 256.0 + pos.x as f64, sy as f64 * 256.0 + pos.y as f64, pos.z, false);
         true
+    }
+
+    /// When the grid last answered about the region of this grid slot.
+    pub fn answered_at(&self, key: (u32, u32)) -> Option<Instant> {
+        self.answered.get(&key).copied()
     }
 
     /// Grid position (region units) of a known region, by name, ignoring case.

@@ -57,7 +57,11 @@ impl App {
     pub(super) fn on_disconnected(&mut self, reason: &str, lost: bool) {
         self.session_ended();
         let restart = self.restart_disconnect();
-        let place = if lost && restart.is_none() {
+        // the viewer logs in again by itself (Preferences › Confirmations ›
+        // Staying online): to the same place, after a restart too
+        let auto = self.auto_relogin_cause(lost, restart.is_some());
+        let stopped = self.auto_relogin_loop_message(lost, restart.is_some()).filter(|_| auto.is_none());
+        let place = if (lost && restart.is_none()) || auto.is_some() {
             let size = self.world.main().map_or((256, 256), |r| (r.heightmap.size_x, r.heightmap.size_y));
             link_health::reconnect_place(&self.world.region_name(), size, self.world.agent.position)
         } else {
@@ -78,9 +82,17 @@ impl App {
             body: message.clone(),
             open: crate::world::attention::Open::Window,
         });
+        let kept = place.clone();
         self.reconnect_place = place.map(|place| (self.settings.login_uri(), self.settings.username.trim().to_lowercase(), place));
+        let message = match stopped {
+            Some(stopped) => format!("{message}\n{stopped}"),
+            None => message,
+        };
         self.back_to_login(Some(message));
         self.login_form.reconnect = reconnect;
+        if let Some(cause) = auto {
+            self.auto_relogin_arm(cause, kept);
+        }
     }
 
     /// AURORA_DEMO_LINK's lost link at its frame, at the top of the frame as
