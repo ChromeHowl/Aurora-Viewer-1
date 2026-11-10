@@ -525,6 +525,8 @@ pub enum NetEvent {
     /// `tos_required` / `critical_required`: the Terms of Service to accept
     /// (reason "tos") or a message to read (reason "critical"), each with
     /// its own flag in the next request; `error` is then the server's text.
+    /// `network`: the login server gave no answer to read (no connection, a
+    /// timeout, a page that is not a login reply): nothing was refused.
     LoginFailed {
         error: String,
         mfa_required: bool,
@@ -532,6 +534,7 @@ pub enum NetEvent {
         critical_required: bool,
         bad_credentials: bool,
         previous_session: bool,
+        network: bool,
     },
     LoggedIn(Arc<LoginResponse>),
     /// A simulator circuit was established (main or neighbor).

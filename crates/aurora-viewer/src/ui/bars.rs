@@ -167,6 +167,8 @@ pub enum BarAction {
     FpsCap(bool),
     CameraPreset(crate::camera::CameraPreset),
     GraphicsPreferences,
+    /// World › Restart evacuation…: its preferences (the backup landmarks).
+    StayOnlinePreferences,
     /// The camera or movement controls (`ui::controls::request`).
     Controls {
         movement: bool,
@@ -1020,6 +1022,9 @@ fn main_menus(ui: &mut egui::Ui, p: &Palette, panels: &mut Panels, st: &StatusIn
         }
         if menu::item(ui, p, "map", aurora_i18n::tr!("owned-land-title")) {
             *action = BarAction::OwnedLand;
+        }
+        if menu::item(ui, p, "door-exit", aurora_i18n::tr!("stay-online-menu")) {
+            *action = BarAction::StayOnlinePreferences;
         }
         menu::submenu(ui, p, "dots-filled", aurora_i18n::tr!("world-show-more"), true, |ui| {
             flip_window(

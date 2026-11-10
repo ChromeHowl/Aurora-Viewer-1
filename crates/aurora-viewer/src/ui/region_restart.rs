@@ -137,6 +137,8 @@ pub fn words(a: &Restart) -> (String, String) {
 /// A landmark of the inventory offered to leave.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Landmark {
+    /// Its inventory item (what the backup list of the preferences keeps).
+    pub item: Uuid,
     pub asset: Uuid,
     pub name: String,
     /// Where it leads, when known.
@@ -182,6 +184,9 @@ pub enum Action {
     LastPlace,
     /// "All landmarks…": the Places window.
     AllLandmarks,
+    /// "Evacuate": the first backup landmark that can be reached, then
+    /// Home (`world/restart_evacuation.rs`).
+    Evacuate,
     Minimize,
     Expand,
     Close,
@@ -203,6 +208,9 @@ pub struct View<'a> {
     /// The demo's frozen pulse, for screenshots (the mockup's still states).
     pub frozen: bool,
     pub destinations: &'a Destinations,
+    /// The "Evacuate" button (Preferences › Confirmations › Staying
+    /// online), unless an evacuation is already under way.
+    pub evacuate: bool,
 }
 
 /// What the alert remembers from one frame to the next.
@@ -710,6 +718,20 @@ fn actions(ui: &mut egui::Ui, p: &Palette, st: &mut RestartUi, v: &View<'_>, out
         st.menu_open = menu::dropdown(&resp, p, egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
             landmark_menu(ui, p, st, v, out);
         });
+        if v.evacuate
+            && widgets::action_button(
+                ui,
+                p,
+                "door-exit",
+                aurora_i18n::tr!("stay-online-evacuate"),
+                widgets::ActionKind::Flat,
+                Vec2::new(0.0, 27.0),
+            )
+            .on_hover_text(aurora_i18n::tr!("stay-online-evacuate-tip"))
+            .clicked()
+        {
+            out.push(Action::Evacuate);
+        }
     });
 }
 
@@ -1017,6 +1039,7 @@ pub fn legacy_box(
     landmarks: &[Landmark],
     pick: &mut Option<Uuid>,
     open: &mut bool,
+    evacuate: bool,
 ) -> Vec<Action> {
     let mut out = Vec::new();
     let size = Vec2::new(290.0, 200.0);
@@ -1091,6 +1114,28 @@ pub fn legacy_box(
             {
                 out.push(Action::Landmark(asset));
             }
+            // Aurora's own, under the box's row: the backup landmarks, then Home
+            if evacuate {
+                let row = Rect::from_min_size(rect.min + Vec2::new(30.0, 160.0), Vec2::new(214.0, 20.0));
+                let mut child = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(row)
+                        .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                );
+                if widgets::action_button(
+                    &mut child,
+                    p,
+                    "door-exit",
+                    aurora_i18n::tr!("stay-online-evacuate"),
+                    widgets::ActionKind::Flat,
+                    row.size(),
+                )
+                .on_hover_text(aurora_i18n::tr!("stay-online-evacuate-tip"))
+                .clicked()
+                {
+                    out.push(Action::Evacuate);
+                }
+            }
         });
     out
 }
@@ -1159,6 +1204,7 @@ mod tests {
     #[test]
     fn the_menu_lists_recent_landmarks_or_the_search() {
         let l = |name: &str, created| Landmark {
+            item: Uuid::nil(),
             asset: Uuid::new_v4(),
             name: name.into(),
             detail: String::new(),

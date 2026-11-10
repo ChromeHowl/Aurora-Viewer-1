@@ -8,6 +8,7 @@ mod alt_codes;
 mod ao;
 mod app;
 mod atomic_file;
+mod auto_relogin;
 mod autopilot;
 mod autoreplace;
 mod blender_live;

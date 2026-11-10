@@ -189,6 +189,168 @@ pub fn page(cx: &mut Cx) {
             });
         });
     });
+    stay_online(cx);
     // the rest of these two, as the former Interface page reset them whole
     cx.track(&fields!(region_restart, collisions));
+}
+
+/// Staying online: leaving a region before its restart and coming back
+/// (`world/restart_evacuation.rs`), and logging in again by itself after a
+/// lost session (`auto_relogin.rs`, off unless turned on here).
+fn stay_online(cx: &mut Cx) {
+    use crate::world::restart_evacuation::{ComeBack, Evacuate, LEAD_SECONDS};
+    use aurora_i18n::tr;
+    let p = cx.p;
+    cx.group(tr!("stay-online-group"), |cx| {
+        cx.choice(
+            tr!("stay-online-evacuation"),
+            tr!("stay-online-evacuation-help"),
+            &field!(restart_evacuation.evacuate),
+            &[
+                (Evacuate::Off, tr!("stay-online-off"), false),
+                (Evacuate::Offer, tr!("stay-online-offer"), false),
+                (Evacuate::Automatic, tr!("stay-online-automatic"), false),
+            ],
+        );
+        let off = cx.s.restart_evacuation.evacuate == Evacuate::Off;
+        cx.subs(off, |cx| {
+            cx.row(
+                tr!("stay-online-lead"),
+                tr!("stay-online-lead-help"),
+                &field!(restart_evacuation.lead_seconds),
+                |ui, s| {
+                    ui.add(
+                        egui::DragValue::new(&mut s.restart_evacuation.lead_seconds)
+                            .custom_parser(aurora_i18n::parse_number)
+                            .range(LEAD_SECONDS.0..=LEAD_SECONDS.1)
+                            .speed(1.0)
+                            .suffix(tr!("stay-online-seconds-suffix")),
+                    )
+                    .changed()
+                },
+            );
+            cx.choice(
+                tr!("stay-online-come-back"),
+                tr!("stay-online-come-back-help"),
+                &field!(restart_evacuation.come_back),
+                &[
+                    (ComeBack::Stay, tr!("stay-online-stay"), false),
+                    (ComeBack::Offer, tr!("stay-online-offer"), false),
+                    (ComeBack::Automatic, tr!("stay-online-automatic"), false),
+                ],
+            );
+            cx.below().row_with(
+                tr!("stay-online-landmarks"),
+                tr!("stay-online-landmarks-help"),
+                &field!(restart_evacuation.landmarks),
+                |ui, s, st, _| backup_landmarks(ui, &p, &mut s.restart_evacuation, &st.restart_landmarks),
+            );
+        });
+        cx.toggle(
+            tr!("stay-online-relogin"),
+            tr!("stay-online-relogin-help"),
+            &field!(auto_relogin.enabled),
+        );
+        let off = !cx.s.auto_relogin.enabled;
+        cx.subs(off, |cx| {
+            cx.row(
+                tr!("stay-online-give-up"),
+                tr!("stay-online-give-up-help"),
+                &field!(auto_relogin.give_up_minutes),
+                |ui, s| {
+                    let (min, max) = crate::auto_relogin::GIVE_UP_MINUTES;
+                    ui.add(
+                        egui::DragValue::new(&mut s.auto_relogin.give_up_minutes)
+                            .custom_parser(aurora_i18n::parse_number)
+                            .range(min..=max)
+                            .speed(1.0)
+                            .suffix(tr!("stay-online-minutes-suffix")),
+                    )
+                    .changed()
+                },
+            );
+            cx.toggle(
+                tr!("stay-online-other-grids"),
+                tr!("stay-online-other-grids-help"),
+                &field!(auto_relogin.other_grids),
+            );
+        });
+    });
+}
+
+/// The backup landmarks in their order (up, down, remove), then the
+/// inventory's landmarks to add one from (`known`: item and name, empty
+/// before login). True on a change.
+fn backup_landmarks(
+    ui: &mut egui::Ui,
+    p: &crate::theme::Palette,
+    s: &mut crate::world::restart_evacuation::Settings,
+    known: &[(uuid::Uuid, String)],
+) -> bool {
+    use crate::ui::widgets;
+    use crate::world::restart_evacuation::MAX_LANDMARKS;
+    use aurora_i18n::tr;
+    enum Edit {
+        Up(usize),
+        Down(usize),
+        Remove(usize),
+        Add(uuid::Uuid, String),
+    }
+    let mut edit = None;
+    ui.vertical(|ui| {
+        if s.landmarks.is_empty() {
+            ui.label(egui::RichText::new(tr!("stay-online-landmarks-none")).size(12.0).color(p.muted));
+        }
+        let last = s.landmarks.len().saturating_sub(1);
+        for (i, l) in s.landmarks.iter().enumerate() {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                // the name the inventory gives now, when it holds the landmark
+                let name = known
+                    .iter()
+                    .find(|(item, _)| *item == l.item)
+                    .map_or(l.name.as_str(), |(_, n)| n.as_str());
+                let missing = !known.is_empty() && !known.iter().any(|(item, _)| *item == l.item);
+                let text = format!("{}. {name}", i + 1);
+                let label = ui.label(egui::RichText::new(text).size(12.0).color(if missing { p.muted } else { p.ink }));
+                if missing {
+                    label.on_hover_text(tr!("stay-online-landmarks-missing"));
+                }
+                if widgets::icon_button(ui, p, "arrow-up", tr!("stay-online-landmarks-up"), i > 0) {
+                    edit = Some(Edit::Up(i));
+                }
+                if widgets::icon_button(ui, p, "arrow-down", tr!("stay-online-landmarks-down"), i < last) {
+                    edit = Some(Edit::Down(i));
+                }
+                if widgets::icon_button(ui, p, "x", tr!("stay-online-landmarks-remove"), true) {
+                    edit = Some(Edit::Remove(i));
+                }
+            });
+        }
+        ui.add_space(4.0);
+        if known.is_empty() {
+            ui.label(egui::RichText::new(tr!("stay-online-landmarks-login")).size(12.0).color(p.muted));
+        } else if s.landmarks.len() < MAX_LANDMARKS {
+            egui::ComboBox::from_id_salt("stay_online_add_landmark")
+                .width(260.0)
+                .selected_text(tr!("stay-online-landmarks-add"))
+                .show_ui(ui, |ui| {
+                    for (item, name) in known.iter().filter(|(item, _)| !s.landmarks.iter().any(|l| l.item == *item)) {
+                        if ui.selectable_label(false, name).clicked() {
+                            edit = Some(Edit::Add(*item, name.clone()));
+                        }
+                    }
+                });
+        }
+    });
+    match edit {
+        Some(Edit::Up(i)) if i > 0 => s.landmarks.swap(i, i - 1),
+        Some(Edit::Down(i)) if i + 1 < s.landmarks.len() => s.landmarks.swap(i, i + 1),
+        Some(Edit::Remove(i)) if i < s.landmarks.len() => {
+            s.landmarks.remove(i);
+        }
+        Some(Edit::Add(item, name)) => return s.add(item, &name),
+        Some(_) | None => return false,
+    }
+    true
 }

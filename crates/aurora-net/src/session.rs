@@ -437,6 +437,7 @@ pub(crate) async fn run_session(sh: &Shared, req: LoginRequest, cmd_rx: &mut mps
             let critical = matches!(e, LoginError::CriticalMessage(_));
             let bad_credentials = matches!(&e, LoginError::Refused { reason, .. } if reason == "key");
             let previous_session = e.previous_session();
+            let network = matches!(e, LoginError::Http(_) | LoginError::XmlRpc(_));
             // The grid's own words (LLLoginInstance shows the message as it
             // comes), without the "login refused (presence)" prefix.
             let error = match &e {
@@ -456,6 +457,7 @@ pub(crate) async fn run_session(sh: &Shared, req: LoginRequest, cmd_rx: &mut mps
                     critical_required: critical,
                     bad_credentials,
                     previous_session,
+                    network,
                 },
             );
             return;
@@ -485,6 +487,8 @@ pub(crate) async fn run_session(sh: &Shared, req: LoginRequest, cmd_rx: &mut mps
                     critical_required: false,
                     bad_credentials: false,
                     previous_session: false,
+                    // the session exists on the grid by now: not a plain retry
+                    network: false,
                 },
             );
             return;

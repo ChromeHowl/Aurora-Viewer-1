@@ -1165,6 +1165,12 @@ pub struct Settings {
     pub ground_feet_max_avatars: u32,
     /// The region restart alert (Preferences › Interface › Region restart).
     pub region_restart: crate::world::region_restart::Settings,
+    /// Leaving a region before its restart and coming back after it
+    /// (Preferences › Confirmations › Staying online).
+    pub restart_evacuation: crate::world::restart_evacuation::Settings,
+    /// Logging in again by itself after a lost session, off by default
+    /// (Preferences › Confirmations › Staying online).
+    pub auto_relogin: crate::auto_relogin::Settings,
     /// Bumps, pushes and hits told in nearby chat or to scripts
     /// (Preferences › Interface › Bumps, pushes & hits).
     pub collisions: crate::world::collisions::Settings,
@@ -2171,6 +2177,8 @@ impl Default for Settings {
             ground_feet_max_height: DEFAULT_GROUND_FEET_HEIGHT,
             ground_feet_max_avatars: DEFAULT_GROUND_FEET_AVATARS,
             region_restart: Default::default(),
+            restart_evacuation: Default::default(),
+            auto_relogin: Default::default(),
             collisions: Default::default(),
             reduce_motion: false,
             color_blindness: crate::colorblind::Deficiency::Off,

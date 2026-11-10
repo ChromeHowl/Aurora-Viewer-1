@@ -374,6 +374,9 @@ pub struct OptionsUi {
     pub flycam_active: bool,
     pub anti_spam_blocks: Vec<(crate::world::anti_spam::Queue, uuid::Uuid, String)>,
     pub anti_spam_version: u64,
+    /// The landmarks of the inventory (item, name) the backup list of the
+    /// restart evacuation is chosen from; empty before login.
+    pub restart_landmarks: Vec<(uuid::Uuid, String)>,
     /// The page shown and its tab.
     pub page: Page,
     pub tab: usize,
