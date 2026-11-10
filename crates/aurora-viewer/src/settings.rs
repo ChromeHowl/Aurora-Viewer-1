@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 pub mod area_search;
 pub mod backup;
+pub mod chat_display;
 pub mod draw_stepping;
 mod hover_height;
 pub mod registry;
@@ -929,6 +930,9 @@ pub struct Settings {
     pub chat_toast_seconds: f32,
     /// Wrapped text rows above the chat bar (ConsoleMaxLines, 40; 0 hides them).
     pub chat_console_max_lines: u32,
+    /// The Legacy Viewer's other chat display options (Preferences › Chat,
+    /// `settings/chat_display.rs`).
+    pub chat_display: chat_display::ChatDisplay,
     /// Toast when a friend comes online or goes offline (ChatOnlineNotification, on).
     pub toast_friends_online: bool,
     /// The same notices as a line of nearby chat (OnlineOfflinetoNearbyChat;
@@ -2122,6 +2126,7 @@ impl Default for Settings {
             system_notifications_when_active: false,
             chat_toast_seconds: 20.0,
             chat_console_max_lines: 40,
+            chat_display: Default::default(),
             toast_friends_online: true,
             friends_online_in_chat: false,
             presence_position: PresencePosition::TopRight,
@@ -3050,6 +3055,7 @@ impl Settings {
         };
         self.chat_toast_seconds = self.chat_toast_seconds.clamp(0.0, 60.0);
         self.chat_console_max_lines = self.chat_console_max_lines.min(50);
+        self.chat_display.sanitize();
         self.chat_bubble_opacity = if self.chat_bubble_opacity.is_finite() {
             self.chat_bubble_opacity.clamp(0.0, 1.0)
         } else {

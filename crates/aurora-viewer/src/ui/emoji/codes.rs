@@ -218,7 +218,10 @@ pub fn after(
     let token = cursor
         .filter(|_| output.response.has_focus())
         .and_then(|at| open_code(&chars, at))
-        .filter(|(_, letters)| letters.chars().count() >= MIN_LETTERS);
+        .filter(|(_, letters)| letters.chars().count() >= MIN_LETTERS)
+        // FSEnableEmojiWindowPopupWhileTyping: the list only when asked for
+        // (a code typed whole is still replaced)
+        .filter(|_| crate::ui::chat::display::get().emoji_popup_while_typing);
     if token != list.token {
         list.items = token.as_ref().map(|(_, letters)| suggestions(letters, SHOWN)).unwrap_or_default();
         list.selected = 0;

@@ -482,6 +482,7 @@ pub struct App {
     favorite_images: std::collections::HashSet<uuid::Uuid>,
     /// The History window (a conversation's whole transcript).
     history_ui: ui::chat::history::HistoryUi,
+    conversation_log_ui: ui::chat::conversation_log::ConversationLogUi,
     perf: PerfData,
     /// The Performance window's full view (ui/monitor) and what its
     /// snapshots need (app/monitor.rs).
@@ -1572,6 +1573,7 @@ impl App {
             favorites_access_applied: None,
             favorite_images: Default::default(),
             history_ui: Default::default(),
+            conversation_log_ui: Default::default(),
             chat_import: Default::default(),
             perf: PerfData::default(),
             monitor: ui::monitor::Monitor::default(),
@@ -2863,6 +2865,7 @@ impl App {
             // the demo never reads the PC's real Legacy Viewer folders: its
             // import scenario starts its own import on its own files
             import_at_login: s.log_import_at_login && !self.demo,
+            seconds: s.chat_display.seconds_in_timestamps,
         };
         // the demo keeps no transcripts unless its scenario asks for them:
         // a run must not change what the next one shows
@@ -5551,6 +5554,10 @@ impl App {
         // only people's lines count and alert (#741; AURORA_DEMO_OBJECT_CHAT=…:on
         // for the run)
         w.quiet_automated_chat = self.settings.compact_automated_chat || (self.demo && crate::demo::object_chat::on());
+        // Preferences › Chat's display options (`world/chat_copies.rs`)
+        if w.chat_display != self.settings.chat_display {
+            w.chat_display.clone_from(&self.settings.chat_display);
+        }
         // FSAnnounceIncomingIM (AURORA_DEMO_IM_ANNOUNCE=1: on for the run)
         w.announce_incoming_im = self.settings.announce_incoming_im || (self.demo && crate::demo::im_announce::forced());
         w.notifications.toasts = crate::world::notifications::ToastPrefs {
@@ -5595,6 +5602,9 @@ impl App {
             if self.settings.flash_conversations_button && (!self.panels.chat || minimized) && w.message_flashes_conversations(&m) {
                 self.chat_ui.button_flash.message(now, !self.panels.chat);
             }
+            // copied into the nearby chat or its lines over the world
+            // (`world/chat_copies.rs`), before the toast it may replace
+            w.copy_message(&m);
             w.notify_message(&m, in_sight.contains(&Some(m.session)));
             w.message_attention(&m);
         }
@@ -13598,6 +13608,24 @@ impl App {
         // :shortcode: emoji
         let message = ui::emoji::expand_shortcodes(&c.message);
         self.chat_ui.recent_emojis.note(&message);
+        // PlayChatAnim: the talk, shout or whisper animation for a line
+        // that leaves on channel 0 after RLVa's rules (redirected or blocked
+        // chat plays nothing), as sendChatFromViewer starts it
+        let animation = if self.settings.chat_display.play_chat_anim {
+            self.world
+                .rlva
+                .outgoing_chat(&message, c.channel, c.chat_type)
+                .iter()
+                .find_map(|cmd| match cmd {
+                    NetCommand::Chat { channel, chat_type, .. } => ui::chat::chat_animation(*channel, *chat_type),
+                    _ => None,
+                })
+        } else {
+            None
+        };
+        if let Some(anim) = animation {
+            self.send(NetCommand::AgentAnimation { anim, start: true });
+        }
         self.send(NetCommand::Chat {
             message,
             channel: c.channel,
@@ -15325,6 +15353,7 @@ impl App {
         );
         ui::widgets::set_perceptual_volume(&ctx, self.settings.audio.perceptual_volume);
         ui::bars::clock::set_chat_format(self.system_island().clock_format);
+        ui::chat::display::set(&self.settings.chat_display);
         let beacon_hovered = !ctx.is_pointer_over_egui() && !ctx.egui_wants_pointer_input() && self.beacon_hover();
         self.beacon_hit = None;
         let mut t = Instant::now();
@@ -16844,6 +16873,14 @@ impl App {
                 self.chat_ui.previews.player_window(&ctx, &p);
                 if self.settings.friends_list != friends_before {
                     self.settings.save();
+                }
+                // the Conversation Log: a past conversation opens in History
+                if let Some(pick) = self
+                    .conversation_log_ui
+                    .show(&ctx, &p, self.world.chat_log.dir(), &mut self.panels.conversation_log)
+                {
+                    self.history_ui.show_file(pick.title, Some(pick.file));
+                    ui::widgets::bring_floater_front(&ctx, "chat_history");
                 }
                 if let Some(ui::chat::history::HistoryAction::OpenFolder(dir)) = self.history_ui.show(
                     &ctx,

@@ -261,6 +261,7 @@ pub fn page(cx: &mut Cx, tab: usize) {
             });
             link_previews(cx);
             gifs(cx);
+            super::chat_display::groups(cx);
         }
         1 => notifications(cx),
         2 => keyword_alerts(cx),

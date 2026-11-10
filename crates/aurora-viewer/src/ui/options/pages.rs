@@ -8,6 +8,7 @@ pub mod avatars;
 pub mod build;
 pub mod camera;
 pub mod chat;
+pub mod chat_display;
 pub mod commands;
 pub mod confirmations;
 pub mod controls;

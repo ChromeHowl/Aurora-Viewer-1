@@ -770,8 +770,10 @@ pub(super) fn tab_order(world: &World, st: &ChatUi) -> Vec<Option<Uuid>> {
 }
 
 pub(super) fn entry_name(world: &World, id: &Uuid, kind: Kind) -> String {
-    if kind == Kind::Private && world.social.avatar_names.get(id).is_some() {
-        return world.social.display_name_of(id);
+    if kind == Kind::Private
+        && let Some(name) = super::private_name(world, id)
+    {
+        return name;
     }
     world.session_title(id)
 }

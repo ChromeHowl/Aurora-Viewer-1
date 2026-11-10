@@ -9,6 +9,8 @@ mod completion;
 mod compose;
 mod console;
 mod conv_menu;
+pub mod conversation_log;
+pub(crate) mod display;
 pub(crate) mod docking;
 mod find;
 mod flash;
@@ -708,7 +710,76 @@ fn ooc_key(m: &egui::Modifiers) -> bool {
 /// FSFloaterIM::sendMsgFromInputEditor build it: the default FSOOCPrefix and
 /// FSOOCPostfix around the text, before the channel is read.
 fn ooc(text: &str) -> String {
-    if text.is_empty() { String::new() } else { format!("(( {text} ))") }
+    let d = display::get();
+    ooc_with(text, &d.ooc_prefix, &d.ooc_postfix)
+}
+
+/// FSOOCPrefix, the text, FSOOCPostfix, a space between them (an empty
+/// marker leaves no space).
+fn ooc_with(text: &str, prefix: &str, postfix: &str) -> String {
+    if text.is_empty() {
+        return String::new();
+    }
+    [prefix, text, postfix]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// AutoCloseOOC (applyAutoCloseOoc, fscommon.cpp, originally LGPL 2.1): a
+/// line that opens "((" and never closes it gets its "))".
+pub(crate) fn auto_close_ooc(text: &str) -> String {
+    let mut out = text.to_owned();
+    if !out.contains("((") || out.contains("))") {
+        return out;
+    }
+    if out.contains("(( ") || !out.ends_with(' ') {
+        out.push(' ');
+    }
+    out.push_str("))");
+    out
+}
+
+/// The line typed as it is sent: wrapped by Alt+Enter (`ooc_key`), then
+/// closed when AutoCloseOOC asks (nearby chat and conversations alike).
+fn typed_line(text: &str, ooc_key: bool) -> String {
+    let wrapped = if ooc_key { ooc(text) } else { text.to_owned() };
+    if display::get().auto_close_ooc {
+        auto_close_ooc(&wrapped)
+    } else {
+        wrapped
+    }
+}
+
+/// The name of a conversation with one resident in the lists, as
+/// FSIMTabNameFormat says (display name, user name or both); None while
+/// their name is not known.
+pub(super) fn private_name(world: &World, id: &uuid::Uuid) -> Option<String> {
+    let names = &world.social.avatar_names;
+    let n = names.get(id)?;
+    Some(display::get().tab_name_format.name(&n.display(&names.options), &n.user_name()))
+}
+
+/// ANIM_AGENT_TALK, ANIM_AGENT_SHOUT, ANIM_AGENT_WHISPER
+/// (indra/llcharacter/llanimationstates.cpp).
+pub(crate) const ANIM_AGENT_TALK: uuid::Uuid = uuid::Uuid::from_u128(0x5c682a95_6da4_a463_0bf6_0f5b7be129d1);
+pub(crate) const ANIM_AGENT_SHOUT: uuid::Uuid = uuid::Uuid::from_u128(0x6bd01860_4ebd_127a_bb3d_d1427e8e0c42);
+pub(crate) const ANIM_AGENT_WHISPER: uuid::Uuid = uuid::Uuid::from_u128(0x7693f268_06c7_ea71_fa21_2b30d6533f8f);
+
+/// The animation our avatar plays with a line of nearby chat (PlayChatAnim
+/// in LLFloaterIMNearbyChat::sendChatFromViewer, originally LGPL 2.1):
+/// none for a line to scripts, "Don't animate for chats people can't hear".
+pub(crate) fn chat_animation(channel: i32, chat_type: ChatType) -> Option<uuid::Uuid> {
+    if channel != 0 {
+        return None;
+    }
+    match chat_type {
+        ChatType::Whisper => Some(ANIM_AGENT_WHISPER),
+        ChatType::Normal => Some(ANIM_AGENT_TALK),
+        ChatType::Shout => Some(ANIM_AGENT_SHOUT),
+        _ => None,
+    }
 }
 
 /// Parse "/5 text" channel prefixes.
@@ -780,11 +851,17 @@ fn message_emphasis(kind: ChatKind, italics: bool) -> super::fonts::TextEmphasis
     super::fonts::TextEmphasis {
         italics: italics || kind.volume() == Some(ChatType::Whisper),
         strong: kind.volume() == Some(ChatType::Shout),
+        underline: false,
     }
 }
 
-/// The same message tone in the conversation thread and its nearby-chat card.
+/// The same message tone in the conversation thread and its nearby-chat card,
+/// diminished when said from afar (`colors::beyond_range`).
 fn message_color(line: &crate::world::ChatLine, p: &Palette, world: &World) -> Color32 {
+    super::colors::beyond_range(line, world, message_color_near(line, p, world))
+}
+
+fn message_color_near(line: &crate::world::ChatLine, p: &Palette, world: &World) -> Color32 {
     if let Some(color) = super::colors::contact_chat_color(line, world) {
         return color;
     }
@@ -796,7 +873,7 @@ fn message_color(line: &crate::world::ChatLine, p: &Palette, world: &World) -> C
         .unwrap_or_else(|| match line.kind.volume() {
             Some(ChatType::Whisper) => p.muted,
             Some(ChatType::Shout) => p.ink,
-            _ => super::colors::chat_color(line, world),
+            _ => super::colors::chat_color_near(line, world),
         })
 }
 
@@ -805,22 +882,24 @@ fn message_color(line: &crate::world::ChatLine, p: &Palette, world: &World) -> C
 /// as the bars' clock (`clock::chat_twelve_hours`). Empty for a line whose
 /// time is unknown (history without a timestamp).
 pub(crate) fn hhmm(t: std::time::SystemTime) -> String {
-    hhmm_in(t, super::bars::clock::chat_twelve_hours())
+    hhmm_in(t, super::bars::clock::chat_twelve_hours(), true)
 }
 
 /// `hhmm` in 24 hours whatever the clock, where the Legacy Viewer keeps 24
 /// hours: the money tracker's times (FSMoneyTracker::getTime) and the
 /// "(Saved at …)" of an offline group message (formatted_time).
 pub(crate) fn hhmm_24(t: std::time::SystemTime) -> String {
-    hhmm_in(t, false)
+    hhmm_in(t, false, false)
 }
 
-fn hhmm_in(t: std::time::SystemTime, twelve: bool) -> String {
+fn hhmm_in(t: std::time::SystemTime, twelve: bool, seconds: bool) -> String {
     if t == std::time::UNIX_EPOCH {
         return String::new();
     }
+    // FSSecondsinChatTimestamps: "14:05:09" in the chat's times
+    let secs = if seconds { display::seconds_suffix(t) } else { String::new() };
     let t = Slt::of(t);
-    super::bars::clock::hour_text(t.hour, t.minute, "", twelve)
+    super::bars::clock::hour_text(t.hour, t.minute, &secs, twelve)
 }
 
 /// Color of the name and text of a history line: Firestorm greys what comes
@@ -831,6 +910,10 @@ pub(crate) fn history_tone(p: &Palette, origin: Origin) -> Option<Color32> {
         Origin::Live => None,
         Origin::Log => Some(p.muted_dim),
         Origin::ServerLog => Some(p.muted_dim.lerp_to_gamma(p.success, 0.3)),
+        // FSIMChatHistoryFade: a copied IM faded into the background
+        Origin::Copy => Some(p.ink.gamma_multiply(display::get().im_nearby_fade)),
+        // FSShowMutedChatHistory: in the colour of the blocked
+        Origin::Muted => Some(super::colors::text(super::colors::get().chat_muted)),
     }
 }
 
@@ -1329,6 +1412,7 @@ pub enum ConvAction {
     },
     /// A participant's voice volume (0..1, 0.5 as sent).
     SetVolume(uuid::Uuid, f32),
+
     /// "Add" of the call strip: pick residents to add to the conversation.
     PickPeople(uuid::Uuid),
     /// Residents dropped on a conversation, to add to it.
@@ -1884,7 +1968,25 @@ fn web_link(ui: &mut egui::Ui, p: &Palette, url: &str, text: &str, size: f32, em
         super::colors::text(k.chat_urls),
     )));
     select::atom_end(ui, behind, text, r.rect);
-    if r.on_hover_text(url).clicked() {
+    // a link written with a text of its own shows where it really goes, at
+    // once and large (FSDisableLabeledChatLinks: the label may lie)
+    let clicked = if text != url && display::labelled_link_hint(ui.ctx()) {
+        if r.hovered() {
+            egui::Tooltip::always_open(
+                ui.ctx().clone(),
+                ui.layer_id(),
+                r.id.with("labelled_link_target"),
+                egui::PopupAnchor::Pointer,
+            )
+            .show(|ui| {
+                ui.label(RichText::new(web_target(url)).size(16.0).color(p.ink));
+            });
+        }
+        r.clicked()
+    } else {
+        r.on_hover_text(url).clicked()
+    };
+    if clicked {
         open_web_link(ui.ctx(), url);
     }
 }
@@ -2016,6 +2118,15 @@ fn header_names(ui: &mut egui::Ui, p: &Palette, name: &str, username: Option<&st
 /// name looked up, mine, else the name the line came with; history lines are
 /// looked up for nothing.
 pub(crate) fn sender_name(world: &World, own_name: &str, line: &crate::world::ChatLine) -> String {
+    let options = display::get();
+    // FSChatHistoryShowYou: "You" for our own lines of this session
+    if options.show_you && line.kind.is_own() && line.origin == Origin::Live {
+        return aurora_i18n::tr!("chat-extras-you").to_owned();
+    }
+    // FSMarkObjects: an object without a name
+    if options.mark_unnamed_objects && matches!(line.kind, ChatKind::Object(_) | ChatKind::ObjectIm) && line.from.trim().is_empty() {
+        return aurora_i18n::tr!("chat-extras-no-name").to_owned();
+    }
     if !line.source.is_nil() && !matches!(line.kind, ChatKind::Object(_) | ChatKind::ObjectIm) && !world.rlva_can_name(line.source) {
         return crate::world::rlva::privacy::anonymous(line.source).display_name.clone();
     }
@@ -2355,6 +2466,8 @@ fn conversation_lines(ui: &mut egui::Ui, p: &Palette, l: Lines, st: &mut ChatUi,
     };
     let wash = find::wash(p);
     let current = search.find.as_ref().and_then(|f| f.current_line(view));
+    // the labelled links' hint follows the nearby chat's or the IMs' option
+    display::links_in(ui.ctx(), Some(st.selected.is_none()));
     let area = super::widgets::scroll_offset::show(ui, egui::ScrollArea::vertical(), ("conv", st.selected));
     let out = area
         .stick_to_bottom(!paused)
@@ -2439,6 +2552,7 @@ fn conversation_lines(ui: &mut egui::Ui, p: &Palette, l: Lines, st: &mut ChatUi,
                 );
             }
         });
+    display::links_in(ui.ctx(), None);
     let mut offset = out.state.unclamped_offset();
     let mut store = false;
     // what came in since the reader left the end: others' messages, not
@@ -2544,6 +2658,12 @@ pub(crate) fn draw_line(ui: &mut egui::Ui, env: &mut LineEnv, line: &crate::worl
     if line.kind == ChatKind::System {
         // its time first, as the header strips show theirs
         // (FSChatHistory::appendMessage stamps the system's lines too, #1999)
+        // FSIMSystemMessageBrackets: "[text]" in these lines
+        let text = if display::get().system_brackets {
+            Cow::Owned(format!("[{}]", line.text))
+        } else {
+            Cow::Borrowed(line.text.as_str())
+        };
         ui.horizontal_top(|ui| {
             let time = hhmm(line.time);
             if !time.is_empty() {
@@ -2556,7 +2676,7 @@ pub(crate) fn draw_line(ui: &mut egui::Ui, env: &mut LineEnv, line: &crate::worl
                     env.emoji,
                     world,
                     env.want_names,
-                    &line.text,
+                    &text,
                     super::fonts::chat_size(ui.ctx(), 12.5),
                     tone.unwrap_or_else(|| super::colors::chat_color(line, world)),
                     true,
@@ -3127,7 +3247,11 @@ pub fn show(
                         if moving {
                             ui.ctx().request_repaint();
                         }
-                        let name = world.session_title(&other);
+                        let name = if world.is_group_session(&other) {
+                            world.session_title(&other)
+                        } else {
+                            private_name(world, &other).unwrap_or_else(|| world.session_title(&other))
+                        };
                         if !world.is_group_session(&other) {
                             st.wanted_pics.insert(other);
                         }
@@ -3389,6 +3513,7 @@ fn classic_pane(
     );
     let mut emoji_btn = None;
     let mut send_clicked = false;
+    let display = display::get();
     let mut draft = std::mem::take(st.draft_mut(st.selected));
     // the recent emojis, over the field (under it with the Legacy chat style)
     let over = if st.recent_emojis.above {
@@ -3401,11 +3526,14 @@ fn classic_pane(
         .horizontal(|ui| {
             // the edges of the lines above, half the theme's spacing between
             ui.spacing_mut().item_spacing.x *= 0.5;
-            let b = tool_resp(ui, p, icons, "mood-smile-filled", st.emoji_open);
-            emoji_btn = Some(b.rect);
-            if b.on_hover_text(aurora_i18n::tr!("ui-chat-emoji")).clicked() {
-                st.emoji_open = !st.emoji_open;
-                st.gif_open = false;
+            // FSShowEmojiButton
+            if display.show_emoji_button {
+                let b = tool_resp(ui, p, icons, "mood-smile-filled", st.emoji_open);
+                emoji_btn = Some(b.rect);
+                if b.on_hover_text(aurora_i18n::tr!("ui-chat-emoji")).clicked() {
+                    st.emoji_open = !st.emoji_open;
+                    st.gif_open = false;
+                }
             }
             // shown once a key is entered (Preferences › Chat › GIFs)
             if st.gifs.usable() {
@@ -3414,7 +3542,14 @@ fn classic_pane(
             }
             // leave exactly the send button + spacing (else the row overflows
             // and the resizable window grows every frame)
-            let field_w = (ui.available_width() - SEND_BTN_W - ui.spacing().item_spacing.x).floor().max(40.0);
+            // FSShowIMSendButton: a conversation's send button
+            let send_shown = st.selected.is_none() || display.show_im_send_button;
+            let send_w = if send_shown {
+                SEND_BTN_W + ui.spacing().item_spacing.x
+            } else {
+                0.0
+            };
+            let field_w = (ui.available_width() - send_w).floor().max(40.0);
             input::prepare(ui, conv_input, st.selected.is_none());
             let recalled = st.input_history.entry(st.selected).or_default().recall(ui, conv_input, &mut draft);
             let nav = super::emoji::codes::keys(ui, conv_input);
@@ -3435,7 +3570,7 @@ fn classic_pane(
             };
             suggest::after(ui, p, &mut output, &mut draft, suggest_nav, &mut st.suggest, scope);
             let has_text = !draft.trim().is_empty();
-            send_clicked = send_button(ui, p, icons, has_text).clicked() && has_text;
+            send_clicked = send_shown && send_button(ui, p, icons, has_text).clicked() && has_text;
             output
                 .response
                 .response
@@ -3503,10 +3638,7 @@ fn classic_pane(
         None
     };
     if let Some(send) = send {
-        let mut text = st.suggest.expand(st.selected, draft.trim());
-        if send == SendKey::Ooc {
-            text = ooc(&text);
-        }
+        let text = typed_line(&st.suggest.expand(st.selected, draft.trim()), send == SendKey::Ooc);
         if !text.is_empty() {
             sent = true;
             st.input_history.entry(st.selected).or_default().record(conv_input, &draft);
@@ -3713,7 +3845,10 @@ pub fn toasts(
         return;
     }
     let now = std::time::SystemTime::now();
-    let size = super::fonts::chat_size(ctx, if pills { 12.0 } else { 13.0 });
+    // ChatConsoleFontSize, ChatFullWidth (`console.rs`)
+    let size = console::console_size(ctx, if pills { 12.0 } else { 13.0 });
+    let full = console::width(ctx).max(560.0);
+    let (wrap, max) = if full > 560.0 { (full - 20.0, full) } else { (540.0, 560.0) };
     let family = pills.then(|| super::fonts::semibold(ctx));
     let recent = console::recent(world, now, seconds, max_lines, residents, |line| {
         console::rows(
@@ -3725,7 +3860,7 @@ pub fn toasts(
                 p,
                 world,
                 want_names,
-                540.0,
+                wrap,
                 size,
                 times,
                 family.as_ref().map_or(JobLook::Line, JobLook::Pill),
@@ -3745,13 +3880,13 @@ pub fn toasts(
         .interactable(false)
         .order(egui::Order::Background)
         .show(ctx, |ui| {
-            ui.set_max_width(560.0);
+            ui.set_max_width(max);
             // the islands' pills: the mockup's 12 px text, 9 × 4 margins and
             // 4 px between two lines
             let (size, margin, gap) = if pills {
-                (super::fonts::chat_size(ui.ctx(), 12.0), egui::Margin::symmetric(9, 4), 4.0)
+                (console::console_size(ui.ctx(), 12.0), egui::Margin::symmetric(9, 4), 4.0)
             } else {
-                (super::fonts::chat_size(ui.ctx(), 13.0), egui::Margin::symmetric(6, 2), 2.0)
+                (console::console_size(ui.ctx(), 13.0), egui::Margin::symmetric(6, 2), 2.0)
             };
             let family = pills.then(|| super::fonts::semibold(ui.ctx()));
             if pills {
@@ -3760,7 +3895,7 @@ pub fn toasts(
             for line in recent {
                 let age = now.duration_since(line.time).map(|d| d.as_secs_f32()).unwrap_or(0.0);
                 let alpha = ((seconds - age) / 3.0).clamp(0.0, 1.0);
-                let tint = Color32::from_rgba_unmultiplied(p.bar.r(), p.bar.g(), p.bar.b(), (190.0 * alpha) as u8);
+                let tint = Color32::from_rgba_unmultiplied(p.bar.r(), p.bar.g(), p.bar.b(), (console::opacity() * 255.0 * alpha) as u8);
                 let radius = ui.visuals().window_corner_radius;
                 let glass = p.panel_alpha < 255;
                 let mut slot = None;
@@ -3782,7 +3917,7 @@ pub fn toasts(
                             p,
                             world,
                             want_names,
-                            540.0,
+                            wrap,
                             size,
                             times,
                             family.as_ref().map_or(JobLook::Line, JobLook::Pill),
@@ -4205,10 +4340,7 @@ pub(crate) fn bar_input(
         && !st.input.trim().is_empty()
     {
         st.input_history.entry(None).or_default().record(bar_input_id(), &st.input);
-        let mut text = st.suggest.expand(None, st.input.trim());
-        if send == SendKey::Ooc {
-            text = ooc(&text);
-        }
+        let text = typed_line(&st.suggest.expand(None, st.input.trim()), send == SendKey::Ooc);
         let (channel, message) = parse_channel(&text);
         out = Some(OutgoingChat {
             message,
@@ -4239,6 +4371,29 @@ mod tests {
         assert_eq!(super::ooc(""), "");
         // like the Legacy Viewer, a channel typed after Alt+Enter stays text on channel 0
         assert_eq!(super::parse_channel(&super::ooc("/5 hi")), (0, "(( /5 hi ))".into()));
+    }
+
+    #[test]
+    fn ooc_markers_and_auto_close_follow_the_legacy_rules() {
+        assert_eq!(super::ooc_with("brb", "[OOC]", ""), "[OOC] brb");
+        assert_eq!(super::ooc_with("brb", "((", "))"), "(( brb ))");
+        assert_eq!(super::ooc_with("", "((", "))"), "");
+        assert_eq!(super::auto_close_ooc("(( brb"), "(( brb ))");
+        assert_eq!(super::auto_close_ooc("((brb"), "((brb ))");
+        assert_eq!(super::auto_close_ooc("((brb "), "((brb ))");
+        assert_eq!(super::auto_close_ooc("(( brb ))"), "(( brb ))");
+        assert_eq!(super::auto_close_ooc("hello"), "hello");
+    }
+
+    #[test]
+    fn only_lines_people_hear_animate() {
+        use super::{ANIM_AGENT_SHOUT, ANIM_AGENT_TALK, ANIM_AGENT_WHISPER, chat_animation};
+        assert_eq!(chat_animation(0, ChatType::Normal), Some(ANIM_AGENT_TALK));
+        assert_eq!(chat_animation(0, ChatType::Shout), Some(ANIM_AGENT_SHOUT));
+        assert_eq!(chat_animation(0, ChatType::Whisper), Some(ANIM_AGENT_WHISPER));
+        assert_eq!(chat_animation(5, ChatType::Normal), None, "a line to scripts");
+        assert_eq!(chat_animation(0, ChatType::StartTyping), None);
+        assert_eq!(chat_animation(0, ChatType::OwnerSay), None);
     }
 
     use super::*;

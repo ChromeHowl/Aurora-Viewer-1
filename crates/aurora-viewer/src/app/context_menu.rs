@@ -629,6 +629,7 @@ impl App {
                 let target = target.map_or(Target::Everyone, Target::Resident);
                 self.send(NetCommand::ModerateVoice { target, mute });
             }
+            CtxAction::ModerateText(session, agent, mute) => self.send(NetCommand::ModerateText { session, agent, mute }),
             CtxAction::ToggleOwnerParticleFilter(id) => {
                 let blocked = !self.settings.particle_filters.blocked(id, true);
                 if self.settings.particle_filters.set(id, true, blocked) {

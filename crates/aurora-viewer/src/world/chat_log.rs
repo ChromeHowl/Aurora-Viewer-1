@@ -17,6 +17,7 @@
 //! - `import`: a Legacy Viewer's transcripts brought into the account's
 //!   folder, adding only.
 
+pub mod conversations;
 pub mod format;
 pub mod import;
 pub mod names;
@@ -45,6 +46,8 @@ pub struct Config {
     pub dated_names: bool,
     /// Import the Legacy Viewer's transcripts at login. On by default.
     pub import_at_login: bool,
+    /// Seconds in the times written (FSSecondsinChatTimestamps, off).
+    pub seconds: bool,
 }
 
 impl Default for Config {
@@ -55,6 +58,7 @@ impl Default for Config {
             show_history: true,
             dated_names: false,
             import_at_login: true,
+            seconds: false,
         }
     }
 }
@@ -197,7 +201,7 @@ impl ChatLog {
             return;
         };
         let from = if from.trim().is_empty() { format::SYSTEM_FROM } else { from };
-        let line = format::format_line(Some(&format::stamp(time, true)), from, text);
+        let line = format::format_line(Some(&format::stamp_with(time, true, self.cfg.seconds)), from, text);
         let mut text = if store::EOL == "\n" { line } else { line.replace('\n', store::EOL) };
         text.push_str(store::EOL);
         if let Some(w) = self.worker() {

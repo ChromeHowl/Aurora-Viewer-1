@@ -137,12 +137,22 @@ fn unix_of(time: SystemTime) -> i64 {
 /// LLLogChat::timestamp2LogString with a 24 hour clock: "2026/10/12 14:05",
 /// or "14:05" without the date (LogTimestampDate off).
 pub fn stamp(time: SystemTime, with_date: bool) -> String {
+    stamp_with(time, with_date, false)
+}
+
+/// `stamp`, with the seconds when asked ("2026/10/12 14:05:09",
+/// FSSecondsinChatTimestamps in LLLogChat::timestamp2LogString).
+pub fn stamp_with(time: SystemTime, with_date: bool, seconds: bool) -> String {
     let t = Slt::of(time);
-    if with_date {
+    let mut out = if with_date {
         format!("{:04}/{:02}/{:02} {:02}:{:02}", t.year, t.month, t.day, t.hour, t.minute)
     } else {
         format!("{:02}:{:02}", t.hour, t.minute)
+    };
+    if seconds {
+        out.push_str(&format!(":{:02}", unix_of(time).rem_euclid(60)));
     }
+    out
 }
 
 /// LLChatLogFormatter::format: one message as its transcript text, without
@@ -426,6 +436,17 @@ mod tests {
         assert_eq!(nth_sunday(2024, 11, 1), days_from_civil(2024, 11, 3));
         // a month that starts on a Sunday
         assert_eq!(nth_sunday(2026, 11, 1), days_from_civil(2026, 11, 1));
+    }
+
+    #[test]
+    fn stamps_take_their_seconds_when_asked() {
+        // 2026-01-15 20:05:09 UTC = 12:05:09 PST
+        let t = UNIX_EPOCH + Duration::from_secs(1_768_507_509);
+        assert_eq!(stamp_with(t, true, false), "2026/01/15 12:05");
+        assert_eq!(stamp_with(t, true, true), "2026/01/15 12:05:09");
+        assert_eq!(stamp_with(t, false, true), "12:05:09");
+        // read back with its seconds
+        assert_eq!(parse_stamp(&stamp_with(t, true, true)), Some(t));
     }
 
     #[test]

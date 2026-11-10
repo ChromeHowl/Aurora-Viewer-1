@@ -48,6 +48,10 @@ pub struct SessionInfo {
     pub moderators: HashSet<Uuid>,
     /// Our text muted by a moderator.
     pub text_muted: bool,
+    /// The participants whose text a moderator muted (their "mutes"
+    /// "text" of the agent lists): the "Allow text chat" of the moderators'
+    /// menu (LLSpeaker::mModeratorMutedText).
+    pub muted_text: HashSet<Uuid>,
     /// The server confirmed the session (start reply / accepted invitation).
     pub active: bool,
     /// The server closed it (ForceCloseChatterBoxSession).
@@ -684,6 +688,11 @@ impl World {
                     }
                 }
             }
+            // a moderator's "mute update" refused (ChatterBoxSessionEventError
+            // shows only its event: "Error while moderating.")
+            NetEvent::SessionError { session, event, .. } if event == "mute" => {
+                self.session_system(session, aurora_i18n::tr!("chat-extras-moderation-error"));
+            }
             NetEvent::SessionError { session, event, error } => {
                 // LLIMMgr::showSessionEventError
                 let what = if event == "message" {
@@ -912,6 +921,15 @@ fn apply_agents(s: &mut SessionInfo, agents: &[SessionAgent]) {
             }
             Some(false) => {
                 s.moderators.remove(&a.agent);
+            }
+            None => {}
+        }
+        match a.text_muted {
+            Some(true) => {
+                s.muted_text.insert(a.agent);
+            }
+            Some(false) => {
+                s.muted_text.remove(&a.agent);
             }
             None => {}
         }

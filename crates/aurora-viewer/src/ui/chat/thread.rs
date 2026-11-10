@@ -18,6 +18,7 @@
 //! links, places, mentions, emoji, find highlights, selection).
 
 use super::{LineEnv, Mark, chat_text_marked, hhmm, history_tone, line_name_menu, sender_name, view};
+use crate::settings::chat_display::TextStyle;
 use crate::theme::Palette;
 use crate::ui::fonts::chat_size;
 use crate::world::chat_log::format::Slt;
@@ -33,6 +34,7 @@ const AVATAR: f32 = 36.0;
 /// (`time_w`).
 const TIME_W: f32 = 40.0;
 const TIME_W_12: f32 = 62.0;
+const TIME_W_SECONDS: f32 = 18.0;
 
 /// The width of the compact rows' time column, as the chat writes its times;
 /// it grows with the chat's text size, like the time it holds.
@@ -42,7 +44,13 @@ fn time_w(ctx: &egui::Context) -> f32 {
     } else {
         TIME_W
     };
-    w * chat_size(ctx, 1.0)
+    // ":59" more with the seconds (FSSecondsinChatTimestamps)
+    let seconds = if super::display::get().seconds_in_timestamps {
+        TIME_W_SECONDS
+    } else {
+        0.0
+    };
+    (w + seconds) * chat_size(ctx, 1.0)
 }
 const TEXT: f32 = 13.5;
 /// Room kept at the right of a row.
@@ -296,12 +304,52 @@ pub(super) fn tag(ui: &mut egui::Ui, text: &str, fill: Option<Color32>, color: C
     crate::ui::widgets::paint_row_text(ui.painter(), galley, rect.left() + pad, rect.center().y, color);
 }
 
+/// The styles of a moderator's name and text in a group chat or a
+/// conference (FSHighlightGroupMods, FSModNameStyle, FSModTextStyle,
+/// LLChatHistory::appendMessage); None for the others or with the option off.
+fn moderator_styles(th: &Thread, line: &ChatLine) -> Option<(TextStyle, TextStyle)> {
+    let d = super::display::get();
+    (d.highlight_moderators && th.moderators.is_some_and(|m| m.contains(&line.source)))
+        .then_some((d.moderator_name_style, d.moderator_text_style))
+}
+
+/// A message's emphasis, a moderator's text style added.
+fn text_emphasis(th: &Thread, line: &ChatLine, italics: bool) -> crate::ui::fonts::TextEmphasis {
+    let mut e = super::message_emphasis(line.kind, italics);
+    if let Some((_, style)) = moderator_styles(th, line) {
+        e.strong |= style.bold();
+        e.italics |= style.italic();
+        e.underline = style.underline();
+    }
+    e
+}
+
 /// The name of a head or a compact row: clickable to the profile, with the
 /// author's menu on a right click.
-fn name_label(ui: &mut egui::Ui, env: &LineEnv, line: &ChatLine, name: &str, color: Color32, who: &Who, max: f32) {
-    let text = RichText::new(name)
-        .font(egui::FontId::new(chat_size(ui.ctx(), 13.5), crate::ui::fonts::semibold(ui.ctx())))
-        .color(color);
+#[allow(clippy::too_many_arguments)]
+fn name_label(ui: &mut egui::Ui, env: &LineEnv, th: &Thread, line: &ChatLine, name: &str, color: Color32, who: &Who, max: f32) {
+    let size = chat_size(ui.ctx(), 13.5);
+    let text = match moderator_styles(th, line) {
+        // FSModNameStyle: the name as the moderators' style says
+        Some((style, _)) => {
+            let family = if style.bold() {
+                crate::ui::fonts::semibold(ui.ctx())
+            } else {
+                egui::FontFamily::Proportional
+            };
+            let mut text = RichText::new(name).font(egui::FontId::new(size, family)).color(color);
+            if style.italic() {
+                text = text.italics();
+            }
+            if style.underline() {
+                text = text.underline();
+            }
+            text
+        }
+        None => RichText::new(name)
+            .font(egui::FontId::new(size, crate::ui::fonts::semibold(ui.ctx())))
+            .color(color),
+    };
     let r = ui.add(crate::ui::widgets::elided_label(ui, text, max).sense(egui::Sense::click()));
     if who.avatar.is_nil() {
         return;
@@ -365,7 +413,7 @@ fn roomy_row(
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 7.0;
                     let color = name_color(env, th, line, who);
-                    name_label(ui, env, line, name, color, who, text_w * 0.6);
+                    name_label(ui, env, th, line, name, color, who, text_w * 0.6);
                     tags(ui, p, th, line, who);
                     let time = when(line);
                     if th.times && !time.is_empty() {
@@ -386,7 +434,7 @@ fn roomy_row(
                     &visible,
                     size,
                     color,
-                    super::message_emphasis(line.kind, italics),
+                    text_emphasis(th, line, italics),
                     mark,
                 );
             }
@@ -431,7 +479,7 @@ fn compact_row(
             let max = (ui.available_width() * 0.35).max(60.0);
             ui.allocate_ui_with_layout(egui::vec2(max, 20.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 5.0;
-                name_label(ui, env, line, name, color, who, max);
+                name_label(ui, env, th, line, name, color, who, max);
                 tags(ui, p, th, line, who);
             });
         }
@@ -451,7 +499,7 @@ fn compact_row(
                     &visible,
                     size,
                     color,
-                    super::message_emphasis(line.kind, italics),
+                    text_emphasis(th, line, italics),
                     mark,
                 );
             }

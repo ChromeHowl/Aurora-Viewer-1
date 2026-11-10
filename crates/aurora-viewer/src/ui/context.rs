@@ -368,6 +368,10 @@ pub enum CtxAction {
     /// Mute or unmute a resident (or everyone, None) in nearby voice for
     /// everyone, as its moderator (LLFloaterIMContainer::moderateVoice).
     ModerateVoice(Option<Uuid>, bool),
+    /// Mute or give back a participant's text in a group chat or a
+    /// conference (session, participant, mute), as its moderator
+    /// (LLIMSpeakerMgr::toggleAllowTextChat).
+    ModerateText(Uuid, Uuid, bool),
     /// Toggle the local owner particle filter, without creating a mute entry.
     ToggleOwnerParticleFilter(Uuid),
     /// One persistent owner category in the sound blacklist (ON blocks it).

@@ -158,6 +158,11 @@ pub(super) fn show(
                 );
                 ui.add_space(4.0);
                 for m in list.iter() {
+                    // a moderator may allow or forbid the others' text
+                    // (menu_participant_view.xml "Allow text chat")
+                    let text = info
+                        .filter(|i| !dim && m.id != world.agent_id && i.moderators.contains(&world.agent_id))
+                        .map(|i| (conversation, !i.muted_text.contains(&m.id)));
                     row(
                         ui,
                         p,
@@ -168,6 +173,7 @@ pub(super) fn show(
                         m,
                         dim,
                         info.is_some_and(|i| i.moderators.contains(&m.id)),
+                        text,
                     );
                 }
             }
@@ -193,6 +199,7 @@ fn row(
     m: &Member,
     dim: bool,
     moderator: bool,
+    text: Option<(Uuid, bool)>,
 ) {
     st.wanted_pics.insert(m.id);
     let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), ROW_H), egui::Sense::hover());
@@ -239,7 +246,23 @@ fn row(
         egui::FontId::proportional(12.5),
         color,
     );
-    super::name_menu(&resp, p, world, m.id);
+    match text {
+        // the resident's menu, then the moderator's switch of their text
+        // (LLIMSpeakerMgr::toggleAllowTextChat)
+        Some((session, allowed)) => {
+            crate::ui::contacts::drag::person_source(&resp, m.id);
+            crate::ui::menu::context_menu(&resp, p, |ui| {
+                crate::ui::context::avatar_list_menu(ui, p, world, m.id, crate::ui::context::AvatarList::Name);
+                crate::ui::menu::separator(ui, p);
+                let label = aurora_i18n::tr!("chat-extras-allow-text");
+                if crate::ui::menu::check(ui, p, "message-off", label, allowed, true) {
+                    crate::ui::context::request(ui.ctx(), crate::ui::context::CtxAction::ModerateText(session, m.id, allowed));
+                }
+            });
+            super::line_menu::inline(&resp);
+        }
+        None => super::name_menu(&resp, p, world, m.id),
+    }
     let tip = if moderator {
         aurora_i18n::tr!("ui-chat-moderator-click-profile")
     } else {
