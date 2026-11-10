@@ -29,6 +29,14 @@ impl Entry {
         format!("{year:04}-{month:02}-{day:02}")
     }
 }
+/// The other files a save writes beside the pose.
+#[derive(Clone, Copy, Default)]
+pub(super) struct Copies {
+    pub bvh: bool,
+    pub unlock_pelvis: bool,
+    /// A Black Dragon pose file (`bd_pose`).
+    pub black_dragon: bool,
+}
 pub(super) enum Loaded {
     Pose(Document, LoadMode),
     Animation(aurora_assets::Animation, LoadMode),
@@ -36,7 +44,7 @@ pub(super) enum Loaded {
 enum Output {
     Listed(Vec<Entry>),
     Loaded(Uuid, Loaded),
-    Overwrite(Document, Arc<SubjectPose>, bool, bool),
+    Overwrite(Document, Arc<SubjectPose>, Copies),
     Saved,
     Prepared(clip::Prepared),
     Failed(String),
@@ -45,7 +53,7 @@ enum Output {
 pub(super) enum Job {
     List,
     Load(Option<PathBuf>, LoadMode, Uuid),
-    Save(Document, Arc<SubjectPose>, bool, bool, bool),
+    Save(Document, Arc<SubjectPose>, Copies, bool),
     Import(Arc<SubjectPose>, Vec<usize>, String, i32),
 }
 pub(super) struct Service {
@@ -57,7 +65,7 @@ pub(super) struct Service {
     pub job: Option<Job>,
     pub ready: bool,
     pub prepared: Vec<clip::Prepared>,
-    pub overwrite: Option<(Document, Arc<SubjectPose>, bool, bool)>,
+    pub overwrite: Option<(Document, Arc<SubjectPose>, Copies)>,
     tx: crossbeam_channel::Sender<Output>,
     rx: crossbeam_channel::Receiver<Output>,
 }
@@ -110,6 +118,7 @@ pub(super) fn native(rig: &Rig, pose: &SubjectPose, translations: &[usize], name
         name: document.name,
         bytes: Arc::new(bytes),
         animation: Arc::new(animation),
+        pose: true,
     })
 }
 fn list(root: &Path, rig: &Rig) -> Result<Vec<Entry>, String> {
@@ -162,7 +171,7 @@ impl Service {
                     self.ready = true;
                 }
                 Output::Loaded(subject, value) => loaded.push((subject, value)),
-                Output::Overwrite(document, pose, bvh, unlock) => self.overwrite = Some((document, pose, bvh, unlock)),
+                Output::Overwrite(document, pose, copies) => self.overwrite = Some((document, pose, copies)),
                 Output::Prepared(value) => self.prepared.push(value),
                 Output::Saved => {
                     self.ready = false;
@@ -195,7 +204,7 @@ impl Service {
                             Some(p) => p,
                             None => {
                                 let Some(p) = rfd::FileDialog::new()
-                                    .add_filter(aurora_i18n::tr!("poser-file-filter"), &["json", "anim", "bvh"])
+                                    .add_filter(aurora_i18n::tr!("wornposer-file-filter"), &["json", "anim", "bvh", "xml"])
                                     .pick_file()
                                 else {
                                     return Ok(Output::Cancelled);
@@ -223,6 +232,23 @@ impl Service {
                                     mode,
                                 ),
                             )
+                        } else if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("xml")) || bd_pose::looks_like(&bytes) {
+                            // a Black Dragon pose, named after its file
+                            let joints = bd_pose::document_joints(&rig, &bd_pose::parse(&bytes)?);
+                            let name: String = path
+                                .file_stem()
+                                .map(|n| n.to_string_lossy().chars().filter(|c| !c.is_control()).take(100).collect())
+                                .unwrap_or_default();
+                            let name = if name.trim().is_empty() {
+                                aurora_i18n::tr!("wornposer-bd-unnamed").to_string()
+                            } else {
+                                name
+                            };
+                            let document = Document::from_joints(name, 4, joints);
+                            if !document.valid(&rig) {
+                                return Err(aurora_i18n::tr!("wornposer-bd-invalid").to_string());
+                            }
+                            Output::Loaded(subject, Loaded::Pose(document, mode))
                         } else {
                             let document: Document = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
                             if !document.valid(&rig) {
@@ -231,17 +257,33 @@ impl Service {
                             Output::Loaded(subject, Loaded::Pose(document, mode))
                         }
                     }
-                    Job::Save(document, pose, bvh, unlock, confirm) => {
+                    Job::Save(document, pose, copies, confirm) => {
                         if !document.valid(&rig) {
                             return Err(aurora_i18n::tr!("anim-edit-invalid").to_string());
                         }
                         let name = clip::files::basename(&document.name);
                         let path = root.join(format!("{name}.aurora-pose.json"));
-                        if confirm && (path.exists() || bvh && root.join(format!("{name}.bvh")).exists()) {
-                            return Ok(Output::Overwrite(document, pose, bvh, unlock));
+                        let bvh_path = root.join(format!("{name}.bvh"));
+                        let black_dragon_path = root.join(bd_pose::FOLDER).join(bd_pose::file_name(&document.name));
+                        if confirm
+                            && (path.exists() || copies.bvh && bvh_path.exists() || copies.black_dragon && black_dragon_path.exists())
+                        {
+                            return Ok(Output::Overwrite(document, pose, copies));
                         }
                         let bytes = serde_json::to_vec_pretty(&document).map_err(|e| e.to_string())?;
-                        let bvh = if bvh { Some(bvh::encode(&rig, &pose, unlock)?) } else { None };
+                        let bvh = if copies.bvh {
+                            Some(bvh::encode(&rig, &pose, copies.unlock_pelvis)?)
+                        } else {
+                            None
+                        };
+                        let black_dragon = if copies.black_dragon {
+                            if !pose.valid(&rig) {
+                                return Err(aurora_i18n::tr!("anim-edit-invalid").to_string());
+                            }
+                            Some(bd_pose::encode(&bd_pose::joints_of(&rig, &pose)))
+                        } else {
+                            None
+                        };
                         std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
                         let temp = root.join(format!("{}.tmp", Uuid::new_v4()));
                         std::fs::write(&temp, bytes).map_err(|e| e.to_string())?;
@@ -250,7 +292,11 @@ impl Service {
                             return Err(e.to_string());
                         }
                         if let Some(bvh) = bvh {
-                            std::fs::write(root.join(format!("{name}.bvh")), bvh).map_err(|e| e.to_string())?;
+                            std::fs::write(bvh_path, bvh).map_err(|e| e.to_string())?;
+                        }
+                        if let Some(black_dragon) = black_dragon {
+                            std::fs::create_dir_all(root.join(bd_pose::FOLDER)).map_err(|e| e.to_string())?;
+                            std::fs::write(black_dragon_path, black_dragon).map_err(|e| e.to_string())?;
                         }
                         Output::Saved
                     }

@@ -831,7 +831,19 @@ fn poser_library_saves_bvh_confirms_overwrite_and_correlates_loads_to_the_origin
     let ctx = egui::Context::default();
     let mut service = storage::Service::default();
     let tick = |service: &mut storage::Service| service.tick(&jobs, &ctx, owner, rig.clone(), world.avatar_lib.skeleton.as_ref());
-    service.job = Some(storage::Job::Save(document.clone(), session.pose.clone(), true, true, false));
+    let mut posed = (*session.pose).clone();
+    let head = rig.names["mHead"];
+    posed.rotations[head] = (posed.rotations[head] * Quat::from_rotation_x(0.4)).normalize();
+    service.job = Some(storage::Job::Save(
+        document.clone(),
+        Arc::new(posed),
+        storage::Copies {
+            bvh: true,
+            unlock_pelvis: true,
+            black_dragon: true,
+        },
+        false,
+    ));
     for _ in 0..3 {
         tick(&mut service);
     }
@@ -846,7 +858,16 @@ fn poser_library_saves_bvh_confirms_overwrite_and_correlates_loads_to_the_origin
             .iter()
             .any(|j| j.joint_name == "mHead" && !j.rot_keys.is_empty())
     );
-    service.job = Some(storage::Job::Save(document, session.pose.clone(), false, false, true));
+    // the Black Dragon copy reads back through the same load
+    let copy = root.join("poses/black_dragon/Portrait.xml");
+    service.job = Some(storage::Job::Load(Some(copy), document::LoadMode::Rotations, subject));
+    tick(&mut service);
+    let loaded = tick(&mut service);
+    assert!(matches!(
+        loaded.as_slice(),
+        [(_, storage::Loaded::Pose(_, document::LoadMode::Rotations))]
+    ));
+    service.job = Some(storage::Job::Save(document, session.pose.clone(), storage::Copies::default(), true));
     tick(&mut service);
     tick(&mut service);
     assert!(service.overwrite.is_some());

@@ -45,6 +45,9 @@ impl App {
                 self.imports.mesh_permission_account = self.world.agent_id;
             }
         }
+        if std::mem::take(&mut self.imports.created_poses_wanted) {
+            self.want_created_poses_folder();
+        }
         self.imports
             .sync_destinations(&self.settings.imports, &self.world, &self.settings.inventory);
         if !self.imports.persistence.started() {

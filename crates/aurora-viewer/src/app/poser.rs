@@ -144,6 +144,35 @@ impl App {
         }
         self.world.poser_consent = consent;
     }
+    /// A pose is about to be staged for upload: its folder, `! Created
+    /// Poses` in the Animations system folder, is made when it is missing
+    /// (an inventory folder costs nothing). The upload itself stays the
+    /// import window's, with its preview, its price and its confirmation;
+    /// the entry takes this folder as its destination once it exists
+    /// (`Imports::entry_folder`).
+    pub(super) fn want_created_poses_folder(&mut self) {
+        use crate::world::inventory::actions;
+        let inventory = &self.world.inventory;
+        let recently = self
+            .imports
+            .created_poses_asked
+            .is_some_and(|at| at.elapsed() < Duration::from_secs(30));
+        if recently || crate::imports::created_poses_folder(inventory).is_some() {
+            return;
+        }
+        let Some(animations) = crate::imports::animations_folder(inventory) else {
+            return;
+        };
+        match actions::create_folder(animations, crate::imports::CREATED_POSES) {
+            Ok(change) => {
+                let request = uuid::Uuid::new_v4();
+                self.imports.created_poses_asked = Some(Instant::now());
+                self.world_edits.insert(request);
+                self.send(NetCommand::EditInventory { request, change });
+            }
+            Err(reason) => log::warn!("folder of the uploaded poses not made: {reason}"),
+        }
+    }
     pub(super) fn poser_consent_ui(&mut self, ctx: &egui::Context, p: &Palette) {
         let mut consent = std::mem::take(&mut self.world.poser_consent);
         // The requester sees every nearby avatar with Ask in the poser's
@@ -160,6 +189,12 @@ impl App {
                 }
                 // The Movelock window's Repair: recompile and restart both scripts.
                 crate::ik_edit::poser::Request::RepairBridge => self.bridge_runtime.retry(Instant::now()),
+                crate::ik_edit::poser::Request::RevealCreatedPoses => {
+                    if let Some(folder) = crate::imports::created_poses_folder(&self.world.inventory) {
+                        self.inventory_ui.show_folder(&self.world.inventory, folder);
+                        widgets::open_floater(ctx, "inventory", &mut self.panels.inventory);
+                    }
+                }
             }
         }
         if let Some(request) = consent.incoming.front().copied() {

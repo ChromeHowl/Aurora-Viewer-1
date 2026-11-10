@@ -64,6 +64,26 @@ impl Document {
                 .collect(),
         }
     }
+    /// A pose read from another format: complete rotations, with each
+    /// joint's position offset and scale ratio (name, rotation, offset, ratio).
+    pub fn from_joints(name: String, priority: i32, joints: Vec<(String, Quat, Vec3, Vec3)>) -> Self {
+        Self {
+            version: 1,
+            name,
+            priority,
+            joints: joints
+                .into_iter()
+                .map(|(name, rotation, translation, scale)| Joint {
+                    name,
+                    rotation: rotation.to_array(),
+                    translation: translation.to_array(),
+                    scale: scale.to_array(),
+                    locked: false,
+                    change: false,
+                })
+                .collect(),
+        }
+    }
     pub fn valid(&self, rig: &Rig) -> bool {
         let mut seen = HashSet::new();
         self.version == 1

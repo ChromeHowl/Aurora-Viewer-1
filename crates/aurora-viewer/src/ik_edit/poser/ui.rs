@@ -108,7 +108,7 @@ impl Editor {
             session.history(redo);
             self.refresh = true;
         }
-        if let Some((document, pose, bvh, unlock)) = self.poser.storage.overwrite.clone() {
+        if let Some((document, pose, copies)) = self.poser.storage.overwrite.clone() {
             widgets::Modal::new(egui::Id::unique("poser-overwrite-confirm")).show(ctx, |ui| {
                 ui.heading(aurora_i18n::tr!("poser-overwrite"));
                 ui.label(&document.name);
@@ -127,7 +127,7 @@ impl Editor {
                     .clicked()
                     {
                         self.poser.storage.overwrite = None;
-                        self.poser.storage.job = Some(storage::Job::Save(document, pose, bvh, unlock, false));
+                        self.poser.storage.job = Some(storage::Job::Save(document, pose, copies, false));
                     }
                 });
             });
@@ -384,6 +384,13 @@ impl Editor {
                     menu::toggle(
                         ui,
                         p,
+                        "file-type-xml",
+                        aurora_i18n::text("wornposer-bd-also-save"),
+                        &mut self.poser.also_black_dragon,
+                    );
+                    menu::toggle(
+                        ui,
+                        p,
                         "accessible-filled",
                         aurora_i18n::text("poser-unlock-pelvis"),
                         &mut self.poser.unlock_pelvis,
@@ -416,7 +423,7 @@ impl Editor {
                     }
                 }
                 menu::separator(ui, p);
-                if menu::item(ui, p, "folder-filled", aurora_i18n::text("poser-open-file")) {
+                if menu::item(ui, p, "folder-filled", aurora_i18n::text("wornposer-open-file")) {
                     self.poser.storage.job = Some(storage::Job::Load(None, LoadMode::All, self.poser.subject));
                 }
             });
@@ -472,8 +479,11 @@ impl Editor {
         self.poser.storage.job = Some(storage::Job::Save(
             document,
             Arc::new(authored),
-            self.poser.also_bvh,
-            self.poser.unlock_pelvis,
+            storage::Copies {
+                bvh: self.poser.also_bvh,
+                unlock_pelvis: self.poser.unlock_pelvis,
+                black_dragon: self.poser.also_black_dragon,
+            },
             self.poser.confirm_overwrite,
         ));
     }
@@ -508,6 +518,16 @@ impl Editor {
                     if let Err(error) = std::fs::create_dir_all(&path).and_then(|()| crate::logging::open_directory(&path)) {
                         self.poser.storage.message = Some(error.to_string());
                     }
+                }
+                // only once a pose was uploaded: the folder is made then
+                let uploaded = crate::imports::created_poses_folder(&world.inventory).is_some();
+                let tip = aurora_i18n::text(if uploaded {
+                    "wornposer-reveal-folder"
+                } else {
+                    "wornposer-reveal-folder-none"
+                });
+                if widgets::icon_button(ui, p, "folder-search", tip, uploaded) {
+                    self.poser.requests.push(Request::RevealCreatedPoses);
                 }
                 if widgets::icon_button(ui, p, "refresh", aurora_i18n::text("poser-library-refresh"), true) {
                     self.poser.storage.ready = false;
@@ -603,6 +623,7 @@ impl Editor {
         bones::caption(ui, p, aurora_i18n::text("poser-settings-files"));
         widgets::switch_labeled(ui, p, &mut self.poser.confirm_overwrite, aurora_i18n::tr!("poser-overwrite"));
         widgets::switch_labeled(ui, p, &mut self.poser.also_bvh, aurora_i18n::tr!("poser-also-bvh"));
+        widgets::switch_labeled(ui, p, &mut self.poser.also_black_dragon, aurora_i18n::tr!("wornposer-bd-also-save"));
         widgets::switch_labeled(ui, p, &mut self.poser.unlock_pelvis, aurora_i18n::tr!("poser-unlock-pelvis"));
         ui.horizontal(|ui| {
             ui.label(aurora_i18n::tr!("poser-priority"));

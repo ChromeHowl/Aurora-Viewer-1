@@ -12,6 +12,7 @@
 //! default one is drawn by `aurora`, on the same state, data and actions.
 
 mod aurora;
+pub mod worn;
 
 pub use aurora::banner_image;
 
@@ -78,6 +79,8 @@ pub enum ProfileAction {
     /// (LLAvatarActions::share, which also opens a conversation to drop
     /// on; the profile takes the drop itself).
     Share(Uuid),
+    /// A row action of the Worn tab (`worn`).
+    Worn(worn::Action),
 }
 
 /// What the "Feed" browser needs from the app.
@@ -96,6 +99,8 @@ const TAB_PICKS: usize = 2;
 const TAB_CLASSIFIEDS: usize = 3;
 const TAB_RL: usize = 4;
 const TAB_NOTES: usize = 5;
+/// What the avatar wears (`worn`): not a tab of the Legacy Viewer.
+const TAB_WORN: usize = 6;
 
 /// Left column of the labels ("Name:", "Key:", "Info:"...), right-aligned.
 const LABEL_W: f32 = 60.0;
@@ -209,6 +214,8 @@ struct Window {
     demo_classified: Option<bool>,
     /// Open a photo once the demo profile reply arrives.
     demo_photo: Option<(PictureSlot, bool)>,
+    /// The Worn tab's selection and outlined row.
+    worn: worn::State,
 }
 
 impl Window {
@@ -241,6 +248,7 @@ impl Window {
             notes_saved: false,
             demo_classified: None,
             demo_photo: None,
+            worn: worn::State::default(),
         }
     }
 
@@ -292,9 +300,26 @@ pub struct ProfileUi {
     /// Banners of the Aurora window by profile picture (`banner_image`),
     /// made by the viewer when it decodes the picture.
     pub banners: HashMap<Uuid, egui::TextureHandle>,
+    /// What the avatars of the windows on their Worn tab wear, filled by
+    /// the app (`App::feed_profile_worn`).
+    pub worn: worn::Feed,
 }
 
 impl ProfileUi {
+    /// The avatars whose window shows its Worn tab.
+    pub fn worn_wanted(&self) -> Vec<Uuid> {
+        self.windows.iter().filter(|w| w.open && w.tab == TAB_WORN).map(|w| w.id).collect()
+    }
+
+    /// The worn objects "Highlight in world" outlines, with their wearer.
+    pub fn worn_highlights(&self) -> Vec<(Uuid, Uuid)> {
+        self.windows
+            .iter()
+            .filter(|w| w.open && w.tab == TAB_WORN)
+            .filter_map(|w| Some((w.id, w.worn.lit?)))
+            .collect()
+    }
+
     /// Decode the selected photo on the scene workers, just like an inventory
     /// texture preview. UI thumbnails alone cannot supply native pixels.
     pub(crate) fn prepare_photos(&mut self, ctx: &egui::Context, scene: &mut crate::scene::Scene, world: &World) {
@@ -551,6 +576,7 @@ impl ProfileUi {
                     web,
                     wanted_pics: &mut self.wanted_pics,
                     wanted_images: &mut self.wanted_images,
+                    worn: &self.worn,
                     actions: &mut actions,
                     pick_picture: &mut pick_picture,
                     friend_rights,
@@ -601,6 +627,7 @@ impl ProfileUi {
                         (aurora_i18n::tr!("ui-profile-classifieds"), true),
                         (aurora_i18n::tr!("ui-profile-real-life"), true),
                         (aurora_i18n::tr!("common-notes"), true),
+                        (aurora_i18n::tr!("common-worn"), true),
                     ],
                 );
                 if before == TAB_FEED && w.tab != TAB_FEED {
@@ -640,6 +667,16 @@ impl ProfileUi {
                         &mut pick_picture,
                     ),
                     TAB_NOTES => notes_tab(ui, &c, w, profile, &mut actions),
+                    TAB_WORN => {
+                        let mut asked = Vec::new();
+                        egui::ScrollArea::vertical()
+                            .id_salt(("profile-worn", w.id))
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                worn::show(ui, p, &mut w.worn, self.worn.get(&w.id), c.own, &name, &mut asked)
+                            });
+                        actions.extend(asked.into_iter().map(ProfileAction::Worn));
+                    }
                     _ => second_life_tab(
                         ui,
                         &c,

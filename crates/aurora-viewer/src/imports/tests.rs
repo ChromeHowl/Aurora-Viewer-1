@@ -235,6 +235,7 @@ fn authored_native_animation_opens_the_normal_inspector_without_starting_or_char
         "Authored".into(),
         bytes.clone(),
         animation,
+        false,
     );
     assert!(imports.open);
     assert_eq!(imports.window_choice(), Choice::Bulk);
@@ -1462,4 +1463,58 @@ fn retiring_material_rows_keeps_texture_receipts_for_the_rest_of_the_batch() {
     assert_eq!(imports.spent, 10);
     assert_eq!(imports.total(&prices()), Some(0));
     assert_eq!(imports.uploaded[&key].item.asset_id, asset);
+}
+
+#[test]
+fn a_pose_from_the_poser_goes_to_its_own_folder_once_that_folder_exists() {
+    use aurora_net::inventory::InvFolder;
+    let mut world = crate::world::World::new(Arc::new(crate::scene::avatar::AvatarLibrary::load()));
+    world.inventory.root = Uuid::from_u128(1);
+    let animations = Uuid::from_u128(2);
+    world.inventory.created_folders(vec![
+        InvFolder {
+            id: world.inventory.root,
+            name: "Inventory".into(),
+            type_default: 8,
+            ..Default::default()
+        },
+        InvFolder {
+            id: animations,
+            parent: world.inventory.root,
+            name: "Animations".into(),
+            type_default: Kind::Animation.asset_type(),
+            ..Default::default()
+        },
+    ]);
+    let prefs = crate::ui::inventory::InventoryPreferences::default();
+    let entry = |pose: bool| {
+        let mut entry = Entry::new("Pose.anim".into(), Err(String::new()), Default::default());
+        entry.created_pose = pose;
+        entry
+    };
+    // not made yet: the Animations folder, as any animation
+    assert_eq!(created_poses_folder(&world.inventory), None);
+    assert_eq!(animations_folder(&world.inventory), Some(animations));
+    assert_eq!(Imports::entry_folder(&world, &prefs, &entry(true), Kind::Animation), animations);
+    // a folder of that name elsewhere is not it
+    world.inventory.created_folders(vec![InvFolder {
+        id: Uuid::from_u128(3),
+        parent: world.inventory.root,
+        name: CREATED_POSES.into(),
+        type_default: -1,
+        ..Default::default()
+    }]);
+    assert_eq!(created_poses_folder(&world.inventory), None);
+    let poses = Uuid::from_u128(4);
+    world.inventory.created_folders(vec![InvFolder {
+        id: poses,
+        parent: animations,
+        name: CREATED_POSES.into(),
+        type_default: -1,
+        ..Default::default()
+    }]);
+    assert_eq!(created_poses_folder(&world.inventory), Some(poses));
+    assert_eq!(Imports::entry_folder(&world, &prefs, &entry(true), Kind::Animation), poses);
+    // a clip of the animation editor keeps the Animations folder
+    assert_eq!(Imports::entry_folder(&world, &prefs, &entry(false), Kind::Animation), animations);
 }

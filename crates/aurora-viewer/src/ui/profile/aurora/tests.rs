@@ -32,7 +32,9 @@ fn body_texts_with(world: &World, w: &mut Window, width: f32, friend_rights: boo
     }
     // a second frame: the first one measures
     for _ in 0..2 {
+        let worn = crate::ui::profile::worn::Feed::default();
         let mut env = Env {
+            worn: &worn,
             p: &p,
             emoji: &mut emoji,
             pics: &pics,
@@ -206,7 +208,7 @@ fn the_compact_window_stacks_its_cards() {
     assert!(
         texts
             .iter()
-            .any(|t| t == &aurora_i18n::tr!("ui-profile-aurora-sections", count = 6))
+            .any(|t| t == &aurora_i18n::tr!("ui-profile-aurora-sections", count = 7))
     );
     assert!(texts.iter().all(|t| t != tr("ui-profile-aurora-tab-picks")));
     assert!(texts.iter().all(|t| *t != tr("ui-profile-aurora-about").to_uppercase()));
@@ -352,7 +354,10 @@ fn a_click_on_a_right_we_grant() {
 
 #[test]
 fn the_notes_tab_is_on_every_profile() {
-    assert_eq!(tabs_of(), [TAB_SL, TAB_PICKS, TAB_CLASSIFIEDS, TAB_RL, TAB_FEED, TAB_NOTES]);
+    assert_eq!(
+        tabs_of(),
+        [TAB_SL, TAB_PICKS, TAB_CLASSIFIEDS, TAB_RL, TAB_FEED, TAB_NOTES, TAB_WORN]
+    );
 }
 
 #[test]
