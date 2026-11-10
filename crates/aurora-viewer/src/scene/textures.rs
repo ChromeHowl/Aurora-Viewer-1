@@ -165,6 +165,9 @@ const REDUCTIONS_PER_FRAME: std::ops::RangeInclusive<usize> = 8..=512;
 /// by half a pass, while the one in front grew by 4 GB in 10 s and lost
 /// its device (#1808).
 const PAUSED_DROPPED: f32 = 1024.0;
+/// What divides the size on screen of the textures memory pressure spares
+/// (`note_own_worn`): nothing, as without pressure.
+const NOT_DROPPED: (f32, f32) = (1.0, 1.0);
 const PAUSED_REDUCTIONS_PER_FRAME: usize = 8192;
 /// Firestorm asks for MAX_IMAGE_DATA_SIZE (indra/llimage/llimage.h) when it
 /// wants the whole file.
@@ -314,6 +317,10 @@ struct Entry {
     /// Noted through `note_usage_boosted` since the last computation: not
     /// capped.
     boosted: bool,
+    /// Noted through `note_own_worn` since the last computation: on what
+    /// our own avatar wears, memory pressure leaves it alone
+    /// (`texture_budget::spared`).
+    own_worn: bool,
     /// Its first request, until its first pixels are shown (the wait the
     /// `texture load:` line tells).
     asked_at: Option<Instant>,
@@ -423,6 +430,7 @@ impl Entry {
             seen_px: 0.0,
             max_px: cap_px(max_resolution),
             boosted: false,
+            own_worn: false,
             asked_at: None,
             gpu_size: (0, 0),
             fetching: false,
@@ -1093,6 +1101,8 @@ pub struct TextureStreamer {
     /// The window in the background long enough to give its textures back
     /// (texture_budget::Background), and its state (`set_window_state`).
     background: texture_budget::Background,
+    /// "Keep my own attachments sharp" of Preferences (`set_kept`).
+    keep_own_worn: bool,
     in_front: bool,
     minimized: bool,
     /// The other viewers on this PC (instances.rs): the budget is shared
@@ -1517,6 +1527,7 @@ impl TextureStreamer {
             decodes: 0,
             pressure: Pressure::new(Instant::now()),
             background: texture_budget::Background::default(),
+            keep_own_worn: false,
             in_front: true,
             minimized: false,
             peers: Default::default(),
@@ -2372,6 +2383,25 @@ impl TextureStreamer {
         }
     }
 
+    /// A texture of an object our own avatar wears (a HUD is noted through
+    /// `note_usage_fixed`), with the preference on: until the next
+    /// computation, memory pressure neither lowers it nor loads it coarser,
+    /// like a bake (`texture_budget::spared`). Its size on screen and the
+    /// maximum resolution rule it as before.
+    #[inline]
+    pub fn note_own_worn(&mut self, id: &Uuid) {
+        if self.keep_own_worn
+            && let Some(e) = self.entries.get_mut(id)
+        {
+            e.own_worn = true;
+        }
+    }
+
+    /// Whether `note_own_worn` is of any use (the preference).
+    pub fn keeps_own_worn(&self) -> bool {
+        self.keep_own_worn
+    }
+
     /// Recompute desired discard levels from accumulated usage, once every
     /// object was seen. Under memory pressure (texture_budget.rs), also
     /// list the loaded textures to lower, done a few per frame by
@@ -2421,6 +2451,11 @@ impl TextureStreamer {
             }
             let full_px = full_size(e).map_or(512, |(w, h)| w.max(h)) as f32;
             let levels = e.info.map(|i| i.levels);
+            let bake = matches!(e.source, TexSource::Bake { .. });
+            // (what we wear: sized as without pressure, unless everything
+            // goes behind, `texture_budget::spared`)
+            let own_worn = e.own_worn && !paused;
+            let (dropped, below) = if own_worn { (NOT_DROPPED, NOT_DROPPED) } else { (dropped, below) };
             let (want, keep) = wanted(full_px, levels, e, dropped);
             let in_view = e.need_px > 0.0 || e.fixed_px > 0.0;
             e.want = if full && in_view && e.source == TexSource::Asset { 0 } else { want };
@@ -2462,16 +2497,19 @@ impl TextureStreamer {
             if step > 0 {
                 let (want_below, keep_below) = wanted(full_px, levels, e, below);
                 // (there it would be lowered to `keep`, or loaded up to `want`)
+                // (what we wear stays as it is there too)
+                let keep_below = if own_worn { 0 } else { keep_below };
                 bytes_below += bytes_at(e, e.decoded.map_or(want_below, |d| d.clamp(keep_below, want_below)));
-                // (bakes and interface images are left alone, as Firestorm's
-                // boosted textures; unused ones are evicted instead. Paused
-                // behind, the bakes go too: in a crowd they were the 1 GB of
-                // pages the window still held, and nothing is drawn)
+                // (bakes and interface images are left alone, as the Legacy
+                // Viewer's boosted textures, and what we wear with them;
+                // unused ones are evicted instead. Paused behind, they go
+                // too: in a crowd the bakes were the 1 GB of pages the
+                // window still held, and nothing is drawn)
                 if let Some(d) = e.decoded
                     && keep > d
                     && e.refs > 0
                     && !e.decoding
-                    && (e.source == TexSource::Asset || (paused && matches!(e.source, TexSource::Bake { .. })))
+                    && !texture_budget::spared(bake, e.own_worn, paused)
                     && !ui_wanted.contains(id)
                 {
                     reductions.push((*id, keep, bytes_at(e, d)));
@@ -2505,6 +2543,8 @@ impl TextureStreamer {
             e.fixed_px *= 0.5;
             // (a preview closed: what it noted is capped from now on)
             e.boosted = false;
+            // (taken off, or the preference turned off: lowered like the rest)
+            e.own_worn = false;
             // (a finer level wanted: `update` hears of it)
             Self::settle(todo, counts, *id, e);
         }
@@ -3565,6 +3605,15 @@ impl TextureStreamer {
         self.minimized = minimized;
     }
 
+    /// The two switches of Preferences › Graphics, each frame: the textures
+    /// of what our own avatar wears are left alone by the memory pressure
+    /// (`note_own_worn`), and the time behind alone gives no texture back
+    /// (texture_budget::Background::set_keep).
+    pub fn set_kept(&mut self, own_worn: bool, in_background: bool) {
+        self.keep_own_worn = own_worn;
+        self.background.set_keep(in_background);
+    }
+
     /// The other viewers running now (instances.rs).
     pub fn set_peers(&mut self, peers: &crate::instances::Peers) {
         if self.peers != *peers {
@@ -4392,6 +4441,7 @@ mod tests {
             seen_px: 0.0,
             max_px: cap_px(crate::settings::MAX_TEXTURE_RESOLUTION),
             boosted: false,
+            own_worn: false,
             asked_at: None,
             gpu_size: decoded.map_or((0, 0), |d| (1024 >> d, 1024 >> d)),
             fetching: false,
@@ -5149,6 +5199,38 @@ mod tests {
         assert!(s.bytes_below > 0);
         // the sizes decay for the next pass
         assert_eq!(s.entries[&Uuid::from_u128(1)].need_px, 100.0);
+    }
+
+    /// What our own avatar wears keeps its level under pressure, with the
+    /// preference on and noted since the last pass; the mark lasts one pass.
+    #[test]
+    fn pressure_leaves_the_textures_of_what_we_wear_with_the_preference() {
+        let worn = Uuid::from_u128(1);
+        let mb = 1024 * 1024 * 16 / 3;
+        let lowered = |keep: bool, step: u8| {
+            let mut s = pressed(step, vec![(1, entry(Some(0), 200.0)), (2, entry(Some(0), 200.0))]);
+            s.to_lower = u64::MAX;
+            s.set_kept(keep, false);
+            assert_eq!(s.keeps_own_worn(), keep);
+            s.note_own_worn(&worn);
+            s.recompute_wants();
+            (s.reductions.iter().map(|r| r.0.as_u128()).collect::<Vec<_>>(), s)
+        };
+        // the preference off: both lowered, as before
+        assert_eq!(lowered(false, 1).0, vec![1, 2]);
+        // on: the other one alone, at every step (the highest is the one a
+        // window behind is held at)
+        for step in [1, 4, texture_budget::MAX_PRESSURE] {
+            let (ids, mut s) = lowered(true, step);
+            assert_eq!(ids, vec![2], "pressure step {step}");
+            // loaded as without pressure, the other one coarser from step 4
+            assert_eq!(s.entries[&worn].want, discard_for(1024.0, 200.0, None), "pressure step {step}");
+            assert!(s.entries[&Uuid::from_u128(2)].want >= s.entries[&worn].want);
+            // not noted again (taken off): lowered at the next pass
+            s.note_usage(&worn, 200.0);
+            s.recompute_wants();
+            assert_eq!(s.reductions.first().map(|r| (r.0, r.2)), Some((worn, mb)), "pressure step {step}");
+        }
     }
 
     #[test]

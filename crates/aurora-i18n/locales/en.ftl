@@ -13555,3 +13555,8 @@ ui-options-draw-distance-stepping-hint = After logging in and after a teleport t
 tone-curves-reinhard = Reinhard
 tone-curves-uncharted2 = Uncharted 2 (filmic)
 tone-curves-agx = AgX
+# Preferences › Graphics: textures kept under memory pressure and in the background
+texkeep-own-worn = Keep my own attachments sharp
+texkeep-own-worn-help = The textures of what your avatar wears are never lowered when video memory runs short, like the textures of your skin and clothing layers.
+texkeep-background = Keep textures while the window is in the background
+texkeep-background-help = Off: after a minute in the background, or a second minimised, the textures are given back and load again when you return. On: they are kept. If video memory runs out while the window is behind, they are still given back.

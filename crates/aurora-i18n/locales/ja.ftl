@@ -13522,3 +13522,8 @@ ui-options-draw-distance-stepping-hint = ログイン後と別のリージョン
 tone-curves-reinhard = Reinhard
 tone-curves-uncharted2 = Uncharted 2（フィルミック）
 tone-curves-agx = AgX
+# Preferences › Graphics: textures kept under memory pressure and in the background
+texkeep-own-worn = 自分の装着物を鮮明に保つ
+texkeep-own-worn-help = ビデオメモリが不足しても、自分のアバターが装着しているもののテクスチャは解像度を下げません。スキンや衣服レイヤーのテクスチャと同じ扱いです。
+texkeep-background = ウィンドウがバックグラウンドにある間もテクスチャを保持する
+texkeep-background-help = オフ：バックグラウンドで1分、または最小化して1秒経つとテクスチャを解放し、戻ったときに読み込み直します。オン：テクスチャを保持します。ウィンドウが背面にある間にビデオメモリが不足した場合は、オンでも解放されます。

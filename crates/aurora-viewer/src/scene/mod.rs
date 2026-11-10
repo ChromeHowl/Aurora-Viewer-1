@@ -5223,6 +5223,17 @@ impl Scene {
                     self.textures.note_usage_fixed(id, px);
                 }
             }
+            // what our own avatar wears, for the memory pressure to leave
+            // alone (Preferences › Graphics; HUDs are already of a fixed size)
+            if self.textures.keeps_own_worn()
+                && let Some(own) = self.agent_idx
+            {
+                for g in self.gpu.iter().filter(|g| g.owner_avatar == Some(own) && !g.hud && !g.is_avatar) {
+                    for id in &g.tex_ids {
+                        self.textures.note_own_worn(id);
+                    }
+                }
+            }
             self.textures.recompute_wants();
         }
         self.stats.cull_ms = t0.elapsed().as_secs_f32() * 1000.0;
