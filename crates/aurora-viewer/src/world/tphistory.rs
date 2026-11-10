@@ -465,8 +465,9 @@ pub fn history_sections() -> [&'static str; 9] {
     ]
 }
 
-/// LLTeleportHistoryPanel::getNextTab with FSTPHistoryTZ "utc" (the
-/// default): the first six sections are days starting at midnight UTC,
+/// LLTeleportHistoryPanel::getNextTab with FSTPHistoryTZ "utc"
+/// (`history_section_in` for another zone): the first six sections are
+/// days starting at midnight UTC,
 /// "6 days ago or earlier" goes back to the same day of the previous month and
 /// "1 month ago or earlier" to six months ago. A date in the future counts as
 /// today. Returns the index in HISTORY_SECTIONS.
@@ -492,6 +493,29 @@ pub fn history_section(date: f64, now: f64) -> usize {
         }
     }
     history_sections().len() - 1
+}
+
+/// `history_section` in a time zone `offset` seconds from UTC: as
+/// LLTeleportHistoryPanel::getNextTab with FSTPHistoryTZ "slt" or "local",
+/// the days start at that zone's midnight, the zone's offset of now
+/// applying to every section.
+pub fn history_section_in(date: f64, now: f64, offset: i64) -> usize {
+    history_section(date + offset as f64, now + offset as f64)
+}
+
+/// A date at `offset` seconds from UTC: year, month, day, hour, minute
+/// (the parts of the history's DateFmt).
+pub fn date_parts(date: f64, offset: i64) -> (i64, u32, u32, i64, i64) {
+    let t = date.floor() as i64 + offset;
+    let (y, m, d) = aurora_net::profile::civil_from_days(t.div_euclid(86_400));
+    let secs = t.rem_euclid(86_400);
+    (y, m, d, secs / 3600, (secs / 60) % 60)
+}
+
+/// The position column of LLTeleportHistoryFlatItem::updateTitle: the
+/// position in the region, "%.0f, %.0f, %.0f".
+pub fn position_text(local: Vec3) -> String {
+    format!("{:.0}, {:.0}, {:.0}", local.x, local.y, local.z)
 }
 
 /// LLAgentUI::buildLocationString(LOCATION_FORMAT_NORMAL): "Parcel, Region",
@@ -657,6 +681,36 @@ mod tests {
         assert_eq!(history_section(days_from_civil(2026, 12, 31) as f64 * DAY, jan), 6);
         assert_eq!(history_section(days_from_civil(2026, 7, 31) as f64 * DAY, jan), 7);
         assert_eq!(history_section(days_from_civil(2026, 7, 30) as f64 * DAY, jan), 8);
+    }
+
+    /// FSTPHistoryTZ: the days start at the zone's midnight.
+    #[test]
+    fn sections_follow_the_time_zone() {
+        use aurora_net::profile::days_from_civil;
+        // 2026-10-10 03:00 UTC is still 2026-10-09 20:00 in SLT (UTC-7)
+        let now = days_from_civil(2026, 10, 10) as f64 * DAY + 3.0 * 3600.0;
+        let slt = -7 * 3600;
+        // 2026-10-09 22:00 UTC: yesterday in UTC, today in SLT
+        let evening = days_from_civil(2026, 10, 9) as f64 * DAY + 22.0 * 3600.0;
+        assert_eq!(history_section_in(evening, now, 0), 1);
+        assert_eq!(history_section_in(evening, now, slt), 0);
+        // 2026-10-09 06:00 UTC: 2026-10-08 23:00 SLT, yesterday there
+        let morning = days_from_civil(2026, 10, 9) as f64 * DAY + 6.0 * 3600.0;
+        assert_eq!(history_section_in(morning, now, slt), 1);
+        // east of UTC: 2026-10-10 01:00 UTC is already the 10th in UTC, and
+        // the 10th at 10:00 in UTC+9
+        assert_eq!(history_section_in(now - 2.0 * 3600.0, now, 9 * 3600), 0);
+    }
+
+    #[test]
+    fn date_and_position_columns() {
+        use aurora_net::profile::days_from_civil;
+        let t = days_from_civil(2026, 1, 1) as f64 * DAY + 5.0 * 3600.0 + 7.0 * 60.0 + 30.0;
+        assert_eq!(date_parts(t, 0), (2026, 1, 1, 5, 7));
+        // SLT in winter: the previous evening
+        assert_eq!(date_parts(t, -8 * 3600), (2025, 12, 31, 21, 7));
+        assert_eq!(date_parts(t, 5 * 3600 + 1800), (2026, 1, 1, 10, 37));
+        assert_eq!(position_text(Vec3::new(128.4, 64.6, 22.0)), "128, 65, 22");
     }
 
     #[test]

@@ -6,6 +6,7 @@
 //! visit read from the saved teleport history, and the places of the history
 //! that no landmark keeps. Pure: the window draws what these functions give.
 
+use crate::settings::teleport::HistoryZone;
 use crate::world::inventory::Inventory;
 use crate::world::landmarks::{Landmarks, Resolved};
 use crate::world::tphistory::HistoryItem;
@@ -350,21 +351,22 @@ fn add_folders(inv: &Inventory, parent: Uuid, depth: usize, out: &mut Vec<Folder
     }
 }
 
-/// "Today, 21:40", "Yesterday, 23:05", else "16 Oct." (Second Life time,
-/// like the days of the conversations).
-pub fn visit_label(date: f64, now: f64) -> String {
-    use crate::world::chat_log::format::Slt;
-    let at = |t: f64| std::time::UNIX_EPOCH + std::time::Duration::from_secs_f64(t.max(0.0));
-    let (d, today, yesterday) = (Slt::of(at(date)), Slt::of(at(now)), Slt::of(at(now - 86_400.0)));
-    let same = |a: &Slt, b: &Slt| (a.year, a.month, a.day) == (b.year, b.month, b.day);
-    let time = format!("{:02}:{:02}", d.hour, d.minute);
-    if same(&d, &today) {
+/// "Today, 21:40", "Yesterday, 23:05", else "16 Oct.", in the teleport
+/// history's time zone (Second Life time by default, like the days of the
+/// conversations; FSTPHistoryTZ).
+pub fn visit_label(date: f64, now: f64, zone: HistoryZone) -> String {
+    use crate::world::tphistory::date_parts;
+    let parts = |t: f64| date_parts(t, crate::ui::places::history_zone(zone, t as i64).0);
+    let (d, today, yesterday) = (parts(date), parts(now), parts(now - 86_400.0));
+    let day = |p: (i64, u32, u32, i64, i64)| (p.0, p.1, p.2);
+    let time = format!("{:02}:{:02}", d.3, d.4);
+    if day(d) == day(today) {
         aurora_i18n::tr!("ui-places-visit-today", time = time).to_owned()
-    } else if same(&d, &yesterday) {
+    } else if day(d) == day(yesterday) {
         aurora_i18n::tr!("ui-places-visit-yesterday", time = time).to_owned()
     } else {
-        let month = crate::ui::land::months()[(d.month.clamp(1, 12) - 1) as usize];
-        aurora_i18n::tr!("ui-places-visit-day", day = d.day.to_string(), month = month.to_string()).to_owned()
+        let month = crate::ui::land::months()[(d.1.clamp(1, 12) - 1) as usize];
+        aurora_i18n::tr!("ui-places-visit-day", day = d.2.to_string(), month = month.to_string()).to_owned()
     }
 }
 
@@ -611,17 +613,27 @@ mod tests {
         // 2026-10-19 21:40 SLT (PDT, UTC-7)
         let now = (aurora_net::profile::days_from_civil(2026, 10, 20) * 86_400 + 4 * 3600 + 40 * 60) as f64;
         assert_eq!(
-            visit_label(now, now),
+            visit_label(now, now, HistoryZone::Slt),
             aurora_i18n::tr!("ui-places-visit-today", time = "21:40").as_str()
         );
         assert_eq!(
-            visit_label(now - 86_400.0 - 3600.0, now),
+            visit_label(now - 86_400.0 - 3600.0, now, HistoryZone::Slt),
             aurora_i18n::tr!("ui-places-visit-yesterday", time = "20:40").as_str()
         );
         let month = crate::ui::land::months()[9];
         assert_eq!(
-            visit_label(now - 3.0 * 86_400.0, now),
+            visit_label(now - 3.0 * 86_400.0, now, HistoryZone::Slt),
             aurora_i18n::tr!("ui-places-visit-day", day = "16", month = month).as_str()
+        );
+        // the history's time zone: 04:40 UTC, today there too
+        assert_eq!(
+            visit_label(now, now, HistoryZone::Utc),
+            aurora_i18n::tr!("ui-places-visit-today", time = "04:40").as_str()
+        );
+        // 2026-10-19 23:00 UTC: today in SLT, yesterday in UTC
+        assert_eq!(
+            visit_label(now - 5.0 * 3600.0 - 40.0 * 60.0, now, HistoryZone::Utc),
+            aurora_i18n::tr!("ui-places-visit-yesterday", time = "23:00").as_str()
         );
         assert_eq!(created_label(0), aurora_i18n::tr!("status-unknown"));
     }

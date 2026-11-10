@@ -19,6 +19,7 @@
 
 use super::model::{self, Catalog, Key, Place, PlacesSort};
 use super::{Confirm, PlacesAction, PlacesUi, history_sections, now_secs, slurl_at, system_folder};
+use crate::settings::teleport::HistoryZone;
 use crate::theme::Palette;
 use crate::ui::place_card::{self, RowSize, Thumb};
 use crate::ui::place_details::{self, Ctx};
@@ -502,7 +503,7 @@ impl PlacesUi {
                 .collect(),
             Source::History => {
                 let mut out = Vec::new();
-                for (section, indices) in history_sections(history, "", now_secs()) {
+                for (section, indices) in history_sections(history, "", now_secs(), self.history_view.zone) {
                     let mut first = true;
                     for i in indices {
                         let Some(place) = cat.place(Key::Visit(i), history) else { continue };
@@ -620,6 +621,8 @@ impl PlacesUi {
             }
             Source::History => {
                 menu::check(ui, p, "history", aurora_i18n::tr!("ui-places-sort-newest"), true, false);
+                // the days of the sections and the visits' times
+                super::history_zone_menu(ui, p, self.history_view, actions);
                 menu::separator(ui, p);
                 if menu::item_if(
                     ui,
@@ -822,7 +825,17 @@ impl PlacesUi {
                 Some((s, ..)) => world.place_snapshots.snapshot(s, &world.profiles.parcels).unwrap_or_default(),
                 None => place.thumbnail,
             };
-            let out = place_row(ui, p, c, place, selected, snapshot, self.aurora.source == Source::Favorites, wide);
+            let out = place_row(
+                ui,
+                p,
+                c,
+                place,
+                selected,
+                snapshot,
+                self.aurora.source == Source::Favorites,
+                wide,
+                self.history_view.zone,
+            );
             let target = match key {
                 Key::Visit(_) => place.global.map(super::drag::Target::History),
                 Key::Landmark(_) => place.item.map(super::drag::Target::Landmark),
@@ -1262,7 +1275,7 @@ impl PlacesUi {
         if !link {
             let visit = place.last_visit.map_or_else(
                 || aurora_i18n::tr!("ui-places-never-visited").to_owned(),
-                |d| model::visit_label(d, now_secs()),
+                |d| model::visit_label(d, now_secs(), self.history_view.zone),
             );
             kv(ui, p, aurora_i18n::tr!("ui-places-last-visit"), &visit);
             ui.add_space(6.0);
@@ -1802,6 +1815,7 @@ fn place_row(
     picture_id: Uuid,
     grip: bool,
     wide: bool,
+    zone: HistoryZone,
 ) -> RowOut {
     let subtitle = if wide {
         let region = region_line(place, &c.world.map);
@@ -1817,7 +1831,7 @@ fn place_row(
             place.region.clone()
         };
         match place.last_visit {
-            Some(d) => format!("{region} · {}", model::visit_label(d, now_secs())),
+            Some(d) => format!("{region} · {}", model::visit_label(d, now_secs(), zone)),
             None => region,
         }
     };
@@ -1858,7 +1872,12 @@ fn place_row(
                 |ui| {
                     if let Some(d) = place.last_visit {
                         ui.add(
-                            egui::Label::new(egui::RichText::new(model::visit_label(d, now_secs())).size(12.0).color(p.muted)).truncate(),
+                            egui::Label::new(
+                                egui::RichText::new(model::visit_label(d, now_secs(), zone))
+                                    .size(12.0)
+                                    .color(p.muted),
+                            )
+                            .truncate(),
                         );
                     }
                 },

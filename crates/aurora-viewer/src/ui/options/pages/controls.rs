@@ -92,6 +92,80 @@ pub fn page(cx: &mut Cx) {
             0,
         );
     });
+    teleport_group(cx);
+}
+
+/// Teleports, the teleport history and the world map
+/// (settings/teleport.rs): the Legacy Viewer's rows of Move & View ›
+/// Teleports and Map, Firestorm › Login / Teleport, Sound and User
+/// interface.
+fn teleport_group(cx: &mut Cx) {
+    use crate::settings::teleport::HistoryZone;
+    use aurora_i18n::tr;
+    cx.group(tr!("tpmap-group"), |cx| {
+        cx.toggle(
+            tr!("tpmap-opt-keep-map-open"),
+            tr!("tpmap-opt-keep-map-open-help"),
+            &field!(teleport.keep_map_open),
+        );
+        cx.toggle(
+            tr!("tpmap-opt-clear-beacon"),
+            tr!("tpmap-opt-clear-beacon-help"),
+            &field!(teleport.clear_beacon),
+        );
+        cx.toggle(
+            tr!("tpmap-opt-back-slurl"),
+            tr!("tpmap-opt-back-slurl-help"),
+            &field!(teleport.back_slurl),
+        );
+        cx.toggle(
+            tr!("tpmap-opt-no-teleport-screen"),
+            tr!("tpmap-opt-no-teleport-screen-help"),
+            &field!(teleport.no_teleport_screen),
+        );
+        cx.toggle(
+            tr!("tpmap-opt-no-login-screen"),
+            tr!("tpmap-opt-no-login-screen-help"),
+            &field!(teleport.no_login_screen),
+        );
+        cx.toggle(
+            tr!("tpmap-opt-unmute-sounds"),
+            tr!("tpmap-opt-unmute-sounds-help"),
+            &field!(teleport.unmute_sounds),
+        );
+        cx.toggle(
+            tr!("tpmap-opt-unmute-ambient"),
+            tr!("tpmap-opt-unmute-ambient-help"),
+            &field!(teleport.unmute_ambient),
+        );
+        cx.toggle(
+            tr!("tpmap-opt-history-position"),
+            tr!("tpmap-opt-history-position-help"),
+            &field!(teleport.history.position),
+        );
+        cx.toggle(
+            tr!("tpmap-opt-history-date"),
+            tr!("tpmap-opt-history-date-help"),
+            &field!(teleport.history.date),
+        );
+        let zones: Vec<(HistoryZone, &str)> = HistoryZone::ALL.iter().map(|z| (*z, z.label())).collect();
+        cx.combo(
+            tr!("tpmap-opt-history-zone"),
+            tr!("tpmap-opt-history-zone-help"),
+            &field!(teleport.history.zone),
+            &zones,
+        );
+        cx.toggle(
+            tr!("tpmap-opt-map-region-info"),
+            tr!("tpmap-opt-map-region-info-help"),
+            &field!(teleport.map_region_info),
+        );
+        cx.toggle(
+            tr!("tpmap-opt-map-unique-landmarks"),
+            tr!("tpmap-opt-map-unique-landmarks-help"),
+            &field!(teleport.map_unique_landmarks),
+        );
+    });
 }
 
 /// "Show Friends Only" itself (FSRenderFriendsOnly), the switch of the

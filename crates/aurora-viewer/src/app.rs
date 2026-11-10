@@ -17815,6 +17815,7 @@ impl App {
                     sort: self.settings.places_sort,
                     favorites: &favorites_order,
                 });
+                self.places_ui.history_view = self.settings.teleport.history;
                 let places_acts = self.places_ui.show(
                     &ctx,
                     &mut c,
@@ -17875,6 +17876,10 @@ impl App {
                         }
                         PlacesAction::Sort(by) => {
                             self.settings.places_sort = by;
+                            self.settings.save();
+                        }
+                        PlacesAction::HistoryView(view) => {
+                            self.settings.teleport.history = view;
                             self.settings.save();
                         }
                     }
@@ -17961,6 +17966,7 @@ impl App {
                     }
                 }
                 let mut open = self.panels.world_map;
+                self.worldmap_ui.teleport = self.settings.teleport;
                 let pictures = ui::worldmap::MapPictures {
                     images: &self.ui_images,
                     avatars: &self.avatar_pics,
