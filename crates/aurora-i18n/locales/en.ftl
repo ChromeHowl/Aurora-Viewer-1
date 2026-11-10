@@ -13558,3 +13558,7 @@ p16-supersampling-hint = Samples drawn for each pixel of the photo, then average
 p16-supersampling-quality-hint = Off: Photo quality still draws this photo with 4 samples per pixel, as before.
 p16-supersampling-off = Off
 p16-supersampling-samples = { $count }x
+p16-full-save-tip = Full save: the photo, its cut-out and the background without avatars, three files of the same instant
+p16-full-saved = Saved { $name }, { $name }_cutout and { $name }_background
+p16-isolate-background = Background
+p16-isolate-background-tip = The scene without the avatars and what they wear

@@ -228,6 +228,8 @@ pub(super) struct Snapshots {
     /// The world frozen by the photo mode (`SnapshotUi::freeze_world`):
     /// the instant and the shaders' clock it shows.
     world_freeze: Option<snapshot::Hold>,
+    /// A Full save under way: its three files, one after the other.
+    full_save: Option<snapshot::full_save::FullSave>,
     /// The free camera flies, started by the window.
     free_flying: bool,
     /// The Controls window was opened by the free camera: it closes with it.
@@ -452,6 +454,7 @@ impl Default for Snapshots {
             gpu_cost: Default::default(),
             target_bytes: None,
             world_freeze: None,
+            full_save: None,
             free_flying: false,
             free_opened_controls: false,
             settings_changed: false,
@@ -1367,13 +1370,81 @@ impl App {
             path,
             alpha: cutout,
         }));
-        self.photo_shutter();
+        // (a Full save's shutter once, for its first file)
+        if self.snapshots.full_save.as_ref().is_none_or(|f| f.next == 0) {
+            self.photo_shutter();
+        }
+    }
+
+    /// A photo is being taken, saved or uploaded, or a Full save is under
+    /// way.
+    pub(super) fn photo_busy(&self) -> bool {
+        self.photo_busy_one() || self.snapshots.full_save.is_some()
     }
 
     /// A photo is being taken, saved or uploaded.
-    pub(super) fn photo_busy(&self) -> bool {
+    fn photo_busy_one(&self) -> bool {
         let s = &self.snapshots;
         s.saving.is_some() || s.upload.is_some() || s.detail_wait.is_some() || s.job.as_ref().is_some_and(|j| j.purpose != Purpose::Preview)
+    }
+
+    /// "Full save": the photo, its cut-out and its background alone, of
+    /// the same instant (`snapshot::full_save`). The world is held still
+    /// until the third is written; the first waits for the photo quality's
+    /// details as any photo does.
+    fn photo_full_save_start(&mut self, renderer: &Renderer) {
+        if self.photo_busy() || self.snapshots.held.is_some() || !self.in_world() {
+            return;
+        }
+        let s = &self.settings.snapshot;
+        let folder = s.folder();
+        let stamp = s.timestamp_names.then(snapshot::local_stamp);
+        let paths = snapshot::full_save::paths(&folder, &s.base_name, stamp.as_deref(), s.format, |p| p.exists());
+        log::info!("photo: full save to {}", paths[0].display());
+        let frozen = self.snapshots.ui.freeze_world;
+        self.snapshots.full_save = Some(snapshot::full_save::FullSave::new(paths, &self.world.photo_isolation, frozen));
+        // (frozen from the next frame on, before the first part is drawn)
+        self.snapshots.ui.freeze_world = true;
+        self.snapshots.ui.destination = Destination::Disk;
+        self.photo_action(Action::Take, renderer);
+    }
+
+    /// Every frame: the Full save's next file once the previous one is
+    /// written, or its end (the user's isolation and freeze given back).
+    fn photo_full_save_update(&mut self, renderer: &Renderer) {
+        let Some(full) = &self.snapshots.full_save else {
+            return;
+        };
+        if self.photo_busy_one() && self.panels.snapshot && self.in_world() {
+            return;
+        }
+        let written = full.started && self.snapshots.last_saved.as_ref() == Some(&full.paths[full.next]);
+        let done = written && full.next + 1 == full.paths.len();
+        if written && !done && self.panels.snapshot && self.in_world() {
+            if let Some(full) = self.snapshots.full_save.as_mut() {
+                full.next += 1;
+                full.started = false;
+            }
+            self.photo_take(renderer, None);
+            return;
+        }
+        // the end, or given up (a part not drawn or not written, the
+        // window closed): the files written so far are kept
+        let Some(full) = self.snapshots.full_save.take() else {
+            return;
+        };
+        full.restore(&mut self.world.photo_isolation);
+        self.snapshots.ui.freeze_world = full.frozen;
+        if done {
+            let name = full.paths[0]
+                .file_stem()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            log::info!("photo: full save written ({name})");
+            self.snapshots.message = Some((aurora_i18n::tr!("p16-full-saved", name = name.as_str()).to_owned(), false));
+        } else {
+            log::warn!("photo: full save stopped after {} of 3 file(s)", full.next);
+        }
     }
 
     /// Upload prices: the account's benefits (texture_upload_cost, by area
@@ -1590,7 +1661,16 @@ impl App {
 
     /// "Take the photo" to disk: the held one, or a new one.
     fn photo_take(&mut self, renderer: &Renderer, chosen: Option<PathBuf>) {
-        if self.photo_busy() {
+        if self.photo_busy_one() {
+            return;
+        }
+        // a Full save's next file, with its isolation (photo_full_save_update)
+        if let Some(full) = self.snapshots.full_save.as_mut() {
+            if !full.started
+                && let Some(path) = full.apply(&mut self.world.photo_isolation)
+            {
+                self.photo_job(Purpose::Save(Some(path)), renderer);
+            }
             return;
         }
         if let Some(held) = &self.snapshots.held {
@@ -1621,6 +1701,7 @@ impl App {
             self.snapshots.quiet = !self.panels.snapshot;
             self.photo_take(renderer, None);
         }
+        self.photo_full_save_update(renderer);
         self.photo_demo(renderer);
         self.photo_reel_demo(renderer);
         self.photo_luts_update();
@@ -1798,7 +1879,7 @@ impl App {
             s.camera_moved = None;
             s.preview_wanted = true;
         }
-        if s.preview_wanted && s.job.is_none() && in_world {
+        if s.preview_wanted && s.job.is_none() && s.full_save.is_none() && in_world {
             s.preview_wanted = false;
             s.preview_for = Some(key);
             self.photo_job(Purpose::Preview, renderer);
@@ -1809,6 +1890,7 @@ impl App {
     pub(super) fn photo_action(&mut self, action: Action, renderer: &Renderer) {
         match action {
             Action::Refresh => self.snapshots.preview_wanted = true,
+            Action::FullSave => self.photo_full_save_start(renderer),
             Action::Take => {
                 self.snapshots.quiet = false;
                 // the photo quality waits for the textures in view to load
@@ -1819,7 +1901,7 @@ impl App {
                     && !std::mem::take(&mut self.snapshots.detail_ready)
                     && (self.scene.textures.pending_in_view() > 0 || !renderer.settings_applied() || self.photo_quality_climbing())
                 {
-                    if self.snapshots.detail_wait.is_none() && !self.photo_busy() {
+                    if self.snapshots.detail_wait.is_none() && !self.photo_busy_one() {
                         log::info!(
                             "photo quality: waiting for {} textures{}{}",
                             self.scene.textures.pending_in_view(),

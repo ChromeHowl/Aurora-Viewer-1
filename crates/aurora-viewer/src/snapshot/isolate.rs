@@ -10,6 +10,12 @@
 //! (`object_flags::PHOTO_HIDDEN`); the particles, name plates and water
 //! effects read [`object_visible`]. While choosing in the scene everything
 //! is drawn, the chosen ones outlined, so that anything can be clicked.
+//!
+//! The background alone ([`Mode::Background`]) is the reverse: every avatar
+//! is left out with what it wears (its attachments, the lights and the
+//! particles of them), the scene kept around, an animated object that no
+//! one wears included. The Full save writes it beside the photo and its
+//! cut-out (`app::snapshot`).
 
 use uuid::Uuid;
 
@@ -23,6 +29,8 @@ pub enum Mode {
     Own,
     /// The avatars and objects chosen.
     Chosen,
+    /// The scene without its avatars and what they wear.
+    Background,
 }
 
 /// The isolation of the photo session.
@@ -70,11 +78,12 @@ impl Isolation {
 
     /// The background is left empty now (and the photo keeps its alpha).
     pub fn empty_background(&self) -> bool {
-        self.applied() && self.transparent
+        self.applied() && self.transparent && self.mode != Mode::Background
     }
 
-    /// Whether the avatar or linkset whose root is `root` is drawn.
-    pub fn root_visible(&self, root: &Uuid) -> bool {
+    /// Whether the avatar or linkset whose root is `root` is drawn; `avatar`:
+    /// the root is an avatar (what it wears, seated or not, has it for root).
+    pub fn root_visible(&self, root: &Uuid, avatar: bool) -> bool {
         if !self.applied() {
             return true;
         }
@@ -82,6 +91,7 @@ impl Isolation {
             Mode::Off => true,
             Mode::Own => *root == self.own,
             Mode::Chosen => self.chosen.contains(root),
+            Mode::Background => !avatar,
         }
     }
 
@@ -209,7 +219,8 @@ pub fn root_of(world: &crate::world::World, index: usize) -> Option<(usize, Uuid
 /// Whether the object at `index` is drawn under the photo's isolation.
 pub fn object_visible(world: &crate::world::World, index: usize) -> bool {
     let iso = &world.photo_isolation;
-    !iso.applied() || root_of(world, index).is_none_or(|(_, root)| iso.root_visible(&root))
+    !iso.applied()
+        || root_of(world, index).is_none_or(|(i, root)| iso.root_visible(&root, world.objects.get(i).is_some_and(|o| o.is_avatar())))
 }
 
 #[cfg(test)]
@@ -230,25 +241,44 @@ mod tests {
     #[test]
     fn own_shows_our_avatar_alone_and_chosen_the_choices() {
         let mut iso = opened();
-        assert!(iso.root_visible(&id(1)), "off: everything drawn");
+        assert!(iso.root_visible(&id(1), false), "off: everything drawn");
         iso.set_mode(Mode::Own);
-        assert!(iso.root_visible(&id(9)));
-        assert!(!iso.root_visible(&id(1)));
+        assert!(iso.root_visible(&id(9), false));
+        assert!(!iso.root_visible(&id(1), false));
         assert!(iso.empty_background());
         iso.set_mode(Mode::Chosen);
-        assert!(!iso.root_visible(&id(9)), "chosen, nothing chosen: nothing drawn");
+        assert!(!iso.root_visible(&id(9), false), "chosen, nothing chosen: nothing drawn");
         assert!(iso.toggle(id(1)));
         assert!(iso.toggle(id(2)));
-        assert!(iso.root_visible(&id(1)) && iso.root_visible(&id(2)));
+        assert!(iso.root_visible(&id(1), false) && iso.root_visible(&id(2), false));
         assert!(!iso.toggle(id(1)), "a second click removes");
-        assert!(!iso.root_visible(&id(1)));
+        assert!(!iso.root_visible(&id(1), false));
         assert_eq!(iso.chosen(), &[id(2)]);
         iso.set_picking(true);
-        assert!(iso.root_visible(&id(1)), "choosing shows everything");
+        assert!(iso.root_visible(&id(1), false), "choosing shows everything");
         assert!(!iso.empty_background());
         iso.set_transparent(false);
         iso.set_picking(false);
         assert!(!iso.empty_background(), "the sky and the ground kept");
+    }
+
+    #[test]
+    fn the_background_alone_leaves_out_every_avatar_and_keeps_the_rest() {
+        let mut iso = opened();
+        iso.set_mode(Mode::Background);
+        // an avatar (ours or another's), with what it wears and its lights
+        // and particles, since all of them have it for root
+        assert!(!iso.root_visible(&id(9), true));
+        assert!(!iso.root_visible(&id(1), true));
+        // a linkset, an animated object no one wears, a seat
+        assert!(iso.root_visible(&id(2), false));
+        // the sky, the ground and the water are kept, the photo opaque
+        assert!(!iso.empty_background());
+        iso.set_picking(true);
+        assert!(iso.root_visible(&id(1), true), "choosing shows everything");
+        iso.set_picking(false);
+        iso.set_open(false);
+        assert!(iso.root_visible(&id(1), true), "photo mode closed: everything drawn");
     }
 
     #[test]
@@ -271,7 +301,7 @@ mod tests {
         assert_eq!(iso.version, 6);
         iso.set_open(false);
         assert!(
-            iso.root_visible(&id(4)) && iso.root_visible(&id(5)),
+            iso.root_visible(&id(4), false) && iso.root_visible(&id(5), false),
             "photo mode closed: everything drawn"
         );
         assert_eq!(

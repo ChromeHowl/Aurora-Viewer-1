@@ -13525,3 +13525,7 @@ p16-supersampling-hint = 写真の1ピクセルごとに描画して平均する
 p16-supersampling-quality-hint = オフ：「写真の品質」はこれまでどおり、この写真を1ピクセルあたり4サンプルで描画します。
 p16-supersampling-off = オフ
 p16-supersampling-samples = { $count }x
+p16-full-save-tip = フル保存：写真、切り抜き、アバターのいない背景を、同じ瞬間の3つのファイルとして保存します
+p16-full-saved = { $name }、{ $name }_cutout、{ $name }_background を保存しました
+p16-isolate-background = 背景
+p16-isolate-background-tip = アバターとその装着物を除いたシーン

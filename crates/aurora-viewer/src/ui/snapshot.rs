@@ -166,6 +166,9 @@ pub struct View<'a> {
 pub enum Action {
     Refresh,
     Take,
+    /// The photo, its cut-out and its background alone, of one instant
+    /// (`snapshot::full_save`).
+    FullSave,
     SaveAs,
     ChooseFolder,
     OpenFolder,
@@ -380,7 +383,7 @@ impl SnapshotUi {
                 }
             }
             (None, None, None) => {
-                let take_w = ui.available_width() - 34.0;
+                let take_w = ui.available_width() - 68.0;
                 ui.add_enabled_ui(!busy, |ui| {
                     if widgets::action_button(
                         ui,
@@ -399,6 +402,12 @@ impl SnapshotUi {
                         .clicked()
                     {
                         out.push(Action::SaveAs);
+                    }
+                    if widgets::action_button(ui, p, "stack-2", "", ActionKind::Flat, Vec2::new(30.0, 32.0))
+                        .on_hover_text(aurora_i18n::tr!("p16-full-save-tip"))
+                        .clicked()
+                    {
+                        out.push(Action::FullSave);
                     }
                 });
             }

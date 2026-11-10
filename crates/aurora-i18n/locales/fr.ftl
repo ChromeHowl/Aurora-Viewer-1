@@ -13554,3 +13554,7 @@ p16-supersampling-hint = Échantillons rendus pour chaque pixel de la photo, pui
 p16-supersampling-quality-hint = Désactivé : la Qualité photo rend quand même cette photo avec 4 échantillons par pixel, comme avant.
 p16-supersampling-off = Désactivé
 p16-supersampling-samples = { $count }x
+p16-full-save-tip = Enregistrement complet : la photo, son détourage et l’arrière-plan sans avatars, trois fichiers du même instant
+p16-full-saved = { $name }, { $name }_cutout et { $name }_background enregistrés
+p16-isolate-background = Arrière-plan
+p16-isolate-background-tip = La scène sans les avatars ni ce qu’ils portent
