@@ -854,6 +854,19 @@ impl WorldMap {
         self.focus_track = false;
     }
 
+    /// FSDisableBeaconAfterTeleport (process_teleport_finish:
+    /// LLTracker::stopTracking, LLWorldMap::cancelTracking): the beacon goes
+    /// once a teleport to another region is under way; a friend joined in
+    /// two hops keeps its target for the second one. True when cleared.
+    pub fn clear_track_after_teleport(&mut self) -> bool {
+        let joining = self.friend_teleport.is_some() || self.friend_join.is_some() || self.friend_join_flight.is_some();
+        if joining || (self.track.is_none() && self.avatar.is_none()) {
+            return false;
+        }
+        self.clear_track();
+        true
+    }
+
     /// Track a spot set by hand (a region of the search): no friend is
     /// followed any more.
     pub fn set_track(&mut self, t: Track) {

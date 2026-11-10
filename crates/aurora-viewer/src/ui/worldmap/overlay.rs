@@ -97,21 +97,25 @@ struct LmFolder {
 /// The landmarks of our inventory out of the trash
 /// (LLFloaterWorldMap::buildLandmarkIDLists), by folder: Favorites, then
 /// Landmarks, then the other folders by name; rebuilt when the inventory
-/// changes.
+/// changes. With WorldmapFilterDuplicateLandmarks (`unique`) a place is
+/// listed once, by its first landmark in that order.
 #[derive(Default)]
 pub(super) struct LandmarkList {
     generation: Option<u64>,
+    unique: bool,
     items: Vec<Lm>,
     folders: Vec<LmFolder>,
 }
 
 impl LandmarkList {
     /// True when it was rebuilt.
-    fn refresh(&mut self, inv: &Inventory) -> bool {
-        if self.generation == Some(inv.generation) {
+    fn refresh(&mut self, inv: &Inventory, unique: bool) -> bool {
+        if self.generation == Some(inv.generation) && self.unique == unique {
             return false;
         }
         self.generation = Some(inv.generation);
+        self.unique = unique;
+        let mut seen = HashSet::new();
         let mut by_folder: HashMap<Uuid, Vec<&aurora_net::inventory::InvItem>> = HashMap::new();
         for it in inv.items.values() {
             if it.asset_type != ASSET_LANDMARK || it.asset_id.is_nil() {
@@ -138,6 +142,12 @@ impl LandmarkList {
         for id in folders {
             let mut list = by_folder.remove(&id).unwrap_or_default();
             list.sort_by_key(|i| (crate::natural_order::key(&i.name), i.id));
+            if unique {
+                super::keep_first_landmarks(&mut list, |i| i.asset_id, &mut seen);
+                if list.is_empty() {
+                    continue;
+                }
+            }
             let start = self.items.len();
             self.items.extend(list.into_iter().map(|i| Lm {
                 item: i.id,
@@ -618,7 +628,9 @@ impl WorldMapUi {
         let area = ui.available_rect_before_wrap();
         let size = vec2(area.width().max(160.0).floor(), area.height().max(160.0).floor());
         let map = Rect::from_min_size(area.min, size);
-        if self.ov.landmarks.refresh(&world.inventory) || (self.ov.landmarks.items.is_empty() && self.want_folders.is_empty()) {
+        if self.ov.landmarks.refresh(&world.inventory, self.teleport.map_unique_landmarks)
+            || (self.ov.landmarks.items.is_empty() && self.want_folders.is_empty())
+        {
             self.want_landmark_folders(&world.inventory);
         }
         let list = std::mem::take(&mut self.ov.landmarks);
@@ -1120,7 +1132,9 @@ impl WorldMapUi {
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .map_or(0.0, |d| d.as_secs_f64());
-                for (section, items) in crate::ui::places::history_sections(&world.tp_storage.items, filter, now) {
+                for (section, items) in
+                    crate::ui::places::history_sections(&world.tp_storage.items, filter, now, self.teleport.history.zone)
+                {
                     rows.push(Row::Section(section));
                     rows.extend(items.into_iter().map(Row::History));
                 }
@@ -2142,19 +2156,43 @@ mod tests {
     fn the_landmarks_are_listed_by_folder_favorites_first_without_the_trash() {
         let w = world();
         let mut list = LandmarkList::default();
-        assert!(list.refresh(&w.inventory));
-        assert!(!list.refresh(&w.inventory), "rebuilt only when the inventory changes");
+        assert!(list.refresh(&w.inventory, false));
+        assert!(!list.refresh(&w.inventory, false), "rebuilt only when the inventory changes");
         let folders: Vec<&str> = list.folders.iter().map(|f| f.name.as_str()).collect();
         assert_eq!(folders, ["Favorites", "Landmarks", "Clubs"]);
         let names: Vec<&str> = list.items.iter().map(|l| l.name.as_str()).collect();
         assert_eq!(names, ["Lagon", "Arbre", "Plage de la lagune", "Club des Lucioles"]);
     }
 
+    /// WorldmapFilterDuplicateLandmarks: a place reached by several
+    /// landmarks is listed once, by the first one in the list's order; a
+    /// folder left without landmarks goes.
+    #[test]
+    fn duplicate_landmarks_are_listed_once_when_asked() {
+        let mut w = world();
+        // a second landmark of the club in Clubs, of the lagoon in Landmarks
+        let mut copy = landmark(201, 20, "Club zz copie");
+        copy.asset_id = Uuid::from_u128(1200);
+        let mut lagoon = landmark(102, 10, "Lagon bis");
+        lagoon.asset_id = Uuid::from_u128(1300);
+        for it in [copy, lagoon] {
+            w.inventory.items.insert(it.id, it);
+        }
+        let mut list = LandmarkList::default();
+        list.refresh(&w.inventory, false);
+        assert_eq!(list.items.len(), 6);
+        assert!(list.refresh(&w.inventory, true), "the option rebuilds the list");
+        let names: Vec<&str> = list.items.iter().map(|l| l.name.as_str()).collect();
+        assert_eq!(names, ["Lagon", "Arbre", "Plage de la lagune", "Club des Lucioles"]);
+        let folders: Vec<&str> = list.folders.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(folders, ["Favorites", "Landmarks", "Clubs"]);
+    }
+
     #[test]
     fn one_search_suggests_regions_landmarks_friends_and_history() {
         let mut w = world();
         let mut list = LandmarkList::default();
-        list.refresh(&w.inventory);
+        list.refresh(&w.inventory, false);
         let s = build_suggestions(&w, &list, "LAG");
         let groups: Vec<Group> = s.iter().map(|s| s.group).collect();
         let labels: Vec<&str> = s.iter().map(|s| s.label.as_str()).collect();

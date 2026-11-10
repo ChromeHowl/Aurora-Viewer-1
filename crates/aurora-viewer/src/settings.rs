@@ -15,6 +15,7 @@ pub mod registry;
 pub mod render_extras;
 mod saver;
 pub mod stream_list;
+pub mod teleport;
 
 /// Where a contact-set marker stands on an avatar (`ui/contact_markers.rs`).
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -512,6 +513,9 @@ pub struct Settings {
     pub people: people::People,
     /// Friends tab of the People window.
     pub friends_list: crate::ui::people::FriendsSettings,
+    /// Teleport history columns, world map extras and teleport options
+    /// (settings/teleport.rs).
+    pub teleport: teleport::Teleport,
     pub inventory: crate::ui::inventory::InventoryPreferences,
     pub texture_library: crate::ui::texture_library::Preferences,
     pub gestures: crate::ui::gestures::Settings,
@@ -1974,6 +1978,7 @@ impl Default for Settings {
             radar: Default::default(),
             people: Default::default(),
             friends_list: Default::default(),
+            teleport: Default::default(),
             inventory: Default::default(),
             texture_library: Default::default(),
             gestures: Default::default(),

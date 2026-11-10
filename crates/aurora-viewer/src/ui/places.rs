@@ -23,6 +23,7 @@ pub mod model;
 
 use super::place_details::{self, ButtonLook, Ctx};
 use super::widgets::{self, Floater};
+use crate::settings::teleport::{HistoryView, HistoryZone};
 use crate::theme::Palette;
 use crate::world::World;
 use crate::world::inventory::{FetchState, Inventory};
@@ -105,6 +106,8 @@ pub enum PlacesAction {
     OpenWindow(Source),
     /// The order of Aurora's lists.
     Sort(model::PlacesSort),
+    /// The history's columns or time zone, from its ⚙ menu.
+    HistoryView(HistoryView),
 }
 
 /// One line of a landmarks tab.
@@ -218,20 +221,96 @@ fn add_rows(
 }
 
 /// The history in its sections (LLTeleportHistoryPanel::refresh): newest
-/// first, filtered by title; empty sections are left out.
-pub fn history_sections(items: &[HistoryItem], filter: &str, now: f64) -> Vec<(usize, Vec<usize>)> {
+/// first, filtered by title; empty sections are left out. The days start
+/// at midnight in `zone` (FSTPHistoryTZ).
+pub fn history_sections(items: &[HistoryItem], filter: &str, now: f64, zone: HistoryZone) -> Vec<(usize, Vec<usize>)> {
+    let offset = history_zone(zone, now as i64).0;
     let mut out: Vec<(usize, Vec<usize>)> = Vec::new();
     for (i, it) in items.iter().enumerate().rev() {
         if !tphistory::history_matches(&it.title, filter) {
             continue;
         }
-        let s = tphistory::history_section(it.date, now);
+        let s = tphistory::history_section_in(it.date, now, offset);
         match out.last_mut() {
             Some((last, v)) if *last == s => v.push(i),
             _ => out.push((s, vec![i])),
         }
     }
     out
+}
+
+/// The time zone and Show... sub-menus of the history's ⚙ menu
+/// (menu_teleport_history_gear.xml: TeleportHistory.TimeZone.Set,
+/// FSTeleportHistoryShowPosition, FSTeleportHistoryShowDate).
+fn history_view_menus(ui: &mut egui::Ui, p: &Palette, view: HistoryView, actions: &mut Vec<PlacesAction>) {
+    history_zone_menu(ui, p, view, actions);
+    super::menu::submenu(ui, p, "eye-filled", aurora_i18n::tr!("tpmap-show"), true, |ui| {
+        if super::menu::check(ui, p, "", aurora_i18n::tr!("tpmap-show-position"), view.position, true) {
+            actions.push(PlacesAction::HistoryView(HistoryView {
+                position: !view.position,
+                ..view
+            }));
+        }
+        if super::menu::check(ui, p, "", aurora_i18n::tr!("tpmap-show-date"), view.date, true) {
+            actions.push(PlacesAction::HistoryView(HistoryView { date: !view.date, ..view }));
+        }
+    });
+}
+
+/// The time zone sub-menu of the history (TeleportHistory.TimeZone.Set):
+/// its day sections and its dates.
+pub(crate) fn history_zone_menu(ui: &mut egui::Ui, p: &Palette, view: HistoryView, actions: &mut Vec<PlacesAction>) {
+    super::menu::submenu(ui, p, "clock-filled", aurora_i18n::tr!("tpmap-time-zone"), true, |ui| {
+        for zone in HistoryZone::ALL {
+            if super::menu::check(ui, p, "", zone.label(), view.zone == zone, true) {
+                actions.push(PlacesAction::HistoryView(HistoryView { zone, ..view }));
+            }
+        }
+    });
+}
+
+/// The history's time zone at `unix`: the seconds it adds to UTC and its
+/// label (FSTPHistoryTZ; LLStringOps::getPacificTimeOffset and
+/// getLocalTimeOffset, the zone named after the date as FIRE-34952 does).
+pub fn history_zone(zone: HistoryZone, unix: i64) -> (i64, String) {
+    use super::bars::clock;
+    match zone {
+        HistoryZone::Utc => (0, "UTC".to_owned()),
+        HistoryZone::Slt => (clock::offset(crate::settings::ClockZone::Slt, unix), "SLT".to_owned()),
+        HistoryZone::Local => clock::local_zone(unix),
+    }
+}
+
+/// The date column of a history entry (LLTeleportHistoryFlatItem::
+/// getTimestamp, DateFmt / DateFmtAMPM): month / day / year, the time in 12
+/// or 24 hours as the bars' clock writes it (Use24HourClock), and the zone.
+pub fn history_date(date: f64, zone: HistoryZone) -> String {
+    let (offset, label) = history_zone(zone, date as i64);
+    let (y, m, d, h, min) = tphistory::date_parts(date, offset);
+    let time = super::bars::clock::hour_text(h, min, "", super::bars::clock::chat_twelve_hours());
+    aurora_i18n::tr!(
+        "tpmap-history-date",
+        year = y.to_string(),
+        month = format!("{m:02}"),
+        day = format!("{d:02}"),
+        time = time,
+        zone = label
+    )
+    .to_owned()
+}
+
+/// The position and date columns of a history entry, as asked
+/// (FSTeleportHistoryShowPosition, FSTeleportHistoryShowDate).
+fn history_detail(world: &World, it: &HistoryItem, position: bool, view: HistoryView) -> String {
+    let mut parts = Vec::new();
+    if position {
+        let (x, y) = world.map.local_xy(it.global.x, it.global.y);
+        parts.push(tphistory::position_text(glam::Vec3::new(x as f32, y as f32, it.global.z as f32)));
+    }
+    if view.date {
+        parts.push(history_date(it.date, view.zone));
+    }
+    parts.join("   ")
 }
 
 /// The region of a SLURL for a global position: the map's, else the region
@@ -286,6 +365,10 @@ pub struct PlacesUi {
     /// AURORA_DEMO_PLACES=…:classic: the Legacy Viewer's tabs for this run,
     /// whatever Preferences › Aurora › Places says (not saved).
     pub demo_classic: bool,
+    /// The history's columns and time zone (`Settings::teleport`, set by
+    /// the app each frame; the ⚙ menu asks for a change with
+    /// `PlacesAction::HistoryView`).
+    pub history_view: HistoryView,
 }
 
 impl PlacesUi {
@@ -490,7 +573,7 @@ impl PlacesUi {
                 aurora_i18n::tr!("ui-places-show-sorting-options"),
                 |ui| {
                     if history {
-                        self.history_gear_menu(ui, p, world);
+                        self.history_gear_menu(ui, p, world, actions);
                     } else {
                         self.sorting_menu(ui, p, world, by_date, actions);
                     }
@@ -613,6 +696,7 @@ impl PlacesUi {
                 icon,
                 rating,
                 &row.name,
+                "",
                 self.selected == Some(sel),
                 false,
             );
@@ -872,7 +956,11 @@ impl PlacesUi {
     fn history_list(&mut self, ui: &mut egui::Ui, p: &Palette, world: &World, actions: &mut Vec<PlacesAction>) {
         let items = &world.tp_storage.items;
         let filter = self.filter.trim().to_owned();
-        let sections = history_sections(items, &filter, now_secs());
+        let view = self.history_view;
+        let sections = history_sections(items, &filter, now_secs(), view.zone);
+        // RLVa @showloc: no position of a place (stricter than the Legacy
+        // Viewer, whose column stays)
+        let show_position = view.position && !world.rlva.has("showloc");
         if sections.is_empty() {
             // no_teleports_msg / no_matched_teleports_msg (the search is not
             // ported yet)
@@ -899,6 +987,7 @@ impl PlacesUi {
             }
             for i in indices {
                 let it = &items[i];
+                let detail = history_detail(world, it, show_position, view);
                 // the region where the entry led, by its position, else by
                 // the name at the end of its title (asked once if unknown)
                 let rating = world
@@ -917,6 +1006,7 @@ impl PlacesUi {
                     "map-pin-filled",
                     rating,
                     &it.title,
+                    &detail,
                     self.selected == Some(Sel::History(i)),
                     true,
                 );
@@ -995,8 +1085,8 @@ impl PlacesUi {
     }
 
     /// menu_teleport_history_gear.xml.
-    fn history_gear_menu(&mut self, ui: &mut egui::Ui, p: &Palette, world: &World) {
-        let present: Vec<usize> = history_sections(&world.tp_storage.items, "", now_secs())
+    fn history_gear_menu(&mut self, ui: &mut egui::Ui, p: &Palette, world: &World, actions: &mut Vec<PlacesAction>) {
+        let present: Vec<usize> = history_sections(&world.tp_storage.items, "", now_secs(), self.history_view.zone)
             .into_iter()
             .map(|(s, _)| s)
             .collect();
@@ -1021,6 +1111,7 @@ impl PlacesUi {
             self.collapsed.extend(0..tphistory::history_sections().len());
             self.selected = None;
         }
+        history_view_menus(ui, p, self.history_view, actions);
         // FIRE-31025
         if super::menu::item_if(
             ui,
@@ -1195,8 +1286,9 @@ struct RowResponse {
 }
 
 /// One line of a list: indentation, caret for a folder, icon, the rating
-/// badge of the place's region when known, name; the history lines show an
-/// "i" button while hovered.
+/// badge of the place's region when known, name, then `detail` in grey at
+/// the right (the history's position and date columns); the history lines
+/// show an "i" button while hovered.
 #[allow(clippy::too_many_arguments)]
 fn list_row(
     ui: &mut egui::Ui,
@@ -1206,6 +1298,7 @@ fn list_row(
     icon: &str,
     rating: Option<u8>,
     name: &str,
+    detail: &str,
     selected: bool,
     info_button: bool,
 ) -> RowResponse {
@@ -1266,6 +1359,15 @@ fn list_row(
         }
         info = response.clicked() && response.interact_pointer_pos().is_some_and(|pos| r.contains(pos));
         right -= 20.0;
+    }
+    if !detail.is_empty() {
+        let galley = painter.layout_no_wrap(detail.to_owned(), egui::FontId::proportional(11.5), p.muted);
+        let at = egui::pos2(right - galley.size().x, rect.center().y - galley.size().y * 0.5);
+        // the name keeps at least a third of the row
+        if at.x > x + (right - x) / 3.0 {
+            painter.galley(at, galley, p.muted);
+            right = at.x - 8.0;
+        }
     }
     let galley = painter.layout(name.to_owned(), egui::FontId::proportional(12.5), p.ink, f32::INFINITY);
     let clip = egui::Rect::from_min_max(egui::pos2(x, rect.top()), egui::pos2(right, rect.bottom()));
@@ -1713,10 +1815,26 @@ mod tests {
             item("Matin", now - 2.0 * 3600.0),
             item(aurora_i18n::tr!("common-midday"), now - 60.0),
         ];
-        let s = history_sections(&items, "", now);
+        let s = history_sections(&items, "", now, HistoryZone::Utc);
         assert_eq!(s, vec![(0, vec![4, 3]), (1, vec![2]), (2, vec![1]), (8, vec![0])]);
-        let s = history_sections(&items, "MAT", now);
+        let s = history_sections(&items, "MAT", now, HistoryZone::Utc);
         assert_eq!(s, vec![(0, vec![3])]);
+        // 12:00 UTC is 05:00 SLT (October, UTC-7): six hours earlier is
+        // today in UTC, yesterday in SLT
+        let dawn = vec![item("Aube", now - 6.0 * 3600.0)];
+        assert_eq!(history_sections(&dawn, "", now, HistoryZone::Utc), vec![(0, vec![0])]);
+        assert_eq!(history_sections(&dawn, "", now, HistoryZone::Slt), vec![(1, vec![0])]);
+    }
+
+    /// The date column: month / day / year, the time and the zone.
+    #[test]
+    fn history_date_column() {
+        let t = aurora_net::profile::days_from_civil(2026, 1, 2) as f64 * DAY + 5.0 * 3600.0 + 7.0 * 60.0;
+        let utc = history_date(t, HistoryZone::Utc);
+        assert!(utc.contains("2026") && utc.contains("02") && utc.ends_with("05:07 UTC"), "{utc}");
+        // January: SLT is UTC-8, the evening before
+        let slt = history_date(t, HistoryZone::Slt);
+        assert!(slt.contains("01") && slt.ends_with("21:07 SLT"), "{slt}");
     }
 
     #[test]

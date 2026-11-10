@@ -111,6 +111,12 @@ pub(crate) fn offset(zone: ClockZone, unix: i64) -> i64 {
     }
 }
 
+/// Local time's offset from UTC (seconds) and its label at `unix`, for the
+/// teleport history's local dates.
+pub(crate) fn local_zone(unix: i64) -> (i64, String) {
+    local(unix)
+}
+
 /// The time a left click on the clock switches to.
 pub(crate) fn next(zone: ClockZone) -> ClockZone {
     match zone {

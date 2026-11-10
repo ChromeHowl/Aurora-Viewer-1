@@ -141,6 +141,7 @@ mod social_menu_demo;
 mod stream_list;
 mod suggest_demo;
 mod task_notecards;
+mod teleport_comfort;
 mod teleport_lookup;
 mod teleport_screen;
 mod texture_library;
@@ -760,6 +761,9 @@ pub struct App {
     demo_radar_walk: bool,
     /// Destination of the teleport being started (teleport screen).
     tp_dest: Option<String>,
+    /// A teleport to another region under way, for its arrival's options
+    /// (app/teleport_comfort.rs).
+    tp_leaving: Option<teleport_comfort::Leaving>,
     /// Window moved / resized: its normal geometry is recorded once settled.
     geom_changed: Option<Instant>,
     frame_start: Instant,
@@ -1736,6 +1740,7 @@ impl App {
             demo_radar_tp: false,
             demo_radar_walk: false,
             tp_dest: None,
+            tp_leaving: None,
             geom_changed: None,
             frame_start: Instant::now(),
             alt_codes: Default::default(),
@@ -3208,6 +3213,7 @@ impl App {
         self.region_restart.put_demo(demo);
         self.restart_evac = Default::default();
         self.move_complete_at = None;
+        self.teleport_comfort_reset();
         self.static_eyes.on_arrival();
         self.set_mouselook_grab(false);
         self.camera = Camera::default();
@@ -3999,6 +4005,7 @@ impl App {
                 self.stop_local_typing();
                 // (TeleportFinish is the arrival in another region)
                 self.start_draw_stepping("teleport");
+                self.teleport_comfort_leaving();
                 if self.world.tp_show_progress && matches!(self.screen, Screen::World) && !self.was_teleporting {
                     // Finish and arrival can be drained in the same frame.
                     // Start the screen here so a fast remote teleport still
@@ -4007,6 +4014,7 @@ impl App {
                 }
             }
             NetEvent::AgentMovementComplete { .. } => {
+                self.teleport_comfort_arrived();
                 if std::mem::replace(&mut self.first_arrival_done, true) {
                     self.draw_stepping_arrived();
                 } else {
@@ -7511,6 +7519,7 @@ impl App {
         self.release_object_hold();
         self.tp_dest = Some(dest);
         self.media.on_teleport();
+        self.teleport_comfort_begin();
         self.world.begin_teleport(show_progress);
         // LLAgent::teleportCore runs before the teleport request is sent: the
         // stops of the seat's animations (LLVOAvatarSelf::stopMotionFromSource)
@@ -7527,6 +7536,12 @@ impl App {
     }
 
     fn show_teleport_progress(&mut self) {
+        if self.settings.teleport.no_teleport_screen {
+            // FSDisableTeleportScreens: the world stays in view
+            self.tp_dest = None;
+            self.was_teleporting = true;
+            return;
+        }
         if self.settings.loading_backdrop {
             self.want_scene_capture = true;
         }
@@ -10434,16 +10449,20 @@ impl App {
         if let Screen::Loading { since } = self.screen {
             let moved = self.move_complete_at.map(|t| t.elapsed().as_secs_f32()).unwrap_or(0.0);
             let terrain = self.world.terrain_progress();
-            if self.world.movement_complete && since.elapsed() > Duration::from_millis(1500) && (terrain > 0.97 || moved > 6.0) {
+            let skip = self.settings.teleport.no_login_screen;
+            if teleport_comfort::loading_screen_ends(skip, self.world.movement_complete, since.elapsed(), terrain, moved) {
                 self.screen = Screen::World;
                 self.world.notifications.started = true;
                 self.camera.snap();
-                // the loading screen fades out over the world
-                let mut o = TpOverlay::new(String::new(), true);
-                o.start = since;
-                o.shown = 1.0;
-                o.end = Some(Instant::now());
-                self.tp_overlay = Some(o);
+                // the loading screen fades out over the world (gone at once
+                // without it, FSDisableLoginScreens)
+                if !skip {
+                    let mut o = TpOverlay::new(String::new(), true);
+                    o.start = since;
+                    o.shown = 1.0;
+                    o.end = Some(Instant::now());
+                    self.tp_overlay = Some(o);
+                }
                 self.was_teleporting = self.world.teleporting;
             }
         }
@@ -17885,6 +17904,7 @@ impl App {
                     sort: self.settings.places_sort,
                     favorites: &favorites_order,
                 });
+                self.places_ui.history_view = self.settings.teleport.history;
                 let places_acts = self.places_ui.show(
                     &ctx,
                     &mut c,
@@ -17945,6 +17965,10 @@ impl App {
                         }
                         PlacesAction::Sort(by) => {
                             self.settings.places_sort = by;
+                            self.settings.save();
+                        }
+                        PlacesAction::HistoryView(view) => {
+                            self.settings.teleport.history = view;
                             self.settings.save();
                         }
                     }
@@ -18031,6 +18055,7 @@ impl App {
                     }
                 }
                 let mut open = self.panels.world_map;
+                self.worldmap_ui.teleport = self.settings.teleport;
                 let pictures = ui::worldmap::MapPictures {
                     images: &self.ui_images,
                     avatars: &self.avatar_pics,
@@ -18062,10 +18087,9 @@ impl App {
                             self.region_tracker_ui.track_region(&self.world, name);
                             self.panels.region_tracker = true;
                         }
-                        ui::worldmap::WorldMapAction::TeleportHome => {
-                            a.bar = BarAction::TeleportHome;
-                            self.panels.world_map = false;
-                        }
+                        // the map closes as the teleport starts, unless asked
+                        // to stay (teleport_comfort_begin)
+                        ui::worldmap::WorldMapAction::TeleportHome => a.bar = BarAction::TeleportHome,
                         ui::worldmap::WorldMapAction::TeleportLandmark(asset) => a.landmark = Some(asset),
                         ui::worldmap::WorldMapAction::TeleportHistory(global) => self.teleport_saved_place(global),
                         ui::worldmap::WorldMapAction::OpenPlace(source) => self.show_place_profile(source),
