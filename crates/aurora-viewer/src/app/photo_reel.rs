@@ -172,6 +172,17 @@ impl ReelState {
     /// or a new one joining the reel, its thumbnail and the reel's copy made
     /// from `rgba`, in the session's folder of the account `agent`.
     pub(super) fn start(&mut self, size: (u32, u32), rgba: &[u8], cutout: bool, agent: &uuid::Uuid) {
+        // (a photo already held in the reel takes no copy)
+        if self.held.is_some_and(|id| self.reel.get(id).is_some()) {
+            self.start_shared(size, Default::default(), cutout, agent);
+        } else {
+            self.start_shared(size, std::sync::Arc::new(rgba.to_vec()), cutout, agent);
+        }
+    }
+
+    /// As `start`, from pixels shared with whoever sends the photo (the
+    /// save to disk of a photo up to 1 GiB: no second copy).
+    pub(super) fn start_shared(&mut self, size: (u32, u32), rgba: std::sync::Arc<Vec<u8>>, cutout: bool, agent: &uuid::Uuid) {
         if let Some(id) = self.held.filter(|id| self.reel.get(*id).is_some()) {
             self.sending = Some(id);
             self.again = true;
@@ -188,7 +199,6 @@ impl ReelState {
             }
         }
         let copy = self.folder.as_ref().map(|f| f.path(id));
-        let rgba = rgba.to_vec();
         let tx = self.tx.clone();
         spawn(&self.tx, move || {
             let _ = tx.send(Done::Thumb(id, save::thumbnail(size.0, size.1, &rgba)));

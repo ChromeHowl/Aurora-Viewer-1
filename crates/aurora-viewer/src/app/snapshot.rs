@@ -122,6 +122,9 @@ struct Job {
     hold: Option<snapshot::Hold>,
     /// The whole photo drawn small before its tiles, for their occlusion.
     context: ContextPass,
+    /// As planned when the photo started (`context` again when it is drawn
+    /// from its first part).
+    context_plan: ContextPass,
     /// Its parts wait while the 3D drawing is paused behind.
     paused: snapshot::PausedWait,
 }
@@ -130,7 +133,9 @@ struct Job {
 struct Held {
     width: u32,
     height: u32,
-    rgba: Vec<u8>,
+    /// Shared with the worker that reduces it for the screen and with its
+    /// save: a 16K photo is 1 GiB, never cloned.
+    rgba: std::sync::Arc<Vec<u8>>,
     cutout: bool,
     texture: Option<egui::TextureHandle>,
 }
@@ -553,7 +558,7 @@ impl App {
                     job.next = 0;
                     job.pixels = Vec::new();
                     job.hold = None;
-                    job.context = ContextPass::plan(job.size, job.tiles.len(), occlusion);
+                    job.context = if occlusion { job.context_plan } else { ContextPass::None };
                     return None;
                 }
             }
@@ -739,7 +744,19 @@ impl App {
             job.pixels = pixels;
         } else {
             if job.pixels.is_empty() {
-                job.pixels = vec![0; job.size.0 as usize * job.size.1 as usize * 4];
+                // (1 GiB for a 16K photo: asked of the system, not assumed)
+                let Some(buffer) = snapshot::photo_buffer(snapshot::photo_bytes(job.size)) else {
+                    log::warn!(
+                        "photo: no memory for {} x {} ({} MB)",
+                        job.size.0,
+                        job.size.1,
+                        snapshot::photo_bytes(job.size) >> 20
+                    );
+                    self.snapshots.job = None;
+                    self.snapshots.message = Some((aurora_i18n::tr!("p16-memory").to_owned(), true));
+                    return;
+                };
+                job.pixels = buffer;
             }
             snapshot::stitch(&mut job.pixels, job.size.0, pass, &pixels);
         }
@@ -778,7 +795,7 @@ impl App {
                 self.photo_hold_pixels(job.size, job.pixels, job.cutout, side);
                 self.photo_shutter();
             }
-            Purpose::Save(path) => self.photo_save(job.size, job.pixels, path, job.cutout),
+            Purpose::Save(path) => self.photo_save(job.size, job.pixels.into(), path, job.cutout),
             Purpose::Inventory(cost) => self.photo_encode(job.size, job.pixels, cost, job.cutout),
             Purpose::Profile => self.photo_post(job.size, job.pixels, job.cutout),
             Purpose::Postcard => self.photo_postcard(job.size, job.pixels, job.cutout),
@@ -801,6 +818,7 @@ impl App {
     pub(super) fn photo_hold_pixels(&mut self, size: (u32, u32), rgba: Vec<u8>, cutout: bool, side: u32) {
         let (tx, rx) = crossbeam_channel::bounded(1);
         let (w, h) = size;
+        let rgba = std::sync::Arc::new(rgba);
         let view = rgba.clone();
         std::thread::spawn(move || {
             let _ = tx.send(save::downscale(w, h, &view, side));
@@ -819,7 +837,7 @@ impl App {
     /// photo of the reel saved again).
     pub(super) fn photo_save_pixels(&mut self, size: (u32, u32), rgba: Vec<u8>, cutout: bool) {
         if !self.photo_busy() {
-            self.photo_save(size, rgba, None, cutout);
+            self.photo_save(size, rgba.into(), None, cutout);
         }
     }
 
@@ -877,7 +895,7 @@ impl App {
             return;
         }
         if let Some(held) = &self.snapshots.held {
-            let (size, rgba, cutout) = ((held.width, held.height), held.rgba.clone(), held.cutout);
+            let (size, rgba, cutout) = ((held.width, held.height), held.rgba.to_vec(), held.cutout);
             self.photo_post(size, rgba, cutout);
             return;
         }
@@ -956,7 +974,7 @@ impl App {
             return;
         }
         if let Some(held) = &self.snapshots.held {
-            let (size, rgba, cutout) = ((held.width, held.height), held.rgba.clone(), held.cutout);
+            let (size, rgba, cutout) = ((held.width, held.height), held.rgba.to_vec(), held.cutout);
             self.photo_postcard(size, rgba, cutout);
             return;
         }
@@ -1131,7 +1149,8 @@ impl App {
         // HUDs or the photo's looks, whatever the Photo window has chosen
         let interface = !outfit && s.interface && snapshot::same_proportions(full, window);
         // (with the ambient occlusion on: GTAO may be forced over its method)
-        let context = ContextPass::plan(size, tiles.len(), self.settings.ssao > 0);
+        let context = ContextPass::plan(size, tiles.len(), self.settings.ssao > 0)
+            .within(self.photo_max_side(renderer), self.photo_max_pixels(renderer));
         self.snapshots.job = Some(Job {
             purpose,
             size,
@@ -1151,6 +1170,7 @@ impl App {
             photo: full,
             hold: None,
             context,
+            context_plan: context,
             paused: Default::default(),
         });
         if outfit {
@@ -1255,7 +1275,12 @@ impl App {
             .video_memory
             .read(&renderer.device)
             .map_or(DEFAULT_TARGET_BYTES, |m| m.budget.saturating_sub(m.usage) / 2);
-        snapshot::pass_pixels(free, per_pixel, renderer.size()).min(self.snapshots.gpu_cost.pass_pixels(renderer.size(), ms))
+        let window = renderer.size();
+        snapshot::pass_pixels(free, per_pixel, window)
+            .min(self.snapshots.gpu_cost.pass_pixels(window, ms))
+            // (what the pass's read-back buffer holds: never under the
+            // window's frame, which the device draws and reads every frame)
+            .min(snapshot::readback_pixels(renderer.device.limits().max_buffer_size).max(u64::from(window.0) * u64::from(window.1)))
     }
 
     /// LLViewerWindow::playSnapshotAnimAndSound: the snapshot animation and
@@ -1270,7 +1295,7 @@ impl App {
         self.send_sound_trigger(self.settings.audio.ui.uuid(UiSound::Snapshot));
     }
 
-    fn photo_save(&mut self, size: (u32, u32), rgba: Vec<u8>, chosen: Option<PathBuf>, cutout: bool) {
+    fn photo_save(&mut self, size: (u32, u32), rgba: std::sync::Arc<Vec<u8>>, chosen: Option<PathBuf>, cutout: bool) {
         let s = &self.settings.snapshot;
         // a cut-out photo is a PNG whatever the format chosen: the only
         // one of them with an alpha
@@ -1285,7 +1310,8 @@ impl App {
         };
         self.snapshots.message_item = None;
         self.snapshots.message_profile = false;
-        self.snapshots.reel.start(size, &rgba, cutout, &self.world.agent_id);
+        // (the reel's copy and the file are written from the same pixels)
+        self.snapshots.reel.start_shared(size, rgba.clone(), cutout, &self.world.agent_id);
         self.snapshots.saving = Some(save::Saving::start(save::Job {
             width: size.0,
             height: size.1,
@@ -1362,7 +1388,7 @@ impl App {
             return;
         }
         if let Some(held) = &self.snapshots.held {
-            let (size, rgba, cutout) = ((held.width, held.height), held.rgba.clone(), held.cutout);
+            let (size, rgba, cutout) = ((held.width, held.height), held.rgba.to_vec(), held.cutout);
             self.photo_encode(size, rgba, cost, cutout);
             return;
         }
@@ -1522,6 +1548,7 @@ impl App {
             return;
         }
         if let Some(held) = &self.snapshots.held {
+            // (the held pixels themselves, shared: no copy)
             let (size, rgba, cutout) = ((held.width, held.height), held.rgba.clone(), held.cutout);
             self.photo_save(size, rgba, chosen, cutout);
             return;

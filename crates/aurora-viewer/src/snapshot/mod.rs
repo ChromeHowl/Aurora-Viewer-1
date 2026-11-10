@@ -26,8 +26,14 @@ use glam::{Mat4, Vec4};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-/// MAX_SNAPSHOT_IMAGE_SIZE of llviewerwindow.h: the largest side.
-pub const MAX_SIDE: u32 = 7680;
+/// The largest side of a photo for the disk. The Legacy Viewer stops at
+/// 7,680 (MAX_SNAPSHOT_IMAGE_SIZE of llviewerwindow.h); Aurora draws a photo
+/// in tiles reduced one by one, so that its side is bound by the memory of
+/// the assembled picture alone: 16,384 x 16,384 is 1 GiB of RGBA. The
+/// inventory, the profile feed and the postcard keep their own sizes.
+pub const MAX_SIDE: u32 = 16_384;
+/// The Legacy Viewer's largest side: the "8K" preset.
+pub const LEGACY_MAX_SIDE: u32 = 7680;
 /// The smallest side (the floater's spinners, min_val="32").
 pub const MIN_SIDE: u32 = 32;
 
@@ -93,17 +99,20 @@ pub enum Resolution {
     Uhd,
     K5,
     K8,
+    /// 15,360 pixels (16K UHD), drawn in tiles.
+    K16,
     Custom,
 }
 
 impl Resolution {
-    pub const ALL: [Resolution; 7] = [
+    pub const ALL: [Resolution; 8] = [
         Resolution::Window,
         Resolution::Hd,
         Resolution::Qhd,
         Resolution::Uhd,
         Resolution::K5,
         Resolution::K8,
+        Resolution::K16,
         Resolution::Custom,
     ];
 
@@ -114,7 +123,8 @@ impl Resolution {
             Resolution::Qhd => Some(2560),
             Resolution::Uhd => Some(3840),
             Resolution::K5 => Some(5120),
-            Resolution::K8 => Some(MAX_SIDE),
+            Resolution::K8 => Some(LEGACY_MAX_SIDE),
+            Resolution::K16 => Some(15_360),
             Resolution::Window | Resolution::Custom => None,
         }
     }
@@ -126,6 +136,7 @@ impl Resolution {
             Resolution::Uhd => Some("4K"),
             Resolution::K5 => Some("5K"),
             Resolution::K8 => Some("8K"),
+            Resolution::K16 => Some("16K"),
             Resolution::Window | Resolution::Custom => None,
         }
     }
@@ -384,7 +395,8 @@ pub fn default_folder() -> PathBuf {
 
 /// Size of a photo: the preset's long side with the proportions, the
 /// window's size, or the typed one; even sides between MIN_SIDE and
-/// MAX_SIDE (the encoders and the viewers of most sites prefer them).
+/// MAX_SIDE (the encoders and the viewers of most sites prefer them), at
+/// any proportions.
 pub fn photo_size(aspect: Aspect, resolution: Resolution, custom: [u32; 2], window: (u32, u32)) -> (u32, u32) {
     let window = (window.0.max(1), window.1.max(1));
     let ratio = aspect.ratio(window);
@@ -474,6 +486,32 @@ pub fn pass_pixels(free_bytes: u64, per_pixel: u64, window: (u32, u32)) -> u64 {
 /// Bytes a photo pass takes beyond its render targets, for each pixel: its
 /// own output texture (8-bit RGBA) and the buffer it is read back into.
 pub const PASS_OUTPUT_BYTES: u64 = 8;
+
+/// The most pixels of a pass its read-back buffer holds within the device's
+/// largest buffer (`max_buffer`, wgpu's `max_buffer_size`): four bytes a
+/// pixel, each row rounded up to 256 bytes (at most a quarter more for a
+/// pass 256 pixels wide or wider, hence five). Without it a card with
+/// memory to spare planned a 16K photo in one pass whose buffer of 1 GiB
+/// the device refuses.
+pub fn readback_pixels(max_buffer: u64) -> u64 {
+    max_buffer / 5
+}
+
+/// Bytes of system memory the assembled photo of `size` takes (RGBA8).
+pub fn photo_bytes(size: (u32, u32)) -> u64 {
+    u64::from(size.0) * u64::from(size.1) * 4
+}
+
+/// A zeroed buffer of `bytes` for the assembled photo, or None when the
+/// system cannot give it (a 16K photo is 1 GiB): the photo is given up with
+/// a message, never a crash.
+pub fn photo_buffer(bytes: u64) -> Option<Vec<u8>> {
+    let len = usize::try_from(bytes).ok()?;
+    let mut v = Vec::new();
+    v.try_reserve_exact(len).ok()?;
+    v.resize(len, 0);
+    Some(v)
+}
 
 /// Bytes of render targets a pixel takes when the renderer has not measured
 /// them yet, besides [`FALLBACK_BYTES_PER_SAMPLE`] per MSAA sample: fitted
@@ -845,6 +883,23 @@ impl ContextPass {
         } else {
             ContextPass::None
         }
+    }
+
+    /// The context no larger than a pass may be (`max_side`, `max_pixels`,
+    /// as for [`plan`]): a 16K photo's quarter, or a supersampled photo's,
+    /// is past what one pass draws, and a coarser context still gives the
+    /// far samples their depth.
+    pub fn within(self, max_side: u32, max_pixels: u64) -> Self {
+        let ContextPass::Pending((w, h)) = self else {
+            return self;
+        };
+        let max_side = max_side.max(16);
+        let max_pixels = max_pixels.max(256);
+        let mut div = w.max(h).div_ceil(max_side).max(1);
+        while u64::from(w.div_ceil(div)) * u64::from(h.div_ceil(div)) > max_pixels {
+            div += 1;
+        }
+        ContextPass::Pending((w.div_ceil(div).max(16).min(max_side), h.div_ceil(div).max(16).min(max_side)))
     }
 
     /// The part drawn while part `next` of `tiles` is the next tile, and

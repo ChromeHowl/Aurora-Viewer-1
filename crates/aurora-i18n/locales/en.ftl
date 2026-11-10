@@ -13550,3 +13550,6 @@ ui-options-attached-particles-hint = Draw the particles of what avatars wear: sp
 # Preferences › Graphics: progressive draw distance (FSRenderFarClipStepping)
 ui-options-draw-distance-stepping = Progressive draw distance
 ui-options-draw-distance-stepping-hint = After logging in and after a teleport to another region, the draw distance starts at 32 m and doubles back up to yours, so that what is near loads first.
+
+# Photo: sizes up to 16,384 pixels, supersampling, full save, photo profiles
+p16-memory = Not enough memory for a photo this large. Choose a smaller size.

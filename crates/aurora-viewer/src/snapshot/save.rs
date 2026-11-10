@@ -4,6 +4,12 @@
 //! `isolate`), PNG row by row so the window can show how far it is, JPEG
 //! at its quality, BMP. The file is written beside its final
 //! name and renamed once complete: a photo is never seen half written.
+//!
+//! A photo may be 16,384 pixels a side, 1 GiB of RGBA: its pixels are shared
+//! with the reel's copy (`Arc`), never cloned; the PNG is written from them a
+//! band of rows at a time, and only the JPEG and the BMP, whose encoders
+//! take the whole image, get one RGB copy, refused with a message when the
+//! system has no room for it.
 
 use super::FileFormat;
 use std::io::{BufWriter, Write};
@@ -17,8 +23,8 @@ pub const THUMB_SIDE: u32 = 192;
 pub struct Job {
     pub width: u32,
     pub height: u32,
-    /// RGBA8, rows top to bottom.
-    pub rgba: Vec<u8>,
+    /// RGBA8, rows top to bottom; shared with the reel's copy.
+    pub rgba: Arc<Vec<u8>>,
     pub format: FileFormat,
     pub jpeg_quality: u8,
     pub path: PathBuf,
@@ -84,16 +90,15 @@ pub fn save(job: Job, progress: &AtomicU32) -> Result<Saved, String> {
         path,
         alpha,
     } = job;
-    if rgba.len() != width as usize * height as usize * 4 {
+    if rgba.len() as u64 != super::photo_bytes((width, height)) {
         return Err(format!("photo: {} bytes for {width} x {height}", rgba.len()));
     }
     let thumb = thumbnail(width, height, &rgba);
     set(progress, 0.05);
-    let rgb: Vec<u8> = if alpha && format == FileFormat::Png {
-        rgba
-    } else {
-        rgba.as_chunks::<4>().0.iter().flat_map(|p| [p[0], p[1], p[2]]).collect()
-    };
+    let keep_alpha = alpha && format == FileFormat::Png;
+    // the PNG is written from the RGBA itself; the other encoders take the
+    // whole image as RGB
+    let rgb: Option<Vec<u8>> = if format == FileFormat::Png { None } else { Some(rgb_of(&rgba)?) };
     set(progress, 0.1);
     if let Some(folder) = path.parent() {
         std::fs::create_dir_all(folder).map_err(|e| format!("{}: {e}", folder.display()))?;
@@ -102,7 +107,11 @@ pub fn save(job: Job, progress: &AtomicU32) -> Result<Saved, String> {
     let written = (|| -> Result<(), String> {
         let file = std::fs::File::create(&part).map_err(|e| format!("{}: {e}", part.display()))?;
         let mut out = BufWriter::with_capacity(1 << 20, file);
-        encode(&mut out, width, height, &rgb, format, jpeg_quality, progress)?;
+        match &rgb {
+            Some(rgb) => encode(&mut out, width, height, rgb, format, jpeg_quality, progress)?,
+            None if keep_alpha => encode(&mut out, width, height, &rgba, format, jpeg_quality, progress)?,
+            None => encode_png_opaque(&mut out, width, height, &rgba, progress)?,
+        }
         out.flush().map_err(|e| e.to_string())?;
         out.into_inner().map_err(|e| e.to_string())?.sync_all().map_err(|e| e.to_string())
     })();
@@ -128,6 +137,41 @@ fn part_path(path: &Path) -> PathBuf {
     let mut name = path.file_name().map(|n| n.to_os_string()).unwrap_or_default();
     name.push(".part");
     path.with_file_name(name)
+}
+
+/// The RGB of RGBA pixels in a buffer of its own, or the message shown when
+/// the system has no memory for it (three quarters of the photo's size).
+fn rgb_of(rgba: &[u8]) -> Result<Vec<u8>, String> {
+    let mut rgb = Vec::new();
+    rgb.try_reserve_exact(rgba.len() / 4 * 3)
+        .map_err(|_| aurora_i18n::tr!("p16-memory").to_owned())?;
+    rgb.extend(rgba.as_chunks::<4>().0.iter().flat_map(|p| [p[0], p[1], p[2]]));
+    Ok(rgb)
+}
+
+/// Rows of a band the PNG is written by.
+const PNG_BAND: usize = 64;
+
+/// A PNG without alpha written from RGBA8 rows, a band at a time through a
+/// small RGB buffer: no second copy of a large photo. Progress as
+/// [`encode`].
+pub fn encode_png_opaque(out: &mut impl Write, width: u32, height: u32, rgba: &[u8], progress: &AtomicU32) -> Result<(), String> {
+    let mut enc = png::Encoder::new(&mut *out, width, height);
+    enc.set_color(png::ColorType::Rgb);
+    enc.set_depth(png::BitDepth::Eight);
+    enc.set_compression(png::Compression::Fast);
+    let mut writer = enc.write_header().map_err(|e| e.to_string())?;
+    let mut stream = writer.stream_writer().map_err(|e| e.to_string())?;
+    let row = width as usize * 4;
+    let mut rgb = Vec::with_capacity(width as usize * 3 * PNG_BAND);
+    for (i, band) in rgba.chunks(row.max(4) * PNG_BAND).enumerate() {
+        rgb.clear();
+        rgb.extend(band.as_chunks::<4>().0.iter().flat_map(|p| [p[0], p[1], p[2]]));
+        stream.write_all(&rgb).map_err(|e| e.to_string())?;
+        let rows = ((i + 1) * PNG_BAND).min(height as usize);
+        set(progress, 0.1 + 0.88 * rows as f32 / height.max(1) as f32);
+    }
+    stream.finish().map_err(|e| e.to_string())
 }
 
 /// Encode RGB8 rows (or RGBA8 ones for a PNG, by their length); progress
@@ -202,17 +246,19 @@ pub fn downscale(width: u32, height: u32, rgba: &[u8], max_side: u32) -> (u32, u
     }
     let tw = ((width as f32 * scale).round() as u32).max(1);
     let th = ((height as f32 * scale).round() as u32).max(1);
-    let mut out = vec![0u8; (tw * th * 4) as usize];
+    let mut out = vec![0u8; tw as usize * th as usize * 4];
     for ty in 0..th {
-        let y0 = ty * height / th;
-        let y1 = ((ty + 1) * height / th).max(y0 + 1).min(height);
+        // (64 bits: a side of 16,384 times another overflows 32)
+        let at = |t: u32, side: u32, of: u32| (u64::from(t) * u64::from(side) / u64::from(of)) as u32;
+        let y0 = at(ty, height, th);
+        let y1 = at(ty + 1, height, th).max(y0 + 1).min(height);
         for tx in 0..tw {
-            let x0 = tx * width / tw;
-            let x1 = ((tx + 1) * width / tw).max(x0 + 1).min(width);
+            let x0 = at(tx, width, tw);
+            let x1 = at(tx + 1, width, tw).max(x0 + 1).min(width);
             let mut sum = [0u64; 4];
             for y in y0..y1 {
-                let start = ((y * width + x0) * 4) as usize;
-                for px in rgba[start..start + ((x1 - x0) * 4) as usize].as_chunks::<4>().0 {
+                let start = (y as usize * width as usize + x0 as usize) * 4;
+                for px in rgba[start..start + (x1 - x0) as usize * 4].as_chunks::<4>().0 {
                     let a = u64::from(px[3]);
                     for c in 0..3 {
                         sum[c] += u64::from(px[c]) * a;
@@ -221,7 +267,7 @@ pub fn downscale(width: u32, height: u32, rgba: &[u8], max_side: u32) -> (u32, u
                 }
             }
             let n = u64::from((y1 - y0) * (x1 - x0)).max(1);
-            let o = ((ty * tw + tx) * 4) as usize;
+            let o = (ty as usize * tw as usize + tx as usize) * 4;
             for c in 0..3 {
                 out[o + c] = sum[c].checked_div(sum[3]).unwrap_or(0) as u8;
             }

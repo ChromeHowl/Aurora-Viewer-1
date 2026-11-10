@@ -13517,3 +13517,6 @@ ui-options-attached-particles-hint = アバターが装着しているものの�
 # Preferences › Graphics: progressive draw distance (FSRenderFarClipStepping)
 ui-options-draw-distance-stepping = 描画距離を段階的に広げる
 ui-options-draw-distance-stepping-hint = ログイン後と別のリージョンへのテレポート後、描画距離を32mから始めて設定値まで倍々に広げ、近くのものから読み込みます。
+
+# Photo: sizes up to 16,384 pixels, supersampling, full save, photo profiles
+p16-memory = この大きさの写真にはメモリが足りません。小さいサイズを選んでください。
