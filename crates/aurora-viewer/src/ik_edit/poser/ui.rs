@@ -35,6 +35,7 @@ impl Editor {
         self.follow_selected_side(rig);
         let (mut library, mut settings, mut undo, mut redo) = (false, false, false, false);
         let mut markers = false;
+        let mut anims = false;
         self.poser.edited_total = self
             .poser
             .sessions
@@ -63,6 +64,7 @@ impl Editor {
             ("arrow-forward-up", aurora_i18n::text("poser-redo"), &mut redo),
             ("arrow-back-up", aurora_i18n::text("poser-undo"), &mut undo),
             ("book-filled", aurora_i18n::text("poser-library"), &mut library),
+            ("player-play-filled", aurora_i18n::text("b4-poser-animations"), &mut anims),
         ];
         floater.show(ctx, p, &mut open, |ui| {
             self.subject_strip(ui, p, world);
@@ -94,6 +96,11 @@ impl Editor {
         }
         if settings {
             self.poser.settings_open = !self.poser.settings_open;
+            self.poser.animations_open &= !self.poser.settings_open;
+        }
+        if anims {
+            self.poser.animations_open = !self.poser.animations_open;
+            self.poser.settings_open &= !self.poser.animations_open;
         }
         if markers {
             self.poser.markers = !self.poser.markers;
@@ -334,6 +341,18 @@ impl Editor {
             .max_height(joint.height())
             .auto_shrink([false, false])
             .show(&mut right, |ui| self.joint_controls(ui, p, rig, frame));
+        if self.poser.animations_open && !self.poser.settings_open {
+            let panel = egui::Rect::from_min_max(egui::pos2((joint.right() - SETTINGS_W).max(joint.left()), joint.top()), joint.max);
+            ui.interact(panel, ui.scope_id().with("poser-animations-cover"), Sense::click_and_drag());
+            let mut over = pane(ui, "poser-animations-pane", panel);
+            widgets::overlay(&mut over, p, egui::Margin::same(14), |ui| {
+                ui.set_min_size(panel.size() - egui::vec2(28.0, 28.0));
+                egui::ScrollArea::vertical()
+                    .id_salt("poser-animations")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| self.playback_ui(ui, p, world));
+            });
+        }
         if self.poser.settings_open {
             let panel = egui::Rect::from_min_max(egui::pos2((joint.right() - SETTINGS_W).max(joint.left()), joint.top()), joint.max);
             // the joint's controls under the panel do not take its clicks

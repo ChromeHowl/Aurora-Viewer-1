@@ -17,6 +17,7 @@ mod data;
 mod document;
 mod kinematics;
 mod overlay;
+mod playback;
 mod scale_gizmo;
 pub(crate) mod stand;
 mod storage;
@@ -117,6 +118,11 @@ pub(super) struct State {
     /// anyway), and its "Don't ask again" ticked.
     close_asked: bool,
     close_dont_ask: bool,
+    /// The Animations panel shows over the joint (`playback.rs`).
+    animations_open: bool,
+    playback: playback::Transport,
+    /// "Manual edits override animation" (off, as the Legacy-based poser).
+    override_edits: bool,
 }
 impl Deref for State {
     type Target = Config;

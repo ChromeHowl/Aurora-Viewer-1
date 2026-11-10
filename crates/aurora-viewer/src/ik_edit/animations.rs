@@ -301,10 +301,15 @@ impl Stack {
         }
     }
     pub fn show(&mut self, ui: &mut egui::Ui, p: &Palette, inv: &Inventory) {
+        widgets::switch_labeled(ui, p, &mut self.suppress_live, aurora_i18n::tr!("ik-edit-animation-suppress"))
+            .on_hover_text(aurora_i18n::tr!("ik-edit-animation-local"));
+        self.show_rows(ui, p, inv);
+    }
+    /// The rows, the add button and the picker, without the IK editor's
+    /// switch (the poser's Animations panel).
+    pub fn show_rows(&mut self, ui: &mut egui::Ui, p: &Palette, inv: &Inventory) {
         let response = ui
             .vertical(|ui| {
-                widgets::switch_labeled(ui, p, &mut self.suppress_live, aurora_i18n::tr!("ik-edit-animation-suppress"))
-                    .on_hover_text(aurora_i18n::tr!("ik-edit-animation-local"));
                 let mut movement = None;
                 let mut removed = None;
                 let mut dragged = None;
@@ -449,8 +454,10 @@ fn frame_controls(ui: &mut egui::Ui, frame: &mut u32, last: u32) {
 
 impl Editor {
     pub fn tick_animations(&mut self, streamer: &mut AnimStreamer, inv: &mut Inventory) {
-        if self.open && !self.poser.active {
-            if self.project.picking_notecard()
+        // the poser's Animations panel plays the same stack
+        if self.open {
+            if !self.poser.active
+                && self.project.picking_notecard()
                 && let Some(root) = actions::system(inv, 7)
             {
                 actions::request_tree(inv, root);

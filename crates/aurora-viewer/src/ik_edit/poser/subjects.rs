@@ -69,16 +69,21 @@ impl Editor {
         {
             self.poser.sessions.insert(self.poser.subject, data::Session::new(pose));
         }
+        let rig = &world.avatar_lib.rig;
+        let now = std::time::Instant::now();
         self.poser
             .sessions
             .iter()
-            .filter(|(_, s)| s.enabled && s.pose.valid(&world.avatar_lib.rig))
-            .map(|(id, s)| (*id, s.pose.clone()))
+            .filter(|(_, s)| s.enabled && s.pose.valid(rig))
+            .map(|(id, s)| (*id, self.played_pose(rig, *id, now).unwrap_or_else(|| s.pose.clone())))
             .collect()
     }
     pub(super) fn pick_subject(&mut self, world: &World, id: Uuid) {
         if !allowed(world, id) {
             return;
+        }
+        if self.poser.subject != id {
+            self.poser.playback = playback::Transport::Stopped;
         }
         self.poser.subject = id;
         self.selected = None;
