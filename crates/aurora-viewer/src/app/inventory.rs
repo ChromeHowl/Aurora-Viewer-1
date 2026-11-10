@@ -751,7 +751,7 @@ impl App {
         self.wear_selection(vec![item], replace, point);
     }
 
-    fn wear_selection(&mut self, items: Vec<Uuid>, replace: bool, point: u8) {
+    pub(super) fn wear_selection(&mut self, items: Vec<Uuid>, replace: bool, point: u8) {
         let group_id = Uuid::new_v4();
         let mut group = ui::inventory::WearCopyGroup {
             replace,

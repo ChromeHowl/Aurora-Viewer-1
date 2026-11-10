@@ -12,6 +12,11 @@
 //! is parented to is compared with the last frame's. A change from one seat
 //! to another is a stand from the first and a sit on the second, as the
 //! Legacy Viewer gets off the first object before sitting on the next.
+//!
+//! The same change resets our skeleton when we get off a seat, with the
+//! option of Preferences › Avatars (FSResetSkeletonOnStandUp in
+//! LLVOAvatar::getOffObject): a ResetSkeleton effect without the animations,
+//! which the viewers around us follow too.
 
 use super::App;
 use crate::ui::context::flags::OBJECT_YOU_OWNER;
@@ -61,6 +66,12 @@ pub fn revokes(before: Option<Uuid>, now: Option<Seat>, left: Option<Seat>, mode
     out
 }
 
+/// Getting off a seat, to sit elsewhere or not, resets the skeleton when
+/// the option is on (FSResetSkeletonOnStandUp; a ground sit has no seat).
+pub fn resets_skeleton(before: Option<Uuid>, now: Option<Uuid>, enabled: bool) -> bool {
+    enabled && before.is_some() && before != now
+}
+
 impl App {
     /// The prim object `id` is, as a seat: None when it is not known (gone).
     fn seat_of(&self, id: Uuid) -> Option<Seat> {
@@ -84,6 +95,10 @@ impl App {
         let before = std::mem::replace(&mut self.last_seat, now);
         if before == now {
             return;
+        }
+        if resets_skeleton(before, now, self.settings.avatar_motion.reset_skeleton_on_stand) {
+            let me = self.world.agent_id;
+            self.reset_skeleton(me, false);
         }
         let left = before.and_then(|id| self.seat_of(id));
         let seat = now.and_then(|id| self.seat_of(id));
@@ -119,6 +134,16 @@ mod tests {
             assert_eq!(stood == [CHAIR], stand, "mode {mode} standing");
             assert_eq!(stood.is_empty(), !stand, "mode {mode} standing");
         }
+    }
+
+    #[test]
+    fn the_skeleton_resets_when_getting_off_a_seat_with_the_option() {
+        assert!(resets_skeleton(Some(CHAIR), None, true));
+        assert!(resets_skeleton(Some(CHAIR), Some(SOFA), true));
+        assert!(!resets_skeleton(Some(CHAIR), None, false));
+        assert!(!resets_skeleton(None, Some(CHAIR), true), "sitting down");
+        assert!(!resets_skeleton(Some(CHAIR), Some(CHAIR), true), "still seated");
+        assert!(!resets_skeleton(None, None, true));
     }
 
     #[test]

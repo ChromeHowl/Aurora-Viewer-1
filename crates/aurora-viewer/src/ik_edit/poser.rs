@@ -18,6 +18,7 @@ mod document;
 mod kinematics;
 mod overlay;
 mod scale_gizmo;
+pub(crate) mod stand;
 mod storage;
 mod subjects;
 mod trackball;

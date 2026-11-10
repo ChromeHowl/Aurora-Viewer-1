@@ -95,7 +95,7 @@ pub const COMMANDS: &[Command] = commands![
     "assetblacklist", "shield-off", "toolbar-command-asset-blacklist", true;
     "phototools", "camera-cog", "toolbar-command-phototools", false;
     "phototools_view", "video-filled", "toolbar-command-phototools-camera", false;
-    "pose_stand", "man-filled", "toolbar-command-pose-stand", false;
+    "pose_stand", "man-filled", "toolbar-command-pose-stand", true;
     "conversation_log", "file-text-filled", "toolbar-command-conversation-log", false;
     "movelock", "lock-filled", "movelock-title", true;
     "water_walk", "walk", "movement-water-walk", true;
@@ -109,8 +109,8 @@ pub const COMMANDS: &[Command] = commands![
     "discord", "brand-discord-filled", "toolbar-command-discord", false;
     "360capture", "panorama-horizontal-filled", "toolbar-command-360-snapshot", false;
     "omnifilter", "filter-filled", "toolbar-command-omnifilter", false;
-    "avatar_align", "user-scan", "toolbar-command-avatar-align", false;
-    "face_nearest_avatar", "user-search", "toolbar-command-face-nearest", false;
+    "avatar_align", "user-scan", "toolbar-command-avatar-align", true;
+    "face_nearest_avatar", "user-search", "toolbar-command-face-nearest", true;
 ];
 
 impl Command {

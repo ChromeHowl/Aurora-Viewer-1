@@ -305,6 +305,8 @@ fn action_key(action: &CtxAction) -> String {
         CtxAction::StopAnimationsKeepPermissions => "StopAnimationsKeepPermissions",
         CtxAction::Undeform => "Undeform",
         CtxAction::RefreshAttachments => "RefreshAttachments",
+        CtxAction::DumpAppearanceXml => "DumpAppearanceXml",
+        CtxAction::ResetDefaultAvatar(..) => "ResetDefaultAvatar",
         CtxAction::ToggleBlock(..) => "ToggleBlock",
         CtxAction::SetVoiceVolume(..) => "SetVoiceVolume",
         CtxAction::ToggleVoiceMute(..) => "ToggleVoiceMute",

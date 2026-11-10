@@ -24,6 +24,11 @@ const TYPES: [&str; 17] = [
     "universal",
 ];
 
+/// The name of a wearable type (LLWearableType::getTypeName).
+pub fn type_name(kind: u8) -> Option<&'static str> {
+    TYPES.get(usize::from(kind)).copied()
+}
+
 /// The wearable type named `name` in avatar_lad.xml (LLWearableType).
 pub fn kind_of(name: &str) -> Option<u8> {
     TYPES.iter().position(|kind| *kind == name).and_then(|i| u8::try_from(i).ok())

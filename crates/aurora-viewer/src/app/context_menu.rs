@@ -782,6 +782,8 @@ impl App {
             CtxAction::StopAnimationsKeepPermissions => self.stop_animations(false),
             CtxAction::Undeform => self.undeform_avatar(),
             CtxAction::RefreshAttachments => self.refresh_attachments(),
+            CtxAction::DumpAppearanceXml => self.dump_appearance_xml(),
+            CtxAction::ResetDefaultAvatar(male) => self.reset_default_avatar(male),
             CtxAction::AnswerTeleport { invite, accept } => {
                 for c in self.world.answer_teleport_invite(invite, accept) {
                     if matches!(c, NetCommand::AcceptLure { .. }) {

@@ -42,6 +42,7 @@ mod sound_explorer;
 // Bug report form (disabled, see main.rs):
 // mod bug_report;
 mod alt_graph;
+mod avatar_align;
 mod avatar_health;
 mod blender_live;
 mod blender_shape;
@@ -49,6 +50,7 @@ mod buy_currency;
 mod buy_land;
 mod camera_presets;
 mod camera_tools;
+mod character_tests;
 mod chat_commands;
 mod chat_import;
 mod click_pick;
@@ -63,6 +65,7 @@ mod describe;
 mod dev_toolbox;
 mod folders;
 mod hover_pick;
+mod pose_stand;
 mod texture_picker;
 use folders::chat_log_root;
 mod contents_drop_demo;
@@ -810,6 +813,14 @@ pub struct App {
     group_titles_ui: ui::group_titles::GroupTitlesUi,
     /// "Bumps, pushes & hits" (Help menu).
     bumps_ui: ui::bumps::BumpsUi,
+    avatar_align_ui: ui::avatar_align::AvatarAlignUi,
+    pose_stand_ui: ui::pose_stand::PoseStandUi,
+    /// Appearance to XML waiting for its file (`app/character_tests.rs`).
+    appearance_dump: Option<std::sync::mpsc::Receiver<Result<Option<std::path::PathBuf>, String>>>,
+    /// The pose stand shows its pose this frame (`app/pose_stand.rs`).
+    pose_stand_held: bool,
+    /// Our shaped skeleton when the stand started holding it.
+    pose_stand_capture: Option<(uuid::Uuid, crate::ik_edit::poser::SubjectPose)>,
     /// The toolbar's Voice controls window (`ui/voice_controls.rs`).
     voice_controls_ui: ui::voice_controls::VoiceControlsUi,
     /// Help › Grid status: the grid's feed (`app/grid_status.rs`), whether
@@ -1763,6 +1774,11 @@ impl App {
             blacklist_ui: Default::default(),
             group_titles_ui: Default::default(),
             bumps_ui: Default::default(),
+            avatar_align_ui: Default::default(),
+            pose_stand_ui: Default::default(),
+            appearance_dump: None,
+            pose_stand_held: false,
+            pose_stand_capture: None,
             voice_controls_ui: Default::default(),
             grid_status: Default::default(),
             grid_status_listed: false,
@@ -9514,9 +9530,15 @@ impl App {
             let step_back = self.settings.walk_backwards_without_turning;
             // (Body::update turns a little even without time: held apart)
             if !frozen {
-                self.world.agent.body_turn = self
-                    .world
-                    .update_bodies(world_now(), dt, at, ml, step_back, self.settings.avatar_turn_speed);
+                self.world.agent.body_turn = self.world.update_bodies(
+                    world_now(),
+                    dt,
+                    at,
+                    ml,
+                    step_back,
+                    self.settings.avatar_turn_speed,
+                    self.settings.avatar_motion.turning(),
+                );
             }
             self.revoke_on_sit();
             self.trace_own_motion();
@@ -9801,6 +9823,7 @@ impl App {
             self.scene.draw_distance = self.settings.draw_distance;
             self.scene.synchronize_animations = self.settings.synchronize_animations;
             self.scene.ground_avatar_feet = self.settings.ground_avatar_feet;
+            self.scene.own_look_limits = self.settings.avatar_motion.look_limits();
             self.scene.ground_feet_while_moving = self.settings.ground_feet_while_moving;
             self.scene.ground_feet_max_height = self.settings.ground_feet_max_height;
             self.scene.set_foot_scope_limit(self.settings.ground_feet_max_avatars);
@@ -9899,6 +9922,7 @@ impl App {
                 self.settings.save();
             }
             self.scene.poser = self.ik_editor.pose_layers(&self.world);
+            self.apply_pose_stand();
             self.ik_editor.tick_pose_storage(&self.scene.jobs, &self.egui_ctx, &self.world);
             if !self.scene.poser.is_empty() {
                 self.scene.ik_edit = Default::default();
@@ -14116,6 +14140,7 @@ impl App {
             BarAction::CustomizeBars => self.toolbar_ui.open = true,
             BarAction::StopAnimations => self.stop_current_animations(),
             BarAction::ResyncAnimations => self.scene.resync_animations(Instant::now()),
+            BarAction::FaceNearestAvatar => self.avatar_align(ui::avatar_align::Action::FaceNearest),
         }
     }
 
@@ -17549,6 +17574,9 @@ impl App {
                 self.animation_explorer_window(&ctx, &p);
                 self.avatar_render_settings_window(&ctx, &p);
                 self.bumps_ui.show(&ctx, &p, &self.world, &mut self.panels.bumps);
+                self.avatar_align_window(&ctx, &p);
+                self.pose_stand_window(&ctx, &p);
+                self.poll_appearance_dump();
                 self.grid_status_window(&ctx, &p);
                 if let Some(ui::voice_controls::Action::LeaveCall) = self.voice_controls_ui.show(
                     &ctx,

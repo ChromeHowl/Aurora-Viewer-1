@@ -60,6 +60,19 @@ struct Param {
     /// LLWearableType.
     wearable: Option<u8>,
     kind: Kind,
+    /// `name=`, for the appearance XML a dump writes.
+    name: Box<str>,
+}
+
+/// One parameter of an appearance dump (`shape_editor::xml_export`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Dumped {
+    pub id: i32,
+    pub name: Box<str>,
+    pub wearable: u8,
+    pub weight: f32,
+    pub min: f32,
+    pub max: f32,
 }
 
 /// The parameter definitions of `avatar_lad.xml`.
@@ -232,6 +245,7 @@ impl ShapeParams {
             sex,
             wearable: e.attr("wearable").and_then(crate::world::inventory::wearable::kind_of),
             kind,
+            name: e.attr("name").unwrap_or_default().into(),
         })
     }
 
@@ -245,6 +259,31 @@ impl ShapeParams {
     /// wearable type matches (indra/llappearance/llwearable.cpp).
     pub fn wearable_range(&self, id: i32, kind: u8) -> Option<(f32, f32)> {
         self.params.get(&id).filter(|p| p.wearable == Some(kind)).map(|p| (p.min, p.max))
+    }
+
+    /// The tweakable parameters a wearable carries, with their weights for
+    /// these AvatarAppearance values, by wearable type then id: what
+    /// LLVOAvatar::dumpArchetypeXML lists grouped by wearable. Only the
+    /// transmitted ones (group 0) are known from an appearance.
+    pub fn dump(&self, values: &[u8]) -> Vec<Dumped> {
+        let weights = self.weights(values);
+        let mut out: Vec<Dumped> = self
+            .params
+            .iter()
+            .filter(|(_, p)| p.group == 0)
+            .filter_map(|(id, p)| {
+                Some(Dumped {
+                    id: *id,
+                    name: p.name.clone(),
+                    wearable: p.wearable?,
+                    weight: weights.get(id).copied().unwrap_or(p.default),
+                    min: p.min,
+                    max: p.max,
+                })
+            })
+            .collect();
+        out.sort_by_key(|d| (d.wearable, d.id));
+        out
     }
 
     /// Range and default weight of a parameter.
