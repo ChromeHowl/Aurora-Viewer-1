@@ -240,6 +240,16 @@ pub(super) fn page(cx: &mut Cx) {
                 changed
             },
         );
+        cx.keywords("FSOpenInventoryAfterSnapshot").toggle(
+            tr!("b1-open-inventory"),
+            tr!("b1-open-inventory-hint"),
+            &field!(snapshot.extras.open_inventory),
+        );
+        cx.keywords("FSLogSnapshotsToLocal").toggle(
+            tr!("b1-log-to-chat"),
+            tr!("b1-log-to-chat-hint"),
+            &field!(snapshot.extras.log_to_chat),
+        );
     });
     cx.group(tr!("ui-options-scripts-and-content"), |cx| {
         cx.toggle(tr!("language-share"), tr!("language-share-help"), &field!(language_is_public));

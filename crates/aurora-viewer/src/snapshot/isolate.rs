@@ -31,6 +31,9 @@ pub enum Mode {
     Chosen,
     /// The scene without its avatars and what they wear.
     Background,
+    /// Every avatar in the shot with what it wears, nothing else (the
+    /// reverse of `Background`).
+    Avatars,
 }
 
 /// The isolation of the photo session.
@@ -92,6 +95,7 @@ impl Isolation {
             Mode::Own => *root == self.own,
             Mode::Chosen => self.chosen.contains(root),
             Mode::Background => !avatar,
+            Mode::Avatars => avatar,
         }
     }
 
@@ -216,6 +220,16 @@ pub fn root_of(world: &crate::world::World, index: usize) -> Option<(usize, Uuid
     None
 }
 
+/// The avatars to choose from, nearest first: (id, distance in metres)
+/// sorted by distance, one not known (NaN) last.
+pub fn by_distance<T>(mut avatars: Vec<(T, f32)>) -> Vec<(T, f32)> {
+    avatars.sort_by(|a, b| match (a.1.is_nan(), b.1.is_nan()) {
+        (false, false) => a.1.total_cmp(&b.1),
+        (x, y) => x.cmp(&y),
+    });
+    avatars
+}
+
 /// Whether the object at `index` is drawn under the photo's isolation.
 pub fn object_visible(world: &crate::world::World, index: usize) -> bool {
     let iso = &world.photo_isolation;
@@ -279,6 +293,24 @@ mod tests {
         iso.set_picking(false);
         iso.set_open(false);
         assert!(iso.root_visible(&id(1), true), "photo mode closed: everything drawn");
+    }
+
+    #[test]
+    fn all_avatars_keeps_every_avatar_and_leaves_out_the_rest() {
+        let mut iso = opened();
+        iso.set_mode(Mode::Avatars);
+        assert!(iso.root_visible(&id(9), true) && iso.root_visible(&id(1), true));
+        assert!(!iso.root_visible(&id(2), false), "a linkset, an animated object no one wears");
+        assert!(iso.empty_background(), "on a transparent background");
+        iso.set_open(false);
+        assert!(iso.root_visible(&id(2), false));
+    }
+
+    #[test]
+    fn the_avatars_to_choose_from_come_nearest_first() {
+        let list = by_distance(vec![("far", 40.0), ("unknown", f32::NAN), ("near", 2.5), ("mid", 12.0)]);
+        let names: Vec<_> = list.iter().map(|(n, _)| *n).collect();
+        assert_eq!(names, ["near", "mid", "far", "unknown"]);
     }
 
     #[test]

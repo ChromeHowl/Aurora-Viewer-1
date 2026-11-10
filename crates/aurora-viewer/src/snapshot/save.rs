@@ -28,8 +28,12 @@ pub struct Job {
     pub format: FileFormat,
     pub jpeg_quality: u8,
     pub path: PathBuf,
-    /// A cut-out photo: the PNG keeps the alpha.
+    /// A cut-out photo: the PNG keeps the alpha, the other formats lay it
+    /// on `matte` (sRGB).
     pub alpha: bool,
+    pub matte: [u8; 3],
+    /// XMP put in a JPEG (a 360° photo's, `pano::xmp`).
+    pub xmp: Option<String>,
 }
 
 /// What a finished save gives back.
@@ -49,11 +53,17 @@ pub struct Saving {
 
 impl Saving {
     pub fn start(job: Job) -> Saving {
+        Saving::start_with(move |p| save(job, p))
+    }
+
+    /// A save whose picture is made on the worker first (a 360° photo
+    /// joined from its views): `work` reports its progress and saves.
+    pub fn start_with(work: impl FnOnce(&AtomicU32) -> Result<Saved, String> + Send + 'static) -> Saving {
         let progress = Arc::new(AtomicU32::new(0));
         let (tx, rx) = crossbeam_channel::bounded(1);
         let p = progress.clone();
         let spawned = std::thread::Builder::new().name("aurora-photo-save".into()).spawn(move || {
-            let _ = tx.send(save(job, &p));
+            let _ = tx.send(work(&p));
         });
         if let Err(e) = spawned {
             log::warn!("photo: cannot start the save thread: {e}");
@@ -89,6 +99,8 @@ pub fn save(job: Job, progress: &AtomicU32) -> Result<Saved, String> {
         jpeg_quality,
         path,
         alpha,
+        matte,
+        xmp,
     } = job;
     if rgba.len() as u64 != super::photo_bytes((width, height)) {
         return Err(format!("photo: {} bytes for {width} x {height}", rgba.len()));
@@ -98,7 +110,11 @@ pub fn save(job: Job, progress: &AtomicU32) -> Result<Saved, String> {
     let keep_alpha = alpha && format == FileFormat::Png;
     // the PNG is written from the RGBA itself; the other encoders take the
     // whole image as RGB
-    let rgb: Option<Vec<u8>> = if format == FileFormat::Png { None } else { Some(rgb_of(&rgba)?) };
+    let rgb: Option<Vec<u8>> = if format == FileFormat::Png {
+        None
+    } else {
+        Some(rgb_of(&rgba, alpha.then_some(matte))?)
+    };
     set(progress, 0.1);
     if let Some(folder) = path.parent() {
         std::fs::create_dir_all(folder).map_err(|e| format!("{}: {e}", folder.display()))?;
@@ -108,6 +124,12 @@ pub fn save(job: Job, progress: &AtomicU32) -> Result<Saved, String> {
         let file = std::fs::File::create(&part).map_err(|e| format!("{}: {e}", part.display()))?;
         let mut out = BufWriter::with_capacity(1 << 20, file);
         match &rgb {
+            Some(rgb) if format == FileFormat::Jpeg && xmp.is_some() => {
+                let mut jpeg = Vec::new();
+                encode(&mut jpeg, width, height, rgb, format, jpeg_quality, progress)?;
+                let jpeg = xmp.as_deref().and_then(|x| super::pano::with_xmp(&jpeg, x)).unwrap_or(jpeg);
+                out.write_all(&jpeg).map_err(|e| e.to_string())?;
+            }
             Some(rgb) => encode(&mut out, width, height, rgb, format, jpeg_quality, progress)?,
             None if keep_alpha => encode(&mut out, width, height, &rgba, format, jpeg_quality, progress)?,
             None => encode_png_opaque(&mut out, width, height, &rgba, progress)?,
@@ -139,13 +161,21 @@ fn part_path(path: &Path) -> PathBuf {
     path.with_file_name(name)
 }
 
-/// The RGB of RGBA pixels in a buffer of its own, or the message shown when
-/// the system has no memory for it (three quarters of the photo's size).
-fn rgb_of(rgba: &[u8]) -> Result<Vec<u8>, String> {
+/// The RGB of RGBA pixels in a buffer of its own, laid on `matte` (a
+/// cut-out photo, `extras::lay_on_matte`), or the message shown when the
+/// system has no memory for it (three quarters of the photo's size).
+fn rgb_of(rgba: &[u8], matte: Option<[u8; 3]>) -> Result<Vec<u8>, String> {
     let mut rgb = Vec::new();
     rgb.try_reserve_exact(rgba.len() / 4 * 3)
         .map_err(|_| aurora_i18n::tr!("p16-memory").to_owned())?;
-    rgb.extend(rgba.as_chunks::<4>().0.iter().flat_map(|p| [p[0], p[1], p[2]]));
+    match matte {
+        Some(m) => rgb.extend(rgba.as_chunks::<4>().0.iter().flat_map(|p| {
+            let mut px = *p;
+            super::extras::lay_on_matte(&mut px, m);
+            [px[0], px[1], px[2]]
+        })),
+        None => rgb.extend(rgba.as_chunks::<4>().0.iter().flat_map(|p| [p[0], p[1], p[2]])),
+    }
     Ok(rgb)
 }
 

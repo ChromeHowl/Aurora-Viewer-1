@@ -159,7 +159,12 @@ impl App {
             .iter()
             .map(|id| {
                 let (name, avatar) = self.photo_isolate_name(id);
-                IsolateRow { id: *id, name, avatar }
+                IsolateRow {
+                    id: *id,
+                    name,
+                    avatar,
+                    distance: None,
+                }
             })
             .collect();
         let hover = self
@@ -167,6 +172,40 @@ impl App {
             .isolate_hover
             .map(|id| (self.photo_isolate_name(&id).0, iso.is_chosen(&id)));
         (rows, hover)
+    }
+
+    /// The avatars around to choose from, nearest the camera first, with
+    /// what they wear (`snapshot::isolate::by_distance`); none while RLVa
+    /// hides who is near (@shownearby) or the panel does not list them.
+    pub(super) fn photo_isolate_nearby(&self) -> Vec<IsolateRow> {
+        let iso = &self.world.photo_isolation;
+        if !self.snapshots.vf.isolate || iso.mode != isolate::Mode::Chosen || self.world.rlva.has("shownearby") {
+            return Vec::new();
+        }
+        let now = self.scene.held_at.unwrap_or_else(std::time::Instant::now);
+        let camera = self.camera.position;
+        let around: Vec<(Uuid, f32)> = self
+            .world
+            .objects
+            .avatars()
+            .filter(|(_, o)| !o.full_id.is_nil())
+            .map(|(idx, o)| {
+                let at = crate::scene::Scene::object_transform(&self.world, idx, now, 0).map(|(p, _, _)| p);
+                (o.full_id, at.map_or(f32::NAN, |p| p.distance(camera)))
+            })
+            .collect();
+        isolate::by_distance(around)
+            .into_iter()
+            .map(|(id, d)| {
+                let (name, avatar) = self.photo_isolate_name(&id);
+                IsolateRow {
+                    id,
+                    name,
+                    avatar,
+                    distance: d.is_finite().then_some(d),
+                }
+            })
+            .collect()
     }
 
     /// AURORA_DEMO_ISOLATE=<own|pick>[-panel][-opaque][-back], with the
@@ -233,6 +272,13 @@ impl App {
             Isolate::Picking(on) => iso.set_picking(on),
             Isolate::Remove(id) => iso.remove(&id),
             Isolate::Transparent(on) => iso.set_transparent(on),
+            Isolate::Toggle(id) => {
+                iso.toggle(id);
+            }
+            Isolate::Matte(color) => {
+                self.settings.snapshot.extras.matte = color;
+                self.settings.save();
+            }
             Isolate::Click(at) => self.snapshots.isolate_point = Some(((at.x * ppp, at.y * ppp), Pick::Toggle)),
             Isolate::Hover(at) => {
                 if self.snapshots.isolate_point.is_none() {

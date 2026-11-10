@@ -30,6 +30,7 @@ impl Part {
             Part::Photo => (isolate::Mode::Off, false),
             Part::Cutout => match mode {
                 isolate::Mode::Chosen if chosen => (isolate::Mode::Chosen, true),
+                isolate::Mode::Avatars => (isolate::Mode::Avatars, true),
                 _ => (isolate::Mode::Own, true),
             },
             Part::Background => (isolate::Mode::Background, false),
@@ -134,6 +135,7 @@ mod tests {
             "nothing chosen: our avatar"
         );
         assert_eq!(Part::Cutout.isolation(Mode::Off, false), (Mode::Own, true));
+        assert_eq!(Part::Cutout.isolation(Mode::Avatars, false), (Mode::Avatars, true), "every avatar");
         assert_eq!(Part::Background.isolation(Mode::Own, false), (Mode::Background, false));
 
         let mut iso = Isolation::default();

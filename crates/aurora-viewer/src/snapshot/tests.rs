@@ -474,6 +474,8 @@ fn saved_photos_read_back_in_every_format() {
                 jpeg_quality: 95,
                 path: path.clone(),
                 alpha: false,
+                matte: [255; 3],
+                xmp: None,
             },
             &progress,
         )
@@ -511,6 +513,8 @@ fn a_wrong_buffer_is_refused_without_a_file() {
             jpeg_quality: 75,
             path: path.clone(),
             alpha: false,
+            matte: [255; 3],
+            xmp: None,
         },
         &AtomicU32::new(0),
     );
@@ -537,6 +541,8 @@ fn a_cut_out_photo_keeps_its_alpha_in_the_png_and_its_colour_when_reduced() {
             jpeg_quality: 75,
             path: path.clone(),
             alpha: true,
+            matte: [255; 3],
+            xmp: None,
         },
         &AtomicU32::new(0),
     )
@@ -548,17 +554,66 @@ fn a_cut_out_photo_keeps_its_alpha_in_the_png_and_its_colour_when_reduced() {
     let (_, _, half) = save::downscale(w, h, &rgba, 2);
     assert_eq!(&half[..4], &[255, 0, 0, 255]);
     assert_eq!(&half[4..8], &[255, 0, 0, 64]);
+    // a BMP has no alpha: the cut-out is laid on its matte
+    let bmp = dir.join("cutout.bmp");
+    save::save(
+        save::Job {
+            width: w,
+            height: h,
+            rgba: rgba.clone().into(),
+            format: FileFormat::Bmp,
+            jpeg_quality: 75,
+            path: bmp.clone(),
+            alpha: true,
+            matte: [0, 0, 255],
+            xmp: None,
+        },
+        &AtomicU32::new(0),
+    )
+    .unwrap();
+    let back = image::open(&bmp).unwrap().to_rgb8();
+    assert_eq!(back.get_pixel(0, 0).0, [255, 0, 0]);
+    assert_eq!(back.get_pixel(2, 0).0, [128, 0, 127]);
+    assert_eq!(back.get_pixel(3, 1).0, [0, 0, 255]);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn guides_draw_inside_the_frame() {
     for g in Guide::ALL {
-        let lines = g.lines();
-        assert!(!lines.is_empty());
-        assert!(lines.iter().flatten().flatten().all(|v| (0.0..=1.0).contains(v)));
+        for aspect in [0.5, 1.0, 16.0 / 9.0, 3.0] {
+            for corner in extras::Corner::ALL {
+                let lines = g.lines(aspect, corner);
+                assert!(!lines.is_empty());
+                assert!(lines.iter().flatten().flatten().all(|v| (0.0..=1.0).contains(v)));
+            }
+        }
     }
-    assert!(Guide::None.lines().is_empty());
+    assert!(Guide::None.lines(1.5, extras::Corner::TopLeft).is_empty());
+}
+
+#[test]
+fn the_golden_spiral_winds_into_its_corner() {
+    use extras::Corner;
+    // the end of the spiral: the point of its last arc nearest its eye
+    let eye = |corner: Corner| {
+        let lines = Guide::Spiral.lines(16.0 / 9.0, corner);
+        let last = lines.last().expect("arcs")[1];
+        [last[0], last[1]]
+    };
+    // a 16:9 frame is wider than the golden rectangle: it sits at the side
+    // of the corner, full height
+    let lines = Guide::Spiral.lines(16.0 / 9.0, Corner::TopRight);
+    let left = lines.iter().flatten().map(|p| p[0]).fold(1.0f32, f32::min);
+    assert!(left > 0.05, "pushed right: {left}");
+    let tl = eye(Corner::TopLeft);
+    let br = eye(Corner::BottomRight);
+    // mirrored corners mirror the spiral
+    assert!((tl[1] - (1.0 - br[1])).abs() < 1e-4, "{tl:?} {br:?}");
+    let tr = eye(Corner::TopRight);
+    assert!((tr[1] - tl[1]).abs() < 1e-4);
+    // the eye lies toward its corner's side of the rectangle's middle
+    assert!(tl[0] < tr[0]);
 }
 
 #[test]

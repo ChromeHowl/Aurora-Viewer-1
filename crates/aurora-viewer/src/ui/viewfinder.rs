@@ -170,6 +170,10 @@ pub struct Frame<'a> {
     pub isolation: &'a crate::snapshot::isolate::Isolation,
     pub isolate_rows: &'a [IsolateRow],
     pub isolate_hover: Option<(String, bool)>,
+    /// The avatars around, nearest first (none while RLVa hides them), and
+    /// the cut-out's matte colour.
+    pub isolate_nearby: &'a [IsolateRow],
+    pub matte: [u8; 3],
     /// The camera presets, and the name of the object an object anchor
     /// would hold.
     pub presets: &'a [crate::camera::CameraShot],
@@ -371,6 +375,7 @@ fn guide_label(g: Guide) -> &'static str {
         Guide::Golden => aurora_i18n::tr!("photo-guide-golden"),
         Guide::Diagonals => aurora_i18n::tr!("photo-guide-diagonals"),
         Guide::Center => aurora_i18n::tr!("photo-guide-center"),
+        Guide::Spiral => aurora_i18n::tr!("b1-guide-spiral"),
     }
 }
 
@@ -378,7 +383,8 @@ pub fn next_guide(g: Guide) -> Guide {
     match g {
         Guide::None => Guide::Thirds,
         Guide::Thirds => Guide::Golden,
-        Guide::Golden => Guide::Diagonals,
+        Guide::Golden => Guide::Spiral,
+        Guide::Spiral => Guide::Diagonals,
         Guide::Diagonals => Guide::Center,
         Guide::Center => Guide::None,
     }
@@ -530,7 +536,7 @@ impl Viewfinder {
         let border = if shows { 0.5 } else { 0.25 };
         back.rect_stroke(frame, 0.0, Stroke::new(1.0, p.ink.gamma_multiply(border)), StrokeKind::Inside);
         if shows && s.guide != Guide::None {
-            panel::guide_lines(&back, frame, s.guide, p.ink.gamma_multiply(0.4));
+            panel::guide_lines(&back, frame, s.guide, &s.extras, p.ink.gamma_multiply(0.4));
         }
         if !s.looks.is_empty() {
             self.compare_line(ctx, p, frame, panel);

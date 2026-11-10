@@ -51,6 +51,23 @@ pub(super) enum Purpose {
     Postcard,
     /// An outfit's picture, for the image request (#2716).
     Outfit(Uuid),
+    /// A view of a 360° photo (`snapshot::pano::Face::ALL`'s index).
+    Pano(usize),
+}
+
+/// A 360° photo under way (`snapshot::pano`): its views drawn one after
+/// the other from where the camera was, then joined and saved on a worker.
+struct PanoRun {
+    quality: snapshot::pano::Quality,
+    basis: snapshot::pano::Basis,
+    eye: glam::Vec3,
+    /// The views drawn so far.
+    faces: Vec<Vec<u8>>,
+    path: PathBuf,
+    /// The isolation and freeze of the world given back at its end.
+    mode: snapshot::isolate::Mode,
+    transparent: bool,
+    frozen: bool,
 }
 
 /// The side of an outfit's picture as it is drawn, reduced to 256 afterwards.
@@ -133,6 +150,8 @@ struct Job {
     context_plan: ContextPass,
     /// Its parts wait while the 3D drawing is paused behind.
     paused: snapshot::PausedWait,
+    /// A view of a 360° photo: drawn looking that way.
+    face: Option<snapshot::pano::Face>,
 }
 
 /// A held photo (freeze frame) and what shows it.
@@ -160,6 +179,9 @@ pub(super) struct PhotoFrame {
     /// Its look, placed for the part drawn.
     pub look: Option<aurora_render::looks::PhotoLook>,
     pub context: aurora_render::PhotoContext,
+    /// A view of a 360° photo: its view and projection, instead of the
+    /// camera's (`snapshot::pano::Basis::matrices`).
+    pub cube: Option<(Mat4, Mat4)>,
 }
 
 type Thumb = (PathBuf, Option<(u32, u32, Vec<u8>)>);
@@ -266,6 +288,8 @@ pub(super) struct Snapshots {
     pub(super) isolate_picks: Vec<(u64, super::photo_isolate::Pick)>,
     pub(super) isolate_point: Option<((f32, f32), super::photo_isolate::Pick)>,
     pub(super) isolate_hover: Option<Uuid>,
+    /// A 360° photo under way.
+    pano: Option<PanoRun>,
 }
 
 impl Snapshots {
@@ -338,6 +362,10 @@ struct DemoPhoto {
     prefs_dof: bool,
     /// AURORA_DEMO_SNAPSHOT=quality: the window with its photo quality on.
     quality: bool,
+    /// AURORA_DEMO_SNAPSHOT=pano | pano-avatars: a 360° photo (Medium,
+    /// the avatars hidden with -avatars); depth: a depth photo to disk.
+    pano: Option<bool>,
+    depth: bool,
     /// AURORA_DEMO_SNAPSHOT=quality-tight[:<MB>[:<MB later>]]: the same
     /// on a card short of memory.
     tight: Option<DemoTight>,
@@ -472,6 +500,7 @@ impl Default for Snapshots {
             isolate_picks: Vec::new(),
             isolate_point: None,
             isolate_hover: None,
+            pano: None,
         }
     }
 }
@@ -557,9 +586,14 @@ impl App {
         let textures = &self.scene.textures;
         let (paused, pending, passes) = (textures.drawing_paused(), textures.pending_in_view(), textures.wants_passes());
         let occlusion = self.settings.ssao > 0;
+        let near = self.camera.near;
         let s = &mut self.snapshots;
         s.capturing = None;
         let job = s.job.as_mut()?;
+        let cube = job
+            .face
+            .zip(s.pano.as_ref())
+            .map(|(face, run)| run.basis.matrices(face, run.eye, run.quality.face(), near));
         // (a part already asked is drawn all the same: the frame that
         // carries it draws the scene, `App::scene_paused`)
         if !job.asked {
@@ -635,6 +669,7 @@ impl App {
                 scale,
                 look: None,
                 context: aurora_render::PhotoContext::Record,
+                cube,
             });
         }
         let tile = job.tiles[job.next].draw.scaled(job.supersample);
@@ -674,6 +709,7 @@ impl App {
             } else {
                 aurora_render::PhotoContext::None
             },
+            cube,
         })
     }
 
@@ -824,6 +860,7 @@ impl App {
             Purpose::Inventory(cost) => self.photo_encode(job.size, job.pixels, cost, job.cutout),
             Purpose::Profile => self.photo_post(job.size, job.pixels, job.cutout),
             Purpose::Postcard => self.photo_postcard(job.size, job.pixels, job.cutout),
+            Purpose::Pano(i) => self.photo_pano_face(i, job.pixels, renderer),
             Purpose::Outfit(request) => {
                 self.inventory_images.photo = None;
                 self.prepare_inventory_photo(request, job.size.0, job.size.1, job.pixels);
@@ -935,12 +972,20 @@ impl App {
             return;
         };
         self.snapshots.reel.start(size, &rgba, cutout, &self.world.agent_id);
+        let matte = cutout.then_some(self.settings.snapshot.extras.matte);
         let caption: String = self.snapshots.ui.caption.chars().take(profile::MAX_CAPTION).collect();
         let add_location = self.settings.snapshot.profile_location;
         let auth = self.snapshots.web_auth.clone();
         let (tx, rx) = crossbeam_channel::unbounded();
         self.net.runtime().spawn(async move {
-            let encoded = tokio::task::spawn_blocking(move || profile::encode_png(size.0, size.1, &rgba)).await;
+            let encoded = tokio::task::spawn_blocking(move || {
+                let mut rgba = rgba;
+                if let Some(m) = matte {
+                    snapshot::extras::lay_on_matte(&mut rgba, m);
+                }
+                profile::encode_png(size.0, size.1, &rgba)
+            })
+            .await;
             let png = match encoded {
                 Ok(Ok(png)) => png,
                 Ok(Err(e)) => {
@@ -1051,13 +1096,21 @@ impl App {
             return;
         }
         self.snapshots.reel.start(size, &rgba, cutout, &self.world.agent_id);
+        let matte = cutout.then_some(self.settings.snapshot.extras.matte);
         let postcard = self.photo_postcard_fields();
         let quality = self.settings.snapshot.jpeg_quality;
         let demo_fail = self.demo && std::env::var("AURORA_DEMO_SNAPSHOT").is_ok_and(|m| m == "postcard-fail");
         let http = self.net.caps_http();
         let (tx, rx) = crossbeam_channel::unbounded();
         self.net.runtime().spawn(async move {
-            let encoded = tokio::task::spawn_blocking(move || save::encode_jpeg(size.0, size.1, &rgba, quality)).await;
+            let encoded = tokio::task::spawn_blocking(move || {
+                let mut rgba = rgba;
+                if let Some(m) = matte {
+                    snapshot::extras::lay_on_matte(&mut rgba, m);
+                }
+                save::encode_jpeg(size.0, size.1, &rgba, quality)
+            })
+            .await;
             let jpeg = match encoded {
                 Ok(Ok(jpeg)) => jpeg,
                 Ok(Err(e)) => {
@@ -1124,11 +1177,28 @@ impl App {
     pub(super) fn photo_job(&mut self, purpose: Purpose, renderer: &Renderer) {
         let window = renderer.size();
         let outfit = matches!(purpose, Purpose::Outfit(_));
+        let face = match purpose {
+            Purpose::Pano(i) => snapshot::pano::Face::ALL.get(i).copied(),
+            _ => None,
+        };
         let full = if outfit {
             (OUTFIT_PHOTO_SIDE, OUTFIT_PHOTO_SIDE)
+        } else if let Some(run) = self.snapshots.pano.as_ref().filter(|_| face.is_some()) {
+            let side = snapshot::pano::drawn_side(run.quality.face());
+            (side, side)
         } else {
             self.photo_size(window)
         };
+        // a photo to disk of the scene's depth (not a Full save's, nor a
+        // 360° photo's view); never while RLVa's vision spheres hide what
+        // is far, which the depth would show
+        let depth = self.snapshots.ui.depth
+            && self.snapshots.ui.destination == Destination::Disk
+            && self.snapshots.full_save.is_none()
+            && self.world.rlva.visuals.spheres.is_empty()
+            && matches!(purpose, Purpose::Preview | Purpose::Save(_) | Purpose::Hold);
+        // (a view of a 360° photo, the depth: the scene alone)
+        let plain = outfit || face.is_some() || depth;
         let s = &self.settings.snapshot;
         let size = if purpose == Purpose::Preview {
             let (w, h) = full;
@@ -1176,7 +1246,7 @@ impl App {
         }
         // an outfit's picture shows the outfit: never the interface, the
         // HUDs or the photo's looks, whatever the Photo window has chosen
-        let interface = !outfit && s.interface && snapshot::same_proportions(full, window);
+        let interface = !plain && s.interface && snapshot::same_proportions(full, window);
         // (with the ambient occlusion on: GTAO may be forced over its method)
         let context = ContextPass::plan(size, tiles.len(), self.settings.ssao > 0)
             .within(self.photo_max_side(renderer), self.photo_max_pixels(renderer));
@@ -1191,7 +1261,7 @@ impl App {
             waiting: None,
             pixels: Vec::new(),
             interface,
-            huds: !outfit && s.huds,
+            huds: !plain && s.huds,
             started: Instant::now(),
             supersample,
             cutout: self.world.photo_isolation.empty_background(),
@@ -1202,8 +1272,16 @@ impl App {
             context,
             context_plan: context,
             paused: Default::default(),
+            face,
         });
-        if outfit {
+        if depth {
+            let far = self.settings.draw_distance;
+            if let Some(job) = &mut self.snapshots.job {
+                job.looks = vec![(looks::depth_map(self.camera.near, far), 100)];
+            }
+            return;
+        }
+        if plain {
             return;
         }
         let stack = self.settings.snapshot.looks.clone();
@@ -1346,11 +1424,10 @@ impl App {
 
     fn photo_save(&mut self, size: (u32, u32), rgba: std::sync::Arc<Vec<u8>>, chosen: Option<PathBuf>, cutout: bool) {
         let s = &self.settings.snapshot;
-        // a cut-out photo is a PNG whatever the format chosen: the only
-        // one of them with an alpha
-        let wanted = if cutout { snapshot::FileFormat::Png } else { s.format };
+        // a cut-out photo keeps its alpha in a PNG; a JPEG or a BMP, which
+        // have none, lays it on the matte colour
+        let wanted = s.format;
         let (format, path) = match chosen {
-            Some(path) if cutout => (wanted, path.with_extension(wanted.extension())),
             Some(path) => (snapshot::FileFormat::of_path(&path).unwrap_or(wanted), path),
             None => {
                 let stamp = s.timestamp_names.then(snapshot::local_stamp);
@@ -1369,6 +1446,8 @@ impl App {
             jpeg_quality: s.jpeg_quality,
             path,
             alpha: cutout,
+            matte: s.extras.matte,
+            xmp: None,
         }));
         // (a Full save's shutter once, for its first file)
         if self.snapshots.full_save.as_ref().is_none_or(|f| f.next == 0) {
@@ -1447,6 +1526,125 @@ impl App {
         }
     }
 
+    /// A 360° photo (`snapshot::pano`): the world held still, the avatars
+    /// left out if asked, then its six views drawn one after the other
+    /// from where the camera is now.
+    fn photo_pano_start(&mut self, renderer: &Renderer) {
+        if self.photo_busy() || self.snapshots.pano.is_some() || !self.in_world() {
+            return;
+        }
+        if snapshot::pano::rlva_blocks(|b| self.world.rlva.has(b)) {
+            self.snapshots.message = Some((aurora_i18n::tr!("b1-pano-rlva").to_owned(), true));
+            return;
+        }
+        let s = &self.settings.snapshot;
+        let quality = s.extras.pano_quality;
+        let hide = s.extras.pano_hide_avatars;
+        let stamp = s.timestamp_names.then(snapshot::local_stamp);
+        let base = format!("{}_360", s.base_name.trim());
+        let path = snapshot::free_path(&s.folder(), &base, stamp.as_deref(), snapshot::FileFormat::Jpeg);
+        let iso = &mut self.world.photo_isolation;
+        let run = PanoRun {
+            quality,
+            basis: snapshot::pano::Basis::new(self.camera.forward()),
+            eye: self.camera.position,
+            faces: Vec::with_capacity(6),
+            path,
+            mode: iso.mode,
+            transparent: iso.transparent,
+            frozen: self.snapshots.ui.freeze_world,
+        };
+        // 360CaptureHideAvatars: every avatar left out with what it wears;
+        // otherwise everything drawn (a cut-out would leave the views empty)
+        let mode = if hide {
+            snapshot::isolate::Mode::Background
+        } else {
+            snapshot::isolate::Mode::Off
+        };
+        iso.set_mode(mode);
+        iso.set_transparent(false);
+        log::info!(
+            "photo: 360° photo of views of {} pixels, heading {:.0}°, to {}",
+            quality.face(),
+            run.basis.heading(),
+            run.path.display()
+        );
+        self.snapshots.pano = Some(run);
+        // (frozen from the next frame on, before the first view is drawn)
+        self.snapshots.ui.freeze_world = true;
+        self.snapshots.message = None;
+        self.photo_shutter();
+        self.photo_job(Purpose::Pano(0), renderer);
+    }
+
+    /// A view of the 360° photo drawn: the next one, or the six joined and
+    /// saved on a worker.
+    fn photo_pano_face(&mut self, index: usize, pixels: Vec<u8>, renderer: &Renderer) {
+        let Some(run) = self.snapshots.pano.as_mut() else {
+            return;
+        };
+        if run.faces.len() != index {
+            return;
+        }
+        run.faces.push(pixels);
+        if index + 1 < snapshot::pano::Face::ALL.len() {
+            self.photo_job(Purpose::Pano(index + 1), renderer);
+            return;
+        }
+        let Some(run) = self.snapshots.pano.take() else {
+            return;
+        };
+        self.photo_pano_restore(&run);
+        let face = run.quality.face();
+        let size = snapshot::pano::output_size(face);
+        let heading = run.basis.heading();
+        let PanoRun { path, faces, .. } = run;
+        self.snapshots.message_item = None;
+        self.snapshots.message_profile = false;
+        self.snapshots.saving = Some(save::Saving::start_with(move |progress| {
+            let t0 = Instant::now();
+            let picture = snapshot::pano::stitch(&faces, face, size).ok_or_else(|| aurora_i18n::tr!("p16-memory").to_owned())?;
+            drop(faces);
+            log::info!("photo: 360° views joined in {} ms", t0.elapsed().as_millis());
+            save::save(
+                save::Job {
+                    width: size.0,
+                    height: size.1,
+                    rgba: picture.into(),
+                    format: snapshot::FileFormat::Jpeg,
+                    jpeg_quality: snapshot::pano::JPEG_QUALITY,
+                    path,
+                    alpha: false,
+                    matte: [0; 3],
+                    xmp: Some(snapshot::pano::xmp(size, heading)),
+                },
+                progress,
+            )
+        }));
+    }
+
+    /// The isolation and the freeze of the world as they were before the
+    /// 360° photo.
+    fn photo_pano_restore(&mut self, run: &PanoRun) {
+        let iso = &mut self.world.photo_isolation;
+        iso.set_mode(run.mode);
+        iso.set_transparent(run.transparent);
+        self.snapshots.ui.freeze_world = run.frozen;
+    }
+
+    /// Every frame: a 360° photo whose view was not drawn (the photo given
+    /// up) ends, what it changed given back.
+    fn photo_pano_update(&mut self) {
+        let drawing = self.snapshots.job.as_ref().is_some_and(|j| matches!(j.purpose, Purpose::Pano(_)));
+        if drawing || self.snapshots.pano.is_none() {
+            return;
+        }
+        if let Some(run) = self.snapshots.pano.take() {
+            log::warn!("photo: 360° photo stopped after {} of 6 views", run.faces.len());
+            self.photo_pano_restore(&run);
+        }
+    }
+
     /// Upload prices: the account's benefits (texture_upload_cost, by area
     /// for the large ones), the demo's, or the economy's single price.
     fn photo_prices(&self) -> Prices {
@@ -1516,10 +1714,15 @@ impl App {
     /// upload starts, like saveTexture's playSnapshotAnimAndSound.
     pub(super) fn photo_encode(&mut self, size: (u32, u32), rgba: Vec<u8>, cost: i32, cutout: bool) {
         self.snapshots.reel.start(size, &rgba, cutout, &self.world.agent_id);
+        let matte = cutout.then_some(self.settings.snapshot.extras.matte);
         let texture = inventory::texture_size(size);
         let (tx, rx) = crossbeam_channel::bounded(1);
         std::thread::spawn(move || {
             let t0 = Instant::now();
+            let mut rgba = rgba;
+            if let Some(m) = matte {
+                snapshot::extras::lay_on_matte(&mut rgba, m);
+            }
             let encoded = inventory::encode(size.0, size.1, &rgba, texture);
             if let Ok(data) = &encoded {
                 log::info!(
@@ -1589,9 +1792,12 @@ impl App {
                 let id = item.id;
                 self.world.inventory.add_items(vec![item]);
                 // the inventory shows the new photo (upload_done_callback,
-                // openInventoryPanelAndSetSelection)
-                self.panels.inventory = true;
-                self.inventory_ui.show_original(&self.world.inventory, id);
+                // openInventoryPanelAndSetSelection), unless turned off
+                // (FSOpenInventoryAfterSnapshot)
+                if self.settings.snapshot.extras.open_inventory {
+                    self.panels.inventory = true;
+                    self.inventory_ui.show_original(&self.world.inventory, id);
+                }
                 self.snapshots.message = Some((aurora_i18n::tr!("photo-uploaded").to_owned(), false));
                 self.snapshots.message_item = Some(id);
                 self.snapshots.reel.done(Some(Place::Inventory(id)), None);
@@ -1702,6 +1908,7 @@ impl App {
             self.photo_take(renderer, None);
         }
         self.photo_full_save_update(renderer);
+        self.photo_pano_update();
         self.photo_demo(renderer);
         self.photo_reel_demo(renderer);
         self.photo_luts_update();
@@ -1744,6 +1951,8 @@ impl App {
         self.photo_postcard_poll();
         self.photo_reel_update();
         let viewfinder = self.viewfinder_on();
+        let log_to_chat = self.settings.snapshot.extras.log_to_chat;
+        let mut chat_line = None;
         let s = &mut self.snapshots;
         // the save on its worker
         if let Some(r) = s.saving.as_ref().and_then(|saving| saving.poll()) {
@@ -1758,6 +1967,11 @@ impl App {
                         saved.millis
                     );
                     s.message = Some((aurora_i18n::tr!("photo-saved", name = name.as_str()).to_owned(), false));
+                    // LLViewerWindow::saveImageLocal: the file to the nearby
+                    // chat (FSLogSnapshotsToLocal, "SnapshotSavedToDisk")
+                    if log_to_chat {
+                        chat_line = Some(aurora_i18n::tr!("b1-saved-chat", path = saved.path.display().to_string()).to_owned());
+                    }
                     let (w, h, px) = saved.thumb;
                     let image = egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &px);
                     let tex = self.egui_ctx.load_texture("photo_thumb", image, egui::TextureOptions::LINEAR);
@@ -1788,6 +2002,9 @@ impl App {
                     s.message = Some((text, true));
                 }
             }
+        }
+        if let Some(line) = chat_line {
+            self.world.system_message(line);
         }
         // the gallery, read when the window shows it and its folder changed
         let folder = self.settings.snapshot.folder();
@@ -2075,6 +2292,19 @@ impl App {
                     self.settings.save();
                 }
             }
+            Action::ProfileReset(part) => {
+                log::info!("photo settings reset: {}", part.map_or("all".to_owned(), |p| format!("{p:?}")));
+                snapshot::saved::reset(
+                    part,
+                    &mut self.settings.snapshot,
+                    &mut self.snapshots.ui.light,
+                    &mut self.world.photo_isolation,
+                );
+                self.snapshots.ui.looks.selected = 0;
+                self.snapshots.preview_wanted = true;
+                self.settings.save();
+            }
+            Action::Pano => self.photo_pano_start(renderer),
         }
     }
 
@@ -2259,7 +2489,9 @@ LUT_3D_SIZE {n}
         } else {
             s.job.as_ref().filter(|j| j.purpose != Purpose::Preview).map(|j| {
                 let f = 0.5 * j.next as f32 / j.tiles.len().max(1) as f32;
-                let what = if j.tiles.len() > 1 {
+                let what = if let Purpose::Pano(i) = j.purpose {
+                    aurora_i18n::tr!("b1-pano-drawing", view = i + 1).to_owned()
+                } else if j.tiles.len() > 1 {
                     aurora_i18n::tr!("photo-rendering-tiles", tile = j.next + 1, count = j.tiles.len()).to_owned()
                 } else {
                     aurora_i18n::tr!("photo-rendering").to_owned()
@@ -2398,6 +2630,7 @@ LUT_3D_SIZE {n}
                 env: env_view(&env_ui, &self.world.eep),
                 back_key: self.settings.keybinds.get(crate::keybinds::Action::ResetCamera)[0].clone(),
                 quality_reduced,
+                pano_allowed: !snapshot::pano::rlva_blocks(|b| self.world.rlva.has(b)),
             };
             // (under the reel's quick view, nothing of the viewfinder acts:
             // no focus by a click, no shutter)
@@ -2442,7 +2675,9 @@ LUT_3D_SIZE {n}
             } else {
                 s.job.as_ref().filter(|j| j.purpose != Purpose::Preview).map(|j| {
                     let f = 0.5 * j.next as f32 / j.tiles.len().max(1) as f32;
-                    let what = if j.tiles.len() > 1 {
+                    let what = if let Purpose::Pano(i) = j.purpose {
+                        aurora_i18n::tr!("b1-pano-drawing", view = i + 1).to_owned()
+                    } else if j.tiles.len() > 1 {
                         aurora_i18n::tr!("photo-rendering-tiles", tile = j.next + 1, count = j.tiles.len()).to_owned()
                     } else {
                         aurora_i18n::tr!("photo-rendering").to_owned()
@@ -2474,6 +2709,7 @@ LUT_3D_SIZE {n}
                 env: env_view(&self.env_ui, &self.world.eep),
                 back_key: self.settings.keybinds.get(crate::keybinds::Action::ResetCamera)[0].clone(),
                 quality_reduced,
+                pano_allowed: !snapshot::pano::rlva_blocks(|b| self.world.rlva.has(b)),
             };
             let mut open = self.panels.snapshot;
             actions.extend(state.show(
@@ -2955,7 +3191,8 @@ LUT_3D_SIZE {n}
 
     /// AURORA_DEMO_SNAPSHOT=open | full[-<W>x<H> proportions, e.g. full-4x5] |
     /// save:<W>x<H>[:png|jpg|bmp][:<folder>] | inventory… | profile[-fail] |
-    /// dof | full-dof | prefs-dof | classic | viewfinder[-<words>]
+    /// dof | full-dof | prefs-dof | classic | viewfinder[-<words>] |
+    /// pano[-avatars] | depth
     /// (AURORA_DEMO_SNAPSHOT_FRAME, 700 by default): the window at frame
     /// 600, the photo saved, sent or posted at that frame.
     fn photo_demo(&mut self, renderer: &Renderer) {
@@ -3091,6 +3328,8 @@ LUT_3D_SIZE {n}
                 dof: kind.ends_with("dof") && kind != "prefs-dof",
                 prefs_dof: kind == "prefs-dof" || words.contains(&"prefsdof"),
                 quality: kind.ends_with("quality") || tight.is_some(),
+                pano: kind.starts_with("pano").then(|| kind == "pano-avatars"),
+                depth: kind == "depth",
                 tight,
                 light: kind == "light",
                 windlight: kind.starts_with("windlight").then(|| kind == "windlight-keep"),
@@ -3221,6 +3460,24 @@ LUT_3D_SIZE {n}
             if self.frame_count == demo.frame {
                 self.snapshots.quiet = false;
                 self.photo_to_postcard(renderer);
+            }
+            return;
+        }
+        if let Some(hide) = demo.pano {
+            if self.frame_count == demo.frame {
+                let e = &mut self.settings.snapshot.extras;
+                e.pano_quality = snapshot::pano::Quality::Medium;
+                e.pano_hide_avatars = hide;
+                self.snapshots.ui.destination = Destination::Disk;
+                self.photo_action(Action::Pano, renderer);
+            }
+            return;
+        }
+        if demo.depth {
+            if self.frame_count == demo.frame {
+                self.snapshots.ui.destination = Destination::Disk;
+                self.snapshots.ui.depth = true;
+                self.photo_action(Action::Take, renderer);
             }
             return;
         }

@@ -999,6 +999,7 @@ impl App {
         let review = self.photo_reel_card();
         let (af_key, menu_key, first_key) = self.vf_keys();
         let (isolate_rows, isolate_hover) = self.photo_isolate_rows();
+        let isolate_nearby = self.photo_isolate_nearby();
         // an object anchor holds the object the camera is on, until one is
         // chosen in the scene
         let form = &mut self.snapshots.vf.preset_form;
@@ -1040,6 +1041,8 @@ impl App {
             isolation: &self.world.photo_isolation,
             isolate_rows: &isolate_rows,
             isolate_hover,
+            isolate_nearby: &isolate_nearby,
+            matte: self.settings.snapshot.extras.matte,
             presets: &self.settings.camera_shots,
             preset_object,
             posing: self.ik_editor.open && self.ik_editor.posing(),

@@ -3,7 +3,10 @@
 //! list of the chosen with a cross each, the button that chooses in the
 //! scene, and the transparent background. While choosing, the pointer over
 //! the photo's frame names what is under it, and a click adds or removes
-//! it (`app::photo_isolate`). The rule is `snapshot::isolate`.
+//! it (`app::photo_isolate`). Every avatar in the shot can be kept at once,
+//! and the avatars around listed nearest first, a tick each (none while
+//! RLVa hides who is near). A cut-out saved or sent without alpha is laid
+//! on the matte colour chosen here. The rule is `snapshot::isolate`.
 
 use super::controls::segmented;
 use super::{Frame, Out, Viewfinder, bold, icon, keep_keys, shadow_text, widgets};
@@ -20,6 +23,10 @@ pub enum Isolate {
     /// A cross of the list.
     Remove(uuid::Uuid),
     Transparent(bool),
+    /// A tick of the avatars around: chosen or not.
+    Toggle(uuid::Uuid),
+    /// The cut-out's matte colour (sRGB).
+    Matte([u8; 3]),
     /// A click while choosing, and the pointer over the frame (points).
     Click(Pos2),
     Hover(Pos2),
@@ -31,6 +38,8 @@ pub struct IsolateRow {
     pub id: uuid::Uuid,
     pub name: String,
     pub avatar: bool,
+    /// From the camera, in metres (the avatars around).
+    pub distance: Option<f32>,
 }
 
 const WIDTH: f32 = 272.0;
@@ -87,9 +96,20 @@ impl Viewfinder {
                     if let Some(i) = segmented(ui, p, &items, Some(ui.available_width())) {
                         out.push(Out::Isolate(Isolate::Mode(modes[i].0)));
                     }
+                    ui.add_space(4.0);
+                    let all = [(
+                        aurora_i18n::tr!("b1-isolate-avatars"),
+                        iso.mode == Mode::Avatars,
+                        aurora_i18n::tr!("b1-isolate-avatars-tip"),
+                    )];
+                    if segmented(ui, p, &all, Some(ui.available_width())).is_some() {
+                        out.push(Out::Isolate(Isolate::Mode(Mode::Avatars)));
+                    }
                     if iso.mode == Mode::Chosen {
                         ui.add_space(8.0);
                         self.isolate_list(ui, p, f, out);
+                        ui.add_space(6.0);
+                        self.isolate_nearby(ui, p, f, out);
                         ui.add_space(6.0);
                         let (glyph, label) = if iso.picking {
                             ("check", aurora_i18n::tr!("photo-isolate-pick-done"))
@@ -113,12 +133,23 @@ impl Viewfinder {
                         if widgets::switch_labeled(ui, p, &mut on, aurora_i18n::tr!("photo-isolate-transparent")).changed() {
                             out.push(Out::Isolate(Isolate::Transparent(on)));
                         }
+                        if iso.transparent {
+                            ui.horizontal(|ui| {
+                                let [r, g, b] = f.matte;
+                                let mut c = [r, g, b, 255];
+                                if widgets::color_button(ui, p, "vf_isolate_matte", &mut c, false).changed() {
+                                    out.push(Out::Isolate(Isolate::Matte([c[0], c[1], c[2]])));
+                                }
+                                ui.label(egui::RichText::new(aurora_i18n::tr!("b1-matte")).size(12.5).color(p.ink))
+                                    .on_hover_text(aurora_i18n::tr!("b1-matte-tip"));
+                            });
+                        }
                     }
                     let hint = match (iso.mode, iso.picking) {
                         (_, true) => Some(aurora_i18n::tr!("photo-isolate-pick-hint")),
                         (Mode::Off, _) => Some(aurora_i18n::tr!("photo-isolate-hint")),
                         (Mode::Background, _) => None,
-                        _ if iso.transparent => Some(aurora_i18n::tr!("photo-isolate-png-hint")),
+                        _ if iso.transparent => Some(aurora_i18n::tr!("b1-isolate-png-hint")),
                         _ => None,
                     };
                     if let Some(hint) = hint {
@@ -156,6 +187,41 @@ impl Viewfinder {
                         });
                         if widgets::icon_button(ui, p, "x", aurora_i18n::tr!("photo-isolate-remove"), true) {
                             out.push(Out::Isolate(Isolate::Remove(row.id)));
+                        }
+                    });
+                }
+            });
+    }
+
+    /// The avatars around, nearest first, a tick each: ticked, chosen.
+    fn isolate_nearby(&mut self, ui: &mut egui::Ui, p: &Palette, f: &Frame, out: &mut Vec<Out>) {
+        ui.label(
+            egui::RichText::new(aurora_i18n::tr!("b1-isolate-nearby"))
+                .font(bold(ui.ctx(), 12.5))
+                .color(p.ink),
+        );
+        if f.isolate_nearby.is_empty() {
+            ui.label(
+                egui::RichText::new(aurora_i18n::tr!("b1-isolate-nearby-none"))
+                    .size(12.0)
+                    .color(p.muted),
+            );
+            return;
+        }
+        egui::ScrollArea::vertical()
+            .id_salt("vf_isolate_nearby")
+            .max_height(150.0)
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                for row in f.isolate_nearby {
+                    ui.horizontal(|ui| {
+                        let mut on = f.isolation.is_chosen(&row.id);
+                        let label = match row.distance {
+                            Some(d) => format!("{} · {}", row.name, aurora_i18n::tr!("b1-metres", distance = format!("{d:.0}"))),
+                            None => row.name.clone(),
+                        };
+                        if widgets::checkbox(ui, p, &mut on, label).changed() {
+                            out.push(Out::Isolate(Isolate::Toggle(row.id)));
                         }
                     });
                 }
