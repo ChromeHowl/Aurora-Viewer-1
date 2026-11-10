@@ -13517,3 +13517,9 @@ ui-options-attached-particles-hint = アバターが装着しているものの�
 # Preferences › Graphics: progressive draw distance (FSRenderFarClipStepping)
 ui-options-draw-distance-stepping = 描画距離を段階的に広げる
 ui-options-draw-distance-stepping-hint = ログイン後と別のリージョンへのテレポート後、描画距離を32mから始めて設定値まで倍々に広げ、近くのものから読み込みます。
+
+# Preferences › Graphics: textures kept under memory pressure and in the background
+texkeep-own-worn = 自分の装着物を鮮明に保つ
+texkeep-own-worn-help = ビデオメモリが不足しても、自分のアバターが装着しているもののテクスチャは解像度を下げません。スキンや衣服レイヤーのテクスチャと同じ扱いです。
+texkeep-background = ウィンドウがバックグラウンドにある間もテクスチャを保持する
+texkeep-background-help = オフ：バックグラウンドで1分、または最小化して1秒経つとテクスチャを解放し、戻ったときに読み込み直します。オン：テクスチャを保持します。ウィンドウが背面にある間にビデオメモリが不足した場合は、オンでも解放されます。

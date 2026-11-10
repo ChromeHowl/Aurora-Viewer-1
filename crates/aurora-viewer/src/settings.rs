@@ -624,6 +624,16 @@ pub struct Settings {
     /// (the Legacy Viewer's RenderMaxTextureResolution: 512, 1024 or 2048,
     /// 2048 by default): `TextureStreamer::max_resolution`.
     pub max_texture_resolution: u32,
+    /// The textures of what our own avatar wears are never lowered by the
+    /// memory pressure, like its bakes (an Aurora addition, on by default;
+    /// `texture_budget::spared`).
+    pub keep_own_worn_textures: bool,
+    /// The time spent in the background or minimised does not give the
+    /// textures back (off by default: the Legacy Viewer's
+    /// TextureDiscardBackgroundedTime and TextureDiscardMinimizedTime
+    /// apply). Past the driver's budget they go whatever this says
+    /// (`texture_budget::Background`).
+    pub keep_textures_in_background: bool,
     pub ui_scale: f32,
     /// Firestorm UsePieMenu. Keep Aurora's existing list menu by default.
     pub use_pie_menu: bool,
@@ -1966,6 +1976,8 @@ impl Default for Settings {
             texture_budget_auto: true,
             texture_budget_mb: 1536,
             max_texture_resolution: MAX_TEXTURE_RESOLUTION,
+            keep_own_worn_textures: true,
+            keep_textures_in_background: false,
             ui_scale: 1.0,
             use_pie_menu: false,
             world_context_menus: Default::default(),

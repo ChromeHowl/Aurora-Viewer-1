@@ -13546,3 +13546,9 @@ ui-options-attached-particles-hint = Affiche les particules de ce que portent le
 # Preferences › Graphics: progressive draw distance (FSRenderFarClipStepping)
 ui-options-draw-distance-stepping = Distance d'affichage progressive
 ui-options-draw-distance-stepping-hint = Après la connexion et après une téléportation vers une autre région, la distance d'affichage part de 32 m et double jusqu'à la vôtre, pour que ce qui est proche se charge d'abord.
+
+# Preferences › Graphics: textures kept under memory pressure and in the background
+texkeep-own-worn = Garder mes propres attachements nets
+texkeep-own-worn-help = Les textures de ce que porte votre avatar ne sont jamais réduites quand la mémoire vidéo vient à manquer, comme celles de votre peau et de vos vêtements.
+texkeep-background = Garder les textures quand la fenêtre est en arrière-plan
+texkeep-background-help = Désactivé : après une minute en arrière-plan, ou une seconde réduite, les textures sont libérées puis rechargées à votre retour. Activé : elles sont gardées. Si la mémoire vidéo est épuisée pendant que la fenêtre est derrière, elles sont tout de même libérées.

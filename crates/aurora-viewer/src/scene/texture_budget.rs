@@ -27,6 +27,12 @@
 //!   without waiting its minute.
 //!
 //! What differs, on purpose:
+//! - the textures of what our own avatar wears are left alone like its
+//!   bakes, under pressure and behind (Preferences › Graphics, on by
+//!   default; [`spared`]), and the time behind alone can be told not to
+//!   give the textures back (off by default, [`Background::set_keep`]). A
+//!   window behind with the viewer past the driver's budget gives
+//!   everything back whatever these say (#1808);
 //! - the budget is read from the driver as it is now and the use is what
 //!   the driver counts for the viewer (aurora_render::vram), where the
 //!   Legacy Viewer doubles the texture and vertex bytes it tracks as an
@@ -257,9 +263,29 @@ pub struct Background {
     /// They went with the viewer past the driver's budget: its 3D drawing
     /// pauses too ([`Background::paused`]).
     crowded: bool,
+    /// The time behind alone gives nothing back ([`Background::set_keep`]).
+    keep: bool,
+}
+
+/// Whether memory pressure leaves a loaded texture as it is: an avatar's
+/// bake (the Legacy Viewer's boosted textures) or, with the preference, a
+/// texture of what our own avatar wears, the first thing its user looks at.
+/// Neither while the 3D drawing is paused behind with the viewer past the
+/// driver's budget ([`Background::paused`]): nothing is drawn then, and what
+/// they hold is what the viewer in front lacks (#1808).
+pub fn spared(bake: bool, own_worn: bool, paused: bool) -> bool {
+    (bake || own_worn) && !paused
 }
 
 impl Background {
+    /// "Keep textures while the window is in the background" (Preferences ›
+    /// Graphics, off by default as the Legacy Viewer): on, neither the
+    /// minute behind nor the second minimised gives the textures back. Past
+    /// the driver's budget they still go at once, see [`Background::update`].
+    pub fn set_keep(&mut self, keep: bool) {
+        self.keep = keep;
+    }
+
     /// The window's state now (`in_front`: it has the focus and is not
     /// minimised; `crowded`: the viewer is past the driver's budget);
     /// whether its textures should go. Once gone they stay gone until the
@@ -283,7 +309,7 @@ impl Background {
         let since = *self.since.get_or_insert(now);
         let after = if minimized { MINIMIZED_AFTER } else { BACKGROUNDED_AFTER };
         self.crowded |= crowded;
-        self.away |= crowded || now.duration_since(since) >= after;
+        self.away |= crowded || (!self.keep && now.duration_since(since) >= after);
         self.away
     }
 
@@ -747,5 +773,53 @@ mod tests {
         // minimised and crowded: at once too
         let mut m = Background::default();
         assert!(m.update(t0, true, true, true));
+    }
+
+    #[test]
+    fn a_window_told_to_keep_its_textures_behind_still_gives_them_back_past_the_budget() {
+        let t0 = Instant::now();
+        let s = Duration::from_secs;
+        let mut b = Background::default();
+        b.set_keep(true);
+        // behind for an hour, minimised or not: nothing goes
+        assert!(!b.update(t0, false, false, false));
+        assert!(!b.update(t0 + s(61), false, false, false));
+        assert!(!b.update(t0 + s(3600), false, true, false));
+        assert!(!b.paused());
+        // past the driver's budget behind: at once, and the drawing pauses,
+        // as without the preference (#1808)
+        assert!(b.update(t0 + s(3601), false, false, true));
+        assert!(b.paused());
+        // gone until in front again, even back under the budget
+        assert!(b.update(t0 + s(3602), false, false, false));
+        assert!(!b.update(t0 + s(3603), true, false, false));
+        assert!(!b.paused());
+        // minimised and crowded: at once too
+        let mut m = Background::default();
+        m.set_keep(true);
+        assert!(!m.update(t0, false, true, false));
+        assert!(!m.update(t0 + s(5), false, true, false));
+        assert!(m.update(t0 + s(6), false, true, true));
+        // the preference turned off behind: the time already spent counts
+        let mut off = Background::default();
+        off.set_keep(true);
+        assert!(!off.update(t0, false, false, false));
+        assert!(!off.update(t0 + s(90), false, false, false));
+        off.set_keep(false);
+        assert!(off.update(t0 + s(91), false, false, false));
+        assert!(!off.paused());
+    }
+
+    #[test]
+    fn bakes_and_what_we_wear_are_spared_until_the_drawing_pauses_behind() {
+        // (bake, worn by us, paused)
+        assert!(!spared(false, false, false), "an ordinary texture is lowered");
+        assert!(spared(true, false, false));
+        assert!(spared(false, true, false));
+        assert!(spared(true, true, false));
+        // past the driver's budget behind: everything goes
+        for (bake, own_worn) in [(false, false), (true, false), (false, true), (true, true)] {
+            assert!(!spared(bake, own_worn, true));
+        }
     }
 }

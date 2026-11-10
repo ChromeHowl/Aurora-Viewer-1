@@ -439,6 +439,16 @@ fn quality(cx: &mut Cx) {
             &field!(max_texture_resolution),
             &choices,
         );
+        cx.toggle(
+            tr!("texkeep-own-worn"),
+            tr!("texkeep-own-worn-help"),
+            &field!(keep_own_worn_textures),
+        );
+        cx.toggle(
+            tr!("texkeep-background"),
+            tr!("texkeep-background-help"),
+            &field!(keep_textures_in_background),
+        );
     });
     cx.group(tr!("ui-options-avatars"), |cx| {
         cx.slider(

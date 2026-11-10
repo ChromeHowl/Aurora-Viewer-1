@@ -8827,6 +8827,9 @@ impl App {
         // a window behind gives its textures back (texture_budget::Background)
         let minimized = self.gfx.as_ref().and_then(|g| g.window.is_minimized()).unwrap_or(false);
         self.scene.textures.set_window_state(self.focused, minimized);
+        self.scene
+            .textures
+            .set_kept(self.settings.keep_own_worn_textures, self.settings.keep_textures_in_background);
         // (a demo or a timed run neither publishes nor reads, instances.rs)
         let timed = self.capture.is_some() || self.frame_profile.enabled();
         // the busy card's switch, the same in every viewer (instances.rs)

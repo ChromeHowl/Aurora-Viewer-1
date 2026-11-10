@@ -13550,3 +13550,9 @@ ui-options-attached-particles-hint = Draw the particles of what avatars wear: sp
 # Preferences › Graphics: progressive draw distance (FSRenderFarClipStepping)
 ui-options-draw-distance-stepping = Progressive draw distance
 ui-options-draw-distance-stepping-hint = After logging in and after a teleport to another region, the draw distance starts at 32 m and doubles back up to yours, so that what is near loads first.
+
+# Preferences › Graphics: textures kept under memory pressure and in the background
+texkeep-own-worn = Keep my own attachments sharp
+texkeep-own-worn-help = The textures of what your avatar wears are never lowered when video memory runs short, like the textures of your skin and clothing layers.
+texkeep-background = Keep textures while the window is in the background
+texkeep-background-help = Off: after a minute in the background, or a second minimised, the textures are given back and load again when you return. On: they are kept. If video memory runs out while the window is behind, they are still given back.
