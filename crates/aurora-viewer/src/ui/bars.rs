@@ -90,6 +90,8 @@ pub enum BarAction {
     ToggleMoveLock,
     /// Me › Quickjump (Self.toggleIgnorePreJump, FSIgnoreFinishAnimation).
     ToggleQuickjump,
+    /// Me › Movement › Face nearest avatar (Avatar.FaceNearest).
+    FaceNearestAvatar,
     /// Advanced › Quiet snapshots (PlayModeUISndSnapshot).
     ToggleQuietSnapshots,
     ToggleWaterWalk,
@@ -789,6 +791,9 @@ fn main_menus(ui: &mut egui::Ui, p: &Palette, panels: &mut Panels, st: &StatusIn
         if menu::check(ui, p, "receipt-filled", tracker, panels.money_tracker, true) {
             super::money_tracker::toggle(ui.ctx(), &mut panels.money_tracker);
         }
+        // menu_viewer.xml: Avatar › Pose Stand…, after the Money Tracker
+        let stand = aurora_i18n::tr!("toolbar-command-pose-stand");
+        flip_window(ui, p, "man-filled", stand, super::pose_stand::WINDOW, &mut panels.pose_stand);
         // menu_viewer.xml: Me › Experiences (Picks, before it there, has
         // no entry in this menu)
         flip_window(
@@ -842,6 +847,12 @@ fn main_menus(ui: &mut egui::Ui, p: &Palette, panels: &mut Panels, st: &StatusIn
         if menu::check(ui, p, "arrow-big-up-lines-filled", quickjump, st.quickjump, true) {
             *action = BarAction::ToggleQuickjump;
         }
+        // menu_viewer.xml: Avatar › Movement › Face nearest avatar, Avatar alignment
+        if menu::item(ui, p, "user-search", aurora_i18n::tr!("toolbar-command-face-nearest")) {
+            *action = BarAction::FaceNearestAvatar;
+        }
+        let align = aurora_i18n::tr!("toolbar-command-avatar-align");
+        flip_window(ui, p, "user-scan", align, super::avatar_align::WINDOW, &mut panels.avatar_align);
         if menu::item(ui, p, "swimming", aurora_i18n::tr!("movement-title")) {
             *action = BarAction::MovementEnhancer;
         }
@@ -1438,8 +1449,9 @@ fn main_menus(ui: &mut egui::Ui, p: &Palette, panels: &mut Panels, st: &StatusIn
 }
 
 /// Me › Avatar health (menu_viewer.xml "avhealth"): the usual fixes of a
-/// broken avatar, in the Legacy Viewer's order. Its default avatar resets
-/// ("Character Test") and complexity information are left out.
+/// broken avatar, in the Legacy Viewer's order, with its default avatar
+/// resets ("Character Test") and Appearance To XML (Advanced › Character);
+/// its complexity information is left out.
 fn health_menu(ui: &mut egui::Ui, p: &Palette, h: &HealthMenu) {
     use super::context::{CtxAction, request};
     menu::submenu(ui, p, "medical-cross-filled", aurora_i18n::tr!("avatar-health-menu"), true, |ui| {
@@ -1492,6 +1504,17 @@ fn health_menu(ui: &mut egui::Ui, p: &Palette, h: &HealthMenu) {
             &h.refresh_keys,
         ) {
             request(ui.ctx(), CtxAction::RefreshAttachments);
+        }
+        // menu_viewer.xml: the Character Test resets after Refresh
+        // Attachments; Advanced › Character › Appearance To XML
+        if menu::item(ui, p, "man-filled", aurora_i18n::tr!("b4-default-male")) {
+            request(ui.ctx(), CtxAction::ResetDefaultAvatar(true));
+        }
+        if menu::item(ui, p, "woman-filled", aurora_i18n::tr!("b4-default-female")) {
+            request(ui.ctx(), CtxAction::ResetDefaultAvatar(false));
+        }
+        if menu::item(ui, p, "file-export", aurora_i18n::tr!("b4-dump-menu")) {
+            request(ui.ctx(), CtxAction::DumpAppearanceXml);
         }
     });
 }
@@ -2332,6 +2355,10 @@ pub fn run_command(ctx: &egui::Context, cmd: &str, panels: &mut Panels) -> BarAc
         "marketplacelistings" => return BarAction::ToggleMarketplaceListings,
         "stop_animations" => return BarAction::StopAnimations,
         "resync_animations" => return BarAction::ResyncAnimations,
+        // Avatar.AlignToggle, Avatar.FaceNearest (commands.xml)
+        "avatar_align" => toggle(super::avatar_align::WINDOW, &mut panels.avatar_align),
+        "pose_stand" => toggle(super::pose_stand::WINDOW, &mut panels.pose_stand),
+        "face_nearest_avatar" => return BarAction::FaceNearestAvatar,
         "vr_view" => return BarAction::ToggleVr,
         "immersive" => return BarAction::ToggleImmersive,
         _ => {}
@@ -2371,6 +2398,8 @@ fn command_active(cmd: &str, panels: &Panels, flying: bool, seated: bool, mousel
         "performance" | "statistics" => panels.perf,
         "snapshot" => panels.snapshot,
         "beacons" => panels.beacons,
+        "avatar_align" => panels.avatar_align,
+        "pose_stand" => panels.pose_stand,
         "quickprefs" => panels.quick_prefs,
         "settings_debug" => panels.debug_settings,
         "preferences" => panels.settings,

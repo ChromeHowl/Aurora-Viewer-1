@@ -7,6 +7,7 @@ pub mod appearance;
 pub mod area_search;
 pub mod audio;
 pub mod aurora_bg;
+pub mod avatar_align;
 pub mod avatar_picker;
 pub mod avatar_render_settings;
 pub mod backdrop;
@@ -15,6 +16,7 @@ pub mod bars;
 pub mod bidi;
 pub mod blacklist;
 pub mod bumps;
+pub mod pose_stand;
 pub mod sound_explorer;
 pub mod voice_controls;
 // Bug report form (disabled, see main.rs):
@@ -216,6 +218,10 @@ pub struct Panels {
     pub experiences: bool,
     /// "Bumps, pushes & hits" (Help menu): who bumped, pushed or hit us.
     pub bumps: bool,
+    /// Me › Movement › Avatar alignment (`ui/avatar_align.rs`).
+    pub avatar_align: bool,
+    /// Avatar › Pose stand (`ui/pose_stand.rs`).
+    pub pose_stand: bool,
     /// "Grid status" (Help menu, toolbar): the grid's incidents.
     pub grid_status: bool,
     /// The built-in web browser (toolbar `webbrowser`).
@@ -288,6 +294,8 @@ impl Panels {
             money_tracker: false,
             experiences: false,
             bumps: false,
+            avatar_align: false,
+            pose_stand: false,
             grid_status: false,
             web_browser: false,
             quick_prefs: false,

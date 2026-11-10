@@ -6,6 +6,7 @@ use aurora_assets::Animation;
 use std::{collections::HashSet, sync::Arc};
 pub(super) mod document;
 pub(super) mod files;
+pub(super) mod interpolation;
 #[cfg(test)]
 mod tests;
 mod ui;
@@ -54,6 +55,23 @@ pub(super) struct State {
     tx: crossbeam_channel::Sender<files::Output>,
     rx: crossbeam_channel::Receiver<files::Output>,
     pub prepared: Vec<Prepared>,
+    /// Open a native animation in the timeline: the file, or one to pick.
+    open_request: Option<Option<std::path::PathBuf>>,
+    /// The animation opened, waiting for the window to make it the draft.
+    opened: Option<Document>,
+    /// Where the account's draft is autosaved, None before a login.
+    recovery_dir: Option<std::path::PathBuf>,
+    /// An autosaved draft is there (looked at once per folder).
+    recovery_exists: Option<bool>,
+    autosaved: Option<u64>,
+    autosave_at: Option<Instant>,
+}
+/// How often the draft is written while it changes.
+const AUTOSAVE_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
+/// Whether the draft is due to be autosaved: changed since the last write,
+/// no write for AUTOSAVE_EVERY.
+fn autosave_due(revision: u64, autosaved: Option<u64>, last: Option<Instant>, now: Instant) -> bool {
+    autosaved != Some(revision) && last.is_none_or(|at| now.saturating_duration_since(at) >= AUTOSAVE_EVERY)
 }
 impl Default for State {
     fn default() -> Self {
@@ -88,6 +106,12 @@ impl Default for State {
             tx,
             rx,
             prepared: Vec::new(),
+            open_request: None,
+            opened: None,
+            recovery_dir: None,
+            recovery_exists: None,
+            autosaved: None,
+            autosave_at: None,
         }
     }
 }
@@ -137,6 +161,11 @@ impl State {
     }
     fn tick(&mut self, jobs: &Jobs, ctx: &egui::Context, rig: Arc<Rig>) -> Vec<usize> {
         let mut clear = Vec::new();
+        if let Some(path) = self.open_request.take() {
+            self.busy = true;
+            self.error = None;
+            files::open(jobs, ctx, self.tx.clone(), path);
+        }
         while let Ok(output) = self.rx.try_recv() {
             match output {
                 files::Output::Preview {
@@ -176,6 +205,17 @@ impl State {
                     self.busy = false;
                     self.message = Some(aurora_i18n::tr!("anim-edit-saved", path = path.display().to_string()).to_string());
                 }
+                files::Output::Opened(name, animation) => {
+                    self.busy = false;
+                    match Document::from_animation(&rig, &animation, name) {
+                        Ok(document) => self.opened = Some(document),
+                        Err(key) => self.error = Some(aurora_i18n::text(key).to_owned()),
+                    }
+                }
+                files::Output::Autosaved(revision) => {
+                    self.autosaved = Some(revision);
+                    self.recovery_exists = Some(true);
+                }
                 files::Output::Cancelled => self.busy = false,
                 files::Output::Failed(error) => {
                     self.busy = false;
@@ -203,6 +243,13 @@ impl State {
             }
             if let Some(action) = self.export.take() {
                 files::start(jobs, ctx, self.tx.clone(), document.clone(), action);
+            }
+            let now = Instant::now();
+            if let Some(dir) = &self.recovery_dir
+                && autosave_due(self.revision, self.autosaved, self.autosave_at, now)
+            {
+                self.autosave_at = Some(now);
+                files::autosave(jobs, self.tx.clone(), document.clone(), self.revision, dir.clone());
             }
             let now = Instant::now();
             let dt = self.at.map_or(0.0, |at| now.saturating_duration_since(at).as_secs_f64().min(0.1));
@@ -322,6 +369,29 @@ impl Editor {
                 .collect(),
             at: frame.at,
         })
+    }
+    /// The account's folder for the autosaved draft (`app.rs`, each frame
+    /// while IK Edit is open); None after a logout.
+    pub fn set_clip_recovery(&mut self, dir: Option<std::path::PathBuf>) {
+        if self.clip.recovery_dir != dir {
+            self.clip.recovery_exists = dir.as_ref().map(|d| d.join(files::RECOVERY).is_file());
+            self.clip.recovery_dir = dir;
+            self.clip.autosaved = None;
+        }
+    }
+    /// A native animation opened in the timeline becomes the draft, the
+    /// previous one kept with the others, as Create does.
+    fn open_clip(&mut self, world: &World, frame: &Frame, document: Document) {
+        if self.clip.history.len() >= 15 {
+            self.clip.error = Some(aurora_i18n::tr!("anim-edit-drafts-hint").to_owned());
+            return;
+        }
+        if let Some(old) = self.clip.document.replace(Arc::new(document)) {
+            self.clip.history.push(old);
+        }
+        self.clip.seek(0);
+        self.clip.changed();
+        self.enter_clip(world, frame);
     }
     fn new_clip(&mut self, world: &World, frame: &Frame) {
         if self.clip.history.len() >= 15 {

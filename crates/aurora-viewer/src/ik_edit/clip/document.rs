@@ -21,6 +21,9 @@ pub struct Document {
     pub start: u32,
     pub end: u32,
     pub tracks: Vec<Track>,
+    /// How the keys follow each other (`interpolation.rs`); linear, the
+    /// native playback, unless chosen.
+    pub interpolation: super::interpolation::Interpolation,
 }
 impl Document {
     pub fn new() -> Self {
@@ -29,6 +32,7 @@ impl Document {
             start: 0,
             end: 60,
             tracks: Vec::new(),
+            interpolation: Default::default(),
             meta: Animation {
                 base_priority: 3,
                 duration: 2.0,
@@ -43,6 +47,53 @@ impl Document {
                 joints: Vec::new(),
             },
         }
+    }
+    /// A native animation opened in the timeline: its joints the rig knows
+    /// become tracks with their keys, its timing and playback settings the
+    /// document's, from frame 0 to its duration.
+    pub fn from_animation(rig: &Rig, animation: &Animation, name: String) -> Result<Self, &'static str> {
+        let mut document = Self::new();
+        document.name = name;
+        let end = if animation.duration.is_finite() {
+            ((animation.duration * FPS).ceil() as u32).clamp(1, LAST)
+        } else {
+            return Err("anim-edit-invalid");
+        };
+        document.meta = Animation {
+            joints: Vec::new(),
+            base_priority: animation.base_priority.clamp(0, 6),
+            hand_pose: animation.hand_pose.min(13),
+            ..animation.clone()
+        };
+        for joint in &animation.joints {
+            let Some(&bone) = rig.names.get(&joint.joint_name) else { continue };
+            if document.tracks.iter().any(|t| t.bone == bone) || (joint.rot_keys.is_empty() && joint.pos_keys.is_empty()) {
+                continue;
+            }
+            let base_position = joint
+                .pos_keys
+                .first()
+                .map_or_else(|| if bone == rig.pelvis { Vec3::ZERO } else { rig.local_pos[bone] }, |k| k.position);
+            document.tracks.push(Track {
+                bone,
+                enabled: true,
+                base_position,
+                motion: JointMotion {
+                    joint_name: rig.canonical_names.get(bone).cloned().unwrap_or_else(|| joint.joint_name.clone()),
+                    priority: joint.priority.clamp(-1, 6),
+                    rot_keys: joint.rot_keys.clone(),
+                    pos_keys: joint.pos_keys.clone(),
+                },
+            });
+        }
+        if document.tracks.is_empty() {
+            return Err("anim-edit-no-bones");
+        }
+        document.start = 0;
+        document.end = end;
+        document.meta.duration = end as f32 / FPS;
+        document.timing();
+        Ok(document)
     }
     pub fn range(&mut self, start: u32, end: u32) {
         let old = self.meta.duration;
@@ -237,6 +288,8 @@ impl Document {
                     position: b,
                 });
             }
+            joint.rot_keys = self.interpolation.rotations(joint.rot_keys);
+            joint.pos_keys = self.interpolation.positions(joint.pos_keys);
             if !joint.rot_keys.is_empty() || !joint.pos_keys.is_empty() {
                 animation.joints.push(joint);
             }

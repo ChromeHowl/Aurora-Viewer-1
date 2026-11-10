@@ -378,6 +378,11 @@ pub enum CtxAction {
     Undeform,
     /// Me › Avatar health › "Refresh attachments" (Advanced.RefreshAttachments).
     RefreshAttachments,
+    /// Me › Avatar health › "Appearance to XML" (Advanced.AppearanceToXML).
+    DumpAppearanceXml,
+    /// Me › Avatar health › "Reset default male (true) / female avatar"
+    /// (Advanced.TestMale / TestFemale).
+    ResetDefaultAvatar(bool),
     /// Block / unblock a resident (LLMuteList).
     ToggleBlock(Uuid),
     /// A resident's voice volume, 0..1 with 0.5 as sent (setUserVolume,

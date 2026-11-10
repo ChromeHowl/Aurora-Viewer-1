@@ -8,6 +8,7 @@ mod material;
 mod preview;
 #[cfg(test)]
 pub(crate) mod tests;
+pub mod xml_export;
 pub mod xml_import;
 use crate::{
     scene::{Scene, jobs::Jobs},
