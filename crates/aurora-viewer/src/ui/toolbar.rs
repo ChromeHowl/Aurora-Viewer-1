@@ -277,6 +277,8 @@ pub struct ToolbarUi {
     pub shown: Shown,
     /// "Show Friends Only" is on (FSRenderFriendsOnly).
     pub friends_only_active: bool,
+    /// The Camera Lock is on (its button stays lit).
+    pub camera_lock_active: bool,
     pub show_name_tags: bool,
     pub movelock_status: String,
     /// The violet of the Grid status button's flash (0: none), given by

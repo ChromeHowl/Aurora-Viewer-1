@@ -110,6 +110,9 @@ pub struct View<'a> {
     pub keys: &'a KeyBindings,
     /// The photo window's free camera, while it flies.
     pub free: Option<FreeView>,
+    /// The Camera Lock is on; the view history has a view to go back to,
+    /// and one to go forward to.
+    pub camera_tools: (bool, bool, bool),
 }
 
 /// The free camera's settings in the window (the photo window's, never
@@ -138,6 +141,10 @@ pub enum ControlAction {
     LevelRoll,
     Mouselook,
     ObjectView,
+    /// The Camera Lock on or off.
+    CameraLock,
+    /// The view history: back (true) or forward.
+    ViewStep(bool),
     Walk,
     Run,
     Fly,
@@ -334,6 +341,39 @@ impl ControlsUi {
             }
             if square_button(ui, p, "restore", aurora_i18n::tr!("controls-reset-camera")) {
                 out.actions.push(ControlAction::ResetCamera);
+            }
+        });
+        // the Camera Lock, lit while it holds the view, and the view history
+        // on the square buttons' column
+        let (locked, back, forward) = view.camera_tools;
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = ROW_GAP;
+            let lock = widgets::action_button_keyed(
+                ui,
+                p,
+                if locked { "lock-filled" } else { "lock-open" },
+                aurora_i18n::tr!("camtools-lock"),
+                if locked {
+                    widgets::ActionKind::Primary
+                } else {
+                    widgets::ActionKind::Flat
+                },
+                Vec2::new(grid.field - BUTTON_H - ROW_GAP, BUTTON_H),
+                true,
+                pad_binding(view.keys, Action::CameraLock).as_ref(),
+            )
+            .on_hover_text(aurora_i18n::tr!("camtools-lock-tip"));
+            if lock.clicked() {
+                out.actions.push(ControlAction::CameraLock);
+            }
+            for (icon, tip, enabled, step) in [
+                ("arrow-back-up", aurora_i18n::tr!("camtools-view-previous"), back, true),
+                ("arrow-forward-up", aurora_i18n::tr!("camtools-view-next"), forward, false),
+            ] {
+                let button = widgets::action_button_if(ui, p, icon, "", widgets::ActionKind::Flat, Vec2::splat(BUTTON_H), enabled);
+                if button.on_hover_text(tip).clicked() {
+                    out.actions.push(ControlAction::ViewStep(step));
+                }
             }
         });
         // no list of the Alt-camera's keys below: they move the camera
@@ -1075,6 +1115,20 @@ fn classic_camera(ui: &mut egui::Ui, p: &Palette, view: &View, naming: (&mut boo
             out.actions.push(ControlAction::ResetOrbit);
         }
     });
+    // Aurora's Camera Lock and view history
+    let (locked, back, forward) = view.camera_tools;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 3.0;
+        if widgets::icon_toggle(ui, p, "lock-filled", aurora_i18n::tr!("camtools-lock"), locked) {
+            out.actions.push(ControlAction::CameraLock);
+        }
+        if widgets::icon_button(ui, p, "arrow-back-up", aurora_i18n::tr!("camtools-view-previous"), back) {
+            out.actions.push(ControlAction::ViewStep(true));
+        }
+        if widgets::icon_button(ui, p, "arrow-forward-up", aurora_i18n::tr!("camtools-view-next"), forward) {
+            out.actions.push(ControlAction::ViewStep(false));
+        }
+    });
     sticks(ui, p, view, out, ui.available_width());
     roll_controls(ui, p, view, out);
     ui.horizontal(|ui| {
@@ -1560,6 +1614,7 @@ mod tests {
             object_view: false,
             keys: &keys,
             free: None,
+            camera_tools: (false, false, false),
         };
         let window = egui::Id::unique("roll_hold_fixture");
         let mut time = 0.0;
@@ -1647,6 +1702,7 @@ mod tests {
                 object_view: false,
                 keys: &keys,
                 free: None,
+                camera_tools: (false, false, false),
             };
             let mut out = Output::default();
             let mut output = ctx.run_ui(
@@ -1867,6 +1923,7 @@ mod tests {
                 object_view: false,
                 keys: &keys,
                 free: None,
+                camera_tools: (false, false, false),
             };
             let mut frame = |events| {
                 time += 0.1;

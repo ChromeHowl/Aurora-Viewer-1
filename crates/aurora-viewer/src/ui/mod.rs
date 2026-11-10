@@ -23,6 +23,7 @@ pub mod beacons;
 pub mod buy_currency;
 pub mod buy_land;
 pub mod call_invite;
+pub mod camera_path;
 pub mod chat;
 pub mod chat_bubbles;
 pub mod click_away_focus;
@@ -166,6 +167,8 @@ pub struct Panels {
     /// World map (Ctrl+M).
     pub world_map: bool,
     pub region_tracker: bool,
+    /// The Camera Path window (World menu).
+    pub camera_path: bool,
     pub beacons: bool,
     pub owned_land: bool,
     pub settings: bool,
@@ -248,6 +251,7 @@ impl Panels {
             minimap: settings.show_minimap,
             world_map: false,
             region_tracker: false,
+            camera_path: false,
             beacons: false,
             owned_land: false,
             settings: false,

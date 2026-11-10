@@ -162,6 +162,7 @@ fn status(classic: bool) -> StatusInfo<'static> {
         double_click: Default::default(),
         quickjump: false,
         friends_only: false,
+        camera_tools: (false, false, false),
         show_name_tags: true,
         fly_override: false,
         quiet_snapshots: false,
