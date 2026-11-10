@@ -697,10 +697,18 @@ pub fn row(ctx: &egui::Context, p: &Palette, icons: &Icons, view: &View, under: 
                 _ => "",
             };
             let facts: Vec<&str> = [fav.region.as_str(), rating].into_iter().filter(|s| !s.is_empty()).collect();
+            // the people of its region, asked for the pill under the pointer
+            let people = resp
+                .hovered()
+                .then(|| crate::ui::region_people::of(ui.ctx(), &fav.region))
+                .flatten();
             let resp = resp.on_hover_ui(|ui| {
                 ui.label(egui::RichText::new(&fav.name).font(semibold(ui, 12.0)).color(p.ink));
                 if !facts.is_empty() {
                     ui.label(egui::RichText::new(facts.join(" · ")).size(12.0).color(p.ink));
+                }
+                if let Some(people) = people {
+                    ui.label(egui::RichText::new(people.label()).size(12.0).color(p.ink));
                 }
                 ui.label(
                     egui::RichText::new(aurora_i18n::tr!("favorites-pill-hints"))

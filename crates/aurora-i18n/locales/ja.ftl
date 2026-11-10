@@ -13517,3 +13517,8 @@ ui-options-attached-particles-hint = アバターが装着しているものの�
 # Preferences › Graphics: progressive draw distance (FSRenderFarClipStepping)
 ui-options-draw-distance-stepping = 描画距離を段階的に広げる
 ui-options-draw-distance-stepping-hint = ログイン後と別のリージョンへのテレポート後、描画距離を32mから始めて設定値まで倍々に広げ、近くのものから読み込みます。
+
+# People in region: the Region Tracker's figure beside a place (place details, About Land, search, Places, favorites, mini-map)
+people-region-title = リージョン内の人数
+# $count is already written out: a number, "…" while it is asked, "?" when the map did not answer
+people-region-label = リージョン内の人数：{ $count }

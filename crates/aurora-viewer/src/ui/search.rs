@@ -932,7 +932,15 @@ fn results(ui: &mut egui::Ui, c: &mut Ctx, list: &List, actions: &mut Vec<Search
                     ui.painter().rect_filled(rect, radius, p.raised.gamma_multiply(0.6));
                 }
                 let cut = paint_row(ui, p, row, &cells(rect), &font);
-                let resp = if cut { resp.on_hover_text(&row.name) } else { resp };
+                // the columns stay as they are: the people of the result's
+                // region are in the tooltip of the row under the pointer
+                let people = resp.hovered().then(|| row_people(c.world, tab, row)).flatten();
+                let resp = match (cut, people) {
+                    (true, Some(n)) => resp.on_hover_text(format!("{}\n{}", row.name, n.label())),
+                    (false, Some(n)) => resp.on_hover_text(n.label()),
+                    (true, None) => resp.on_hover_text(&row.name),
+                    (false, None) => resp,
+                };
                 let resp = place_drag_source(resp, c, tab, row);
                 if resp.clicked() && !selected {
                     actions.push(SearchAction::Select(tab, row.key));
@@ -972,6 +980,24 @@ fn results(ui: &mut egui::Ui, c: &mut Ctx, list: &List, actions: &mut Vec<Search
             }
         });
     });
+}
+
+/// The region of a result, once its details arrived (a place's or a land
+/// sale's parcel, a classified, an event): nothing is asked for it here.
+fn row_region<'a>(world: &'a crate::world::World, tab: Tab, row: &Row) -> Option<&'a str> {
+    let name = match (tab, row.key) {
+        (Tab::Places | Tab::Land, Key::Id(id)) => world.profiles.parcels.get(&id)?.sim_name.as_str(),
+        (Tab::Classifieds, Key::Id(id)) => world.profiles.classifieds.get(&id)?.sim_name.as_str(),
+        (Tab::Events, Key::Event(id)) => world.search.events.get(&id)?.sim_name.as_str(),
+        _ => return None,
+    };
+    (!name.is_empty()).then_some(name)
+}
+
+/// "People in region: N" of a result drawn on screen (None under RLVa
+/// @showloc, or while its region is not known).
+fn row_people(world: &crate::world::World, tab: Tab, row: &Row) -> Option<crate::world::region_people::People> {
+    row_region(world, tab, row).and_then(|region| world.people_in_region(region))
 }
 
 /// FSFloaterSearch::displayParcelDetails uses ParcelInfoReply's arrival for

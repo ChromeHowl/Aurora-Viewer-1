@@ -142,6 +142,13 @@ pub(super) fn muted(ui: &mut egui::Ui, p: &Palette, text: &str) {
     ui.label(RichText::new(text).size(12.0).color(p.muted));
 }
 
+/// "People in region: N" under a location; nothing under RLVa @showloc.
+pub(super) fn people(ui: &mut egui::Ui, p: &Palette, world: &crate::world::World, region: &str) {
+    if let Some(n) = world.people_in_region(region) {
+        muted(ui, p, &n.label());
+    }
+}
+
 /// A labelled value: the label in a fixed column, the value wrapping.
 pub(super) fn field(ui: &mut egui::Ui, p: &Palette, label: &str, value: impl FnOnce(&mut egui::Ui)) {
     ui.horizontal_top(|ui| {
@@ -565,6 +572,7 @@ fn classified(ui: &mut egui::Ui, c: &mut Ctx, id: Uuid, row_name: &str, actions:
             aurora_i18n::tr!("ui-profile-location"),
             &aurora_net::profile::location_text(&[&info.parcel_name, &info.sim_name], info.pos_global),
         );
+        people(ui, p, c.world, &info.sim_name);
         // is_cf_mature: the mature flag of the ad or of its query
         let mature = info.flags & (classified_flags::MATURE | classified_flags::QUERY_INC_MATURE) != 0;
         field(ui, p, aurora_i18n::tr!("ui-profile-content-type"), |ui| {
@@ -661,6 +669,7 @@ fn event(ui: &mut egui::Ui, c: &mut Ctx, id: u32, row_name: &str, actions: &mut 
                 context::request(ui.ctx(), CtxAction::ShowPlaceInfo(e.sim_name.clone(), pos));
             }
         });
+        people(ui, p, c.world, &e.sim_name);
         let fee = match e.cover {
             Some(amount) => format!("{}{amount}", aurora_i18n::currency()),
             None => aurora_i18n::tr!("search-none-fee").to_owned(),

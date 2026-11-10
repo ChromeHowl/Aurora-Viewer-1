@@ -47,6 +47,8 @@ const TOOLBAR_H: f32 = 52.0;
 const FOOTER_H: f32 = 38.0;
 /// The last visit's column of a wide row.
 const VISIT_W: f32 = 112.0;
+/// Width of the wide list's people figure, before the rating.
+const PEOPLE_W: f32 = 44.0;
 /// FT_TRASH.
 const FOLDER_TRASH: i32 = 14;
 /// DB_INV_ITEM_DESC_STR_LEN - 1: the longest notes a landmark keeps.
@@ -1829,6 +1831,17 @@ fn place_row(
     };
     let size = if wide { RowSize::PLACES_WIDE } else { RowSize::PLACES_NARROW };
     let mut starred = false;
+    // the people of the place's region, by its name once known and by its
+    // position until then: read only for a row drawn (the wide list's
+    // figure) or under the pointer (the narrow list's tooltip)
+    let world = c.world;
+    let people = || {
+        if place.region.is_empty() {
+            place.global.and_then(|g| world.people_at_global(g.x, g.y))
+        } else {
+            world.people_in_region(&place.region)
+        }
+    };
     let trailing = |ui: &mut egui::Ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         if place.is_landmark() {
@@ -1853,12 +1866,30 @@ fn place_row(
             ui.add_space(12.0);
         }
         badge_slot(ui, p, place.rating);
+        if wide {
+            ui.add_space(8.0);
+            ui.allocate_ui_with_layout(
+                Vec2::new(PEOPLE_W, size.height),
+                egui::Layout::right_to_left(egui::Align::Center),
+                |ui| {
+                    if let Some(n) = people() {
+                        crate::ui::region_people::figure(ui, p, n);
+                    }
+                },
+            );
+        }
     };
     let resp = if grip {
         place_card::draggable_row(ui, p, size, &card, trailing)
     } else {
         place_card::row(ui, p, size, &card, trailing).interact(egui::Sense::click_and_drag())
     };
+    if !wide
+        && resp.hovered()
+        && let Some(n) = people()
+    {
+        resp.clone().on_hover_text(n.label());
+    }
     RowOut { resp, star: starred }
 }
 

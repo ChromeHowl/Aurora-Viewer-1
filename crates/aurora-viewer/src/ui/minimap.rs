@@ -735,12 +735,18 @@ impl MiniMap {
                 .map(|r| r.name.clone())
                 .or_else(|| world.map.sim_at_global(g.0, g.1).map(|(_, s)| s.name.clone()));
             if let Some(n) = name.filter(|n| !n.is_empty()) {
+                // the Region Tracker's figure, hidden with the name under
+                // RLVa @showloc
+                let people = world.people_in_region(&n);
                 let n = if world.rlva.has("showloc") {
                     aurora_i18n::tr!("rlva-hidden-region").to_owned()
                 } else {
                     n
                 };
                 lines.push(aurora_i18n::tr!("ui-minimap-region", n = n.to_string()));
+                if let Some(people) = people {
+                    lines.push(people.label());
+                }
             }
             match opts.mini_double_click {
                 1 => lines.push(aurora_i18n::tr!("ui-minimap-double-click-to-open-the-map").into()),

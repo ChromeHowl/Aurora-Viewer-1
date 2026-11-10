@@ -877,6 +877,14 @@ impl SearchUi {
                 actions.push(action);
             }
         };
+        // the people of the result's region, a compact figure before the
+        // row's own (traffic, price): only for the rows drawn
+        let people = super::row_people(world, tab, row);
+        let people_meta = |ui: &mut egui::Ui| {
+            if let Some(n) = people {
+                crate::ui::region_people::figure(ui, p, n);
+            }
+        };
         let resp = match (tab, row.key) {
             (Tab::Places | Tab::Land, Key::Id(id)) => {
                 let parcel = world.profiles.parcels.get(&id);
@@ -921,6 +929,7 @@ impl SearchUi {
                             sale_pill(ui, p, row.icon == RowIcon::Auction);
                         }
                     }
+                    people_meta(ui);
                 })
             }
             (Tab::Classifieds, Key::Id(id)) => {
@@ -957,6 +966,7 @@ impl SearchUi {
                     if let Some(Value::Int(price)) = row.values.first() {
                         meta(ui, p, None, &linden(*price));
                     }
+                    people_meta(ui);
                 })
             }
             (Tab::Events, _) => {
@@ -990,6 +1000,7 @@ impl SearchUi {
                     if unix > 0 && unix <= now {
                         started_pill(ui, p);
                     }
+                    people_meta(ui);
                 })
             }
             (Tab::Groups, Key::Id(id)) => {

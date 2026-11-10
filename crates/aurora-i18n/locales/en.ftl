@@ -13550,3 +13550,8 @@ ui-options-attached-particles-hint = Draw the particles of what avatars wear: sp
 # Preferences › Graphics: progressive draw distance (FSRenderFarClipStepping)
 ui-options-draw-distance-stepping = Progressive draw distance
 ui-options-draw-distance-stepping-hint = After logging in and after a teleport to another region, the draw distance starts at 32 m and doubles back up to yours, so that what is near loads first.
+
+# People in region: the Region Tracker's figure beside a place (place details, About Land, search, Places, favorites, mini-map)
+people-region-title = People in region
+# $count is already written out: a number, "…" while it is asked, "?" when the map did not answer
+people-region-label = People in region: { $count }

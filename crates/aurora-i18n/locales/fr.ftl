@@ -13546,3 +13546,8 @@ ui-options-attached-particles-hint = Affiche les particules de ce que portent le
 # Preferences › Graphics: progressive draw distance (FSRenderFarClipStepping)
 ui-options-draw-distance-stepping = Distance d'affichage progressive
 ui-options-draw-distance-stepping-hint = Après la connexion et après une téléportation vers une autre région, la distance d'affichage part de 32 m et double jusqu'à la vôtre, pour que ce qui est proche se charge d'abord.
+
+# People in region: the Region Tracker's figure beside a place (place details, About Land, search, Places, favorites, mini-map)
+people-region-title = Personnes dans la région
+# $count is already written out: a number, "…" while it is asked, "?" when the map did not answer
+people-region-label = Personnes dans la région : { $count }

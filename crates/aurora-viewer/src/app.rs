@@ -15669,6 +15669,8 @@ impl App {
                 if let Some(after) = self.balance_gains.repaint_after(still, now) {
                     self.egui_ctx.request_repaint_after(after);
                 }
+                // the people counts the bars' tooltips showed last frame
+                ui::region_people::serve(&self.egui_ctx, &self.world);
                 let status = ui::bars::StatusInfo {
                     location_hidden: self.world.rlva.has("showloc"),
                     show_bug_report: if self.demo {
