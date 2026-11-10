@@ -3,6 +3,9 @@ use super::*;
 
 impl Editor {
     pub(in crate::ik_edit) fn clip_entry_ui(&mut self, ui: &mut egui::Ui, palette: &Palette, world: &World, frame: &Frame) {
+        if let Some(document) = self.clip.opened.take() {
+            self.open_clip(world, frame, document);
+        }
         if !self.clip.history.is_empty() {
             let current = self.clip.document.as_ref().map_or_else(String::new, |d| d.name.clone());
             let mut choice = None;
@@ -39,6 +42,25 @@ impl Editor {
                 .clicked()
             {
                 self.new_clip(world, frame);
+            }
+            // a native animation in the timeline, or the account's autosaved
+            // draft (written every few seconds while the draft changes)
+            let idle = !self.clip.busy && self.clip.history.len() < 15;
+            if ui
+                .add_enabled(idle, egui::Button::new(aurora_i18n::tr!("b4-clip-open")))
+                .on_hover_text(aurora_i18n::tr!("b4-clip-open-tip"))
+                .clicked()
+            {
+                self.clip.open_request = Some(None);
+            }
+            if self.clip.recovery_exists == Some(true)
+                && let Some(dir) = &self.clip.recovery_dir
+                && ui
+                    .add_enabled(idle, egui::Button::new(aurora_i18n::tr!("b4-clip-recover")))
+                    .on_hover_text(aurora_i18n::tr!("b4-clip-recover-tip"))
+                    .clicked()
+            {
+                self.clip.open_request = Some(Some(dir.join(files::RECOVERY)));
             }
         });
         if self.clip.active {
@@ -328,9 +350,23 @@ impl Editor {
                     changed |= ui.selectable_value(&mut meta.emote_name, name.to_owned(), label).changed();
                 }
             });
+        // how the keys follow each other (`interpolation.rs`)
+        ui.label(aurora_i18n::tr!("b4-clip-interpolation"))
+            .on_hover_text(aurora_i18n::tr!("b4-clip-interpolation-tip"));
+        let mut interpolation = document.interpolation;
+        let options: Vec<(&str, bool)> = interpolation::Interpolation::ALL.iter().map(|i| (i.label(), true)).collect();
+        let mut index = interpolation::Interpolation::ALL
+            .iter()
+            .position(|i| *i == interpolation)
+            .unwrap_or(1);
+        if widgets::segmented(ui, palette, &mut index, &options) {
+            interpolation = interpolation::Interpolation::ALL[index.min(2)];
+            changed = true;
+        }
         ui.label(aurora_i18n::tr!("anim-edit-range-hint"));
         if changed && let Some(document) = self.clip.document.as_mut() {
             let document = Arc::make_mut(document);
+            document.interpolation = interpolation;
             document.meta = meta;
             document.range(start, end);
             self.clip.frame = self.clip.frame.clamp(document.start, document.end);

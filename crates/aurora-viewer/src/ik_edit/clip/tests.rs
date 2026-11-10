@@ -305,3 +305,85 @@ fn creation_bakes_the_contacts_the_user_set_on_the_rest_skeleton() {
     let head = rig.names["mHead"];
     assert!(key(head).dot(rig.local_rot[head]).abs() > 0.9999, "the played head is not");
 }
+fn opened_animation(joints: Vec<aurora_assets::JointMotion>) -> Animation {
+    Animation {
+        base_priority: 9,
+        duration: 1.5,
+        emote_name: String::new(),
+        loop_in: 0.2,
+        loop_out: 1.0,
+        looping: true,
+        ends_after: None,
+        ease_in: 0.1,
+        ease_out: 0.1,
+        hand_pose: 20,
+        joints,
+    }
+}
+fn head_motion() -> aurora_assets::JointMotion {
+    use aurora_assets::anim::RotKey;
+    aurora_assets::JointMotion {
+        joint_name: "mHead".into(),
+        priority: 3,
+        rot_keys: vec![
+            RotKey {
+                time: 0.0,
+                rotation: Quat::IDENTITY,
+            },
+            RotKey {
+                time: 1.0,
+                rotation: Quat::from_rotation_z(0.6),
+            },
+            RotKey {
+                time: 1.5,
+                rotation: Quat::from_rotation_z(0.2),
+            },
+        ],
+        pos_keys: Vec::new(),
+    }
+}
+#[test]
+fn an_opened_animation_becomes_the_timeline_and_exports_its_keys() {
+    let lib = AvatarLibrary::load();
+    let rig = &lib.rig;
+    let unknown = aurora_assets::JointMotion {
+        joint_name: "notAJoint".into(),
+        ..head_motion()
+    };
+    let document = Document::from_animation(rig, &opened_animation(vec![head_motion(), unknown.clone()]), "Wave".into()).expect("opened");
+    assert_eq!(document.name, "Wave");
+    assert_eq!(document.tracks.len(), 1, "joints the rig does not know are left out");
+    assert_eq!(document.tracks[0].bone, rig.names["mHead"]);
+    assert_eq!((document.start, document.end), (0, 45));
+    assert_eq!((document.meta.base_priority, document.meta.hand_pose), (6, 13));
+    assert!((document.meta.loop_in - 0.2).abs() < 1e-6 && document.meta.looping);
+    assert_eq!(document.frames(None), vec![0, 30, 45]);
+    let exported = document.animation().expect("export");
+    let head = &exported.joints[0];
+    assert_eq!(head.rot_keys.len(), 3);
+    assert!(head.rot_keys[1].rotation.angle_between(Quat::from_rotation_z(0.6)) < 1e-3);
+    assert!(Document::from_animation(rig, &opened_animation(vec![unknown]), "None".into()).is_err());
+}
+#[test]
+fn the_chosen_interpolation_is_written_into_the_exported_keys() {
+    let lib = AvatarLibrary::load();
+    let rig = &lib.rig;
+    let mut document = Document::from_animation(rig, &opened_animation(vec![head_motion()]), "Wave".into()).expect("opened");
+    let keys = |d: &Document| d.animation().expect("export").joints[0].rot_keys.clone();
+    assert_eq!(keys(&document).len(), 3);
+    document.interpolation = interpolation::Interpolation::Step;
+    // one held key before each later key
+    assert_eq!(keys(&document).len(), 5);
+    document.interpolation = interpolation::Interpolation::Spline;
+    // a key on every frame from 0 to 45
+    assert_eq!(keys(&document).len(), 46);
+    assert!(document.preview().is_ok());
+}
+#[test]
+fn the_draft_is_autosaved_after_a_change_at_most_every_five_seconds() {
+    let t0 = Instant::now();
+    assert!(autosave_due(1, None, None, t0));
+    assert!(!autosave_due(1, Some(1), None, t0), "already written");
+    assert!(!autosave_due(2, Some(1), Some(t0), t0 + std::time::Duration::from_secs(2)));
+    assert!(autosave_due(2, Some(1), Some(t0), t0 + AUTOSAVE_EVERY));
+}
