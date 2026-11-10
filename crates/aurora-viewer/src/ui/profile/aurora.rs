@@ -460,7 +460,7 @@ fn body(ui: &mut egui::Ui, env: &mut Env, w: &mut Window) {
                                 TAB_WORN => {
                                     let mut asked = Vec::new();
                                     let name = display_name(world, &w.id);
-                                    super::worn::show(ui, env.p, &mut w.worn, env.worn.get(&w.id), own, &name, &mut asked);
+                                    super::worn::show(ui, env.p, &mut w.worn, env.worn.seen(&w.id), own, &name, &mut asked);
                                     env.actions.extend(asked.into_iter().map(ProfileAction::Worn));
                                 }
                                 _ => tabs::notes(ui, env, w),
