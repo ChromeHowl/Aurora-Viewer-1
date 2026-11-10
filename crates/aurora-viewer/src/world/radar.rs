@@ -189,6 +189,8 @@ pub struct Radar {
     sync_asked: bool,
     /// Number of the last alert to scripts (mRadarFrameCount).
     script_frame: u32,
+    /// The resident the tracking beacon follows (FSRadar::mTrackedAvatarId).
+    pub tracked: Option<Tracked>,
 }
 
 /// True when `range` is known and within `limit`.
@@ -529,6 +531,114 @@ pub fn sightings(world: &World) -> Vec<Sighting> {
     out
 }
 
+/// The chat range a distance falls in, for the colours of the name tags
+/// (FSTagShowDistanceColors, FIRE-6664: whisper and say green, shout
+/// yellow, beyond red; LLVOAvatar::idleUpdateNameTagText).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Band {
+    Whisper,
+    Say,
+    Shout,
+    Beyond,
+}
+
+impl Band {
+    /// The band of `distance` (meters) with the region's chat ranges.
+    pub fn of(distance: f32, ranges: ChatRanges) -> Band {
+        if distance <= ranges.whisper {
+            Band::Whisper
+        } else if distance <= ranges.say {
+            Band::Say
+        } else if distance <= ranges.shout {
+            Band::Shout
+        } else {
+            Band::Beyond
+        }
+    }
+}
+
+/// The colours of "Mark" in the radar and mini-map menus
+/// (Nearby.People.SetAvatarMarkColor: Red, Green, Blue, Purple, LtYellow
+/// of colors.xml), in the menu's order.
+pub const MARK_COLORS: [[u8; 3]; 5] = [[186, 0, 31], [0, 255, 0], [0, 0, 255], [255, 0, 255], [255, 255, 201]];
+
+/// Residents marked with a colour from the radar, the mini-map or a
+/// resident's menu, for this session (LLNetMap::sAvatarMarksMap): the
+/// colour of their dot on the mini-map and of their classic name tag.
+#[derive(Debug, Default, Clone)]
+pub struct Marks {
+    map: HashMap<Uuid, [u8; 3]>,
+}
+
+impl Marks {
+    pub fn get(&self, id: &Uuid) -> Option<[u8; 3]> {
+        self.map.get(id).copied()
+    }
+
+    /// LLNetMap::setAvatarMarkColors; `None` clears them
+    /// (clearAvatarMarkColors).
+    pub fn set(&mut self, ids: &[Uuid], color: Option<[u8; 3]>) {
+        for id in ids {
+            match color {
+                Some(c) => {
+                    self.map.insert(*id, c);
+                }
+                None => {
+                    self.map.remove(id);
+                }
+            }
+        }
+    }
+
+    pub fn clear_all(&mut self) {
+        self.map.clear();
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.map.is_empty()
+    }
+}
+
+/// LLTracker's DESTINATION_REACHED_RADIUS.
+pub const TRACK_REACHED: f32 = 3.0;
+
+/// A resident of the radar followed by the tracking beacon ("Track",
+/// FSRadar::startTracking): the global position last given to the map's
+/// track, to tell it from a track chosen since.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Tracked {
+    pub id: Uuid,
+    pub at: glam::DVec3,
+}
+
+/// What a sweep does with the followed resident.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TrackStep {
+    /// The beacon stays where it is.
+    Keep,
+    /// The beacon moves to this global position.
+    Move(glam::DVec3),
+    /// Tracking ends (the resident left the radar, or we reached them).
+    Stop,
+}
+
+/// FSRadar::updateTracking and LLTracker::render3D for the followed
+/// resident: `seen` is where the radar sees them now (global), `me` our
+/// global position. Within `TRACK_REACHED` (heights counted half,
+/// getDistanceToDestination's z attenuation) the beacon goes away when
+/// `clear_close_in` (FSDisableAvatarTrackerAtCloseIn), else it stays.
+pub fn track_step(tracked: &Tracked, seen: Option<glam::DVec3>, me: glam::DVec3, clear_close_in: bool) -> TrackStep {
+    let Some(at) = seen else {
+        return TrackStep::Stop;
+    };
+    let mut gap = at - me;
+    gap.z *= 0.5;
+    if clear_close_in && gap.length() < f64::from(TRACK_REACHED) {
+        return TrackStep::Stop;
+    }
+    if at == tracked.at { TrackStep::Keep } else { TrackStep::Move(at) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -826,5 +936,56 @@ mod tests {
         assert_eq!(Event::RegionEnter(id(1), None).sound(), S::RadarRegionEnter);
         assert_eq!(Event::ChatLeave(id(1)).sound(), S::RadarChatLeave);
         assert_eq!(Event::AgeAlert(id(1), 2).sound(), S::RadarAgeAlert);
+    }
+
+    #[test]
+    fn name_tag_bands_follow_the_chat_ranges() {
+        let r = ChatRanges::default();
+        assert_eq!(Band::of(0.0, r), Band::Whisper);
+        assert_eq!(Band::of(10.0, r), Band::Whisper);
+        assert_eq!(Band::of(10.5, r), Band::Say);
+        assert_eq!(Band::of(20.0, r), Band::Say);
+        assert_eq!(Band::of(99.0, r), Band::Shout);
+        assert_eq!(Band::of(100.5, r), Band::Beyond);
+        // an OpenSim region's own ranges
+        let wide = ChatRanges { say: 30.0, ..r };
+        assert_eq!(Band::of(25.0, wide), Band::Say);
+    }
+
+    #[test]
+    fn marks_are_set_cleared_and_cleared_all() {
+        let mut m = Marks::default();
+        let (a, b) = (id(1), id(2));
+        m.set(&[a, b], Some(MARK_COLORS[0]));
+        assert_eq!(m.get(&a), Some(MARK_COLORS[0]));
+        m.set(&[a], Some(MARK_COLORS[2]));
+        assert_eq!(m.get(&a), Some(MARK_COLORS[2]));
+        m.set(&[a], None);
+        assert_eq!(m.get(&a), None);
+        assert_eq!(m.get(&b), Some(MARK_COLORS[0]));
+        m.clear_all();
+        assert!(m.is_empty());
+    }
+
+    #[test]
+    fn the_tracking_beacon_follows_the_resident_and_stops_close_in() {
+        use glam::DVec3;
+        let t = Tracked {
+            id: id(1),
+            at: DVec3::new(100.0, 100.0, 20.0),
+        };
+        let me = DVec3::new(50.0, 100.0, 20.0);
+        assert_eq!(track_step(&t, Some(t.at), me, true), TrackStep::Keep);
+        let moved = DVec3::new(110.0, 100.0, 20.0);
+        assert_eq!(track_step(&t, Some(moved), me, true), TrackStep::Move(moved));
+        // gone from the radar
+        assert_eq!(track_step(&t, None, me, true), TrackStep::Stop);
+        // reached: within 3 m, heights counting half
+        let near = DVec3::new(52.0, 100.0, 24.0);
+        assert_eq!(track_step(&t, Some(near), me, true), TrackStep::Stop);
+        // the option off: the beacon stays on them
+        assert_eq!(track_step(&t, Some(near), me, false), TrackStep::Move(near));
+        let above = DVec3::new(50.0, 100.0, 27.0);
+        assert_eq!(track_step(&t, Some(above), me, true), TrackStep::Move(above));
     }
 }

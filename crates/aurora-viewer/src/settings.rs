@@ -8,6 +8,7 @@ pub mod area_search;
 pub mod backup;
 pub mod draw_stepping;
 mod hover_height;
+pub mod people;
 pub mod registry;
 pub mod render_extras;
 mod saver;
@@ -504,6 +505,9 @@ pub struct Settings {
     pub contacts: crate::ui::contacts::ContactsSettings,
     /// Radar of the People window.
     pub radar: crate::ui::people::RadarSettings,
+    /// Radar tracking, contact sets' notices, name tags and floating texts
+    /// (settings/people.rs).
+    pub people: people::People,
     /// Friends tab of the People window.
     pub friends_list: crate::ui::people::FriendsSettings,
     pub inventory: crate::ui::inventory::InventoryPreferences,
@@ -1960,6 +1964,7 @@ impl Default for Settings {
             hover_height_account: None,
             contacts: Default::default(),
             radar: Default::default(),
+            people: Default::default(),
             friends_list: Default::default(),
             inventory: Default::default(),
             texture_library: Default::default(),
@@ -2660,6 +2665,7 @@ impl Settings {
         for profile in self.world_context_menus.profiles.values_mut() {
             profile.locked = true;
         }
+        self.people.sanitize();
         self.grids.retain_mut(|grid| grid.validate().is_ok());
         if let Some(on) = self.former_chat_timestamps.take() {
             self.chat_timestamps_nearby = on;

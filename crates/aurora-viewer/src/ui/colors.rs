@@ -180,6 +180,19 @@ pub fn tag_color(world: &World, id: &Uuid, name: &str, custom_display_name: bool
     text(v)
 }
 
+/// The colour of a chat range on the name tags (FSTagShowDistanceColors:
+/// NameTagWhisperDistanceColor and NameTagChatDistanceColor green,
+/// NameTagShoutDistanceColor yellow, NameTagBeyondShoutDistanceColor red),
+/// in the theme's roles.
+pub fn band_color(p: &crate::theme::Palette, band: crate::world::radar::Band) -> Color32 {
+    use crate::world::radar::Band;
+    match band {
+        Band::Whisper | Band::Say => p.success,
+        Band::Shout => p.amber,
+        Band::Beyond => p.danger,
+    }
+}
+
 /// Minimap marker color of an avatar.
 pub fn map_color(world: &World, id: &Uuid, name: &str) -> Color32 {
     if let Some(color) = world.contact_appearance(id).minimap {

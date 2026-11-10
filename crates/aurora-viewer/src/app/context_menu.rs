@@ -222,6 +222,7 @@ impl App {
                 f.voice_volume = crate::ui::context::voice_volume_of(w, *id);
                 f.worn = !super::inspect::worn_roots(w, id).is_empty();
                 f.moderation = self.moderation_rights(*id);
+                f.estate = w.estate_moderation_region(*id).is_some();
             }
             _ => {}
         }
@@ -484,6 +485,13 @@ impl App {
             CtxAction::NewPhysics => self.new_physics(),
             CtxAction::Freeze(id) => self.ask_moderation(id, false),
             CtxAction::Eject(id) => self.ask_moderation(id, true),
+            CtxAction::TrackAvatar(id) => self.track_avatar(id),
+            CtxAction::Share(id) => self.share_with(id),
+            CtxAction::MarkAvatars(ids, color) => self.world.avatar_marks.set(&ids, color),
+            CtxAction::ClearAllMarks => self.world.avatar_marks.clear_all(),
+            CtxAction::EstateKick(ids) => self.ask_estate(people_actions::EstateAction::Kick, ids),
+            CtxAction::EstateTeleportHome(ids) => self.ask_estate(people_actions::EstateAction::Home, ids),
+            CtxAction::EstateBan(ids) => self.ask_estate(people_actions::EstateAction::Ban, ids),
             CtxAction::EditWorn(item) => {
                 if self.world.inventory.items.get(&item).is_some_and(crate::wearable_editor::supported) {
                     self.open_wearable_editor(item);
@@ -878,7 +886,16 @@ impl App {
             CtxAction::AddFriend(id) => self.contacts_ui.ask_friendship(id),
             CtxAction::RemoveFriend(id) => self.contacts_ui.ask_remove_friend(id),
             CtxAction::HideFriend(id) => {
-                self.world.hide_friend(id);
+                // the first hidden friend of this account: where to find them
+                if self.world.hide_friend(id) && self.settings.people.take_hidden_tip(self.world.agent_id) {
+                    self.settings.save();
+                    self.world.notifications.push(
+                        crate::world::notifications::Kind::Info,
+                        aurora_i18n::tr!("hidefriend-tab"),
+                        aurora_i18n::tr!("b6-hidden-tip"),
+                        crate::world::notifications::Data::None,
+                    );
+                }
             }
             CtxAction::UnhideFriend(id) => {
                 self.world.unhide_friend(id);

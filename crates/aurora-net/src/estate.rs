@@ -227,6 +227,18 @@ pub fn access_delta_flags(flags: u32, count: usize, batch: bool) -> Vec<u32> {
         .collect()
 }
 
+/// The flags of a resident menu's "Estate Ban" (callbackEstateBan): banned
+/// and taken off the allowed list, on this estate or, with `all`, on every
+/// estate the agent owns (`owner`) or manages for this owner.
+pub fn ban_resident_flags(all: bool, owner: bool) -> u32 {
+    let flags = estate_access::BANNED_AGENT_ADD | estate_access::ALLOWED_AGENT_REMOVE;
+    match (all, owner) {
+        (false, _) => flags,
+        (true, true) => flags | estate_access::APPLY_TO_ALL_ESTATES,
+        (true, false) => flags | estate_access::APPLY_TO_MANAGED_ESTATES,
+    }
+}
+
 /// `estateaccessdelta`'s strings (sendEstateAccessDelta): who asks, the
 /// flags (`"%u"`), the resident or group changed.
 pub fn access_delta_strings(agent: Uuid, flags: u32, id: Uuid) -> Vec<String> {
@@ -929,6 +941,18 @@ pub enum EstateCommand {
     TeleportHome { handle: RegionHandle, target: Option<Uuid> },
     /// "Kick from estate" (`kickestate`).
     KickFromEstate { handle: RegionHandle, target: Uuid },
+    /// "Estate Kick" of a resident's menu (LLAvatarActions::callbackEstateKick):
+    /// `kickestate` to the region they stand in, with a new invoice.
+    KickResident { handle: RegionHandle, target: Uuid },
+    /// "Estate Teleport Home" of a resident's menu
+    /// (LLAvatarActions::callbackEstateTeleportHome): `teleporthomeuser` to
+    /// the region they stand in, with a new invoice.
+    TeleportResidentHome { handle: RegionHandle, target: Uuid },
+    /// "Estate Ban" of a resident's menu (LLAvatarActions::callbackEstateBan):
+    /// for each resident a new invoice (LLFloaterRegionInfo::nextInvoice), then
+    /// `estateaccessdelta` to the agent's region with `flags`
+    /// (`ban_resident_flags`), NO_REPLY on all but the last.
+    BanResidents { handle: RegionHandle, flags: u32, ids: Vec<Uuid> },
     /// A resident's objects returned (LLPanelRegionDebugInfo::callbackReturn):
     /// through the estate (`estateobjectreturn`) or this region only
     /// (SimWideDeletes), with `swd` flags.
@@ -1076,6 +1100,19 @@ mod tests {
 
     /// accessCoreConfirm answers once for a change of several residents;
     /// an import asks an answer of each.
+    #[test]
+    fn a_resident_menu_ban_also_removes_the_resident_from_the_allowed_list() {
+        use estate_access as ea;
+        let one = ea::BANNED_AGENT_ADD | ea::ALLOWED_AGENT_REMOVE;
+        assert_eq!(ban_resident_flags(false, true), one);
+        assert_eq!(ban_resident_flags(false, false), one);
+        assert_eq!(ban_resident_flags(true, true), one | ea::APPLY_TO_ALL_ESTATES);
+        assert_eq!(ban_resident_flags(true, false), one | ea::APPLY_TO_MANAGED_ESTATES);
+        // decimal "%u" as sendEstateAccessDelta writes it
+        let id = Uuid::from_u128(7);
+        assert_eq!(access_delta_strings(Uuid::nil(), one, id)[1], "72");
+    }
+
     #[test]
     fn access_delta_flags_reply_once() {
         use estate_access::*;

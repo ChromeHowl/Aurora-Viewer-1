@@ -358,3 +358,36 @@ fn clicking_a_friend_online_starts_an_im_and_offline_opens_nothing() {
     assert_eq!(w.open_from_notification(off), None);
     assert!(w.social.focus_im.is_none());
 }
+
+#[test]
+fn a_contact_set_with_notices_on_brings_its_friends_notices_back() {
+    // FIRE-3522: the friends' toasts and lines off, a set asks for its own
+    for (set_toast, set_chat) in [(false, true), (true, false), (true, true), (false, false)] {
+        let mut w = world();
+        w.notifications.toasts.presence = false;
+        w.notifications.toasts.presence_in_chat = false;
+        w.notifications.toasts.set_presence = set_toast;
+        w.notifications.toasts.set_presence_in_chat = set_chat;
+        w.social.form_friendship(JANE);
+        w.social.form_friendship(TOM);
+        w.contact_sets.add_set("Close");
+        w.contact_sets.add_to_set(&[JANE], "Close", |_| true);
+        w.contact_sets.set_notify("Close", true);
+        w.social.set_online(&[JANE, TOM], true);
+        w.flush_online_notices();
+        let toast = |who| {
+            w.notifications
+                .list
+                .iter()
+                .any(|n| matches!(n.data, Data::Presence { who: id, .. } if id == who))
+        };
+        let line = |name: &str| w.chat.iter().any(|l| l.kind == ChatKind::System && l.text.contains(name));
+        assert_eq!(
+            (toast(JANE), line("Jane Doe")),
+            (set_toast, set_chat),
+            "toast {set_toast}, chat {set_chat}"
+        );
+        // a friend in no such set keeps the friends' preferences
+        assert!(!toast(TOM) && !line("Tom"));
+    }
+}

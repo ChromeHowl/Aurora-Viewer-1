@@ -215,6 +215,11 @@ fn list(ui: &mut egui::Ui, c: &mut Ctx, data: &super::RadarData, st: &mut People
                 }
                 row(ui, c, data, st, line, &order);
             }
+            // People › Hidden's switch: the hidden friends greyed, under the
+            // others (never inside a contact set's list)
+            if st.show_hidden && st.friend_set.is_none() {
+                super::hidden::greyed_rows(ui, c, st, &filter);
+            }
         });
 }
 

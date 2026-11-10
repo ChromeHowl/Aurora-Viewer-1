@@ -316,7 +316,7 @@ impl ProfileUi {
         self.windows
             .iter()
             .filter(|w| w.open && w.tab == TAB_WORN)
-            .filter_map(|w| Some((w.id, w.worn.lit?)))
+            .flat_map(|w| w.worn.lit.iter().map(move |lit| (w.id, *lit)))
             .collect()
     }
 
@@ -673,7 +673,7 @@ impl ProfileUi {
                             .id_salt(("profile-worn", w.id))
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
-                                worn::show(ui, p, &mut w.worn, self.worn.get(&w.id), c.own, &name, &mut asked)
+                                worn::show(ui, p, &mut w.worn, self.worn.seen(&w.id), c.own, &name, &mut asked)
                             });
                         actions.extend(asked.into_iter().map(ProfileAction::Worn));
                     }

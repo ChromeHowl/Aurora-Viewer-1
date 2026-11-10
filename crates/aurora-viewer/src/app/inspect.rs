@@ -215,6 +215,8 @@ impl App {
             return;
         }
         let mut lists = HashMap::new();
+        // RLVa hides who they are: no list, not even the last one
+        let hidden: HashSet<Uuid> = wanted.iter().copied().filter(|id| !self.world.rlva_can_name(*id)).collect();
         // the names not known yet, a few each time, as a hover asks for one
         // (RequestObjectPropertiesFamily, which selects nothing)
         let mut asks = 4;
@@ -223,7 +225,7 @@ impl App {
                 lists.insert(avatar, rows);
             }
         }
-        self.profile_ui.worn.set(lists, now);
+        self.profile_ui.worn.set(lists, hidden, now, std::time::SystemTime::now());
     }
 
     /// One row per object avatar `id` wears, with the figures of Inspect
@@ -255,18 +257,29 @@ impl App {
         };
         let mut rows = Vec::new();
         let mut unnamed = Vec::new();
+        let mut creators = Vec::new();
         for root in worn_roots(w, &id) {
             let Some((idx, o)) = w.objects.index_of_uuid(&root).and_then(|i| Some((i, w.objects.get(i)?))) else {
                 continue;
             };
             let prims = linkset_prims(w, idx);
-            let name = self
-                .build
-                .props
-                .get(&root)
-                .or_else(|| self.interactions.props.get(&root))
-                .map(|p| p.name.clone())
-                .filter(|n| !n.is_empty());
+            let props = self.build.props.get(&root).or_else(|| self.interactions.props.get(&root));
+            let name = props.map(|p| p.name.clone()).filter(|n| !n.is_empty());
+            // the creator only with the full properties (the family subset
+            // has none): a name, never the id
+            let creator = props.filter(|p| p.full && !p.creator_id.is_nil()).map(|p| {
+                creators.push(p.creator_id);
+                w.social.name_of(&p.creator_id)
+            });
+            // animesh (EXTENDED_MESH_ANIMATED on the root), else rigged when
+            // a prim of it is skinned to the skeleton
+            let kind = if o.extra.extended_mesh_flags.unwrap_or(0) & aurora_prim::extra::EXTENDED_MESH_ANIMATED != 0 {
+                crate::ui::profile::worn::Kind::Animesh
+            } else if prims.iter().any(|&i| self.scene.gpu.get(i).is_some_and(|g| g.rigged)) {
+                crate::ui::profile::worn::Kind::Rigged
+            } else {
+                crate::ui::profile::worn::Kind::Attached
+            };
             if name.is_none() {
                 unnamed.push((o.key.region, root));
             }
@@ -280,6 +293,8 @@ impl App {
                 complexity: self.scene.linkset_complexity(w, &prims),
                 triangles: prims.iter().map(|&i| self.scene.prim_stats(w, i).triangles).sum(),
                 derendered: false,
+                kind,
+                creator,
             });
         }
         for (object, point, name) in w.derender.hidden_worn(wearer_key) {
@@ -293,6 +308,9 @@ impl App {
                 derendered: true,
                 ..WornRow::default()
             });
+        }
+        for creator in creators {
+            self.world.social.want_name(creator);
         }
         for (handle, root) in unnamed {
             if *asks == 0 {

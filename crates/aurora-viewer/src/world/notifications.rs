@@ -536,6 +536,12 @@ pub struct ToastPrefs {
     /// is read. Off by default: the Legacy Viewer's notification well never
     /// lists IMs, the Conversations window has them (#752).
     pub im_in_bell: bool,
+    /// The friends of a contact set with its notices on get their toast
+    /// whatever `presence` says (FSContactSetsNotificationToast).
+    pub set_presence: bool,
+    /// ... and their line of nearby chat whatever `presence_in_chat` says
+    /// (FSContactSetsNotificationNearbyChat).
+    pub set_presence_in_chat: bool,
 }
 
 impl Default for ToastPrefs {
@@ -546,6 +552,8 @@ impl Default for ToastPrefs {
             im: true,
             group_im: false,
             im_in_bell: false,
+            set_presence: false,
+            set_presence_in_chat: true,
         }
     }
 }

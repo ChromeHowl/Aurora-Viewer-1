@@ -1056,6 +1056,9 @@ pub fn reply(c: &EstateCommand) -> Vec<NetEvent> {
         EstateCommand::Message { .. }
         | EstateCommand::TeleportHome { .. }
         | EstateCommand::KickFromEstate { .. }
+        | EstateCommand::KickResident { .. }
+        | EstateCommand::TeleportResidentHome { .. }
+        | EstateCommand::BanResidents { .. }
         | EstateCommand::ReturnObjects { .. } => Vec::new(),
     }
 }

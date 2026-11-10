@@ -397,6 +397,24 @@ fn crosshair(cx: &mut Cx) {
     use crate::ui::crosshair::{self, Shape};
     use aurora_i18n::tr;
     let p = cx.p;
+    // FSMouselookCombatFeatures with ExodusMouselookIFF and its range
+    cx.group(tr!("b6-markers-group"), |cx| {
+        cx.toggle(
+            tr!("b6-markers-show"),
+            tr!("b6-markers-show-hint"),
+            &field!(people.mouselook_markers),
+        );
+        let off = !cx.s.people.mouselook_markers;
+        cx.subs(off, |cx| {
+            cx.slider(
+                tr!("b6-markers-range"),
+                "",
+                &field!(people.mouselook_marker_range),
+                0.0..=crate::settings::people::MARKER_RANGE_MAX,
+                " m",
+            );
+        });
+    });
     cx.group(tr!("ui-options-crosshair"), |cx| {
         cx.unfolded().toggle(
             tr!("ui-options-crosshair-show"),

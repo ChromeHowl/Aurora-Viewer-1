@@ -863,7 +863,7 @@ fn avatar_groups(ui: &mut Builder, f: &Facts, id: Uuid, attachment: Option<Uuid>
 /// Visible only with the corresponding land/nearby-voice moderation rights.
 fn avatar_moderation(ui: &mut Builder, f: &Facts, id: Uuid) {
     let voice = f.voice_volume.and_then(|v| v.moderated);
-    if !f.moderation.allowed && voice.is_none() {
+    if !f.moderation.allowed && !f.estate && voice.is_none() {
         return;
     }
     ui.submenu("shield-filled", aurora_i18n::tr!("ui-context-moderation-options"), true, |ui| {
@@ -890,11 +890,22 @@ fn avatar_moderation(ui: &mut Builder, f: &Facts, id: Uuid) {
     });
 }
 
-/// Avatar.Freeze / Avatar.Eject, visible only with rights on the avatar's land.
+/// Avatar.Freeze / Avatar.Eject, visible only with rights on the avatar's
+/// land; the radar's estate actions, only on an estate we own or manage
+/// (Avatar.VisibleKickTeleportHome).
 fn moderation_items(ui: &mut Builder, f: &Facts, id: Uuid) {
     if f.moderation.allowed {
         ui.item("snowflake", aurora_i18n::tr!("ui-context-freeze"), CtxAction::Freeze(id));
         ui.item("player-eject-filled", aurora_i18n::tr!("ui-context-eject"), CtxAction::Eject(id));
+    }
+    if f.estate {
+        ui.item("door-exit", aurora_i18n::tr!("b6-estate-kick"), CtxAction::EstateKick(vec![id]));
+        ui.item(
+            "home-filled",
+            aurora_i18n::tr!("b6-estate-home"),
+            CtxAction::EstateTeleportHome(vec![id]),
+        );
+        ui.item("ban", aurora_i18n::tr!("b6-estate-ban"), CtxAction::EstateBan(vec![id]));
     }
 }
 
@@ -1293,6 +1304,41 @@ mod tests {
                         |e| matches!(e.kind, Kind::Action(CtxAction::Derender { id, permanent: p }) if id == expected && p == permanent)
                     )
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn estate_actions_show_only_on_an_estate_we_manage() {
+        let id = Uuid::from_u128(7);
+        let target = Target::Avatar {
+            id,
+            own: false,
+            attachment: None,
+        };
+        for estate in [false, true] {
+            let facts = Facts {
+                estate,
+                ..Facts::default()
+            };
+            let menu = world_menu(&target, &facts, Vec3::ZERO);
+            let group = menu
+                .into_iter()
+                .find(|e| e.label == aurora_i18n::tr!("ui-context-moderation-options"));
+            assert_eq!(group.is_some(), estate);
+            let actions = rows(group.into_iter().collect());
+            for found in [
+                actions
+                    .iter()
+                    .any(|e| matches!(&e.kind, Kind::Action(CtxAction::EstateKick(ids)) if ids == &[id])),
+                actions
+                    .iter()
+                    .any(|e| matches!(&e.kind, Kind::Action(CtxAction::EstateTeleportHome(ids)) if ids == &[id])),
+                actions
+                    .iter()
+                    .any(|e| matches!(&e.kind, Kind::Action(CtxAction::EstateBan(ids)) if ids == &[id])),
+            ] {
+                assert_eq!(found, estate);
             }
         }
     }

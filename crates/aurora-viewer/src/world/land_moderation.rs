@@ -54,6 +54,12 @@ pub fn rights(place: &Place, agent: &AgentRights) -> Rights {
     }
 }
 
+/// canEstateKickOrTeleportHomeMultiple for one region: its owner or an
+/// estate manager.
+pub fn estate_moderator(region_owner: Uuid, estate_manager: bool, agent: Uuid) -> bool {
+    region_owner == agent || estate_manager
+}
+
 /// The parcel under a resident is group land the viewer does not know yet:
 /// the group's powers decide, so it must be asked for.
 pub fn needs_parcel(place: &Place) -> bool {
@@ -92,6 +98,15 @@ impl World {
         })
     }
 
+    /// LLAvatarActions::canEstateKickOrTeleportHome (we are never godlike):
+    /// the owner or a manager of the estate of the region the resident
+    /// stands in, by its RegionHandshake. Their region, or None.
+    pub fn estate_moderation_region(&self, id: Uuid) -> Option<RegionHandle> {
+        let (handle, _) = self.resident_place(id)?;
+        let info = self.regions.get(&handle)?.info.as_ref()?;
+        (estate_moderator(info.owner, info.is_estate_manager, self.agent_id) && id != self.agent_id).then_some(handle)
+    }
+
     /// Who we are, for the rule.
     pub fn moderation_agent(&self) -> AgentRights<'_> {
         AgentRights {
@@ -109,6 +124,13 @@ mod tests {
     const ME: Uuid = Uuid::from_u128(1);
     const OTHER: Uuid = Uuid::from_u128(2);
     const GROUP: Uuid = Uuid::from_u128(3);
+
+    #[test]
+    fn estate_actions_need_the_region_owner_or_an_estate_manager() {
+        assert!(estate_moderator(ME, false, ME));
+        assert!(estate_moderator(OTHER, true, ME));
+        assert!(!estate_moderator(OTHER, false, ME));
+    }
 
     fn place(overlay: u8, parcel: Option<&ParcelInfo>) -> Place<'_> {
         Place {

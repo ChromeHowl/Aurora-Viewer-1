@@ -133,61 +133,115 @@ pub fn page(cx: &mut Cx, tab: usize) {
                 );
             });
         }
-        1 => cx.group(tr!("ui-options-hover-tips"), |cx| {
-            cx.toggle(
-                tr!("ui-options-hover-tips-show"),
-                tr!("ui-options-hover-tips-show-help"),
-                &field!(hover_tips.enabled),
-            );
-            // the one exception to the main switch (#2475): it only acts
-            // while world tooltips are off, so it is greyed while they are on
-            cx.greyed(cx.s.hover_tips.enabled);
-            cx.toggle(
-                tr!("ui-options-hover-tips-avatars"),
-                tr!("ui-options-hover-tips-avatars-help"),
-                &field!(hover_tips.avatars),
-            );
-            // form, group titles and delay serve the avatar-only tips too
-            let any = crate::hover_tips::any_enabled(&cx.s.hover_tips);
-            cx.greyed(!any);
-            use crate::settings::HoverTipForm;
-            let forms = [tr!("hover-tips-bubble"), tr!("hover-tips-card"), tr!("hover-tips-readout")];
-            let choices: Vec<(HoverTipForm, &str, bool)> = HoverTipForm::ALL.iter().zip(forms).map(|(f, l)| (*f, l, true)).collect();
-            cx.choice(
-                tr!("ui-options-hover-tips-form"),
-                tr!("ui-options-hover-tips-form-help"),
-                &field!(hover_tips.form),
-                &choices,
-            );
-            cx.greyed(!cx.s.hover_tips.enabled);
-            cx.choice(
-                tr!("ui-options-hover-tips-objects"),
-                tr!("ui-options-hover-tips-objects-help"),
-                &field!(hover_tips.all_objects),
-                &[
-                    (false, tr!("ui-options-hover-tips-interactive"), true),
-                    (true, tr!("ui-options-hover-tips-all"), true),
-                ],
-            );
-            cx.toggle(
-                tr!("ui-options-hover-tips-land"),
-                tr!("ui-options-hover-tips-land-help"),
-                &field!(hover_tips.land),
-            );
-            cx.greyed(!any);
-            cx.toggle(tr!("ui-options-hover-tips-group-titles"), "", &field!(hover_tips.group_titles));
-            cx.slider(
-                tr!("ui-options-hover-tips-delay"),
-                "",
-                &field!(hover_tips.delay),
-                0.0..=crate::settings::MAX_HOVER_TIP_DELAY,
-                " s",
-            );
-        }),
+        1 => {
+            cx.group(tr!("ui-options-hover-tips"), |cx| {
+                cx.toggle(
+                    tr!("ui-options-hover-tips-show"),
+                    tr!("ui-options-hover-tips-show-help"),
+                    &field!(hover_tips.enabled),
+                );
+                // the one exception to the main switch (#2475): it only acts
+                // while world tooltips are off, so it is greyed while they are on
+                cx.greyed(cx.s.hover_tips.enabled);
+                cx.toggle(
+                    tr!("ui-options-hover-tips-avatars"),
+                    tr!("ui-options-hover-tips-avatars-help"),
+                    &field!(hover_tips.avatars),
+                );
+                // form, group titles and delay serve the avatar-only tips too
+                let any = crate::hover_tips::any_enabled(&cx.s.hover_tips);
+                cx.greyed(!any);
+                use crate::settings::HoverTipForm;
+                let forms = [tr!("hover-tips-bubble"), tr!("hover-tips-card"), tr!("hover-tips-readout")];
+                let choices: Vec<(HoverTipForm, &str, bool)> = HoverTipForm::ALL.iter().zip(forms).map(|(f, l)| (*f, l, true)).collect();
+                cx.choice(
+                    tr!("ui-options-hover-tips-form"),
+                    tr!("ui-options-hover-tips-form-help"),
+                    &field!(hover_tips.form),
+                    &choices,
+                );
+                cx.greyed(!cx.s.hover_tips.enabled);
+                cx.choice(
+                    tr!("ui-options-hover-tips-objects"),
+                    tr!("ui-options-hover-tips-objects-help"),
+                    &field!(hover_tips.all_objects),
+                    &[
+                        (false, tr!("ui-options-hover-tips-interactive"), true),
+                        (true, tr!("ui-options-hover-tips-all"), true),
+                    ],
+                );
+                cx.toggle(
+                    tr!("ui-options-hover-tips-land"),
+                    tr!("ui-options-hover-tips-land-help"),
+                    &field!(hover_tips.land),
+                );
+                cx.greyed(!any);
+                cx.toggle(tr!("ui-options-hover-tips-group-titles"), "", &field!(hover_tips.group_titles));
+                cx.slider(
+                    tr!("ui-options-hover-tips-delay"),
+                    "",
+                    &field!(hover_tips.delay),
+                    0.0..=crate::settings::MAX_HOVER_TIP_DELAY,
+                    " s",
+                );
+            });
+            floating_text(cx);
+        }
         _ => cx.group(tr!("ui-options-at-startup"), |cx| {
             cx.toggle(tr!("ui-options-conversations-at-startup"), "", &field!(show_chat));
             cx.toggle(tr!("ui-options-performance-at-startup"), "", &field!(show_perf));
             cx.toggle(tr!("ui-options-mini-map-at-startup"), "", &field!(show_minimap));
         }),
     }
+}
+
+/// The floating texts of objects (llSetText): the Legacy Viewer's UI ›
+/// 3D World and Colors › Floating Text (FSHudTextFadeDistance,
+/// FSHudTextFadeRange, FSHudTextUseHoverHighlight, FSHudTextShowBackground,
+/// FSHudTextBackgroundOpacity).
+fn floating_text(cx: &mut Cx) {
+    use crate::settings::people::{TEXT_FADE_MAX, TextBackground};
+    use aurora_i18n::tr;
+    cx.group(tr!("b6-text-group"), |cx| {
+        cx.greyed(false);
+        cx.slider(
+            tr!("b6-text-fade-distance"),
+            tr!("b6-text-fade-distance-hint"),
+            &field!(people.text_fade_distance),
+            0.0..=TEXT_FADE_MAX,
+            " m",
+        );
+        cx.slider(
+            tr!("b6-text-fade-range"),
+            tr!("b6-text-fade-range-hint"),
+            &field!(people.text_fade_range),
+            0.0..=TEXT_FADE_MAX,
+            " m",
+        );
+        cx.toggle(
+            tr!("b6-text-hover-highlight"),
+            tr!("b6-text-hover-highlight-hint"),
+            &field!(people.text_hover_highlight),
+        );
+        cx.combo(
+            tr!("b6-text-background"),
+            tr!("b6-text-background-hint"),
+            &field!(people.text_background),
+            &[
+                (TextBackground::Off, tr!("b6-text-background-off")),
+                (TextBackground::Highlighted, tr!("b6-text-background-highlighted")),
+                (TextBackground::All, tr!("b6-text-background-all")),
+            ],
+        );
+        let off = cx.s.people.text_background == TextBackground::Off;
+        cx.subs(off, |cx| {
+            cx.slider(
+                tr!("b6-text-background-opacity"),
+                "",
+                &field!(people.text_background_opacity),
+                0.0..=1.0,
+                "",
+            );
+        });
+    });
 }

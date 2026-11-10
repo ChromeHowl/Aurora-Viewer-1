@@ -223,6 +223,7 @@ fn world_objects_use_the_same_baselines_without_changing_avatar_tags() {
             None,
             None,
             None,
+            None,
         );
         assert!(hits.is_empty());
     });
@@ -342,4 +343,29 @@ fn tessellated_glyphs_stay_on_physical_pixels_without_resizing_the_font() {
             }
         }
     }
+}
+
+#[test]
+fn the_plate_behind_floating_texts_follows_its_mode_and_the_highlight() {
+    use crate::settings::people::{People, TextBackground};
+    let white_text = [255, 255, 255, 255];
+    let dark_text = [20, 20, 60, 255];
+    let mut people = People::default();
+    // off by default
+    assert_eq!(background(&people, true, false, white_text, 1.0), None);
+    people.text_background = TextBackground::All;
+    // black behind a light text, white behind a dark one, faded with it
+    assert_eq!(background(&people, false, false, white_text, 1.0), Some((0.75, false)));
+    assert_eq!(background(&people, false, false, dark_text, 0.5), Some((0.375, true)));
+    // never on a worn object's text
+    assert_eq!(background(&people, false, true, white_text, 1.0), None);
+    // the highlighted text: opaque with "All", the setting's with "Highlighted"
+    people.text_hover_highlight = true;
+    assert_eq!(background(&people, true, false, white_text, 1.0), Some((1.0, false)));
+    people.text_background = TextBackground::Highlighted;
+    assert_eq!(background(&people, false, false, white_text, 1.0), None);
+    assert_eq!(background(&people, true, false, white_text, 1.0), Some((0.75, false)));
+    // "Highlighted" needs the hover highlight on
+    people.text_hover_highlight = false;
+    assert_eq!(background(&people, true, false, white_text, 1.0), None);
 }
