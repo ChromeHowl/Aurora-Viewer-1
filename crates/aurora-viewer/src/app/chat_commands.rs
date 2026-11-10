@@ -231,13 +231,13 @@ impl App {
                 ));
             }
             Command::TrackAvatar(name) => match self.find_nearby(&name) {
-                // Deviation: LLAvatarActions::track follows the avatar; Aurora
-                // has no avatar tracking yet and marks where it is now.
-                Some((id, pos)) => {
-                    let (x, y) = crate::ui::minimap::to_global(&self.world, pos);
-                    self.world.map.track_location(x, y, pos.z, false);
-                    let name = self.world.person_name(&id).unwrap_or(name);
-                    self.report_command(aurora_i18n::tr!("app-chat-commands-tracking", name = name.to_string()));
+                // LLAvatarActions::track: the radar's beacon follows the avatar
+                Some((id, _)) => {
+                    self.track_avatar(id);
+                    if self.radar.tracked.is_some_and(|t| t.id == id) {
+                        let name = self.world.person_name(&id).unwrap_or(name);
+                        self.report_command(aurora_i18n::tr!("app-chat-commands-tracking", name = name.to_string()));
+                    }
                 }
                 None => self.report_command(aurora_i18n::tr!(
                     "app-chat-commands-no-nearby-avatar-matches",

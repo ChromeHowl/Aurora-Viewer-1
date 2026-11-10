@@ -17,6 +17,7 @@ fn content() -> Content {
         render_never: false,
         blocked: false,
         mark: None,
+        marked: None,
     }
 }
 
@@ -25,6 +26,7 @@ fn detail() -> Detail {
         full: "Complexité : 245 000".into(),
         short: "245 000".into(),
         alert: true,
+        band: None,
     }
 }
 

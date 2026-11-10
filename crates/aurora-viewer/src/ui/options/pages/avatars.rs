@@ -63,6 +63,31 @@ pub fn page(cx: &mut Cx, tab: usize) {
                     0.0..=128.0,
                     " m",
                 );
+                // FSTagShowDistance, FSTagShowDistanceColors,
+                // FSNameTagZOffsetCorrection, FSShowAutorespondInNametag
+                cx.toggle(
+                    tr!("b6-tag-distance-show"),
+                    tr!("b6-tag-distance-show-hint"),
+                    &field!(people.tag_distance),
+                );
+                cx.toggle(
+                    tr!("b6-tag-distance-colors"),
+                    tr!("b6-tag-distance-colors-hint"),
+                    &field!(people.tag_distance_colors),
+                );
+                let max = crate::settings::people::TAG_OFFSET_MAX;
+                cx.slider(
+                    tr!("b6-tag-offset"),
+                    tr!("b6-tag-offset-hint"),
+                    &field!(people.tag_z_offset),
+                    -max..=max,
+                    "",
+                );
+                cx.toggle(
+                    tr!("b6-tag-autorespond-show"),
+                    tr!("b6-tag-autorespond-show-hint"),
+                    &field!(people.tag_autorespond),
+                );
                 cx.toggle(
                     tr!("ui-options-contact-markers"),
                     tr!("ui-options-contact-markers-help"),
@@ -207,6 +232,19 @@ pub fn page(cx: &mut Cx, tab: usize) {
                     tr!("ui-options-group-titles-help"),
                     &field!(group_titles),
                     &choices,
+                );
+            });
+            // FSDisableAvatarTrackerAtCloseIn, FSShowChatRangeSpheres
+            cx.group(tr!("b6-around-group"), |cx| {
+                cx.toggle(
+                    tr!("b6-track-close-in"),
+                    tr!("b6-track-close-in-hint"),
+                    &field!(people.track_clear_close_in),
+                );
+                cx.toggle(
+                    tr!("b6-chat-spheres"),
+                    tr!("b6-chat-spheres-hint"),
+                    &field!(people.chat_range_spheres),
                 );
             });
             // FSShowTypingStateInNameTag and FSTypingChevronPrefix

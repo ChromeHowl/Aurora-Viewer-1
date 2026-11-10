@@ -23,9 +23,56 @@ fn normalize(text: String) -> String {
     }
 }
 
+/// The plate behind a floating text (FSHudTextShowBackground, FIRE-35019,
+/// LLHUDText::renderText): on every text of an object in the world with
+/// "All", only on the highlighted one with "Highlighted" (and the hover
+/// highlight on). Black, or white behind a dark text (luminance at most
+/// 0.4); its opacity follows the text's fade, but the highlighted text's
+/// is the setting's ("Highlighted") or full ("All"). The opacity and
+/// whether it is white, or None.
+pub(super) fn background(
+    people: &crate::settings::people::People,
+    highlighted: bool,
+    attached: bool,
+    color: [u8; 4],
+    fade: f32,
+) -> Option<(f32, bool)> {
+    use crate::settings::people::TextBackground;
+    let lit = highlighted && people.text_hover_highlight;
+    let shown = match people.text_background {
+        TextBackground::Off => false,
+        TextBackground::Highlighted => lit,
+        TextBackground::All => true,
+    };
+    if !shown || attached {
+        return None;
+    }
+    let [r, g, b, _] = color.map(|c| f32::from(c) / 255.0);
+    let white = 0.299 * r + 0.587 * g + 0.114 * b <= 0.4;
+    let alpha = match (lit, people.text_background) {
+        (true, TextBackground::Highlighted) => people.text_background_opacity,
+        (true, _) => fade,
+        (false, _) => people.text_background_opacity * fade,
+    };
+    Some((alpha.clamp(0.0, 1.0), white))
+}
+
 /// `projection_scale` affects the positions of HUD text, not its glyphs:
 /// get_hud_matrices scales the model, then hud_render_text paints in 2D.
 pub(super) fn paint(painter: &egui::Painter, text: String, anchor: Pos2, size: f32, color: Color32, projection_scale: f32) {
+    paint_on(painter, text, anchor, size, color, projection_scale, None);
+}
+
+/// `paint` with a plate of this colour and corner radius behind the text.
+pub(super) fn paint_on(
+    painter: &egui::Painter,
+    text: String,
+    anchor: Pos2,
+    size: f32,
+    color: Color32,
+    projection_scale: f32,
+    plate: Option<(Color32, egui::CornerRadius)>,
+) {
     let text = normalize(text);
     if text.is_empty() || color.a() < 3 {
         return;
@@ -67,6 +114,9 @@ pub(super) fn paint(painter: &egui::Painter, text: String, anchor: Pos2, size: f
         row.pos = ((ideal_origin + row.pos.to_vec2()).round_to_pixels(ppp) - origin).to_pos2();
         layout.rect = layout.rect.union(row.rect());
         layout.mesh_bounds = layout.mesh_bounds.union(row.visuals.mesh_bounds.translate(row.pos.to_vec2()));
+    }
+    if let Some((fill, radius)) = plate {
+        painter.rect_filled(layout.rect.translate(origin.to_vec2()).expand2(egui::vec2(6.0, 3.0)), radius, fill);
     }
     let [r, g, b, a] = color.to_srgba_unmultiplied();
     let luminance = (r.max(g).max(b) as f32 + r.min(g).min(b) as f32) / 510.0;

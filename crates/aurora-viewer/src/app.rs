@@ -112,6 +112,7 @@ mod object_menu;
 mod object_menu_demo;
 mod own_motion;
 mod pay;
+mod people_actions;
 mod photo_isolate;
 mod photo_reel;
 mod physics_editor;
@@ -5563,6 +5564,8 @@ impl App {
             // or click them
             im_in_bell: self.settings.ims_in_notification_center
                 || (self.demo && crate::demo::toasts::mode().is_some_and(|m| matches!(m.as_str(), "bell" | "click" | "minimized"))),
+            set_presence: self.settings.people.set_notice_toast,
+            set_presence_in_chat: self.settings.people.set_notice_chat,
         };
         // a conversation in sight: its tab shown in the Conversations window
         // or its own window (FSFloaterIM visible), whether or not the viewer
@@ -6548,6 +6551,7 @@ impl App {
         let mut events = self
             .radar
             .sweep(seen, self.world.agent.position, my_region, &gaps, self.settings.draw_distance, now);
+        self.update_radar_track();
         // AURORA_DEMO_PEOPLE: its residents arrived before the session
         if self.demo {
             for (id, ago) in crate::demo::people::arrivals() {
@@ -15636,6 +15640,8 @@ impl App {
                             opacity: self.settings.chat_bubble_opacity,
                             now: Instant::now(),
                         }),
+                        // the object under the pointer (FSHudTextUseHoverHighlight)
+                        self.look_hover.and_then(|(idx, _)| idx),
                     )
                 };
                 ui::contact_markers::draw(
@@ -15650,6 +15656,14 @@ impl App {
                     self.settings.contact_marker_anchor,
                     self.settings.contact_markers && !held && (!self.interface.immersive || self.settings.immersive_name_tags),
                 );
+                // FSShowChatRangeSpheres; in mouselook, the residents out of
+                // view (FSMouselookCombatFeatures, ExodusMouselookIFF)
+                if !held && self.settings.people.chat_range_spheres {
+                    ui::people_overlay::chat_spheres(&ctx, &self.world, projector);
+                }
+                if self.camera.mouselook() && !held && self.settings.people.mouselook_markers {
+                    ui::people_overlay::mouselook_markers(&ctx, &p, &self.world, projector, self.settings.people.mouselook_marker_range);
+                }
                 // RenderTrackerBeacon (LLTracker::render3D, renderBeacon)
                 if !self.camera.mouselook() && !held && self.settings.tracker_beacon {
                     self.beacon_hit = ui::minimap::draw_beacon(&ctx, &p, &self.world, projector, beacon_hovered);

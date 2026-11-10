@@ -24,6 +24,12 @@ pub(super) enum Ask {
         name: String,
         ban: bool,
     },
+    /// "Estate Kick", "Estate Teleport Home" or "Estate Ban" of the residents
+    /// we may act on, with their names (app/people_actions.rs).
+    Estate {
+        action: super::people_actions::EstateAction,
+        targets: Vec<(Uuid, String)>,
+    },
 }
 
 impl App {
@@ -91,6 +97,10 @@ impl App {
         let Some(ask) = self.moderation_ask.as_ref() else {
             return;
         };
+        if matches!(ask, Ask::Estate { .. }) {
+            self.estate_ask_ui(ctx, p);
+            return;
+        }
         let answer = match ask {
             Ask::Freeze { name, .. } => {
                 let question = aurora_i18n::tr!("ui-context-freeze-question", name = name.as_str());
@@ -120,6 +130,7 @@ impl App {
                     &choices,
                 )
             }
+            Ask::Estate { .. } => return,
         };
         let Some(choice) = answer else {
             return;
@@ -132,7 +143,10 @@ impl App {
         };
         // the second button: "Unfreeze" (Flags 0x1), "Eject and ban" (0x1)
         let second = choice == 1;
-        let (Ask::Freeze { target, .. } | Ask::Eject { target, .. }) = ask;
+        let target = match &ask {
+            Ask::Freeze { target, .. } | Ask::Eject { target, .. } => *target,
+            Ask::Estate { .. } => return,
+        };
         let Some((handle, _)) = self.world.resident_place(target) else {
             log::warn!("land moderation: {target} is no longer in a region we are connected to");
             return;
@@ -148,6 +162,7 @@ impl App {
                 target,
                 ban: second,
             },
+            Ask::Estate { .. } => return,
         };
         log::info!("land moderation: {cmd:?}");
         self.send(NetCommand::Land(cmd));

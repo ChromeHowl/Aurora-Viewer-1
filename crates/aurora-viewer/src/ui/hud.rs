@@ -266,6 +266,7 @@ fn plate_content(
     too_complex: bool,
     settings: &crate::settings::Settings,
     own_typing: bool,
+    position: Vec3,
 ) -> super::nameplate::Content {
     use super::nameplate::{Content, Detail, Presence, Role};
     use super::presence::Status;
@@ -294,7 +295,7 @@ fn plate_content(
     let blocked = !own && world.is_avatar_blocked(&id);
     let friend = !own && world.social.is_friend_shown(&id);
     // the same rule as the classic tag (FSTagShowARW and its two options)
-    let detail = complexity.and_then(|tc| {
+    let complexity = complexity.and_then(|tc| {
         let shown = (own && tc.own) || (!own && (!tc.only_too_complex || tc.too_complex.contains(&idx)));
         let c = *tc.values.get(&id).filter(|_| shown)?;
         let figure = group_digits(c);
@@ -311,8 +312,39 @@ fn plate_content(
             full,
             short,
             alert: !own && tc.max > 0 && (c > tc.max || over_area),
+            band: None,
         })
     });
+    // the distance (FSTagShowDistance) and our auto-response
+    // (FSShowAutorespondInNametag) follow on the same line
+    let mut extra = Vec::new();
+    let mut band = None;
+    if let Some((meters, b)) = tag_distance(world, settings, own, position) {
+        extra.push(meters);
+        band = settings.people.tag_distance_colors.then_some(b);
+    }
+    if own && settings.people.tag_autorespond && autoresponding(settings) {
+        extra.push(aurora_i18n::tr!("b6-tag-autorespond").to_owned());
+    }
+    let detail = if extra.is_empty() {
+        complexity
+    } else {
+        let more = extra.join(" · ");
+        Some(match complexity {
+            Some(d) => Detail {
+                full: format!("{} · {more}", d.full),
+                short: format!("{} · {more}", d.short),
+                band,
+                ..d
+            },
+            None => Detail {
+                full: more.clone(),
+                short: more,
+                alert: false,
+                band,
+            },
+        })
+    };
     Content {
         appearance: world.contact_appearance(&id).clone(),
         name,
@@ -334,7 +366,69 @@ fn plate_content(
         render_never: !own && too_complex && settings.render_exception(&id) == 1,
         blocked,
         mark: crate::world::staff::mark_named(&id, &legacy),
+        marked: world.avatar_marks.get(&id),
     }
+}
+
+/// Our auto-response is on (FSAutorespondMode or FSAutorespondNonFriendsMode).
+fn autoresponding(settings: &crate::settings::Settings) -> bool {
+    settings.autoresponse.autorespond || settings.autoresponse.autorespond_nonfriends
+}
+
+/// Object `idx` is the object `hovered` or a prim of its linkset: its
+/// floating text is the highlighted one (LLViewerObject::setTextIsHighlighted).
+fn same_linkset(world: &World, idx: usize, hovered: usize) -> bool {
+    let root = |mut i: usize| {
+        for _ in 0..64 {
+            match world.objects.get(i).and_then(|o| world.objects.parent_of(o)) {
+                Some(parent) if world.objects.get(parent).is_some_and(|o| !o.is_avatar()) => i = parent,
+                _ => break,
+            }
+        }
+        i
+    };
+    idx == hovered || root(idx) == root(hovered)
+}
+
+/// The distance shown on another resident's tag ("12.34 m", FSTagShowDistance)
+/// and its chat range, from our avatar to theirs; None on ours or with the
+/// option off.
+fn tag_distance(
+    world: &World,
+    settings: &crate::settings::Settings,
+    own: bool,
+    position: Vec3,
+) -> Option<(String, crate::world::radar::Band)> {
+    if own || !settings.people.tag_distance {
+        return None;
+    }
+    let d = position.distance(world.agent.position);
+    let band = crate::world::radar::Band::of(d, crate::world::radar::chat_ranges());
+    Some((
+        aurora_i18n::tr!("b6-tag-distance", meters = aurora_i18n::number(f64::from(d), 2)),
+        band,
+    ))
+}
+
+/// The classic tag's name colour by distance (FSTagShowDistanceColors),
+/// unless a friend's or a contact set's colour already shows; a radar mark
+/// over everything (LLVOAvatar::getNameTagColor).
+fn classic_name_color(
+    p: &Palette,
+    world: &World,
+    settings: &crate::settings::Settings,
+    id: uuid::Uuid,
+    own: bool,
+    position: Vec3,
+    base: Color32,
+) -> Color32 {
+    let special = world.social.is_friend_shown(&id) || world.contact_appearance(&id).nameplate_name.is_some();
+    let mut color = base;
+    if !own && !special && settings.people.tag_distance_colors {
+        let d = position.distance(world.agent.position);
+        color = super::colors::band_color(p, crate::world::radar::Band::of(d, crate::world::radar::chat_ranges()));
+    }
+    world.avatar_marks.get(&id).map_or(color, |[r, g, b]| Color32::from_rgb(r, g, b))
 }
 
 /// What the avatars' name tags show.
@@ -386,6 +480,7 @@ pub fn draw(
     loading: Option<&HashMap<uuid::Uuid, f32>>,
     plates: Option<PlateFrame<'_>>,
     bubbles: Option<super::chat_bubbles::Frame<'_>>,
+    hovered: Option<usize>,
 ) -> Vec<NameTag> {
     let painter = world_painter(ctx);
     let now = Instant::now();
@@ -413,6 +508,11 @@ pub fn draw(
         None => (None, None),
     };
     let mut plate_tags: Vec<super::nameplate::Tag<'_>> = Vec::new();
+    // the floating texts: (order, anchor, text, colour, where it stands,
+    // highlighted, plate)
+    #[allow(clippy::type_complexity)]
+    let mut texts: Vec<(f32, Pos2, String, Color32, Vec3, bool, Option<Color32>)> = Vec::new();
+    let people = &settings.people;
     // only the avatars and the objects with a text: a shop has thousands of
     // objects for a few dozen of these
     for (idx, o) in world.objects.avatars().chain(world.objects.texted()) {
@@ -452,7 +552,8 @@ pub fn draw(
             if !chatting && (!names || d > settings.name_tag_distance) {
                 continue;
             }
-            let head = scene.name_tag_anchor(&o.full_id, pos);
+            // FSNameTagZOffsetCorrection
+            let head = scene.name_tag_anchor(&o.full_id, pos) + Vec3::Z * settings.people.tag_offset_m();
             if !scene.portal_keeps_point(idx, head) {
                 continue;
             }
@@ -503,6 +604,7 @@ pub fn draw(
                         too,
                         settings,
                         own_typing,
+                        pos,
                     ),
                     voice: in_voice.filter(|_| audio.world_voice_visualizer(id == world.agent_id, world.calls.active.is_some(), false)),
                     loading: loading.and_then(|l| l.get(&id).copied()),
@@ -522,6 +624,10 @@ pub fn draw(
                 }
                 if playing(ANIM_DO_NOT_DISTURB) {
                     status.push(aurora_i18n::tr!("common-do-not-disturb"));
+                }
+                // FSShowAutorespondInNametag, on our own tag
+                if o.full_id == world.agent_id && settings.people.tag_autorespond && autoresponding(settings) {
+                    status.push(aurora_i18n::tr!("b6-tag-autorespond"));
                 }
                 if world.is_avatar_blocked(&o.full_id) {
                     status.push(aurora_i18n::tr!("ui-hud-blocked"));
@@ -552,7 +658,9 @@ pub fn draw(
                     (legacy.clone(), None, false, legacy)
                 }
             };
+            let own = o.full_id == world.agent_id;
             let col = super::colors::tag_color(world, &o.full_id, &legacy, custom);
+            let col = classic_name_color(p, world, settings, o.full_id, own, pos, col);
             lines.push((name, col, 13.0));
             if let Some(u) = username {
                 let dim = |v: u8| (v as f32 * 0.83) as u8;
@@ -561,6 +669,11 @@ pub fn draw(
                     Color32::from_rgba_unmultiplied(dim(col.r()), dim(col.g()), dim(col.b()), col.a()),
                     11.0,
                 ));
+            }
+            // the distance under the names, in its range's colour
+            // (FSTagShowDistance)
+            if let Some((meters, band)) = tag_distance(world, settings, own, pos) {
+                lines.push((meters, super::colors::band_color(p, band), 11.0));
             }
             // complexity under the name (Firestorm FSTagShowARW): red as it
             // nears the limit, green fading past it; grey for ourselves or
@@ -619,10 +732,12 @@ pub fn draw(
             if hud {
                 continue;
             }
-            // LLHUDText: fade from 8 m over 4 m, anchored 0.6 x height above the
-            // object and pulled towards the camera by its radius
-            const FADE_DISTANCE: f32 = 8.0;
-            const FADE_RANGE: f32 = 4.0;
+            // LLHUDText: fade from FSHudTextFadeDistance over
+            // FSHudTextFadeRange, anchored 0.6 x height above the object and
+            // pulled towards the camera by its radius; the text of the
+            // object under the pointer neither fades nor hides behind the
+            // scene (FSHudTextUseHoverHighlight)
+            let highlighted = people.text_hover_highlight && hovered.is_some_and(|h| same_linkset(world, idx, h));
             let c = o.text_color;
             if c[3] == 0 {
                 continue;
@@ -636,44 +751,50 @@ pub fn draw(
                 top
             };
             let d = anchor.distance(eye);
-            if d > FADE_DISTANCE + FADE_RANGE {
+            let fade = if highlighted { 1.0 } else { people.text_alpha(d) };
+            if fade <= 0.0 {
                 continue;
             }
-            let fade = if d > FADE_DISTANCE {
-                (1.0 - (d - FADE_DISTANCE) / FADE_RANGE).max(0.0)
-            } else {
-                1.0
-            };
             let Some((sp, _)) = proj.project(anchor) else {
                 continue;
             };
             let col = Color32::from_rgba_unmultiplied(c[0], c[1], c[2], (c[3] as f32 * fade) as u8);
             let text = world.rlva_hover_privacy.apply(&o.text);
-            let lines = vec![(text.into_owned(), col, 12.0)];
-            tags.push((d + 1000.0, sp, lines, None, None, None, anchor, 1.0, None));
+            let plate = super::floating_text::background(people, highlighted, o.is_attachment(), c, fade).map(|(alpha, white)| {
+                // theme-guard: content — the Legacy Viewer's plate: black, or white behind a dark text
+                let base = if white { Color32::WHITE } else { Color32::BLACK };
+                base.gamma_multiply(alpha)
+            });
+            // the highlighted text in front of the others
+            texts.push((
+                if highlighted { 0.0 } else { d },
+                sp,
+                text.into_owned(),
+                col,
+                anchor,
+                highlighted,
+                plate,
+            ));
         }
     }
     visibility.finish();
     // the classic tag is a small card of the theme
     let tag_radius = ctx.global_style().visuals.window_corner_radius;
+    // the floating texts under the name tags, far first
+    texts.sort_by(|a, b| b.0.total_cmp(&a.0));
+    for (_, sp, text, color, at, highlighted, plate) in texts {
+        // the scene hides what it has in front of this point, but the
+        // highlighted text
+        aurora_render::world_label_at(ctx, (!highlighted).then_some(at));
+        super::floating_text::paint_on(&painter, text, sp, 12.0, color, 1.0, plate.map(|fill| (fill, tag_radius)));
+    }
     // far first so near tags draw on top
     tags.sort_by(|a, b| b.0.total_cmp(&a.0));
     let opacity = bubbles.as_ref().map_or(0.0, |b| b.opacity);
     for (d, sp, lines, in_voice, progress, avatar, at, alpha, bubble) in tags {
         // the scene hides what it has in front of this point
         aurora_render::world_label_at(ctx, Some(at));
-        let is_avatar = d < 1000.0;
-        if !is_avatar {
-            if let Some((text, color, size)) = lines.into_iter().next() {
-                super::floating_text::paint(&painter, text, sp, size, color, 1.0);
-            }
-            continue;
-        }
-        let fade = if is_avatar {
-            (1.0 - (d - 40.0) / 24.0).clamp(0.35, 1.0) * alpha
-        } else {
-            1.0
-        };
+        let fade = (1.0 - (d - 40.0) / 24.0).clamp(0.35, 1.0) * alpha;
         let mut y = sp.y;
         // measure
         let galleys: Vec<_> = lines
@@ -684,10 +805,10 @@ pub fn draw(
         let max_w = galleys.iter().map(|g| g.size().x).fold(0.0, f32::max);
         y -= total_h;
         let visualizer = audio.world_voice_visualizer(avatar == Some(world.agent_id), world.calls.active.is_some(), false);
-        let no_voice = visualizer && is_avatar && in_voice.is_none();
+        let no_voice = visualizer && in_voice.is_none();
         let voice_w = if no_voice { super::voice_tag::ICON_WIDTH } else { 0.0 };
         let text_x = sp.x + voice_w * 0.5;
-        if is_avatar {
+        {
             let w = max_w + 12.0 + super::voice_tag::TAG_EXTRA_WIDTH;
             let r = egui::Rect::from_min_size(Pos2::new(sp.x - w * 0.5, y - 3.0), egui::vec2(w, total_h + 6.0));
             if let Some(id) = avatar {
@@ -806,7 +927,7 @@ mod tests {
         for mode in [0, 1, 2, 1, 0] {
             settings.set_render_exception(avatar.full_id, mode);
             for silhouette in [false, true] {
-                let content = plate_content(&world, idx, avatar, false, None, silhouette, &settings, false);
+                let content = plate_content(&world, idx, avatar, false, None, silhouette, &settings, false, Vec3::ZERO);
                 let expected = if mode == 1 { Badge::RenderNever } else { Badge::TooComplex };
                 for level in [Level::Full, Level::Compact] {
                     let shown: Vec<_> = badges(level, &content)
@@ -824,7 +945,7 @@ mod tests {
             .find(|(_, o)| o.full_id == world.agent_id)
             .expect("our demo avatar");
         settings.set_render_exception(avatar.full_id, 1);
-        let own = plate_content(&world, idx, avatar, false, None, true, &settings, false);
+        let own = plate_content(&world, idx, avatar, false, None, true, &settings, false, Vec3::ZERO);
         assert!(!own.too_complex && !own.render_never, "our own avatar has no rendering-limit badge");
     }
 
@@ -956,6 +1077,7 @@ mod tests {
                                 own_typing: false,
                             }),
                             None,
+                            None,
                         );
                     },
                 );
@@ -1072,6 +1194,7 @@ mod tests {
                                 opacity: 0.5,
                                 now,
                             }),
+                            None,
                         );
                     },
                 );

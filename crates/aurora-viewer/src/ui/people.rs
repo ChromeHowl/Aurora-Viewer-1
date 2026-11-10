@@ -312,6 +312,9 @@ pub struct PeopleUi {
     /// The last refused zoom (resident, ui time): double clicks on the
     /// same row say it once.
     zoom_refused: Option<(Uuid, f64)>,
+    /// The hidden friends also listed, greyed, under the friends (People ›
+    /// Hidden's switch): for this session only, as FDShowHiddenFriends.
+    pub show_hidden: bool,
 }
 
 impl PeopleUi {
@@ -505,7 +508,7 @@ pub fn people_window(
                 if panels.people_tab == 2 {
                     groups_tab(ui, p, world, &st.filter, &mut actions);
                 } else if panels.people_tab == TAB_HIDDEN {
-                    hidden::legacy_tab(ui, p, world, &filter, &mut actions);
+                    hidden::legacy_tab(ui, p, world, &filter, &mut st.show_hidden, &mut actions);
                 } else {
                     blocked_tab(ui, p, world, st, &filter, &mut actions);
                 }
@@ -854,6 +857,10 @@ fn friends_tab(
                     .size(12.0)
                     .color(p.muted),
             );
+        }
+        // People › Hidden's switch: the hidden friends greyed, under the others
+        if st.show_hidden && all {
+            hidden::legacy_greyed(ui, p, world, &filter, actions);
         }
     });
 }

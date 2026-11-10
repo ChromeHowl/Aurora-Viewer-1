@@ -283,6 +283,9 @@ pub struct Detail {
     pub short: String,
     /// Over the limit: in the color of the too-complex badge.
     pub alert: bool,
+    /// The line carries the distance, in the colour of its chat range
+    /// (FSTagShowDistanceColors) unless `alert`.
+    pub band: Option<crate::world::radar::Band>,
 }
 
 /// Everything a plate says about an avatar.
@@ -304,6 +307,9 @@ pub struct Content {
     /// A member of the Aurora team or a Linden Lab employee
     /// (`world::staff`): the plate has its light and its tag (`mark.rs`).
     pub mark: Option<crate::world::staff::Mark>,
+    /// The colour the resident was marked with (radar's "Mark"): the
+    /// name's, over every other (LLVOAvatar::getNameTagColor).
+    pub marked: Option<[u8; 3]>,
 }
 
 /// A live editor preview shares the live geometry, contrast and badge code.
@@ -329,6 +335,7 @@ pub fn preview(ui: &mut egui::Ui, p: &Palette, appearance: std::sync::Arc<crate:
         render_never: false,
         blocked: false,
         mark: None,
+        marked: None,
     };
     let tag = Tag {
         id: Uuid::nil(),

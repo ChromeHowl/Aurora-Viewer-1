@@ -68,7 +68,11 @@ pub(super) fn items(ui: &mut egui::Ui, p: &Palette, world: &World, actions: &mut
             if menu::item_if(ui, p, "map", aurora_i18n::tr!("common-show-on-map-2"), world.can_locate_avatar(id)) {
                 act(CtxAction::ShowOnMap(id));
             }
-            menu::todo(ui, p, "share", aurora_i18n::tr!("common-share"));
+            // Avatar.Share: RLVa's @share with them and @showinv refuse it
+            let share = world.rlva.allows("share", &id.to_string()) && !world.rlva.has("showinv");
+            if menu::item_if(ui, p, "share", aurora_i18n::tr!("common-share"), share) {
+                act(CtxAction::Share(id));
+            }
             if menu::item(ui, p, "coin-filled", aurora_i18n::tr!("common-pay")) {
                 act(CtxAction::PayResident(id));
             }

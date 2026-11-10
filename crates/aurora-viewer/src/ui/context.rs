@@ -240,6 +240,9 @@ pub struct Facts {
 
     /// "Freeze" / "Eject" of the avatar, and whether the eject may ban.
     pub moderation: crate::world::land_moderation::Rights,
+    /// We own or manage the estate the avatar stands in: "Estate Kick",
+    /// "Estate Teleport Home", "Estate Ban" (canEstateKickOrTeleportHome).
+    pub estate: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -298,6 +301,24 @@ pub enum CtxAction {
     /// landFreeze / landEject).
     Freeze(Uuid),
     Eject(Uuid),
+    /// "Track" of the radar (Nearby.People.TrackAvatar, FSRadar::startTracking):
+    /// the tracking beacon follows the resident.
+    TrackAvatar(Uuid),
+    /// "Share" of a resident's menu (LLAvatarActions::share): the inventory
+    /// and a conversation with them, to drop items into.
+    Share(Uuid),
+    /// "Mark" with a colour, or cleared with None (LLNetMap::setAvatarMarkColors,
+    /// clearAvatarMarkColors).
+    MarkAvatars(Vec<Uuid>, Option<[u8; 3]>),
+    /// "Clear all Marks" (LLNetMap::clearAvatarMarkColors()).
+    ClearAllMarks,
+    /// "Estate Kick", "Estate Teleport Home", "Estate Ban": asked first
+    /// (LLAvatarActions::estateKickMultiple, estateTeleportHomeMultiple,
+    /// estateBanMultiple).
+    EstateKick(Vec<Uuid>),
+    EstateTeleportHome(Vec<Uuid>),
+    EstateBan(Vec<Uuid>),
+
     Touch(u32),
     Sit {
         target: Uuid,
@@ -535,6 +556,62 @@ pub enum CtxAction {
 /// "Add to contact set": one entry per set, then "New contact set…"
 /// (menu_fs_contacts_friends.xml, LLAvatarActions::addToContactSet: the
 /// sets of FSFloaterAddToContactSet's list and its "+", AddNewContactSet).
+/// "Mark" of the radar's menus (menu_fs_radar.xml MarkAvatar, the same in
+/// the mini-map's): a colour for the residents chosen, clear theirs, clear
+/// all.
+pub fn mark_submenu(ui: &mut egui::Ui, p: &Palette, world: &World, ids: &[Uuid]) {
+    let ctx = ui.ctx().clone();
+    let act = |a: CtxAction| request(&ctx, a);
+    menu::submenu(ui, p, "tag-filled", aurora_i18n::tr!("ui-minimap-markers"), !ids.is_empty(), |ui| {
+        let names = [
+            aurora_i18n::tr!("ui-minimap-red"),
+            aurora_i18n::tr!("ui-minimap-green"),
+            aurora_i18n::tr!("ui-minimap-blue"),
+            aurora_i18n::tr!("ui-minimap-purple"),
+            aurora_i18n::tr!("ui-minimap-yellow"),
+        ];
+        for (name, [r, g, b]) in names.into_iter().zip(crate::world::radar::MARK_COLORS) {
+            if menu::swatch(ui, p, egui::Color32::from_rgb(r, g, b), name) {
+                act(CtxAction::MarkAvatars(ids.to_vec(), Some([r, g, b])));
+            }
+        }
+        menu::separator(ui, p);
+        let marked = ids.iter().any(|id| world.avatar_marks.get(id).is_some());
+        if menu::item_if(ui, p, "backspace-filled", aurora_i18n::tr!("ui-minimap-clear-marker"), marked) {
+            act(CtxAction::MarkAvatars(ids.to_vec(), None));
+        }
+        if menu::item_if(
+            ui,
+            p,
+            "backspace-filled",
+            aurora_i18n::tr!("ui-minimap-clear-all-markers"),
+            !world.avatar_marks.is_empty(),
+        ) {
+            act(CtxAction::ClearAllMarks);
+        }
+    });
+}
+
+/// "Estate Kick", "Estate Teleport Home" and "Estate Ban" of the radar's
+/// menus, shown only when we own or manage the estate of one of them at
+/// least (Avatar.VisibleKickTeleportHome: canEstateKickOrTeleportHomeMultiple).
+pub fn estate_items(ui: &mut egui::Ui, p: &Palette, world: &World, ids: &[Uuid]) {
+    if !ids.iter().any(|id| world.estate_moderation_region(*id).is_some()) {
+        return;
+    }
+    let ctx = ui.ctx().clone();
+    let act = |a: CtxAction| request(&ctx, a);
+    if menu::item(ui, p, "door-exit", aurora_i18n::tr!("b6-estate-kick")) {
+        act(CtxAction::EstateKick(ids.to_vec()));
+    }
+    if menu::item(ui, p, "home-filled", aurora_i18n::tr!("b6-estate-home")) {
+        act(CtxAction::EstateTeleportHome(ids.to_vec()));
+    }
+    if menu::item(ui, p, "ban", aurora_i18n::tr!("b6-estate-ban")) {
+        act(CtxAction::EstateBan(ids.to_vec()));
+    }
+}
+
 pub fn contact_set_submenu(ui: &mut egui::Ui, p: &Palette, world: &World, ids: &[Uuid], label: &str) {
     let sets = world.contact_sets.set_names();
     menu::submenu(ui, p, "users-group", label, !ids.is_empty(), |ui| {
@@ -885,6 +962,14 @@ fn avatar_menu_reporting(
             act(CtxAction::HideFriend(id));
         }
     };
+    // Avatar.Share ("can_open_inventory"): RLVa's @share with them and
+    // @showinv refuse it (LLAvatarActions::share)
+    let share = |ui: &mut egui::Ui| {
+        let can = world.rlva.allows("share", &id.to_string()) && !world.rlva.has("showinv");
+        if menu::item_if(ui, p, "share", aurora_i18n::tr!("common-share"), can) {
+            act(CtxAction::Share(id));
+        }
+    };
     let request_tp = |ui: &mut egui::Ui| {
         if menu::item_if(ui, p, "car-filled", aurora_i18n::tr!("common-request-teleport"), online) {
             act(CtxAction::RequestTeleport(id));
@@ -936,11 +1021,24 @@ fn avatar_menu_reporting(
             if menu::item_if(ui, p, "map", aurora_i18n::tr!("common-show-on-map-2"), mappable) {
                 act(CtxAction::ShowOnMap(id));
             }
-            menu::todo(ui, p, "share", aurora_i18n::tr!("common-share"));
+            // Nearby.People.TrackAvatar: the beacon follows them while the
+            // radar sees them
+            if menu::item_if(
+                ui,
+                p,
+                "map-pin-filled",
+                aurora_i18n::tr!("b6-track"),
+                world.avatar_map_position(id).is_some(),
+            ) {
+                act(CtxAction::TrackAvatar(id));
+            }
+            mark_submenu(ui, p, world, &[id]);
+            share(ui);
             if menu::item(ui, p, "coin-filled", aurora_i18n::tr!("common-pay")) {
                 act(CtxAction::PayResident(id));
             }
             block(ui);
+            estate_items(ui, p, world, &[id]);
             // menu_fs_radar.xml / menu_mini_map.xml: Avatar.Derender and
             // Avatar.DerenderPermanent (LLAvatarActions::derender), always enabled
             for (icon, label, permanent) in [

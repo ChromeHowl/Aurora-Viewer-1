@@ -375,6 +375,13 @@ fn action_key(action: &CtxAction) -> String {
         CtxAction::GroupChatBlocked(..) => "GroupChatBlocked",
         CtxAction::ContactSet(..) => "ContactSet",
         CtxAction::NewContactSet(..) => "NewContactSet",
+        CtxAction::TrackAvatar(..) => "TrackAvatar",
+        CtxAction::Share(..) => "Share",
+        CtxAction::MarkAvatars(..) => "MarkAvatars",
+        CtxAction::ClearAllMarks => "ClearAllMarks",
+        CtxAction::EstateKick(..) => "EstateKick",
+        CtxAction::EstateTeleportHome(..) => "EstateTeleportHome",
+        CtxAction::EstateBan(..) => "EstateBan",
     };
     match action {
         CtxAction::TakeOffClothing(kind) | CtxAction::DetachAt(kind) => format!("{base}:{kind}"),

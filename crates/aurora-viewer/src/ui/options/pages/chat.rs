@@ -745,6 +745,18 @@ fn notifications(cx: &mut Cx) {
             tr!("ui-options-friends-online-in-chat-hint"),
             &field!(friends_online_in_chat),
         );
+        // the notices of a contact set with "notices" on, whatever the two
+        // above say (FSContactSetsNotificationToast, FSContactSetsNotificationNearbyChat)
+        cx.toggle(
+            tr!("b6-set-notice-toast"),
+            tr!("b6-set-notice-toast-hint"),
+            &field!(people.set_notice_toast),
+        );
+        cx.toggle(
+            tr!("b6-set-notice-chat"),
+            tr!("b6-set-notice-chat-hint"),
+            &field!(people.set_notice_chat),
+        );
         // PaymentReceived's toast (NotifyMoneyReceived, #2675): a direct
         // payment on by default, the others off, each with its limit
         cx.toggle(

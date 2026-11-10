@@ -526,6 +526,8 @@ pub struct World {
     pub social: social::Social,
     /// Contact sets and aliases (LGGContactSets), per account.
     pub contact_sets: contact_sets::ContactSets,
+    /// Residents marked with a colour (radar, mini-map and resident menus).
+    pub avatar_marks: radar::Marks,
     /// The residents we dealt with lately (People › Recent).
     pub recent: recent::RecentPeople,
     /// Contact sets generation whose aliases the name cache has.
@@ -893,6 +895,7 @@ impl World {
             held_kills: Vec::new(),
             social: social::Social::default(),
             contact_sets: Default::default(),
+            avatar_marks: Default::default(),
             recent: Default::default(),
             aliases_synced: 0,
             mutes: mutes::MuteList::default(),
@@ -5245,9 +5248,17 @@ impl World {
             if self.social.has_session(&id) {
                 self.session_system(id, n.clone());
             }
+            // a contact set with its notices on (FIRE-3522,
+            // LGGContactSets::notifyForFriend)
+            let set = self.contact_sets.notify_for(&id);
+            let toasts = self.notifications.toasts;
             // the toast of LLNotificationTipHandler (ChatOnlineNotification),
             // never during login, in do not disturb nor for a blocked resident
-            if self.notifications.toasts.presence && self.notifications.started && !self.status.dnd && !self.mutes.is_muted_id(&id) {
+            if (toasts.presence || (set && toasts.set_presence))
+                && self.notifications.started
+                && !self.status.dnd
+                && !self.mutes.is_muted_id(&id)
+            {
                 let notification = self.notifications.push_presence(id, n.clone(), online);
                 self.notifications
                     .link_name(notification, self.social.name_of(&id), notifications::NameTarget::Avatar(id));
@@ -5263,7 +5274,7 @@ impl World {
             }
             // the line of nearby chat (OnlineOfflinetoNearbyChat), only when
             // asked for: the toast already says it
-            if self.notifications.toasts.presence_in_chat {
+            if toasts.presence_in_chat || (set && toasts.set_presence_in_chat) {
                 // checked as nearby chat (LLAvatarTracker::processNotify),
                 // unless notices are kept quiet (#741)
                 if self.alerts(ChatKind::System) {

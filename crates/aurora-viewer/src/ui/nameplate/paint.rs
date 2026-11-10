@@ -229,6 +229,8 @@ fn face(env: &Env<'_>, level: Level, c: &Content, t: f32) -> Face {
         .nameplate_name
         .map(crate::ui::colors::set_color)
         .unwrap_or_else(|| c.role.name_color(p, &crate::ui::colors::get()));
+    // a radar mark wins (LLVOAvatar::getNameTagColor applies it last)
+    let color = c.marked.map_or(color, |[r, g, b]| Color32::from_rgb(r, g, b));
     let color = surface_tint(env, c).map(|bg| readable_name(color, bg, p.ink)).unwrap_or(color);
     let mut format = match level {
         // the far pill's name is a regular weight
@@ -238,7 +240,11 @@ fn face(env: &Env<'_>, level: Level, c: &Content, t: f32) -> Face {
     format.italics = c.role == Role::Blocked;
     let name = line(env, &c.name, format, m.max_text);
     let small = |color: Color32| TextFormat::simple(FontId::proportional(m.sub_pt), color);
-    let detail_color = |d: &super::Detail| if d.alert { p.amber } else { p.muted };
+    let detail_color = |d: &super::Detail| match (d.alert, d.band) {
+        (true, _) => p.amber,
+        (false, Some(band)) => crate::ui::colors::band_color(p, band),
+        (false, None) => p.muted,
+    };
     let subs = super::sub_lines(level, c).map(|sub| {
         Some(match sub? {
             SubLine::Username(user, None) => (line(env, user, small(p.muted), m.max_text), None),

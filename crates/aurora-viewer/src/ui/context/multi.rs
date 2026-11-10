@@ -74,6 +74,7 @@ pub fn avatars_menu(ui: &mut egui::Ui, p: &Palette, world: &World, ids: &[Uuid])
     if menu::item_if(ui, p, "phone-filled", aurora_i18n::tr!("common-voice-call"), f.call) {
         act(CtxAction::ConferenceCall(ids.to_vec()));
     }
+    super::mark_submenu(ui, p, world, ids);
     // "*TODO: unimplemented" for several in Firestorm too
     menu::todo(ui, p, "share", aurora_i18n::tr!("common-share"));
     menu::todo(ui, p, "coin-filled", aurora_i18n::tr!("common-pay"));
@@ -81,6 +82,7 @@ pub fn avatars_menu(ui: &mut egui::Ui, p: &Palette, world: &World, ids: &[Uuid])
         act(CtxAction::OfferTeleports(ids.to_vec()));
     }
     menu::separator(ui, p);
+    super::estate_items(ui, p, world, ids);
     // Render Settings (Nearby.People.SetRenderMode) for each
     menu::submenu(
         ui,

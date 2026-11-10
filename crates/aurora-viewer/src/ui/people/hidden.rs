@@ -36,6 +36,12 @@ fn unhide(ui: &egui::Ui, id: Uuid) {
     context::request(ui.ctx(), CtxAction::UnhideFriend(id));
 }
 
+/// "Show them greyed in Friends" (FDShowHiddenFriends, for this session),
+/// and its tip.
+fn show_switch(ui: &mut egui::Ui, p: &Palette, show: &mut bool) {
+    widgets::switch_labeled(ui, p, show, aurora_i18n::tr!("b6-hidden-show")).on_hover_text(aurora_i18n::tr!("b6-hidden-show-tip"));
+}
+
 /// The row's menu, the same in both looks.
 fn row_menu(resp: &egui::Response, p: &Palette, id: Uuid, actions: &mut Vec<PeopleAction>) {
     menu::context_menu(resp, p, |ui| {
@@ -54,6 +60,8 @@ pub(super) fn tab(ui: &mut egui::Ui, c: &mut Ctx, st: &mut PeopleUi) {
     let world = c.world;
     ui.spacing_mut().item_spacing.y = 0.0;
     ui.label(RichText::new(aurora_i18n::tr!("hidefriend-list-hint")).size(11.5).color(p.muted));
+    ui.add_space(4.0);
+    show_switch(ui, p, &mut st.show_hidden);
     ui.add_space(4.0);
     let line = Vec2::new(ui.available_width(), rows::TOOLBAR_H);
     ui.allocate_ui_with_layout(line, egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -129,8 +137,10 @@ fn row(ui: &mut egui::Ui, c: &mut Ctx, st: &PeopleUi, id: Uuid, name: &str) {
 }
 
 /// The Legacy look's table: the names and an "Un-hide" button each.
-pub(super) fn legacy_tab(ui: &mut egui::Ui, p: &Palette, world: &World, filter: &str, actions: &mut Vec<PeopleAction>) {
+pub(super) fn legacy_tab(ui: &mut egui::Ui, p: &Palette, world: &World, filter: &str, show: &mut bool, actions: &mut Vec<PeopleAction>) {
     ui.label(RichText::new(aurora_i18n::tr!("hidefriend-list-hint")).size(11.5).color(p.muted));
+    ui.add_space(4.0);
+    show_switch(ui, p, show);
     ui.add_space(4.0);
     let list = entries(world, filter);
     let id = ui.scope_id().with("hidden_friends_list");
@@ -165,6 +175,42 @@ pub(super) fn legacy_tab(ui: &mut egui::Ui, p: &Palette, world: &World, filter: 
     });
     widgets::remember_scroll_bar(ui, id, &out);
 }
+
+/// The hidden friends under the friends, greyed, with their own header
+/// (People › Hidden's switch, Aurora's look). Still strangers: their rows
+/// are this tab's, with "Un-hide" and the profile only.
+pub(super) fn greyed_rows(ui: &mut egui::Ui, c: &mut Ctx, st: &PeopleUi, filter: &str) {
+    let list = entries(c.world, filter);
+    if list.is_empty() {
+        return;
+    }
+    super::nearby::section_header(ui, c.p, &aurora_i18n::tr!("b6-hidden-section", count = list.len() as i64));
+    let opacity = ui.opacity();
+    ui.set_opacity(opacity * GREYED);
+    for (id, name) in &list {
+        row(ui, c, st, *id, name);
+    }
+    ui.set_opacity(opacity);
+}
+
+/// The same in the Legacy look's friends list.
+pub(super) fn legacy_greyed(ui: &mut egui::Ui, p: &Palette, world: &World, filter: &str, actions: &mut Vec<PeopleAction>) {
+    for (friend, name) in entries(world, filter) {
+        ui.horizontal(|ui| {
+            ui.set_min_height(22.0);
+            let r = ui.add(
+                egui::Label::new(RichText::new(&name).size(13.0).color(p.muted.gamma_multiply(GREYED)))
+                    .truncate()
+                    .sense(Sense::click()),
+            );
+            row_menu(&r, p, friend, actions);
+            r.on_hover_text(aurora_i18n::tr!("b6-hidden-status"));
+        });
+    }
+}
+
+/// How much a hidden friend's row is faded in the friends list.
+const GREYED: f32 = 0.5;
 
 #[cfg(test)]
 mod tests {

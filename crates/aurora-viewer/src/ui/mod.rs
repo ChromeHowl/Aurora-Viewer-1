@@ -97,6 +97,7 @@ pub mod owned_land;
 pub mod parcel_icons;
 pub mod pay;
 pub mod people;
+pub mod people_overlay;
 pub mod perf;
 pub mod photo_reel;
 pub mod physics;

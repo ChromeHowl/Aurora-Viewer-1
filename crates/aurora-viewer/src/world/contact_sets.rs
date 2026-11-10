@@ -321,6 +321,22 @@ impl ContactSets {
         }
     }
 
+    /// "Show online / offline notices for this set" (setNotifyForSet).
+    pub fn set_notify(&mut self, name: &str, on: bool) {
+        if let Some(s) = self.sets.get_mut(name)
+            && s.notify != on
+        {
+            s.notify = on;
+            self.changed();
+        }
+    }
+
+    /// LGGContactSets::notifyForFriend: one of the resident's sets wants
+    /// their online / offline notices.
+    pub fn notify_for(&self, id: &Uuid) -> bool {
+        self.sets.values().any(|s| s.notify && s.friends.contains(id))
+    }
+
     pub fn set_separate_chats(&mut self, name: &str, on: bool) {
         if let Some(s) = self.sets.get_mut(name)
             && s.separate_chats != on
@@ -537,6 +553,22 @@ mod tests {
 
     fn id(n: u128) -> Uuid {
         Uuid::from_u128(n)
+    }
+
+    #[test]
+    fn a_set_with_notices_on_asks_for_its_members_notices() {
+        let is_friend = |_: &Uuid| true;
+        let mut cs = ContactSets::default();
+        cs.add_set("Family");
+        cs.add_set("Work");
+        cs.add_to_set(&[id(1)], "Family", is_friend);
+        cs.add_to_set(&[id(2)], "Work", is_friend);
+        assert!(!cs.notify_for(&id(1)) && !cs.notify_for(&id(2)));
+        cs.set_notify("Family", true);
+        assert!(cs.notify_for(&id(1)) && !cs.notify_for(&id(2)));
+        assert!(cs.set("Family").is_some_and(|s| s.notify));
+        cs.set_notify("Family", false);
+        assert!(!cs.notify_for(&id(1)));
     }
 
     #[test]
