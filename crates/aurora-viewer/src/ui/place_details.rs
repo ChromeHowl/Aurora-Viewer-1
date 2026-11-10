@@ -515,6 +515,19 @@ fn titles(data: &Shown, place: &Place, world: &World) -> (String, Option<String>
 
 /// "maturity_icon" / "maturity_value", icon first in reading order (a
 /// right-to-left layout draws its first widget at the right).
+/// "People in region: N" under the region's line, by the parcel's region
+/// once known and by the place's position until then; nothing under RLVa
+/// @showloc (`World::people_in_region`).
+fn people_row(ui: &mut egui::Ui, p: &Palette, data: &Shown, place: &Place, world: &World) {
+    let people = match data {
+        Shown::Parcel(d) if !d.sim_name.is_empty() => world.people_in_region(&d.sim_name),
+        _ => place.global.and_then(|g| world.people_at_global(g.x, g.y)),
+    };
+    if let Some(people) = people {
+        ui.add(egui::Label::new(RichText::new(people.label()).size(12.0).color(p.muted)).truncate());
+    }
+}
+
 fn maturity_row(ui: &mut egui::Ui, p: &Palette, data: &Shown) {
     let (icon, text, known): (Option<&str>, &str, bool) = match data {
         Shown::Parcel(d) => (None, maturity(d.flags), true),
@@ -608,6 +621,7 @@ fn place_profile(ui: &mut egui::Ui, c: &mut Ctx, place: &Place, data: &Shown) {
     if let Some(r) = region {
         ui.add(egui::Label::new(RichText::new(r).size(12.0).color(p.muted)).truncate());
     }
+    people_row(ui, p, data, place, c.world);
     ui.add_space(8.0);
     // 150 px high for these (STORM-1311), less when the window is short so
     // the classification under it stays in view: inside the scroll area the
@@ -675,6 +689,7 @@ fn landmark_info(ui: &mut egui::Ui, c: &mut Ctx, place: &Place, item: Uuid, data
             });
         });
     });
+    people_row(ui, p, data, place, c.world);
     // "parcel_owner": the parcel's owner, a group with flag 0x4 (DRTSIM-453)
     ui.horizontal(|ui| {
         // "Owner:" in Firestorm; named apart from the landmark's owner below,

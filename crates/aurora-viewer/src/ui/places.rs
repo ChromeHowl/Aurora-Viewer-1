@@ -616,6 +616,16 @@ impl PlacesUi {
                 self.selected == Some(sel),
                 false,
             );
+            // the people of a landmark's region, in the tooltip of the row
+            // under the pointer once the landmark is read
+            if row.folder.is_none()
+                && r.response.hovered()
+                && let Some(it) = world.inventory.items.get(&row.id)
+                && let Resolved::Ready { global, .. } = world.landmarks.peek(it.asset_id)
+                && let Some(people) = world.people_at_global(global.x, global.y)
+            {
+                r.response.clone().on_hover_text(people.label());
+            }
             if row.folder.is_none() {
                 drag::source(&r.response, || drag::PlaceDrag {
                     target: drag::Target::Landmark(row.id),
@@ -910,6 +920,13 @@ impl PlacesUi {
                     self.selected == Some(Sel::History(i)),
                     true,
                 );
+                // the people of the entry's region, in the tooltip of the
+                // row under the pointer
+                if r.response.hovered()
+                    && let Some(people) = world.people_at_global(it.global.x, it.global.y)
+                {
+                    r.response.clone().on_hover_text(people.label());
+                }
                 drag::source(&r.response, || drag::PlaceDrag {
                     target: drag::Target::History(it.global),
                     favorite: None,

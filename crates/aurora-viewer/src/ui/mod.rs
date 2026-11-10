@@ -107,6 +107,7 @@ pub mod profile;
 pub mod quick_prefs;
 pub mod region;
 pub mod region_message_prompt;
+pub mod region_people;
 pub mod region_restart;
 pub mod region_tracker;
 pub mod remote_object;

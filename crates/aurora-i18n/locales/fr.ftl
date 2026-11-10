@@ -13556,3 +13556,7 @@ texkeep-own-worn = Garder mes propres attachements nets
 texkeep-own-worn-help = Les textures de ce que porte votre avatar ne sont jamais réduites quand la mémoire vidéo vient à manquer, comme celles de votre peau et de vos vêtements.
 texkeep-background = Garder les textures quand la fenêtre est en arrière-plan
 texkeep-background-help = Désactivé : après une minute en arrière-plan, ou une seconde réduite, les textures sont libérées puis rechargées à votre retour. Activé : elles sont gardées. Si la mémoire vidéo est épuisée pendant que la fenêtre est derrière, elles sont tout de même libérées.
+# People in region: the Region Tracker's figure beside a place (place details, About Land, search, Places, favorites, mini-map)
+people-region-title = Personnes dans la région
+# $count is already written out: a number, "…" while it is asked, "?" when the map did not answer
+people-region-label = Personnes dans la région : { $count }

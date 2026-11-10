@@ -319,6 +319,10 @@ fn main_column(ui: &mut egui::Ui, p: &Palette, s: &mut LandUi, v: &View, world: 
             ui.ctx().copy_text(crate::slurl::make(region, point));
         }
         ui.label(RichText::new(format!("· {rest}")).size(12.0).color(p.muted));
+        // the Region Tracker's figure; hidden under RLVa @showloc
+        if let Some(people) = world.people_in_region(region) {
+            ui.label(RichText::new(format!("· {}", people.label())).size(12.0).color(p.muted));
+        }
     });
     owner(ui, p, s, world, parcel, pics);
     // objects, access, arrival

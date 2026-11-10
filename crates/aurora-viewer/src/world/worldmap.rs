@@ -183,6 +183,8 @@ impl super::World {
         if !allowed {
             self.map.clear_track();
         }
+        // the people counts shown beside places: their next request, if due
+        self.region_people.pump(&mut self.map, Instant::now());
         let mut out = self.map.take_commands();
         if !allowed {
             out.retain(|c| {
@@ -580,12 +582,17 @@ impl WorldMap {
     /// LLWorldMap::updateRegions: ask the 16 x 16 blocks covering a range of
     /// grid positions (region units), each at most once a minute.
     pub fn want_regions(&mut self, x0: i64, y0: i64, x1: i64, y1: i64) {
+        self.want_regions_at(x0, y0, x1, y1, Instant::now());
+    }
+
+    /// `want_regions` at a given time; whether a request was queued.
+    pub(super) fn want_regions_at(&mut self, x0: i64, y0: i64, x1: i64, y1: i64, now: Instant) -> bool {
         let clamp = |v: i64| (v.max(0) as u32 / MAP_BLOCK_SIZE).min(MAP_BLOCK_RES - 1);
-        let now = Instant::now();
+        let mut sent = false;
         let (bx0, by0, bx1, by1) = (clamp(x0), clamp(y0), clamp(x1), clamp(y1));
         // a world map zoomed far out stops asking (level > 3 never gets here)
         if (bx1 - bx0 + 1) * (by1 - by0 + 1) > 64 {
-            return;
+            return false;
         }
         for by in by0..=by1 {
             for bx in bx0..=bx1 {
@@ -601,39 +608,51 @@ impl WorldMap {
                     max_y: (by * MAP_BLOCK_SIZE + MAP_BLOCK_SIZE - 1) as u16,
                     null_sims: false,
                 });
+                sent = true;
             }
         }
+        sent
     }
 
     /// LLSimInfo::updateAgentCount: people dots of a visible region.
     pub fn want_agents(&mut self, key: (u32, u32)) {
-        let now = Instant::now();
+        self.want_agents_at(key, Instant::now());
+    }
+
+    /// `want_agents` at a given time; whether a request was queued.
+    pub(super) fn want_agents_at(&mut self, key: (u32, u32), now: Instant) -> bool {
         if self.agents_asked.get(&key).is_some_and(|t| now.duration_since(*t) < AGENTS_UPDATE) {
-            return;
+            return false;
         }
         self.agents_asked.insert(key, now);
         self.out.push(NetCommand::MapItemRequest {
             item_type: map_item::AGENT_LOCATIONS,
             handle: aurora_net::origin_to_handle(key.0 * 256, key.1 * 256),
         });
+        true
     }
 
     /// Ask for a tracked region by name no more than once a minute.
     pub fn want_named_region(&mut self, name: &str) {
+        self.want_named_region_at(name, Instant::now());
+    }
+
+    /// `want_named_region` at a given time; whether a request was queued.
+    pub(super) fn want_named_region_at(&mut self, name: &str, now: Instant) -> bool {
         let lower = name.trim().to_lowercase();
         if lower.is_empty() {
-            return;
+            return false;
         }
-        let now = Instant::now();
         if self
             .named_region_asked
             .get(&lower)
             .is_some_and(|t| now.duration_since(*t) < AGENTS_UPDATE)
         {
-            return;
+            return false;
         }
         self.named_region_asked.insert(lower.clone(), now);
         self.out.push(NetCommand::MapNameRequest { name: lower });
+        true
     }
 
     /// LLFloaterWorldMap::trackAvatar: follow a friend who lets us see them

@@ -99,14 +99,14 @@ pub struct RegionStatus {
 }
 
 pub fn status(map: &super::worldmap::WorldMap, name: &str, own_region: Option<(u32, u32)>) -> RegionStatus {
-    let Some(key) = map.region_by_name(name) else {
-        return RegionStatus {
-            state: RegionState::Unknown,
-            agents: None,
-            access: None,
-        };
-    };
-    let Some(sim) = map.sims.get(&key) else {
+    status_at(map, map.region_by_name(name), own_region)
+}
+
+/// `status` of the region at a grid position already looked up (None: not
+/// known to the map), for callers that keep it instead of searching the
+/// name again.
+pub fn status_at(map: &super::worldmap::WorldMap, key: Option<(u32, u32)>, own_region: Option<(u32, u32)>) -> RegionStatus {
+    let Some((key, sim)) = key.and_then(|k| map.sims.get(&k).map(|s| (k, s))) else {
         return RegionStatus {
             state: RegionState::Unknown,
             agents: None,

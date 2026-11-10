@@ -13527,3 +13527,7 @@ texkeep-own-worn = 自分の装着物を鮮明に保つ
 texkeep-own-worn-help = ビデオメモリが不足しても、自分のアバターが装着しているもののテクスチャは解像度を下げません。スキンや衣服レイヤーのテクスチャと同じ扱いです。
 texkeep-background = ウィンドウがバックグラウンドにある間もテクスチャを保持する
 texkeep-background-help = オフ：バックグラウンドで1分、または最小化して1秒経つとテクスチャを解放し、戻ったときに読み込み直します。オン：テクスチャを保持します。ウィンドウが背面にある間にビデオメモリが不足した場合は、オンでも解放されます。
+# People in region: the Region Tracker's figure beside a place (place details, About Land, search, Places, favorites, mini-map)
+people-region-title = リージョン内の人数
+# $count is already written out: a number, "…" while it is asked, "?" when the map did not answer
+people-region-label = リージョン内の人数：{ $count }

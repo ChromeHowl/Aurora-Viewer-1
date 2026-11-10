@@ -13560,3 +13560,7 @@ texkeep-own-worn = Keep my own attachments sharp
 texkeep-own-worn-help = The textures of what your avatar wears are never lowered when video memory runs short, like the textures of your skin and clothing layers.
 texkeep-background = Keep textures while the window is in the background
 texkeep-background-help = Off: after a minute in the background, or a second minimised, the textures are given back and load again when you return. On: they are kept. If video memory runs out while the window is behind, they are still given back.
+# People in region: the Region Tracker's figure beside a place (place details, About Land, search, Places, favorites, mini-map)
+people-region-title = People in region
+# $count is already written out: a number, "…" while it is asked, "?" when the map did not answer
+people-region-label = People in region: { $count }
