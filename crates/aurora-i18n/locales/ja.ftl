@@ -13517,3 +13517,34 @@ ui-options-attached-particles-hint = アバターが装着しているものの�
 # Preferences › Graphics: progressive draw distance (FSRenderFarClipStepping)
 ui-options-draw-distance-stepping = 描画距離を段階的に広げる
 ui-options-draw-distance-stepping-hint = ログイン後と別のリージョンへのテレポート後、描画距離を32mから始めて設定値まで倍々に広げ、近くのものから読み込みます。
+
+# プロフィール：「着用中」タブ、ポーザーの Black Dragon ファイルとポーズフォルダ
+wornposer-cat-head = 頭
+wornposer-cat-upper = 上半身
+wornposer-cat-arms = 腕と手
+wornposer-cat-lower = 下半身
+wornposer-cat-legs = 脚と足
+wornposer-cat-other = その他
+wornposer-cat-hud = HUD
+wornposer-category = { $category } · { $count }
+wornposer-col-name = 名前
+wornposer-col-point = 装着先
+wornposer-summary = 着用 { $count } 個 · 複雑度 { $complexity } · 三角形 { $triangles }
+wornposer-nothing = 着用しているものはまだ分かりません。
+wornposer-not-nearby = { $name } は近くにいません。
+wornposer-not-nearby-hint = アバターの着用物は、接続中のリージョンにいる間だけ一覧表示されます。
+wornposer-derendered = 非表示のオブジェクト
+wornposer-derendered-name = { $name }（非表示）
+wornposer-derender-tip = 次のテレポートまで、または再表示するまで、このオブジェクトを非表示にします。
+wornposer-blacklist-tip = このオブジェクトを非表示にし、アセットブラックリストに残します。
+wornposer-rerender = 再表示
+wornposer-rerender-tip = このオブジェクトを再表示し、ブラックリストから外します。
+wornposer-highlight = ワールドで強調表示
+wornposer-highlight-tip = アバター上のこのオブジェクトを輪郭で示します。
+wornposer-bd-invalid = このスケルトンで使える Black Dragon ポーズではありません。
+wornposer-bd-unnamed = Black Dragon ポーズ
+wornposer-bd-also-save = Black Dragon 用のコピー (.xml) も保存
+wornposer-open-file = ファイルを開く (.anim、.bvh、ポーズ、Black Dragon .xml)…
+wornposer-file-filter = Aurora ポーズ、ネイティブアニメーション、BVH、Black Dragon ポーズ
+wornposer-reveal-folder = インベントリで「! Created Poses」を表示
+wornposer-reveal-folder-none = 「! Created Poses」はまだありません。ポーザーから初めてアップロードするときにアニメーションフォルダ内に作成されます。

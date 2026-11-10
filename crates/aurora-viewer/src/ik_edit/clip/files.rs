@@ -7,6 +7,8 @@ pub struct Prepared {
     pub name: String,
     pub bytes: Arc<Vec<u8>>,
     pub animation: Arc<Animation>,
+    /// A pose from the poser, not a clip: its upload has its own folder.
+    pub pose: bool,
 }
 #[derive(Clone, Copy)]
 pub(super) enum Action {
@@ -50,6 +52,7 @@ pub(super) fn start(jobs: &Jobs, ctx: &egui::Context, tx: crossbeam_channel::Sen
                     name,
                     bytes: Arc::new(bytes),
                     animation: Arc::new(animation),
+                    pose: false,
                 }),
                 Action::Save => {
                     let Some(path) = rfd::FileDialog::new()

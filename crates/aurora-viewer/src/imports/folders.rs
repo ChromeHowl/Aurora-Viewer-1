@@ -164,7 +164,7 @@ impl Imports {
                 entry.preview_generation += 1;
             }
             if !enabled && let Some(source) = &entry.source {
-                let folder = Self::default_folder(world, inventory, source.kind());
+                let folder = Self::entry_folder(world, inventory, entry, source.kind());
                 if entry.folder != folder {
                     entry.folder = folder;
                     if let Some(Source::Mesh(draft)) = &mut entry.source {

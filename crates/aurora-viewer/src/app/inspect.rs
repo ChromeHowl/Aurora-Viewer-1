@@ -4,6 +4,7 @@
 //! LLFloaterInspect::onOpen / refresh (indra/newview/llfloaterinspect.cpp).
 use super::*;
 use crate::ui::inspect::{Row, Totals};
+use crate::ui::profile::worn::Row as WornRow;
 use aurora_net::RegionHandle;
 use aurora_net::build::BuildCmd;
 use std::collections::HashMap;
@@ -70,12 +71,7 @@ impl App {
             .roots
             .iter()
             .filter_map(|id| w.objects.index_of_uuid(id))
-            .flat_map(|root| {
-                crate::build::family(w, root)
-                    .into_iter()
-                    .filter(|&i| w.objects.get(i).is_some_and(|o| !o.is_avatar()))
-                    .map(move |i| (i, i == root))
-            })
+            .flat_map(|root| linkset_prims(w, root).into_iter().map(move |i| (i, i == root)))
             .collect()
     }
 
@@ -202,6 +198,156 @@ impl App {
         totals.textures = textures.len() as u32;
         (rows, totals)
     }
+}
+
+impl App {
+    /// The Worn tab of the profile windows (ui/profile/worn.rs): what each
+    /// avatar wears, twice a second while a tab shows. An avatar that is
+    /// not in a connected region, or whose name RLVa hides, has no list.
+    pub(super) fn feed_profile_worn(&mut self) {
+        let wanted = self.profile_ui.worn_wanted();
+        if wanted.is_empty() {
+            self.profile_ui.worn.clear();
+            return;
+        }
+        let now = Instant::now();
+        if !self.profile_ui.worn.due(now) {
+            return;
+        }
+        let mut lists = HashMap::new();
+        // the names not known yet, a few each time, as a hover asks for one
+        // (RequestObjectPropertiesFamily, which selects nothing)
+        let mut asks = 4;
+        for avatar in wanted {
+            if let Some(rows) = self.worn_rows(avatar, &mut asks) {
+                lists.insert(avatar, rows);
+            }
+        }
+        self.profile_ui.worn.set(lists, now);
+    }
+
+    /// One row per object avatar `id` wears, with the figures of Inspect
+    /// (prim_stats, linkset_complexity), then what the derender list keeps
+    /// out of the world. No texture or other asset id leaves here.
+    fn worn_rows(&mut self, id: Uuid, asks: &mut usize) -> Option<Vec<WornRow>> {
+        let w = &self.world;
+        // the profile itself is not shown either (RlvActions::canShowName)
+        if !w.rlva_can_name(id) {
+            return None;
+        }
+        let wearer = w
+            .objects
+            .index_of_uuid(&id)
+            .and_then(|i| w.objects.get(i))
+            .filter(|o| o.is_avatar())?;
+        if !w.regions.contains_key(&wearer.key.region) {
+            return None;
+        }
+        let wearer_key = wearer.key;
+        let point_of = |point: u8| {
+            let name = w
+                .avatar_lib
+                .attach_names
+                .get(&point)
+                .map(|name| crate::ui::appearance::items::point_name(name).to_owned())
+                .unwrap_or_else(|| aurora_i18n::tr!("attachment-point", point = point));
+            (name, w.avatar_lib.attach_points.get(&point).is_some_and(|ap| ap.hud))
+        };
+        let mut rows = Vec::new();
+        let mut unnamed = Vec::new();
+        for root in worn_roots(w, &id) {
+            let Some((idx, o)) = w.objects.index_of_uuid(&root).and_then(|i| Some((i, w.objects.get(i)?))) else {
+                continue;
+            };
+            let prims = linkset_prims(w, idx);
+            let name = self
+                .build
+                .props
+                .get(&root)
+                .or_else(|| self.interactions.props.get(&root))
+                .map(|p| p.name.clone())
+                .filter(|n| !n.is_empty());
+            if name.is_none() {
+                unnamed.push((o.key.region, root));
+            }
+            let (point_name, hud) = point_of(o.attachment_point());
+            rows.push(WornRow {
+                id: root,
+                name,
+                point: o.attachment_point(),
+                point_name,
+                hud,
+                complexity: self.scene.linkset_complexity(w, &prims),
+                triangles: prims.iter().map(|&i| self.scene.prim_stats(w, i).triangles).sum(),
+                derendered: false,
+            });
+        }
+        for (object, point, name) in w.derender.hidden_worn(wearer_key) {
+            let (point_name, hud) = point_of(point);
+            rows.push(WornRow {
+                id: object,
+                name: Some(name).filter(|n| !n.is_empty()),
+                point,
+                point_name,
+                hud,
+                derendered: true,
+                ..WornRow::default()
+            });
+        }
+        for (handle, root) in unnamed {
+            if *asks == 0 {
+                break;
+            }
+            if let Some(cmd) = self.interactions.tip_request(handle, root) {
+                *asks -= 1;
+                self.send(cmd);
+            }
+        }
+        Some(rows)
+    }
+
+    /// Object `id` is worn by avatar `wearer`, who is not us: the row
+    /// actions of the Worn tab are for other avatars' objects only.
+    fn worn_by_other(&self, wearer: Uuid, id: Uuid) -> bool {
+        wearer != self.world.agent_id && worn_roots(&self.world, &wearer).contains(&id)
+    }
+
+    /// "Derender", "Derender + blacklist" and "Re-render" of a row: the
+    /// menus' own derender (app/derender.rs) and the blacklist's removal.
+    pub(super) fn profile_worn_action(&mut self, action: crate::ui::profile::worn::Action) {
+        use crate::ui::profile::worn::Action;
+        match action {
+            Action::Derender { object, permanent } => {
+                let ours = worn_roots(&self.world, &self.world.agent_id).contains(&object);
+                if !ours {
+                    self.derender(object, permanent);
+                }
+            }
+            Action::Rerender { object } => self.world.underender(&[object]),
+        }
+    }
+
+    /// The prims "Highlight in world" outlines, as Inspect outlines its
+    /// highlighted row; never a HUD, never something of ours.
+    pub(super) fn profile_worn_outline(&self) -> Vec<usize> {
+        self.profile_ui
+            .worn_highlights()
+            .into_iter()
+            .filter(|(wearer, object)| self.worn_by_other(*wearer, *object))
+            .filter_map(|(_, object)| self.world.objects.index_of_uuid(&object))
+            .flat_map(|root| crate::build::family(&self.world, root))
+            .filter(|i| self.scene.gpu.get(*i).is_some_and(|g| !g.hud))
+            .collect()
+    }
+}
+
+/// The prims of the linkset of root `root`, root first; an avatar sitting
+/// on it is not part of it.
+fn linkset_prims(w: &crate::world::World, root: usize) -> Vec<usize> {
+    crate::build::family(w, root)
+        .into_iter()
+        .filter(|&i| w.objects.get(i).is_some_and(|o| !o.is_avatar()))
+        .collect()
 }
 
 /// The root prims of what avatar `id` wears, as the world has them.

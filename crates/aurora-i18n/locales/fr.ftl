@@ -13546,3 +13546,34 @@ ui-options-attached-particles-hint = Affiche les particules de ce que portent le
 # Preferences › Graphics: progressive draw distance (FSRenderFarClipStepping)
 ui-options-draw-distance-stepping = Distance d'affichage progressive
 ui-options-draw-distance-stepping-hint = Après la connexion et après une téléportation vers une autre région, la distance d'affichage part de 32 m et double jusqu'à la vôtre, pour que ce qui est proche se charge d'abord.
+
+# Profil : l'onglet Porté, et les fichiers Black Dragon et le dossier des poses du poseur
+wornposer-cat-head = Tête
+wornposer-cat-upper = Haut du corps
+wornposer-cat-arms = Bras et mains
+wornposer-cat-lower = Bas du corps
+wornposer-cat-legs = Jambes et pieds
+wornposer-cat-other = Autre
+wornposer-cat-hud = HUD
+wornposer-category = { $category } · { $count }
+wornposer-col-name = Nom
+wornposer-col-point = Attaché à
+wornposer-summary = { $count } portés · complexité { $complexity } · { $triangles } triangles
+wornposer-nothing = Rien de porté n'est encore connu.
+wornposer-not-nearby = { $name } n'est pas à proximité.
+wornposer-not-nearby-hint = Ce que porte un avatar est listé tant qu'il se trouve dans une région à laquelle vous êtes connecté.
+wornposer-derendered = Objet masqué
+wornposer-derendered-name = { $name } (masqué)
+wornposer-derender-tip = Masquer cet objet jusqu'à la prochaine téléportation ou jusqu'à ce que vous le réaffichiez.
+wornposer-blacklist-tip = Masquer cet objet et le garder dans la liste noire des assets.
+wornposer-rerender = Réafficher
+wornposer-rerender-tip = Réafficher cet objet et le retirer de la liste noire.
+wornposer-highlight = Surligner dans le monde
+wornposer-highlight-tip = Entourer cet objet sur l'avatar.
+wornposer-bd-invalid = Ce n'est pas une pose Black Dragon utilisable avec ce squelette.
+wornposer-bd-unnamed = Pose Black Dragon
+wornposer-bd-also-save = Aussi une copie Black Dragon (.xml)
+wornposer-open-file = Ouvrir un fichier (.anim, .bvh, pose, .xml Black Dragon)…
+wornposer-file-filter = Pose Aurora, animation native, BVH ou pose Black Dragon
+wornposer-reveal-folder = Montrer « ! Created Poses » dans l'inventaire
+wornposer-reveal-folder-none = « ! Created Poses » n'existe pas encore : il est créé dans Animations au premier envoi depuis le poseur.

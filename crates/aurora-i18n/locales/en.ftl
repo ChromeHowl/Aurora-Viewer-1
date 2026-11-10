@@ -13550,3 +13550,34 @@ ui-options-attached-particles-hint = Draw the particles of what avatars wear: sp
 # Preferences › Graphics: progressive draw distance (FSRenderFarClipStepping)
 ui-options-draw-distance-stepping = Progressive draw distance
 ui-options-draw-distance-stepping-hint = After logging in and after a teleport to another region, the draw distance starts at 32 m and doubles back up to yours, so that what is near loads first.
+
+# Profile: the Worn tab, and the poser's Black Dragon files and pose folder
+wornposer-cat-head = Head
+wornposer-cat-upper = Upper body
+wornposer-cat-arms = Arms and hands
+wornposer-cat-lower = Lower body
+wornposer-cat-legs = Legs and feet
+wornposer-cat-other = Other
+wornposer-cat-hud = HUD
+wornposer-category = { $category } · { $count }
+wornposer-col-name = Name
+wornposer-col-point = Attached to
+wornposer-summary = { $count } worn · complexity { $complexity } · { $triangles } triangles
+wornposer-nothing = Nothing worn is known yet.
+wornposer-not-nearby = { $name } is not nearby.
+wornposer-not-nearby-hint = What an avatar wears is listed while it is in a region you are connected to.
+wornposer-derendered = Derendered object
+wornposer-derendered-name = { $name } (derendered)
+wornposer-derender-tip = Hide this object until the next teleport or until you bring it back.
+wornposer-blacklist-tip = Hide this object and keep it in the asset blacklist.
+wornposer-rerender = Re-render
+wornposer-rerender-tip = Bring this object back and take it off the blacklist.
+wornposer-highlight = Highlight in world
+wornposer-highlight-tip = Outline this object on the avatar.
+wornposer-bd-invalid = This is not a Black Dragon pose this skeleton can use.
+wornposer-bd-unnamed = Black Dragon pose
+wornposer-bd-also-save = Also a Black Dragon copy (.xml)
+wornposer-open-file = Open a file (.anim, .bvh, pose, Black Dragon .xml)…
+wornposer-file-filter = Aurora pose, native animation, BVH or Black Dragon pose
+wornposer-reveal-folder = Show "! Created Poses" in the inventory
+wornposer-reveal-folder-none = "! Created Poses" does not exist yet: it is made in Animations at the first upload from the poser.

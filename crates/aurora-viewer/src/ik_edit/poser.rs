@@ -9,6 +9,7 @@ use std::{
     sync::Arc,
 };
 
+mod bd_pose;
 mod bones;
 mod bvh;
 mod controls;
@@ -34,6 +35,8 @@ pub struct Config {
     pub dof: bool,
     pub sensitivity: f32,
     pub also_bvh: bool,
+    /// Save also writes a Black Dragon pose file (`.xml`).
+    pub also_black_dragon: bool,
     pub unlock_pelvis: bool,
     pub confirm_overwrite: bool,
     /// Ask before a close that stops the pose and loses its edited joints.
@@ -48,6 +51,7 @@ impl Default for Config {
             dof: false,
             sensitivity: 0.5,
             also_bvh: false,
+            also_black_dragon: false,
             unlock_pelvis: false,
             confirm_overwrite: false,
             confirm_close: true,
@@ -64,6 +68,8 @@ pub enum Request {
     OpenPrivacy,
     /// The bridge's Repair, offered when its query service is silent or failed.
     RepairBridge,
+    /// Show the inventory folder of the uploaded poses in the inventory window.
+    RevealCreatedPoses,
 }
 /// Which side of the paired joints the window edits: the Côté selector. In
 /// `Mirror` the left joint is edited and its counterpart follows (the

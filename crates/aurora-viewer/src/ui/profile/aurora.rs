@@ -15,8 +15,8 @@
 mod tabs;
 
 use super::{
-    Edit, PictureSlot, ProfileAction, TAB_CLASSIFIEDS, TAB_FEED, TAB_NOTES, TAB_PICKS, TAB_RL, TAB_SL, WebContext, Window, has_unsaved,
-    loading, rich, save_all,
+    Edit, PictureSlot, ProfileAction, TAB_CLASSIFIEDS, TAB_FEED, TAB_NOTES, TAB_PICKS, TAB_RL, TAB_SL, TAB_WORN, WebContext, Window,
+    has_unsaved, loading, rich, save_all,
 };
 use crate::theme::Palette;
 use crate::ui::context::{self, CtxAction};
@@ -63,6 +63,7 @@ pub(super) struct Env<'a, 'w> {
     pub web: &'a WebContext<'w>,
     pub wanted_pics: &'a mut HashSet<Uuid>,
     pub wanted_images: &'a mut HashSet<Uuid>,
+    pub worn: &'a super::worn::Feed,
     pub actions: &'a mut Vec<ProfileAction>,
     pub pick_picture: &'a mut Option<(PictureSlot, Uuid)>,
     /// `Settings::profile_rights`.
@@ -334,7 +335,7 @@ fn right_change(given: i32, bit: i32) -> RightChange {
 /// The tabs of the Aurora window, as the classic window's tab numbers.
 fn tabs_of() -> Vec<usize> {
     // The Legacy Viewer keeps the Notes tab on our own profile too.
-    vec![TAB_SL, TAB_PICKS, TAB_CLASSIFIEDS, TAB_RL, TAB_FEED, TAB_NOTES]
+    vec![TAB_SL, TAB_PICKS, TAB_CLASSIFIEDS, TAB_RL, TAB_FEED, TAB_NOTES, TAB_WORN]
 }
 
 /// What is edited and not saved, for the bar ("bio, 1 place").
@@ -441,7 +442,7 @@ fn body(ui: &mut egui::Ui, env: &mut Env, w: &mut Window) {
             .id_salt(("profile-card-body", w.id, w.tab))
             .auto_shrink([false, false])
             .show(&mut child, |ui| match w.tab {
-                TAB_PICKS | TAB_CLASSIFIEDS | TAB_RL | TAB_NOTES => {
+                TAB_PICKS | TAB_CLASSIFIEDS | TAB_RL | TAB_NOTES | TAB_WORN => {
                     ui.horizontal_top(|ui| {
                         ui.add_space(INSET);
                         ui.vertical(|ui| {
@@ -451,6 +452,12 @@ fn body(ui: &mut egui::Ui, env: &mut Env, w: &mut Window) {
                                 TAB_PICKS => tabs::picks(ui, env, w, compact),
                                 TAB_CLASSIFIEDS => tabs::classifieds(ui, env, w, compact),
                                 TAB_RL => tabs::first_life(ui, env, w, compact),
+                                TAB_WORN => {
+                                    let mut asked = Vec::new();
+                                    let name = display_name(world, &w.id);
+                                    super::worn::show(ui, env.p, &mut w.worn, env.worn.get(&w.id), own, &name, &mut asked);
+                                    env.actions.extend(asked.into_iter().map(ProfileAction::Worn));
+                                }
                                 _ => tabs::notes(ui, env, w),
                             }
                         });
@@ -1320,6 +1327,7 @@ fn tab_looks(env: &Env, w: &Window, own: bool) -> Vec<TabLook> {
                 TAB_RL => ("user-heart", aurora_i18n::tr!("ui-profile-aurora-tab-first-life")),
                 TAB_FEED => ("world-filled", aurora_i18n::tr!("ui-profile-aurora-tab-web")),
                 TAB_NOTES => ("lock-filled", aurora_i18n::tr!("common-notes")),
+                TAB_WORN => ("shirt-filled", aurora_i18n::tr!("common-worn")),
                 _ => ("id-filled", aurora_i18n::tr!("ui-profile-aurora-tab-profile")),
             };
             let count = match tab {
@@ -1329,6 +1337,14 @@ fn tab_looks(env: &Env, w: &Window, own: bool) -> Vec<TabLook> {
                 }),
                 // known once the tab asked for them, like Firestorm's
                 TAB_CLASSIFIEDS => world.profiles.classified_lists.get(&w.id).map(|l| l.len().to_string()),
+                // known while the tab shows and the avatar is nearby
+                TAB_WORN => env.worn.get(&w.id).map(|rows| {
+                    super::worn::grouped(rows, own)
+                        .iter()
+                        .map(|(_, list)| list.len())
+                        .sum::<usize>()
+                        .to_string()
+                }),
                 _ => None,
             }
             .filter(|n| n != "0");

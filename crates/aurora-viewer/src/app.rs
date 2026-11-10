@@ -9996,6 +9996,9 @@ impl App {
                 for (idx, current) in self.inspect_outline() {
                     selection_wire.entry(idx).or_insert(current);
                 }
+                for idx in self.profile_worn_outline() {
+                    selection_wire.entry(idx).or_insert(true);
+                }
             }
             self.scene.set_wire_selection(&mut self.world, selection_wire);
             self.scene.selection_silhouettes = if self.photo_full_frame() {
@@ -16190,6 +16193,7 @@ impl App {
                         prepared.name,
                         prepared.bytes,
                         prepared.animation,
+                        prepared.pose,
                     );
                 }
                 {
@@ -17566,6 +17570,7 @@ impl App {
                     profile_base: profile_base.as_deref(),
                 };
                 self.profile_ui.prepare_photos(&ctx, &mut self.scene, &self.world);
+                self.feed_profile_worn();
                 let acts = self.profile_ui.show(
                     &ctx,
                     &p,
@@ -17605,6 +17610,7 @@ impl App {
                         ui::profile::ProfileAction::ModifyRights { friend, rights, grant } => {
                             self.contacts_ui.ask_modify_rights(friend, rights, grant)
                         }
+                        ui::profile::ProfileAction::Worn(action) => self.profile_worn_action(action),
                         ui::profile::ProfileAction::GroupChat(id) => {
                             self.world.start_group_chat(id);
                             self.show_conversations();

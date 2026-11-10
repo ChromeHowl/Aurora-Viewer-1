@@ -357,6 +357,22 @@ impl Derender {
         self.entries.iter()
     }
 
+    /// The derendered objects worn by the avatar of key `wearer`, with
+    /// their attachment points and listed names: what an object entry of
+    /// the list keeps out of the world, as its last update placed it.
+    pub fn hidden_worn(&self, wearer: ObjKey) -> Vec<(Uuid, u8, String)> {
+        self.hidden
+            .iter()
+            .filter(|(key, _)| key.region == wearer.region)
+            .filter_map(|(_, h)| h.update.as_ref())
+            .filter(|u| u.parent_id == wearer.local_id && !u.is_avatar())
+            .filter_map(|u| {
+                let entry = self.entries.get(&u.full_id).filter(|e| e.kind == Kind::Object)?;
+                Some((u.full_id, u.attachment_point(), entry.name.clone()))
+            })
+            .collect()
+    }
+
     pub fn has_row(&self, row: RowId) -> bool {
         self.entries.get(&row.id).is_some_and(|entry| match entry.kind {
             Kind::Sound(flags) if flags != 0 => row.flag != 0 && flags & row.flag == row.flag,
