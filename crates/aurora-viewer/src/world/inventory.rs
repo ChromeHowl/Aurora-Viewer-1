@@ -11,6 +11,9 @@ pub mod actions;
 pub mod asset_ids;
 pub mod background;
 pub mod demo;
+#[cfg(test)]
+#[path = "inventory/export_tests.rs"]
+mod export_tests;
 pub mod items;
 mod lost;
 mod parents;

@@ -58,6 +58,9 @@ pub struct MeshHeader {
     pub physics_convex: Option<(usize, usize)>,
     pub physics_mesh: Option<(usize, usize)>,
     pub version: i32,
+    /// The `creator` of the header (LLMeshRepository::getCreatorFromHeader):
+    /// the resident who uploaded the mesh, nil when the header has none.
+    pub creator: uuid::Uuid,
 }
 
 impl MeshHeader {
@@ -124,6 +127,7 @@ pub fn parse_mesh_header(data: &[u8]) -> Result<MeshHeader, AssetError> {
         physics_convex: range("physics_convex"),
         physics_mesh: range("physics_mesh"),
         version,
+        creator: hdr["creator"].as_uuid(),
     })
 }
 
@@ -510,7 +514,7 @@ mod tests {
     fn header_offsets_are_absolute() {
         let hdr = llsd_map! {
             "version" => 1,
-            "creator" => uuid::Uuid::nil(),
+            "creator" => uuid::Uuid::from_u128(77),
             "lowest_lod" => llsd_map!{ "offset" => 0, "size" => 100 },
             "low_lod" => llsd_map!{ "offset" => 100, "size" => 0 },
             "high_lod" => llsd_map!{ "offset" => 300, "size" => 400 },
@@ -523,6 +527,7 @@ mod tests {
         let h = parse_mesh_header(&asset).unwrap();
         let hs = bin.len();
         assert_eq!(h.header_size, hs);
+        assert_eq!(h.creator, uuid::Uuid::from_u128(77));
         assert_eq!(h.version, 1);
         assert_eq!(h.lods, [Some((hs, 100)), None, None, Some((hs + 300, 400))]);
         assert_eq!(h.skin, Some((hs + 700, 50)));
