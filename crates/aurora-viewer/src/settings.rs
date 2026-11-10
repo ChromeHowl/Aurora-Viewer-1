@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 pub mod area_search;
 pub mod backup;
 pub mod chat_display;
+pub mod chat_translation;
 pub mod draw_stepping;
 mod hover_height;
 pub mod people;
@@ -938,6 +939,9 @@ pub struct Settings {
     /// The Legacy Viewer's other chat display options (Preferences › Chat,
     /// `settings/chat_display.rs`).
     pub chat_display: chat_display::ChatDisplay,
+    /// The translation of incoming chat, off (Preferences › Chat ›
+    /// Translation and filter, `settings/chat_translation.rs`).
+    pub chat_translation: chat_translation::ChatTranslation,
     /// Toast when a friend comes online or goes offline (ChatOnlineNotification, on).
     pub toast_friends_online: bool,
     /// The same notices as a line of nearby chat (OnlineOfflinetoNearbyChat;
@@ -2141,6 +2145,7 @@ impl Default for Settings {
             chat_toast_seconds: 20.0,
             chat_console_max_lines: 40,
             chat_display: Default::default(),
+            chat_translation: Default::default(),
             toast_friends_online: true,
             friends_online_in_chat: false,
             presence_position: PresencePosition::TopRight,

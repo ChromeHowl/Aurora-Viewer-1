@@ -104,6 +104,7 @@ mod link_health;
 mod login_favorites;
 mod marketplace_listings;
 mod media_pack;
+mod message_rules;
 mod money_tracker;
 mod monitor;
 mod movement;
@@ -5618,6 +5619,10 @@ impl App {
             if self.settings.flash_conversations_button && (!self.panels.chat || minimized) && w.message_flashes_conversations(&m) {
                 self.chat_ui.button_flash.message(now, !self.panels.chat);
             }
+            // highlighted by a rule, translated (`world/omnifilter.rs`,
+            // `world/translate.rs`)
+            w.omnifilter_message(&m);
+            w.translate_message(&m);
             // copied into the nearby chat or its lines over the world
             // (`world/chat_copies.rs`), before the toast it may replace
             w.copy_message(&m);
@@ -9028,6 +9033,7 @@ impl App {
         if self.options_ui.media_filter.as_deref() != rules {
             self.options_ui.media_filter = rules.map(<[_]>::to_vec);
         }
+        self.sync_filter_and_translation_options();
         self.poll_inventory_images();
         // a click whose depth is back already (the render thread finished
         // the last frame while this thread waited for its next one)
@@ -9185,6 +9191,8 @@ impl App {
             self.world.notify_deliveries(&deliveries);
         }
         self.world.poll_transcripts();
+        self.world.translation.configure(&self.settings.chat_translation);
+        self.world.poll_translations();
         self.poll_chat_import();
         self.update_hover_height();
         self.update_avatar_health();

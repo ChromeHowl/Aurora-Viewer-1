@@ -470,6 +470,23 @@ pub struct OptionsUi {
     pub media_filter: Option<Vec<crate::media::filter::Rule>>,
     pub media_filter_edits: Vec<crate::media::filter::Edit>,
     media_filter_typed: String,
+    /// The account's Omnifilter rules while logged in (set by the app), the
+    /// rules as edited here (applied by the app), the rule open, and the
+    /// filter's list of the session (set by the app).
+    pub omnifilter: Option<crate::world::omnifilter::RuleSet>,
+    pub omnifilter_edit: Option<crate::world::omnifilter::RuleSet>,
+    pub omnifilter_broken: Vec<usize>,
+    pub omnifilter_log: Vec<crate::world::omnifilter::LogEntry>,
+    pub omnifilter_log_key: (u64, u64),
+    pub omnifilter_clear_log: bool,
+    omnifilter_open: Option<usize>,
+    /// The translation keys: their state (set by the app), a look at them
+    /// asked, the key being typed and the keys typed or forgotten here
+    /// (taken by the app, never kept in the settings).
+    pub translation_keys: [crate::world::translate::KeyState; 3],
+    pub translation_probe: bool,
+    translation_key_typed: String,
+    pub translation_key_edits: Vec<(crate::settings::chat_translation::Service, Option<String>)>,
     /// The site being typed in Preferences › Protections › Trusted sites.
     trusted_site_typed: String,
     /// The site being typed in Preferences › Chat › Picture sites.

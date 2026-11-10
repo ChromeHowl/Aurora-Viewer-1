@@ -69,6 +69,7 @@ pub mod notification_history;
 pub mod notifications;
 pub mod object_im_filter;
 pub mod objects;
+pub mod omnifilter;
 pub mod open_ims;
 pub mod outfit;
 pub mod outfit_backup;
@@ -111,6 +112,7 @@ pub mod temp_attachments;
 pub mod terrain;
 pub mod tphistory;
 pub mod transcripts;
+pub mod translate;
 pub mod user_info;
 pub mod voice_moderation;
 pub mod windlight_presets;
@@ -482,6 +484,10 @@ pub struct World {
     pub point_at: pointat::PointAts,
     /// Object messages from elsewhere (Preferences › Privacy, issue #623).
     pub object_im_filter: object_im_filter::Settings,
+    /// The account's message rules (`omnifilter.rs`).
+    pub omnifilter: omnifilter::Omnifilter,
+    /// The translation of incoming chat (`translate.rs`).
+    pub translation: translate::Translator,
     pub anti_spam: anti_spam::Registry,
     pub teleporting: bool,
     /// Since when a teleport to another region waits for that region's
@@ -882,6 +888,8 @@ impl World {
             look_at: lookat::LookAts::default(),
             point_at: pointat::PointAts::default(),
             object_im_filter: object_im_filter::Settings::default(),
+            omnifilter: Default::default(),
+            translation: Default::default(),
             anti_spam: Default::default(),
             appearance_counter: 1,
             bake_refreshes: HashMap::new(),
@@ -2632,6 +2640,7 @@ impl World {
                 self.derender = derender::Derender::load(account.join(derender::FILE));
                 self.friends_only.reload = true;
                 self.media_filter = crate::media::filter::MediaFilter::load(account.join(crate::media::filter::FILE));
+                self.omnifilter = omnifilter::Omnifilter::load(account.join(omnifilter::FILE));
                 self.aliases_synced = u64::MAX;
                 self.sync_contact_aliases();
                 self.inventory = inventory::Inventory::from_login(&l.raw);
@@ -4341,6 +4350,9 @@ impl World {
             self.keep_muted_chat(c);
             return;
         }
+        let Some(highlight) = self.omnifilter_chat(&mut c) else {
+            return;
+        };
         if self.receive_hand_contacts(&c, Instant::now()) {
             return;
         }
@@ -4426,15 +4438,18 @@ impl World {
             }
         }
         let time = SystemTime::now();
+        self.omnifilter_mark(time, c.source_id, highlight);
         self.note_chat_range(time, c.source_id, c.position);
-        self.push_chat(ChatLine {
+        let line = ChatLine {
             time,
             from,
             text: c.message,
             kind,
             source: c.source_id,
             origin: Origin::Live,
-        });
+        };
+        self.translate_chat(&line);
+        self.push_chat(line);
     }
 
     fn on_im(&mut self, mut im: InstantMessage) {
@@ -4470,6 +4485,9 @@ impl World {
                 }
                 self.social.set_typing(im.from_agent_id, im.dialog == IM_TYPING_START);
             }
+            return;
+        }
+        if self.omnifilter_im(&mut im) {
             return;
         }
         if self.on_session_im(&im) || self.on_status_im(&im) || self.on_im_offer(&im) {
