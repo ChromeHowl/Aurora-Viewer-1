@@ -2043,6 +2043,38 @@ impl App {
                 gallery::reveal(&dir, None);
             }
             Action::Reel(a) => self.photo_reel_action(a, renderer),
+            Action::ProfileLoad(name) => {
+                let Some(profile) = self.settings.snapshot.profiles.get(&name).cloned() else {
+                    return;
+                };
+                log::info!("photo profile loaded: {name}");
+                profile.apply(
+                    &mut self.settings.snapshot,
+                    &mut self.snapshots.ui.light,
+                    &mut self.world.photo_isolation,
+                );
+                self.snapshots.ui.looks.selected = 0;
+                self.snapshots.preview_wanted = true;
+                self.settings.save();
+                self.snapshots.message = Some((aurora_i18n::tr!("p16-profile-loaded", name = name.as_str()).to_owned(), false));
+            }
+            Action::ProfileSave(name) => {
+                if !snapshot::saved::valid_name(&name) {
+                    return;
+                }
+                let profile =
+                    snapshot::saved::Profile::capture(&self.settings.snapshot, &self.snapshots.ui.light, &self.world.photo_isolation);
+                log::info!("photo profile saved: {name}");
+                self.settings.snapshot.profiles.insert(name.clone(), profile);
+                self.settings.save();
+                self.snapshots.message = Some((aurora_i18n::tr!("p16-profile-saved", name = name.as_str()).to_owned(), false));
+            }
+            Action::ProfileDelete(name) => {
+                if self.settings.snapshot.profiles.remove(&name).is_some() {
+                    log::info!("photo profile deleted: {name}");
+                    self.settings.save();
+                }
+            }
         }
     }
 

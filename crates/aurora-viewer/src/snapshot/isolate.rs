@@ -19,8 +19,8 @@
 
 use uuid::Uuid;
 
-/// What the photo shows.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// What the photo shows (kept in a photo profile, `snapshot::saved`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Mode {
     /// Everything.
     #[default]

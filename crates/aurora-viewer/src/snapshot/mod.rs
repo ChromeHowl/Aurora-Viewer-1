@@ -21,6 +21,7 @@ pub mod profile;
 pub mod quality;
 pub mod reel;
 pub mod save;
+pub mod saved;
 pub mod viewfinder;
 
 use glam::{Mat4, Vec4};
@@ -278,6 +279,9 @@ pub struct Settings {
     /// The settings of Aurora's looks by id (`knobs`), kept when a look is
     /// taken out.
     pub look_settings: std::collections::BTreeMap<String, Vec<f32>>,
+    /// The photo profiles, by name (`saved`).
+    #[serde(deserialize_with = "saved::lenient")]
+    pub profiles: std::collections::BTreeMap<String, saved::Profile>,
 }
 
 impl Default for Settings {
@@ -311,6 +315,7 @@ impl Default for Settings {
             viewfinder: Default::default(),
             looks: Vec::new(),
             look_settings: Default::default(),
+            profiles: Default::default(),
         }
     }
 }
