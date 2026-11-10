@@ -91,8 +91,7 @@ fn lines(c: &Ctx, filter: &str, set: Option<&str>) -> Vec<Line> {
         .collect();
     let mut out: Vec<Line> = world
         .social
-        .friends
-        .iter()
+        .shown_friends()
         .filter(|f| set.is_none_or(|s| world.contact_sets.friend_sets(&f.id).iter().any(|x| x == s)))
         .map(|f| {
             let (name, full, username) = match names.get(&f.id) {
@@ -125,7 +124,7 @@ fn lines(c: &Ctx, filter: &str, set: Option<&str>) -> Vec<Line> {
             let set = icon.or_else(|| {
                 world
                     .contact_sets
-                    .friend_color(&f.id, |id| world.social.is_friend(id))
+                    .friend_color(&f.id, |id| world.social.is_friend_shown(id))
                     .or_else(|| {
                         let first = world.contact_sets.friend_sets(&f.id).into_iter().next()?;
                         Some(world.contact_sets.set(&first)?.color)
@@ -257,7 +256,7 @@ fn pills(ui: &mut egui::Ui, c: &mut Ctx, st: &mut PeopleUi) {
         c.world
             .contact_sets
             .set(s)
-            .map_or(0, |set| set.friends.iter().filter(|id| c.world.social.is_friend(id)).count())
+            .map_or(0, |set| set.friends.iter().filter(|id| c.world.social.is_friend_shown(id)).count())
     };
     sets.sort_by_key(|s| std::cmp::Reverse(friends_in(s)));
     let sets_below = ui

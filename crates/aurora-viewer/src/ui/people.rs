@@ -1,8 +1,9 @@
 //! "People" floater. In Aurora's look (the People mock-up v2) it holds every
 //! person: Near you (`nearby.rs`), Friends, Groups, Contact sets, Recent and
 //! Blocked (`friends.rs`, `groups.rs`, `sets.rs`, `recent.rs`,
-//! `blocked.rs`: the tabs of Conversations › Contacts with all their
-//! rights and actions, `ui/contacts.rs` reused), each with the sheet of the
+//! `blocked.rs`, and `hidden.rs` for the friends hidden in this viewer:
+//! the tabs of Conversations › Contacts with all their rights and actions,
+//! `ui/contacts.rs` reused), each with the sheet of the
 //! person held or group clicked (`sheet.rs`); `rows.rs` holds what their rows
 //! share. The friends tab is also the Contacts tab of the Conversations
 //! workspace (`friends_pane`). In the Legacy look (Preferences › Aurora,
@@ -27,6 +28,7 @@ use uuid::Uuid;
 mod blocked;
 mod friends;
 mod groups;
+mod hidden;
 mod nearby;
 mod radar;
 mod recent;
@@ -44,7 +46,11 @@ pub(crate) const TAB_GROUPS: u8 = 2;
 pub(crate) const TAB_RECENT: u8 = 3;
 pub(crate) const TAB_BLOCKED: u8 = 4;
 pub(crate) const TAB_SETS: u8 = 5;
-const AURORA_TABS: [u8; 6] = [TAB_NEARBY, TAB_FRIENDS, TAB_GROUPS, TAB_SETS, TAB_RECENT, TAB_BLOCKED];
+/// The friends hidden in this viewer, beside Blocked (`hidden.rs`).
+pub(crate) const TAB_HIDDEN: u8 = 6;
+const AURORA_TABS: [u8; 7] = [TAB_NEARBY, TAB_FRIENDS, TAB_GROUPS, TAB_SETS, TAB_RECENT, TAB_BLOCKED, TAB_HIDDEN];
+/// Where the Legacy look, which has no contact sets tab, shows Hidden.
+const LEGACY_HIDDEN: usize = 5;
 
 /// Search every name with a trimmed, lowercase filter, independently of the
 /// row's display preferences. Unlike
@@ -346,7 +352,7 @@ impl PeopleUi {
         self.shown_tab = Some(tab);
         let keep = match tab {
             TAB_GROUPS => self.sheet_group,
-            TAB_BLOCKED => false,
+            TAB_BLOCKED | TAB_HIDDEN => false,
             _ => !self.sheet_group,
         };
         if self.sheet.is_some() && !keep {
@@ -461,20 +467,26 @@ pub fn people_window(
                 TAB_GROUPS => groups::tab(ui, &mut c, radar, st),
                 TAB_SETS => sets::tab(ui, &mut c, radar, st),
                 TAB_RECENT => recent::tab(ui, &mut c, radar, st),
+                TAB_HIDDEN => hidden::tab(ui, &mut c, st),
                 _ => blocked::tab(ui, &mut c, st),
             }
             return;
         }
-        let mut tab = panels.people_tab as usize;
+        let mut tab = if panels.people_tab == TAB_HIDDEN {
+            LEGACY_HIDDEN
+        } else {
+            panels.people_tab as usize
+        };
         let labels = [
             (aurora_i18n::tr!("ui-people-near-you"), true),
             (aurora_i18n::tr!("common-friends"), true),
             (aurora_i18n::tr!("common-groups"), true),
             (aurora_i18n::tr!("common-recent"), false),
             (aurora_i18n::tr!("common-blocked"), true),
+            (aurora_i18n::tr!("hidefriend-tab"), true),
         ];
         widgets::tabs(ui, p, &mut tab, &labels);
-        panels.people_tab = tab as u8;
+        panels.people_tab = if tab == LEGACY_HIDDEN { TAB_HIDDEN } else { tab as u8 };
         ui.add_space(4.0);
         match panels.people_tab {
             0 => {
@@ -492,6 +504,8 @@ pub fn people_window(
                 let filter = st.filter.trim().to_lowercase();
                 if panels.people_tab == 2 {
                     groups_tab(ui, p, world, &st.filter, &mut actions);
+                } else if panels.people_tab == TAB_HIDDEN {
+                    hidden::legacy_tab(ui, p, world, &filter, &mut actions);
                 } else {
                     blocked_tab(ui, p, world, st, &filter, &mut actions);
                 }
@@ -559,7 +573,7 @@ pub fn friends_pane(ui: &mut egui::Ui, p: &Palette, world: &World, pane: Friends
     actions
 }
 
-/// The six tabs in pills, the open one's count in the accent; a window too
+/// The tabs in pills, the open one's count in the accent; a window too
 /// narrow for them all shows those around the open one, the others behind
 /// "…". Returns the tab chosen.
 fn aurora_tabs(ui: &mut egui::Ui, p: &Palette, world: &World, radar: &RadarData, mut tab: u8) -> u8 {
@@ -569,6 +583,7 @@ fn aurora_tabs(ui: &mut egui::Ui, p: &Palette, world: &World, radar: &RadarData,
         TAB_GROUPS => aurora_i18n::tr!("common-groups"),
         TAB_SETS => aurora_i18n::tr!("people-tab-sets"),
         TAB_RECENT => aurora_i18n::tr!("common-recent"),
+        TAB_HIDDEN => aurora_i18n::tr!("hidefriend-tab"),
         _ => aurora_i18n::tr!("common-blocked"),
     };
     // the icons of the People entries of the bars' menus
@@ -578,15 +593,17 @@ fn aurora_tabs(ui: &mut egui::Ui, p: &Palette, world: &World, radar: &RadarData,
         TAB_GROUPS => "users-group",
         TAB_SETS => "tags-filled",
         TAB_RECENT => "history",
+        TAB_HIDDEN => "user-off",
         _ => "ban",
     };
     let count = |t: u8| -> Option<usize> {
         match t {
             TAB_NEARBY => Some(radar.radar.total),
-            TAB_FRIENDS => Some(world.social.friends.len()),
+            TAB_FRIENDS => Some(world.social.shown_friends().count()),
             TAB_GROUPS => Some(world.groups.groups.len()),
             TAB_RECENT => Some(world.recent.len()),
             TAB_BLOCKED => Some(world.mutes.entries().len()),
+            TAB_HIDDEN => Some(hidden::count(world)),
             _ => None,
         }
     };
@@ -733,7 +750,7 @@ fn friends_tab(
     });
     ui.add_space(4.0);
     let filter = st.filter.trim().to_lowercase();
-    let mut friends = world.social.friends.clone();
+    let mut friends: Vec<_> = world.social.shown_friends().cloned().collect();
     sort_friends(
         &mut friends,
         settings.sort,

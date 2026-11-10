@@ -1106,7 +1106,7 @@ fn second_life_tab(
 ) {
     let (p, world, own, id) = (c.p, c.world, c.own, w.id);
     let profile = world.profiles.get(&id);
-    let friend = world.social.friends.iter().find(|f| f.id == id);
+    let friend = world.social.shown_friend(&id);
     if profile.is_some_and(|pr| !pr.sl_image.is_nil()) {
         wanted_pics.insert(id);
     }
@@ -1563,6 +1563,15 @@ fn overflow_menu(ui: &mut egui::Ui, p: &Palette, world: &World, id: Uuid, blocke
         };
         if menu::item(ui, p, "ban", block) {
             actions.push(ProfileAction::ToggleBlock(id));
+        }
+        // a friend hidden in this viewer, or shown again
+        // (`world/hidden_friends.rs`)
+        if world.social.is_friend_hidden(&id) {
+            if menu::item(ui, p, "user-check", aurora_i18n::tr!("hidefriend-unhide")) {
+                super::context::request(ui.ctx(), super::context::CtxAction::UnhideFriend(id));
+            }
+        } else if world.social.is_friend(&id) && menu::item(ui, p, "user-off", aurora_i18n::tr!("hidefriend-hide")) {
+            super::context::request(ui.ctx(), super::context::CtxAction::HideFriend(id));
         }
         menu::separator(ui, p);
         if menu::item(ui, p, "copy-filled", aurora_i18n::tr!("common-copy-name")) {

@@ -91,9 +91,7 @@ pub fn known(world: &World, id: &Uuid) -> Known {
     };
     let friend_online = world
         .social
-        .friends
-        .iter()
-        .find(|f| f.id == *id)
+        .shown_friend(id)
         .filter(|f| f.rights_has & rights::ONLINE_STATUS != 0)
         .map(|f| f.online);
     Known {

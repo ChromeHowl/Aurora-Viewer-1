@@ -13623,3 +13623,12 @@ camtools-path-import-format = This file is not a camera path this viewer can rea
 camtools-path-import-waypoint = Waypoint { $number } of the file is not valid: nothing was imported.
 camtools-path-exported = Camera path exported.
 camtools-path-export-failed = The file could not be written.
+# Hide a friend: a friend hidden in this viewer only (People › Hidden)
+hidefriend-hide = Hide this friend
+hidefriend-hide-tip = Hides this friend in this viewer only: they stay your friend and are not told. Their messages, calls and offers still arrive.
+hidefriend-unhide = Un-hide this friend
+hidefriend-unhide-short = Un-hide
+hidefriend-tab = Hidden
+hidefriend-list-hint = Friends hidden in this viewer only. They stay your friends and are not told; their messages, calls and offers still arrive.
+hidefriend-list-empty = No friend is hidden.
+hidefriend-row-sub = Hidden friend

@@ -230,7 +230,11 @@ enum Badge {
 #[derive(Default)]
 struct Facts {
     own: bool,
+    /// A friend shown as one (`Social::is_friend_shown`).
     friend: bool,
+    /// A friend hidden in this viewer: shown as a stranger, without a
+    /// friendship offer.
+    hidden: bool,
     common: usize,
     account: Option<(&'static str, bool)>,
     sets: Vec<(String, Color32)>,
@@ -263,7 +267,7 @@ fn badges(f: &Facts, compact: bool) -> Vec<Badge> {
 }
 
 fn facts(world: &World, id: &Uuid, own: bool, profile: Option<&AvatarProfile>) -> Facts {
-    let friend = world.social.friends.iter().any(|f| f.id == *id);
+    let friend = world.social.is_friend_shown(id);
     let sets = world
         .contact_sets
         .friend_sets(id)
@@ -278,6 +282,7 @@ fn facts(world: &World, id: &Uuid, own: bool, profile: Option<&AvatarProfile>) -
     Facts {
         own,
         friend,
+        hidden: world.social.is_friend_hidden(id),
         common: profile.map_or(0, |pr| pr.groups.iter().filter(|g| world.groups.is_member(&g.id)).count()),
         account: profile.and_then(profiles::header_badge),
         sets,
@@ -505,7 +510,7 @@ fn header(ui: &mut egui::Ui, env: &mut Env, w: &mut Window, f: &Facts) {
         pos2(full.left() + pad, line.center().y - BUTTON_H / 2.0),
         pos2(full.right() - 14.0, line.center().y + BUTTON_H / 2.0),
     );
-    let acts = header_acts(own, w.editing, f.friend, false);
+    let acts = header_acts(own, w.editing, f.friend || f.hidden, false);
     let layout = egui::Layout::right_to_left(egui::Align::Center);
     // with their names while who it is keeps room for its badges on a line
     // or two, else the main action alone named (a long language)
@@ -559,7 +564,7 @@ fn header_compact(ui: &mut egui::Ui, env: &mut Env, w: &mut Window, f: &Facts) {
     let status = photo(ui, env, w, photo_rect, 3.0);
     let pad = 82.0;
     let y0 = banner.bottom() + 10.0;
-    let acts = header_acts(own, w.editing, f.friend, true);
+    let acts = header_acts(own, w.editing, f.friend || f.hidden, true);
     // our own buttons at the right of the name
     let mut acts_w = 0.0;
     if own {
@@ -609,7 +614,7 @@ fn photo(ui: &mut egui::Ui, env: &mut Env, w: &mut Window, rect: Rect, ring: f32
     let id = w.id;
     let own = id == world.agent_id;
     let profile = world.profiles.get(&id);
-    let friend = world.social.friends.iter().find(|fr| fr.id == id);
+    let friend = world.social.shown_friend(&id);
     let pic = env.pics.get(&id);
     let status = status_of(world, &id, own, profile, friend);
     paint_photo(ui, p, rect, ring, pic, &display_name(world, &id), status, w.editing);
@@ -699,7 +704,7 @@ fn who_it_is(
     }
     let list = badges(f, compact);
     if !list.is_empty() {
-        let is_friend = world.social.friends.iter().any(|fr| fr.id == id);
+        let is_friend = world.social.is_friend_shown(&id);
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = Vec2::new(5.0, 4.0);
             for b in &list {
@@ -1008,6 +1013,12 @@ fn more_menu(resp: &Response, env: &Env, w: &Window, f: &Facts, compact: bool) {
         }
         if f.friend && menu::item(ui, p, "user-minus", aurora_i18n::tr!("ui-profile-aurora-remove-friend")) {
             act(CtxAction::RemoveFriend(id));
+        }
+        if f.friend && menu::item(ui, p, "user-off", aurora_i18n::tr!("hidefriend-hide")) {
+            act(CtxAction::HideFriend(id));
+        }
+        if f.hidden && menu::item(ui, p, "user-check", aurora_i18n::tr!("hidefriend-unhide")) {
+            act(CtxAction::UnhideFriend(id));
         }
         menu::separator(ui, p);
         if menu::item_if(
@@ -1677,12 +1688,19 @@ fn info_card(ui: &mut egui::Ui, env: &mut Env, w: &Window, compact: bool) {
                 partner_chip(ui, env, pr.partner);
             }
         });
-        let friend = world.social.friends.iter().find(|fr| fr.id == id);
+        let friend = world.social.shown_friend(&id);
         match friend {
             // can be hidden (Preferences › Aurora › Profiles): the rights
             // stay in Contacts
             Some(fr) if env.friend_rights => kv(ui, p, aurora_i18n::tr!("ui-profile-aurora-permissions"), |ui| {
                 rights_line(ui, env, id, fr)
+            }),
+            // a hidden friend is still one: shown again from here, no offer
+            None if world.social.is_friend_hidden(&id) => kv(ui, p, aurora_i18n::tr!("ui-profile-aurora-friendship"), |ui| {
+                let unhide = aurora_i18n::tr!("hidefriend-unhide");
+                if widgets::action_button(ui, p, "user-check", unhide, ActionKind::Flat, Vec2::new(0.0, 24.0)).clicked() {
+                    context::request(ui.ctx(), CtxAction::UnhideFriend(id));
+                }
             }),
             // a stranger's way to it; the compact header has its own
             None if !compact && id != world.agent_id => kv(ui, p, aurora_i18n::tr!("ui-profile-aurora-friendship"), |ui| {

@@ -1,6 +1,7 @@
 //! Friends, name cache and instant-message sessions.
 
 use super::ChatLine;
+use super::hidden_friends::HiddenFriends;
 use super::names::AvatarNames;
 use super::transcripts::{LineClock, SessionLog};
 use aurora_llsd::Llsd;
@@ -53,7 +54,11 @@ impl ImSession {
 
 #[derive(Default)]
 pub struct Social {
+    /// Every friend the server knows, hidden ones included. What the viewer
+    /// shows reads `shown_friends` / `is_friend_shown` instead.
     pub friends: Vec<Friend>,
+    /// Friends hidden in this viewer (`hidden_friends.rs`).
+    pub hidden: HiddenFriends,
     /// Legacy names ("First Last", UUIDNameReply / IM headers).
     pub names: HashMap<Uuid, String>,
     /// Display names (LLAvatarNameCache).
@@ -141,13 +146,19 @@ impl Social {
         for f in self.friends.iter_mut() {
             if ids.contains(&f.id) && f.online != online {
                 f.online = online;
-                self.online_notices.push((f.id, online, now));
+                // a hidden friend comes and goes without a word
+                if !self.hidden.contains(&f.id) {
+                    self.online_notices.push((f.id, online, now));
+                }
             }
         }
     }
 
     /// Online / offline notices whose name is known (or after 10 s without).
     pub fn take_online_notices(&mut self) -> Vec<(Uuid, String, bool)> {
+        // hidden while the notice waited for the name
+        let hidden = &self.hidden;
+        self.online_notices.retain(|(id, ..)| !hidden.contains(id));
         let mut out = Vec::new();
         let mut i = 0;
         while i < self.online_notices.len() {
@@ -172,15 +183,56 @@ impl Social {
         out
     }
 
+    /// The friendship itself, hidden or not: what the server knows. For
+    /// the rules about what a friend may send or do (messages, calls,
+    /// offers, rights) and for the friendship actions. Anything shown
+    /// reads `is_friend_shown`.
     pub fn is_friend(&self, id: &Uuid) -> bool {
         self.friends.iter().any(|f| f.id == *id)
+    }
+
+    /// The one rule of hidden friends: a friend the viewer shows as one. A
+    /// hidden friend is a non-friend for every list, picker, colour,
+    /// marker and friend-based display filter.
+    pub fn is_friend_shown(&self, id: &Uuid) -> bool {
+        !self.hidden.contains(id) && self.is_friend(id)
+    }
+
+    /// The friends the viewer shows: all but the hidden ones.
+    pub fn shown_friends(&self) -> impl Iterator<Item = &Friend> {
+        self.friends.iter().filter(|f| !self.hidden.contains(&f.id))
+    }
+
+    /// A shown friend's entry.
+    pub fn shown_friend(&self, id: &Uuid) -> Option<&Friend> {
+        self.shown_friends().find(|f| f.id == *id)
+    }
+
+    /// Whether this friend is hidden.
+    pub fn is_friend_hidden(&self, id: &Uuid) -> bool {
+        self.hidden.contains(id) && self.is_friend(id)
+    }
+
+    /// The hidden friends, for the list that brings them back.
+    pub fn hidden_friends(&self) -> impl Iterator<Item = &Friend> {
+        self.friends.iter().filter(|f| self.hidden.contains(&f.id))
+    }
+
+    /// Hides a friend in this viewer; nothing is sent. Only a friend can be
+    /// hidden. A notice of theirs still waiting is dropped.
+    pub fn hide_friend(&mut self, id: Uuid) -> bool {
+        self.is_friend(&id) && self.hidden.insert(id)
+    }
+
+    /// Shows a hidden friend again.
+    pub fn unhide_friend(&mut self, id: &Uuid) -> bool {
+        self.hidden.remove(id)
     }
 
     /// is_agent_mappable / LLAvatarTracker::isBuddyOnline: received rights,
     /// never the permissions we grant the other resident.
     pub fn can_map_friend(&self, id: Uuid) -> bool {
-        self.friends
-            .iter()
+        self.shown_friends()
             .any(|f| f.id == id && f.online && f.rights_has & rights::MAP_LOCATION != 0)
     }
 
@@ -203,6 +255,8 @@ impl Social {
     pub fn end_friendship(&mut self, id: &Uuid) -> bool {
         let before = self.friends.len();
         self.friends.retain(|f| f.id != *id);
+        // no longer a friend: nothing left to hide
+        self.hidden.remove(id);
         self.friends.len() != before
     }
 

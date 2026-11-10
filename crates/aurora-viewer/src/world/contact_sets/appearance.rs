@@ -270,6 +270,11 @@ impl ContactSets {
         self.appearances.get(id).unwrap_or(&EMPTY)
     }
 
+    /// The look of a resident in no set.
+    pub fn no_appearance() -> &'static std::sync::Arc<Appearance> {
+        &EMPTY
+    }
+
     /// Whether any resident has a marker in the world: with every set's
     /// marker off (the default), the markers look at nobody.
     pub fn has_markers(&self) -> bool {

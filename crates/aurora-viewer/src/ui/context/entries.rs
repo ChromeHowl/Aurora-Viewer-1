@@ -666,6 +666,13 @@ fn avatar_social_items(ui: &mut Builder, f: &Facts, id: Uuid) {
         !f.friend,
         CtxAction::AddFriend(id),
     );
+    // friends only: hidden in this viewer, or shown again
+    // (`world/hidden_friends.rs`)
+    if f.friend_hidden {
+        ui.item("user-check", aurora_i18n::tr!("hidefriend-unhide"), CtxAction::UnhideFriend(id));
+    } else if f.friend {
+        ui.item("user-off", aurora_i18n::tr!("hidefriend-hide"), CtxAction::HideFriend(id));
+    }
     contact_set_entries(ui, f, id);
     // RLVa @startim: greyed instead of refused after the click
     // (LLAvatarActions::startIM / startCall refuse both).

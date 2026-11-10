@@ -84,8 +84,7 @@ impl AvatarPicker {
                 TAB_FRIENDS => {
                     let mut v: Vec<_> = world
                         .social
-                        .friends
-                        .iter()
+                        .shown_friends()
                         .map(|f| (f.id, world.social.name_of(&f.id), String::new()))
                         .collect();
                     v.sort_by_key(|r| crate::natural_order::key(&r.1));

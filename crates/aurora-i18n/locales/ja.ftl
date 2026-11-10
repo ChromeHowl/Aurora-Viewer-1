@@ -13590,3 +13590,12 @@ camtools-path-import-format = このファイルは、このビューアで読�
 camtools-path-import-waypoint = ファイルのポイント { $number } が無効です。何もインポートされませんでした。
 camtools-path-exported = カメラパスをエクスポートしました。
 camtools-path-export-failed = ファイルを書き込めませんでした。
+# Hide a friend: a friend hidden in this viewer only (People › Hidden)
+hidefriend-hide = このフレンドを非表示にする
+hidefriend-hide-tip = このビューアでのみフレンドを非表示にします。フレンド関係はそのままで、相手には通知されません。メッセージ、通話、オファーはこれまでどおり届きます。
+hidefriend-unhide = このフレンドを再表示する
+hidefriend-unhide-short = 再表示
+hidefriend-tab = 非表示
+hidefriend-list-hint = このビューアでのみ非表示にしているフレンドです。フレンド関係はそのままで、相手には通知されません。メッセージ、通話、オファーはこれまでどおり届きます。
+hidefriend-list-empty = 非表示のフレンドはいません。
+hidefriend-row-sub = 非表示のフレンド

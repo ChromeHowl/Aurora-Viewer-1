@@ -212,6 +212,8 @@ pub struct Facts {
     /// Our contact sets, for "Add to contact set" (getAllContactSets).
     pub contact_sets: Vec<String>,
     pub friend: bool,
+    /// A friend hidden in this viewer (`world/hidden_friends.rs`).
+    pub friend_hidden: bool,
     /// RLVa `@startim` forbids an IM with this resident (RlvActions::canStartIM).
     pub im_blocked: bool,
     /// EditLinkedParts.
@@ -502,6 +504,10 @@ pub enum CtxAction {
     /// Friendship: offer (with a message) / end, both confirmed first.
     AddFriend(Uuid),
     RemoveFriend(Uuid),
+    /// A friend hidden in this viewer, or shown again: nothing is sent
+    /// (`world/hidden_friends.rs`).
+    HideFriend(Uuid),
+    UnhideFriend(Uuid),
     /// Several friends removed, after one confirmation (removeFriendsDialog).
     RemoveFriends(Vec<Uuid>),
     /// A text conference with these residents (startConference).
@@ -751,7 +757,10 @@ fn avatar_menu_reporting(
         return;
     }
     voice_row(ui, p, id, voice_volume_of(world, id));
+    // the friendship itself: a hidden friend gets no friendship offer and
+    // can still be removed, or shown again
     let friend = world.social.friends.iter().find(|f| f.id == id).cloned();
+    let hidden = world.social.is_friend_hidden(&id);
     let blocked = world.is_avatar_blocked(&id);
     let here = avatar_position(world, &id).is_some();
     let mappable = world.can_locate_avatar(id);
@@ -864,6 +873,18 @@ fn avatar_menu_reporting(
             act(CtxAction::RemoveFriend(id));
         }
     };
+    let hide_friend = |ui: &mut egui::Ui| {
+        if friend.is_none() {
+            return;
+        }
+        if hidden {
+            if menu::item(ui, p, "user-check", aurora_i18n::tr!("hidefriend-unhide")) {
+                act(CtxAction::UnhideFriend(id));
+            }
+        } else if menu::item(ui, p, "user-off", aurora_i18n::tr!("hidefriend-hide")) {
+            act(CtxAction::HideFriend(id));
+        }
+    };
     let request_tp = |ui: &mut egui::Ui| {
         if menu::item_if(ui, p, "car-filled", aurora_i18n::tr!("common-request-teleport"), online) {
             act(CtxAction::RequestTeleport(id));
@@ -904,6 +925,7 @@ fn avatar_menu_reporting(
             menu::separator(ui, p);
             add_friend(ui);
             remove_friend(ui);
+            hide_friend(ui);
             contact_set_submenu(ui, p, world, &[id], aurora_i18n::tr!("ui-context-add-to-contact-set"));
             // Avatar.InviteToGroup (can_invite: always)
             if menu::item(ui, p, "users-plus", aurora_i18n::tr!("ui-context-invite-to-group")) {
@@ -947,6 +969,7 @@ fn avatar_menu_reporting(
             }
             navigation(ui);
             remove_friend(ui);
+            hide_friend(ui);
             menu::separator(ui, p);
             copy(ui);
             if let Some(f) = &friend {
@@ -980,6 +1003,7 @@ fn avatar_menu_reporting(
             request_tp(ui);
             navigation(ui);
             remove_friend(ui);
+            hide_friend(ui);
             menu::separator(ui, p);
             if menu::item(ui, p, "flag-filled", aurora_i18n::tr!("ui-context-report-abuse")) {
                 act(CtxAction::ReportAbuse(

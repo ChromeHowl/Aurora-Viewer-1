@@ -355,7 +355,7 @@ pub(super) fn show(
                     sub: Some(match contacts_sub {
                         ContactsSub::Friends => aurora_i18n::tr!(
                             "ui-chat-contacts-friends-sub",
-                            online = world.social.friends.iter().filter(|f| f.online).count() as i64
+                            online = world.social.shown_friends().filter(|f| f.online).count() as i64
                         ),
                         ContactsSub::Lists => aurora_i18n::tr!("ui-chat-contacts-sub").to_owned(),
                     }),
@@ -500,8 +500,7 @@ pub(super) fn show(
             if !filter.is_empty() && !rail {
                 let mut friends: Vec<(Uuid, String)> = world
                     .social
-                    .friends
-                    .iter()
+                    .shown_friends()
                     .filter(|f| !world.social.has_session(&f.id))
                     .map(|f| (f.id, world.social.name_of(&f.id)))
                     .filter(|(_, n)| n.to_lowercase().contains(&filter))

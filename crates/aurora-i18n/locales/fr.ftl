@@ -13619,3 +13619,12 @@ camtools-path-import-format = Ce fichier n'est pas un trajet de caméra lisible 
 camtools-path-import-waypoint = Le point { $number } du fichier n'est pas valide : rien n'a été importé.
 camtools-path-exported = Trajet de caméra exporté.
 camtools-path-export-failed = Le fichier n'a pas pu être écrit.
+# Hide a friend: a friend hidden in this viewer only (People › Hidden)
+hidefriend-hide = Masquer cet ami
+hidefriend-hide-tip = Masque cet ami dans ce viewer uniquement : il reste votre ami et n'en est pas informé. Ses messages, appels et offres arrivent toujours.
+hidefriend-unhide = Ne plus masquer cet ami
+hidefriend-unhide-short = Ne plus masquer
+hidefriend-tab = Masqués
+hidefriend-list-hint = Amis masqués dans ce viewer uniquement. Ils restent vos amis et n'en sont pas informés ; leurs messages, appels et offres arrivent toujours.
+hidefriend-list-empty = Aucun ami n'est masqué.
+hidefriend-row-sub = Ami masqué

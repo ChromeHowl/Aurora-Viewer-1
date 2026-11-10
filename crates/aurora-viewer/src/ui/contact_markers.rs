@@ -125,7 +125,7 @@ fn sightings(world: &World, region: u64, now: Instant) -> Vec<Sighting> {
 }
 
 fn marked(world: &World, id: &Uuid) -> Option<Marker> {
-    world.contact_sets.appearance(id).marker.filter(|_| !world.is_avatar_blocked(id))
+    world.contact_appearance(id).marker.filter(|_| !world.is_avatar_blocked(id))
 }
 
 /// One frame of markers. `shown` is off with the setting, in immersive mode
