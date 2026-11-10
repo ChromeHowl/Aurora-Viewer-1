@@ -77,6 +77,11 @@ impl Viewfinder {
                             aurora_i18n::tr!("photo-isolate-chosen"),
                             aurora_i18n::tr!("photo-isolate-chosen-tip"),
                         ),
+                        (
+                            Mode::Background,
+                            aurora_i18n::tr!("p16-isolate-background"),
+                            aurora_i18n::tr!("p16-isolate-background-tip"),
+                        ),
                     ];
                     let items: Vec<(&str, bool, &str)> = modes.iter().map(|(m, t, tip)| (*t, iso.mode == *m, *tip)).collect();
                     if let Some(i) = segmented(ui, p, &items, Some(ui.available_width())) {
@@ -102,7 +107,7 @@ impl Viewfinder {
                             out.push(Out::Isolate(Isolate::Picking(!iso.picking)));
                         }
                     }
-                    if iso.mode != Mode::Off {
+                    if iso.mode != Mode::Off && iso.mode != Mode::Background {
                         ui.add_space(8.0);
                         let mut on = iso.transparent;
                         if widgets::switch_labeled(ui, p, &mut on, aurora_i18n::tr!("photo-isolate-transparent")).changed() {
@@ -112,6 +117,7 @@ impl Viewfinder {
                     let hint = match (iso.mode, iso.picking) {
                         (_, true) => Some(aurora_i18n::tr!("photo-isolate-pick-hint")),
                         (Mode::Off, _) => Some(aurora_i18n::tr!("photo-isolate-hint")),
+                        (Mode::Background, _) => None,
                         _ if iso.transparent => Some(aurora_i18n::tr!("photo-isolate-png-hint")),
                         _ => None,
                     };

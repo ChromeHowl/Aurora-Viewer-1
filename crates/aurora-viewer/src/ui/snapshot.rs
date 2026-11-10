@@ -8,6 +8,7 @@
 use super::widgets::{self, ActionKind, Floater};
 use crate::snapshot::inventory::TextureSize;
 use crate::snapshot::profile::ProfileSize;
+use crate::snapshot::quality::Supersampling;
 use crate::snapshot::{Aspect, FileFormat, Guide, Resolution, Settings};
 use crate::theme::Palette;
 use egui::{Color32, Pos2, Rect, RichText, Sense, Stroke, Vec2};
@@ -50,6 +51,8 @@ pub struct SnapshotUi {
     pub looks: super::looks_editor::LooksUi,
     /// The user's 3D tables, by file name (`snapshot::luts`).
     pub lut_names: Vec<String>,
+    /// The name typed for a photo profile (`snapshot::saved`).
+    pub profile_name: String,
 }
 
 /// Where a photo goes (Firestorm's snapshot panels; the profile feed
@@ -165,6 +168,9 @@ pub struct View<'a> {
 pub enum Action {
     Refresh,
     Take,
+    /// The photo, its cut-out and its background alone, of one instant
+    /// (`snapshot::full_save`).
+    FullSave,
     SaveAs,
     ChooseFolder,
     OpenFolder,
@@ -199,6 +205,11 @@ pub enum Action {
     OpenLutFolder,
     /// The session's photos (`ui::photo_reel`).
     Reel(crate::ui::photo_reel::ReelAction),
+    /// A photo profile loaded, saved (by that name, over one of the same
+    /// name) or deleted (`snapshot::saved`).
+    ProfileLoad(String),
+    ProfileSave(String),
+    ProfileDelete(String),
 }
 
 impl SnapshotUi {
@@ -379,7 +390,7 @@ impl SnapshotUi {
                 }
             }
             (None, None, None) => {
-                let take_w = ui.available_width() - 34.0;
+                let take_w = ui.available_width() - 68.0;
                 ui.add_enabled_ui(!busy, |ui| {
                     if widgets::action_button(
                         ui,
@@ -398,6 +409,12 @@ impl SnapshotUi {
                         .clicked()
                     {
                         out.push(Action::SaveAs);
+                    }
+                    if widgets::action_button(ui, p, "stack-2", "", ActionKind::Flat, Vec2::new(30.0, 32.0))
+                        .on_hover_text(aurora_i18n::tr!("p16-full-save-tip"))
+                        .clicked()
+                    {
+                        out.push(Action::FullSave);
                     }
                 });
             }
@@ -547,6 +564,7 @@ impl SnapshotUi {
         out: &mut Vec<Action>,
     ) {
         ui.set_width(WIDTH - 36.0);
+        self.profiles(ui, p, s, out);
         section(ui, p, "aspect-ratio-filled", aurora_i18n::tr!("photo-section-format"));
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
@@ -669,6 +687,33 @@ impl SnapshotUi {
             Some(aurora_i18n::tr!("photo-quality-hint")),
             |ui| {
                 widgets::switch(ui, p, &mut s.quality);
+            },
+        );
+        // samples a pixel; Off leaves the photo quality its own 4 samples
+        // for the photos it always drew at twice their size
+        let auto = s.quality && s.supersampling == Supersampling::Off && crate::snapshot::quality::supersample(view.photo) > 1;
+        row(
+            ui,
+            p,
+            aurora_i18n::tr!("p16-supersampling"),
+            Some(if auto {
+                aurora_i18n::tr!("p16-supersampling-quality-hint")
+            } else {
+                aurora_i18n::tr!("p16-supersampling-hint")
+            }),
+            |ui| {
+                let labels: Vec<String> = Supersampling::ALL
+                    .iter()
+                    .map(|c| match c {
+                        Supersampling::Off => aurora_i18n::tr!("p16-supersampling-off").to_owned(),
+                        c => aurora_i18n::tr!("p16-supersampling-samples", count = c.samples()).to_owned(),
+                    })
+                    .collect();
+                let options: Vec<(&str, bool)> = labels.iter().map(|l| (l.as_str(), true)).collect();
+                let mut i = Supersampling::ALL.iter().position(|c| *c == s.supersampling).unwrap_or(0);
+                if widgets::segmented(ui, p, &mut i, &options) {
+                    s.supersampling = Supersampling::ALL[i];
+                }
             },
         );
         row(
@@ -1641,6 +1686,67 @@ fn icon_image(ui: &mut egui::Ui, icon: &str, side: f32, tint: Color32) {
 
 /// A setting: its label (and a hint under it) on the left, its control on
 /// the right.
+impl SnapshotUi {
+    /// The photo profiles: one loaded or deleted from the list, the
+    /// window's settings saved under the name typed.
+    fn profiles(&mut self, ui: &mut egui::Ui, p: &Palette, s: &Settings, out: &mut Vec<Action>) {
+        section(ui, p, "bookmarks", aurora_i18n::tr!("p16-profiles"));
+        ui.horizontal(|ui| {
+            let save_w = 30.0 + ui.spacing().item_spacing.x;
+            let name_w = 110.0;
+            let list_w = (ui.available_width() - save_w - name_w - ui.spacing().item_spacing.x * 2.0).max(60.0);
+            egui::ComboBox::from_id_salt("photo_profiles")
+                .width(list_w)
+                .truncate()
+                .selected_text(aurora_i18n::tr!("p16-profiles-load"))
+                .show_ui(ui, |ui| {
+                    for name in s.profiles.keys() {
+                        ui.push_id(("photo_profile", name), |ui| {
+                            ui.horizontal(|ui| {
+                                let width = (ui.available_width() - 20.0 - ui.spacing().item_spacing.x).max(120.0);
+                                if ui
+                                    .add_sized(
+                                        Vec2::new(width, 20.0),
+                                        egui::Button::selectable(false, ()).left_text(name.as_str()).truncate(),
+                                    )
+                                    .on_hover_text(name.as_str())
+                                    .clicked()
+                                {
+                                    self.profile_name = name.clone();
+                                    out.push(Action::ProfileLoad(name.clone()));
+                                    ui.close();
+                                }
+                                if widgets::icon_button(ui, p, "trash-filled", aurora_i18n::tr!("common-delete"), true) {
+                                    out.push(Action::ProfileDelete(name.clone()));
+                                    ui.close();
+                                }
+                            });
+                        });
+                    }
+                    if s.profiles.is_empty() {
+                        ui.label(RichText::new(aurora_i18n::tr!("p16-profiles-empty")).color(p.muted));
+                    }
+                });
+            let input = ui.add(
+                egui::TextEdit::singleline(&mut self.profile_name)
+                    .hint_text(aurora_i18n::tr!("p16-profile-name"))
+                    .char_limit(64)
+                    .desired_width(name_w),
+            );
+            let valid = crate::snapshot::saved::valid_name(&self.profile_name);
+            let enter = input.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            let tip = if s.profiles.contains_key(self.profile_name.trim()) {
+                aurora_i18n::tr!("p16-profile-replace")
+            } else {
+                aurora_i18n::tr!("p16-profile-save")
+            };
+            if (widgets::icon_button(ui, p, "device-floppy", tip, valid) || enter) && valid {
+                out.push(Action::ProfileSave(self.profile_name.trim().to_owned()));
+            }
+        });
+    }
+}
+
 fn row(ui: &mut egui::Ui, p: &Palette, label: &str, hint: Option<&str>, control: impl FnOnce(&mut egui::Ui)) {
     ui.horizontal(|ui| {
         let width = ui.available_width();

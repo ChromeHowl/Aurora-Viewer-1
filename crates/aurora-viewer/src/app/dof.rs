@@ -101,6 +101,11 @@ impl App {
             lens.focus_far = far;
             return Some(lens);
         }
+        // a photo's parts: one focus for all of them, the one it started at
+        if let Some(d) = self.photo_locked_focus() {
+            self.dof_focus.set(d);
+            return Some(dof::lens(&s, d, fov_y, height, window_height, false));
+        }
         let eye = self.camera.position;
         let at = self.camera.target - self.camera.position;
         let (w, h) = renderer.size();

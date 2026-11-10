@@ -4,7 +4,9 @@
 //! ambient occlusion, reflections at full resolution, anisotropy), the
 //! textures in view are loaded at full resolution and the photo itself is
 //! drawn at twice its size (`app::snapshot`), the user's own values set
-//! aside.
+//! aside. The photo window's supersampling ([`Supersampling`]) draws any
+//! photo at two, three or four times its size, with or without the boost:
+//! each part is reduced as it is read back ([`reduce_into`]).
 //! Firestorm has no such switch: its Phototools change the real settings
 //! for good. Here the user's values are what is saved while the boost is
 //! on (`Settings::save`), and they come back when the window closes.
@@ -202,11 +204,94 @@ pub fn boosted(user: Values) -> Values {
     }
 }
 
-/// The photo is drawn at this many times its size, then reduced (a box
-/// filter over whole pixels), while its larger side stays within
-/// `snapshot::MAX_SIDE`: an 8K photo is drawn once, a 4K one at 8K.
+/// What the photo quality does on its own, the supersampling left Off: the
+/// photo is drawn at twice its size, then reduced (a box filter over whole
+/// pixels), while its larger side stays within the Legacy Viewer's largest
+/// (`snapshot::LEGACY_MAX_SIDE`): an 8K photo is drawn once, a 4K one at 8K.
 pub fn supersample(size: (u32, u32)) -> u32 {
-    if size.0.max(size.1) * 2 <= super::MAX_SIDE { 2 } else { 1 }
+    if size.0.max(size.1) * 2 <= super::LEGACY_MAX_SIDE { 2 } else { 1 }
+}
+
+/// The photo window's supersampling, named by its samples a pixel: the
+/// photo is drawn at 2, 3 or 4 times its size on each side and every pixel
+/// is the mean of the 4, 9 or 16 drawn for it (an exact box filter). At any
+/// size, 16,384 included: the parts are reduced one by one as they are
+/// read back, so the enlarged photo is never assembled.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum Supersampling {
+    /// None of its own; the photo quality still draws its 4 samples for
+    /// the photos it always did ([`supersample`]).
+    #[default]
+    Off,
+    X4,
+    X9,
+    X16,
+}
+
+impl Supersampling {
+    pub const ALL: [Supersampling; 4] = [Supersampling::Off, Supersampling::X4, Supersampling::X9, Supersampling::X16];
+
+    /// Times the photo's size on each side.
+    pub fn linear(self) -> u32 {
+        match self {
+            Supersampling::Off => 1,
+            Supersampling::X4 => 2,
+            Supersampling::X9 => 3,
+            Supersampling::X16 => 4,
+        }
+    }
+
+    /// Samples drawn for a pixel.
+    pub fn samples(self) -> u32 {
+        self.linear() * self.linear()
+    }
+}
+
+/// Times its size a photo of `size` is drawn at, on each side: the choice
+/// made in the window, or with it Off what the photo quality (`boosted`:
+/// it is on) always did.
+pub fn factor(choice: Supersampling, boosted: bool, size: (u32, u32)) -> u32 {
+    match choice {
+        Supersampling::Off if boosted => supersample(size),
+        choice => choice.linear(),
+    }
+}
+
+/// Reduce the part a pass keeps into the photo, as it is read back: `keep`
+/// is the part in the photo's pixels, `pixels` the RGBA the pass drew at
+/// `factor` times the size, `drawn_width` pixels wide, whose pixel
+/// (`skip.0`, `skip.1`) is the first of `keep`'s (the guard band before
+/// it, enlarged). Each pixel of the photo is the mean of its `factor` x
+/// `factor` drawn, the colour weighted by the alpha, exactly as
+/// `save::downscale` reduces a whole image by a whole factor: the photo is
+/// the same as if it had been assembled enlarged and reduced at once.
+pub fn reduce_into(photo: &mut [u8], photo_width: u32, keep: super::Tile, pixels: &[u8], drawn_width: u32, skip: (u32, u32), factor: u32) {
+    let f = factor.max(1) as usize;
+    let (pw, dw) = (photo_width as usize, drawn_width as usize);
+    let n = (f * f) as u64;
+    for y in 0..keep.height as usize {
+        let out_row = ((keep.y as usize + y) * pw + keep.x as usize) * 4;
+        let top = skip.1 as usize + y * f;
+        for x in 0..keep.width as usize {
+            let left = skip.0 as usize + x * f;
+            let mut sum = [0u64; 4];
+            for sy in 0..f {
+                let start = ((top + sy) * dw + left) * 4;
+                for px in pixels[start..start + f * 4].as_chunks::<4>().0 {
+                    let a = u64::from(px[3]);
+                    for c in 0..3 {
+                        sum[c] += u64::from(px[c]) * a;
+                    }
+                    sum[3] += a;
+                }
+            }
+            let o = out_row + x * 4;
+            for c in 0..3 {
+                photo[o + c] = sum[c].checked_div(sum[3]).unwrap_or(0) as u8;
+            }
+            photo[o + 3] = (sum[3] / n) as u8;
+        }
+    }
 }
 
 /// The longest wait for the textures in view to reach full resolution
@@ -518,6 +603,119 @@ mod tests {
         held.restore(&mut s);
         // and are theirs afterwards; the untouched ones come back
         assert_eq!((s.draw_distance, s.antialiasing, s.shadow_quality), (128.0, 6, 1));
+    }
+
+    #[test]
+    fn the_supersampling_is_the_choice_or_what_the_photo_quality_always_did() {
+        use Supersampling::{Off, X4, X9, X16};
+        const ALL: [Supersampling; 4] = Supersampling::ALL;
+        assert_eq!(ALL.map(|s| (s.linear(), s.samples())), [(1, 1), (2, 4), (3, 9), (4, 16)]);
+        let (k4, k8, k16) = ((3840, 2160), (7680, 4320), (16_384, 16_384));
+        // Off: nothing without the photo quality, its own 2x with it, for
+        // the photos it always drew at twice their size and no other
+        assert_eq!(factor(Off, false, k4), 1);
+        assert_eq!(factor(Off, true, k4), 2);
+        assert_eq!(factor(Off, true, (3842, 2160)), 1);
+        assert_eq!(factor(Off, true, k8), 1);
+        assert_eq!(factor(Off, true, k16), 1);
+        // a choice: at any size, with or without the photo quality
+        for boosted in [false, true] {
+            for size in [k4, k8, k16] {
+                assert_eq!(factor(X4, boosted, size), 2);
+                assert_eq!(factor(X9, boosted, size), 3);
+                assert_eq!(factor(X16, boosted, size), 4);
+            }
+        }
+        assert_eq!(Supersampling::default(), Off);
+        // settings saved before the choice existed
+        let old: crate::snapshot::Settings = serde_json::from_str(r#"{"quality":true}"#).expect("older settings");
+        assert_eq!(old.supersampling, Off);
+    }
+
+    /// A synthetic photo, every channel and the alpha varying, with empty
+    /// (transparent black) pixels like a cut-out's.
+    fn synthetic(w: u32, h: u32) -> Vec<u8> {
+        let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+        for y in 0..h {
+            for x in 0..w {
+                let v = x.wrapping_mul(2_654_435_761).wrapping_add(y.wrapping_mul(40_503)) >> 7;
+                if v % 7 == 0 {
+                    rgba.extend_from_slice(&[0, 0, 0, 0]);
+                } else {
+                    rgba.extend_from_slice(&[
+                        v as u8,
+                        (v >> 8) as u8,
+                        (v >> 16) as u8,
+                        if v % 5 == 0 { (v >> 3) as u8 } else { 255 },
+                    ]);
+                }
+            }
+        }
+        rgba
+    }
+
+    #[test]
+    fn reducing_each_tile_gives_the_photo_reduced_whole() {
+        use crate::snapshot::{TILE_GUARD, plan_supersampled, save};
+        for (factor, out) in [(2u32, (150u32, 90u32)), (3, (131, 77)), (4, (96, 130)), (1, (140, 66))] {
+            let big = (out.0 * factor, out.1 * factor);
+            let image = synthetic(big.0, big.1);
+            // the whole enlarged photo reduced at once, as before
+            let (w, h, whole) = save::downscale(big.0, big.1, &image, out.0.max(out.1));
+            assert_eq!((w, h), out);
+            // drawn in passes with their guard bands, reduced one by one
+            let passes = plan_supersampled(out, factor, 64 * factor, u64::from(64 * factor).pow(2), TILE_GUARD);
+            assert!(passes.len() > 4, "{factor}: {}", passes.len());
+            let mut photo = vec![0u8; (out.0 * out.1 * 4) as usize];
+            for pass in &passes {
+                let (keep, draw) = (pass.keep, pass.draw.scaled(factor));
+                assert!(draw.width <= 64 * factor && draw.height <= 64 * factor);
+                // what the pass reads back: its part of the enlarged photo
+                let mut drawn = Vec::with_capacity((draw.width * draw.height * 4) as usize);
+                for y in draw.y..draw.y + draw.height {
+                    let start = ((y * big.0 + draw.x) * 4) as usize;
+                    drawn.extend_from_slice(&image[start..start + (draw.width * 4) as usize]);
+                }
+                let skip = ((keep.x - pass.draw.x) * factor, (keep.y - pass.draw.y) * factor);
+                reduce_into(&mut photo, out.0, keep, &drawn, draw.width, skip, factor);
+            }
+            assert!(photo == whole, "factor {factor}");
+        }
+    }
+
+    #[test]
+    fn a_supersampled_16k_photo_is_planned_without_assembling_it() {
+        use crate::snapshot::{TILE_GUARD, photo_bytes, plan_supersampled};
+        let out = (16_384u32, 16_384u32);
+        // drawn at 65,536 a side: 16 GiB assembled, never allocated; the
+        // photo itself stays 1 GiB whatever the factor
+        assert_eq!(photo_bytes((out.0 * 4, out.1 * 4)), 16 << 30);
+        assert_eq!(photo_bytes(out), 1 << 30);
+        let (max_side, max_pixels) = (16_384u32, 12_000_000u64);
+        for factor in [2u32, 3, 4] {
+            // the guard asked in drawn pixels, as the effects reach
+            let guard = TILE_GUARD * factor;
+            let passes = plan_supersampled(out, factor, max_side, max_pixels, guard);
+            let mut area = 0u64;
+            for p in &passes {
+                let (k, d) = (p.keep, p.draw.scaled(factor));
+                area += u64::from(k.width) * u64::from(k.height);
+                assert!(d.width <= max_side && d.height <= max_side);
+                assert!(u64::from(d.width) * u64::from(d.height) <= max_pixels, "{factor}");
+                // the band, in drawn pixels, on every shared side
+                let band = |kept: u32, drawn: u32| (kept - drawn) * factor;
+                assert!(k.x == 0 || band(k.x, p.draw.x) >= guard);
+                assert!(k.y == 0 || band(k.y, p.draw.y) >= guard);
+                assert!(k.x + k.width == out.0 || band(p.draw.x + p.draw.width, k.x + k.width) >= guard);
+                assert!(k.y + k.height == out.1 || band(p.draw.y + p.draw.height, k.y + k.height) >= guard);
+            }
+            assert_eq!(area, u64::from(out.0) * u64::from(out.1), "{factor}");
+        }
+        // no supersampling: the plan of the photo itself
+        assert_eq!(
+            plan_supersampled((7680, 4320), 1, 4096, u64::MAX, TILE_GUARD),
+            crate::snapshot::plan((7680, 4320), 4096, u64::MAX, TILE_GUARD)
+        );
     }
 
     #[test]

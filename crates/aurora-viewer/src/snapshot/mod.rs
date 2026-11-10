@@ -9,6 +9,7 @@
 //! `profile`; what the photo shows is chosen by `isolate`; the window is
 //! `ui::snapshot`, the frames `app::snapshot`.
 
+pub mod full_save;
 pub mod gallery;
 pub mod inventory;
 pub mod isolate;
@@ -20,14 +21,21 @@ pub mod profile;
 pub mod quality;
 pub mod reel;
 pub mod save;
+pub mod saved;
 pub mod viewfinder;
 
 use glam::{Mat4, Vec4};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-/// MAX_SNAPSHOT_IMAGE_SIZE of llviewerwindow.h: the largest side.
-pub const MAX_SIDE: u32 = 7680;
+/// The largest side of a photo for the disk. The Legacy Viewer stops at
+/// 7,680 (MAX_SNAPSHOT_IMAGE_SIZE of llviewerwindow.h); Aurora draws a photo
+/// in tiles reduced one by one, so that its side is bound by the memory of
+/// the assembled picture alone: 16,384 x 16,384 is 1 GiB of RGBA. The
+/// inventory, the profile feed and the postcard keep their own sizes.
+pub const MAX_SIDE: u32 = 16_384;
+/// The Legacy Viewer's largest side: the "8K" preset.
+pub const LEGACY_MAX_SIDE: u32 = 7680;
 /// The smallest side (the floater's spinners, min_val="32").
 pub const MIN_SIDE: u32 = 32;
 
@@ -93,17 +101,20 @@ pub enum Resolution {
     Uhd,
     K5,
     K8,
+    /// 15,360 pixels (16K UHD), drawn in tiles.
+    K16,
     Custom,
 }
 
 impl Resolution {
-    pub const ALL: [Resolution; 7] = [
+    pub const ALL: [Resolution; 8] = [
         Resolution::Window,
         Resolution::Hd,
         Resolution::Qhd,
         Resolution::Uhd,
         Resolution::K5,
         Resolution::K8,
+        Resolution::K16,
         Resolution::Custom,
     ];
 
@@ -114,7 +125,8 @@ impl Resolution {
             Resolution::Qhd => Some(2560),
             Resolution::Uhd => Some(3840),
             Resolution::K5 => Some(5120),
-            Resolution::K8 => Some(MAX_SIDE),
+            Resolution::K8 => Some(LEGACY_MAX_SIDE),
+            Resolution::K16 => Some(15_360),
             Resolution::Window | Resolution::Custom => None,
         }
     }
@@ -126,6 +138,7 @@ impl Resolution {
             Resolution::Uhd => Some("4K"),
             Resolution::K5 => Some("5K"),
             Resolution::K8 => Some("8K"),
+            Resolution::K16 => Some("16K"),
             Resolution::Window | Resolution::Custom => None,
         }
     }
@@ -250,6 +263,8 @@ pub struct Settings {
     /// "Photo quality": the graphics raised while the window is open
     /// (`quality`), the user's settings back once it closes.
     pub quality: bool,
+    /// Samples drawn for each pixel of the photo (`quality::Supersampling`).
+    pub supersampling: quality::Supersampling,
     /// The warning before the first "Photo quality" was accepted: a modest
     /// PC may freeze or crash with every graphics setting at its maximum.
     pub quality_warned: bool,
@@ -264,6 +279,9 @@ pub struct Settings {
     /// The settings of Aurora's looks by id (`knobs`), kept when a look is
     /// taken out.
     pub look_settings: std::collections::BTreeMap<String, Vec<f32>>,
+    /// The photo profiles, by name (`saved`).
+    #[serde(deserialize_with = "saved::lenient")]
+    pub profiles: std::collections::BTreeMap<String, saved::Profile>,
 }
 
 impl Default for Settings {
@@ -291,11 +309,13 @@ impl Default for Settings {
             postcard_size: profile::ProfileSize::S800,
             dof: Default::default(),
             quality: false,
+            supersampling: Default::default(),
             quality_warned: false,
             quality_off_after_crash: true,
             viewfinder: Default::default(),
             looks: Vec::new(),
             look_settings: Default::default(),
+            profiles: Default::default(),
         }
     }
 }
@@ -384,7 +404,8 @@ pub fn default_folder() -> PathBuf {
 
 /// Size of a photo: the preset's long side with the proportions, the
 /// window's size, or the typed one; even sides between MIN_SIDE and
-/// MAX_SIDE (the encoders and the viewers of most sites prefer them).
+/// MAX_SIDE (the encoders and the viewers of most sites prefer them), at
+/// any proportions.
 pub fn photo_size(aspect: Aspect, resolution: Resolution, custom: [u32; 2], window: (u32, u32)) -> (u32, u32) {
     let window = (window.0.max(1), window.1.max(1));
     let ratio = aspect.ratio(window);
@@ -411,6 +432,19 @@ pub struct Tile {
     pub y: u32,
     pub width: u32,
     pub height: u32,
+}
+
+impl Tile {
+    /// The tile in the pixels of the photo drawn at `factor` times its size.
+    pub fn scaled(self, factor: u32) -> Tile {
+        let f = factor.max(1);
+        Tile {
+            x: self.x * f,
+            y: self.y * f,
+            width: self.width * f,
+            height: self.height * f,
+        }
+    }
 }
 
 /// One pass of a photo: the tile it keeps, and the larger part of the photo
@@ -474,6 +508,32 @@ pub fn pass_pixels(free_bytes: u64, per_pixel: u64, window: (u32, u32)) -> u64 {
 /// Bytes a photo pass takes beyond its render targets, for each pixel: its
 /// own output texture (8-bit RGBA) and the buffer it is read back into.
 pub const PASS_OUTPUT_BYTES: u64 = 8;
+
+/// The most pixels of a pass its read-back buffer holds within the device's
+/// largest buffer (`max_buffer`, wgpu's `max_buffer_size`): four bytes a
+/// pixel, each row rounded up to 256 bytes (at most a quarter more for a
+/// pass 256 pixels wide or wider, hence five). Without it a card with
+/// memory to spare planned a 16K photo in one pass whose buffer of 1 GiB
+/// the device refuses.
+pub fn readback_pixels(max_buffer: u64) -> u64 {
+    max_buffer / 5
+}
+
+/// Bytes of system memory the assembled photo of `size` takes (RGBA8).
+pub fn photo_bytes(size: (u32, u32)) -> u64 {
+    u64::from(size.0) * u64::from(size.1) * 4
+}
+
+/// A zeroed buffer of `bytes` for the assembled photo, or None when the
+/// system cannot give it (a 16K photo is 1 GiB): the photo is given up with
+/// a message, never a crash.
+pub fn photo_buffer(bytes: u64) -> Option<Vec<u8>> {
+    let len = usize::try_from(bytes).ok()?;
+    let mut v = Vec::new();
+    v.try_reserve_exact(len).ok()?;
+    v.resize(len, 0);
+    Some(v)
+}
 
 /// Bytes of render targets a pixel takes when the renderer has not measured
 /// them yet, besides [`FALLBACK_BYTES_PER_SAMPLE`] per MSAA sample: fitted
@@ -664,6 +724,18 @@ pub fn plan(size: (u32, u32), max_side: u32, max_pixels: u64, guard: u32) -> Vec
     tiles
 }
 
+/// How a photo of `size` drawn at `factor` times its size on each side is
+/// drawn ([`plan`]), in the photo's own pixels: each pass draws its part
+/// `factor` times larger (`Tile::scaled`) and is reduced as it is read back
+/// (`quality::reduce_into`), so every edge of a tile falls on a whole pixel
+/// of the photo. `max_side`, `max_pixels` and `guard` are what a pass may
+/// draw and the band its effects need, in drawn pixels: the band is as
+/// many photo pixels as cover it.
+pub fn plan_supersampled(size: (u32, u32), factor: u32, max_side: u32, max_pixels: u64, guard: u32) -> Vec<TilePass> {
+    let f = factor.max(1);
+    plan(size, max_side / f, max_pixels / (u64::from(f) * u64::from(f)), guard.div_ceil(f))
+}
+
 /// The largest power of two within `v` (at least 1).
 fn prev_power_of_two(v: u32) -> u32 {
     1 << (31 - v.max(1).leading_zeros())
@@ -845,6 +917,23 @@ impl ContextPass {
         } else {
             ContextPass::None
         }
+    }
+
+    /// The context no larger than a pass may be (`max_side`, `max_pixels`,
+    /// as for [`plan`]): a 16K photo's quarter, or a supersampled photo's,
+    /// is past what one pass draws, and a coarser context still gives the
+    /// far samples their depth.
+    pub fn within(self, max_side: u32, max_pixels: u64) -> Self {
+        let ContextPass::Pending((w, h)) = self else {
+            return self;
+        };
+        let max_side = max_side.max(16);
+        let max_pixels = max_pixels.max(256);
+        let mut div = w.max(h).div_ceil(max_side).max(1);
+        while u64::from(w.div_ceil(div)) * u64::from(h.div_ceil(div)) > max_pixels {
+            div += 1;
+        }
+        ContextPass::Pending((w.div_ceil(div).max(16).min(max_side), h.div_ceil(div).max(16).min(max_side)))
     }
 
     /// The part drawn while part `next` of `tiles` is the next tile, and

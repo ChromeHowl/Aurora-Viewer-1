@@ -469,7 +469,7 @@ fn saved_photos_read_back_in_every_format() {
             save::Job {
                 width: w,
                 height: h,
-                rgba: rgba.clone(),
+                rgba: rgba.clone().into(),
                 format,
                 jpeg_quality: 95,
                 path: path.clone(),
@@ -506,7 +506,7 @@ fn a_wrong_buffer_is_refused_without_a_file() {
         save::Job {
             width: 10,
             height: 10,
-            rgba: vec![0; 12],
+            rgba: vec![0; 12].into(),
             format: FileFormat::Png,
             jpeg_quality: 75,
             path: path.clone(),
@@ -532,7 +532,7 @@ fn a_cut_out_photo_keeps_its_alpha_in_the_png_and_its_colour_when_reduced() {
         save::Job {
             width: w,
             height: h,
-            rgba: rgba.clone(),
+            rgba: rgba.clone().into(),
             format: FileFormat::Png,
             jpeg_quality: 75,
             path: path.clone(),
@@ -871,4 +871,137 @@ fn a_photo_waits_while_the_drawing_is_paused_then_starts_over_once_the_textures_
         PausedPart::Wait
     );
     assert_eq!(w.next(at(700) + quality::DETAIL_WAIT, false, 5, 9), PausedPart::Draw);
+}
+
+#[test]
+fn a_16k_photo_is_planned_in_tiles_that_cover_it_once_with_their_guard() {
+    assert_eq!(MAX_SIDE, 16_384);
+    assert_eq!(
+        photo_size(Aspect::R1x1, Resolution::Custom, [99_999, 99_999], (1920, 1080)),
+        (16_384, 16_384)
+    );
+    assert_eq!(photo_size(Aspect::R16x9, Resolution::K16, [0, 0], (1920, 1080)), (15_360, 8640));
+    // the Legacy Viewer's preset keeps its size
+    assert_eq!(photo_size(Aspect::R16x9, Resolution::K8, [0, 0], (1920, 1080)), (7680, 4320));
+    // any proportions: a strip as long as the limit
+    assert_eq!(
+        photo_size(Aspect::Window, Resolution::Custom, [16_384, 32], (800, 600)),
+        (16_384, 32)
+    );
+    // a card that draws 8,192 pixels a side and 8 Mpx a pass
+    let (side, max_side, max_pixels) = (16_384u32, 8192u32, 8_000_000u64);
+    let tiles = plan((side, side), max_side, max_pixels, TILE_GUARD);
+    assert!(tiles.len() > 32, "{}", tiles.len());
+    // each row of the photo is covered exactly once by the tiles kept
+    // (counted by rows and columns: 268 million pixels are not walked)
+    let mut area = 0u64;
+    for t in &tiles {
+        let (k, d) = (t.keep, t.draw);
+        area += u64::from(k.width) * u64::from(k.height);
+        assert!(d.width <= max_side && d.height <= max_side);
+        assert!(u64::from(d.width) * u64::from(d.height) <= max_pixels);
+        assert!(d.x <= k.x && d.y <= k.y && d.x + d.width >= k.x + k.width && d.y + d.height >= k.y + k.height);
+        // a whole guard band on every side shared with another tile
+        assert!(k.x == 0 || k.x - d.x >= TILE_GUARD);
+        assert!(k.y == 0 || k.y - d.y >= TILE_GUARD);
+        assert!(k.x + k.width == side || d.x + d.width - (k.x + k.width) >= TILE_GUARD);
+        assert!(k.y + k.height == side || d.y + d.height - (k.y + k.height) >= TILE_GUARD);
+    }
+    assert_eq!(area, u64::from(side) * u64::from(side));
+    for (i, a) in tiles.iter().enumerate() {
+        for b in &tiles[i + 1..] {
+            let (a, b) = (a.keep, b.keep);
+            let apart = a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y;
+            assert!(apart, "{a:?} {b:?}");
+        }
+    }
+    // one pass on a card that holds it
+    assert_eq!(plan((side, side), 16_384, u64::MAX, TILE_GUARD).len(), 1);
+}
+
+#[test]
+fn the_memory_of_a_photo_is_counted_in_64_bits_and_asked_not_assumed() {
+    // 16,384 x 16,384 RGBA is exactly 1 GiB, past what 32 bits count
+    assert_eq!(photo_bytes((16_384, 16_384)), 1 << 30);
+    assert_eq!(photo_bytes((65_536, 65_536)), 1 << 34);
+    assert_eq!(photo_bytes((7680, 4320)), 132_710_400);
+    let small = photo_buffer(photo_bytes((64, 32))).expect("a small photo");
+    assert_eq!(small.len(), 64 * 32 * 4);
+    assert!(small.iter().all(|&b| b == 0));
+    // more than any system gives: refused, no panic
+    assert!(photo_buffer(u64::MAX).is_none());
+    assert!(photo_buffer(1 << 62).is_none());
+    // the read-back buffer of a pass, its rows rounded up to 256 bytes,
+    // within the device's largest buffer
+    for (w, h) in [(256u64, 4000u64), (300, 3000), (4096, 2160), (16_384, 16_384)] {
+        let buffer = (w * 4).div_ceil(256) * 256 * h;
+        assert!(buffer <= (w * h) * 5, "{w} x {h}");
+    }
+    // wgpu's default largest buffer, 256 MiB: 53 Mpx a pass, so a 16K
+    // photo (268 Mpx) is never one pass there
+    assert_eq!(readback_pixels(256 << 20), 53_687_091);
+    assert!(readback_pixels(256 << 20) < 16_384 * 16_384);
+    // the pass bound by it fits the buffer
+    let max = readback_pixels(256 << 20);
+    for t in plan((16_384, 16_384), 16_384, max, TILE_GUARD) {
+        let (w, h) = (u64::from(t.draw.width), u64::from(t.draw.height));
+        assert!((w * 4).div_ceil(256) * 256 * h <= 256 << 20);
+    }
+}
+
+#[test]
+fn the_context_of_a_large_photo_stays_within_one_pass() {
+    // an 8K photo's quarter fits: unchanged
+    let quarter = ContextPass::plan((7680, 4320), 6, true);
+    assert_eq!(quarter.within(8192, 8_000_000), quarter);
+    // a 16K photo's quarter is 16.8 Mpx: drawn coarser, same proportions
+    let ContextPass::Pending((w, h)) = ContextPass::plan((16_384, 16_384), 60, true).within(8192, 8_000_000) else {
+        panic!("a context");
+    };
+    assert_eq!(w, h);
+    assert!(u64::from(w) * u64::from(h) <= 8_000_000 && w >= 2048, "{w}");
+    // a photo drawn at four times 16,384: its quarter is past the card's side
+    let ContextPass::Pending((w, h)) = ContextPass::plan((65_536, 32_768), 900, true).within(8192, 64_000_000) else {
+        panic!("a context");
+    };
+    assert!(w <= 8192 && h <= 8192 && w == 2 * h, "{w} x {h}");
+    assert_eq!(ContextPass::None.within(8192, 1), ContextPass::None);
+    assert_eq!(ContextPass::Drawn.within(8192, 1), ContextPass::Drawn);
+}
+
+#[test]
+fn a_large_photo_is_reduced_without_overflowing_32_bits() {
+    // a strip 16,384 wide: the offsets of its last rows are past 2^32 bytes
+    // only in a full photo, which a test does not allocate; the arithmetic
+    // is the same on a strip
+    let (w, h) = (16_384u32, 4u32);
+    let mut rgba = vec![0u8; (w * h * 4) as usize];
+    for px in rgba.as_chunks_mut::<4>().0.iter_mut().skip(w as usize * 2) {
+        *px = [200, 100, 50, 255];
+    }
+    let (tw, th, out) = save::downscale(w, h, &rgba, 8192);
+    assert_eq!((tw, th), (8192, 2));
+    assert_eq!(out.len(), 8192 * 2 * 4);
+    assert_eq!(&out[..4], &[0, 0, 0, 0]);
+    assert_eq!(&out[out.len() - 4..], &[200, 100, 50, 255]);
+}
+
+#[test]
+fn an_opaque_png_is_written_from_rgba_a_band_at_a_time() {
+    // more rows than one band, a width that is no multiple of anything
+    let (w, h) = (37u32, 150u32);
+    let mut rgba = Vec::new();
+    for y in 0..h {
+        for x in 0..w {
+            rgba.extend_from_slice(&[x as u8, y as u8, 7, 3]);
+        }
+    }
+    let mut banded = Vec::new();
+    save::encode_png_opaque(&mut banded, w, h, &rgba, &AtomicU32::new(0)).unwrap();
+    let back = image::load_from_memory(&banded).unwrap();
+    assert_eq!(back.color(), image::ColorType::Rgb8);
+    let back = back.to_rgb8();
+    assert_eq!((back.width(), back.height()), (w, h));
+    assert_eq!(back.get_pixel(36, 149).0, [36, 149, 7]);
+    assert_eq!(back.get_pixel(5, 64).0, [5, 64, 7]);
 }

@@ -9668,9 +9668,10 @@ impl Backend {
         );
         // (a cut-out photo keeps its coverage, cutout.rs)
         let opaque = if cutout { 0 } else { 255 };
-        let mut out = Vec::with_capacity((w * h * 4) as usize);
-        for y in 0..h {
-            let r = &view[(y * row) as usize..(y * row + w * 4) as usize];
+        let (w_bytes, row_bytes) = (w as usize * 4, row as usize);
+        let mut out = Vec::with_capacity(w_bytes * h as usize);
+        for y in 0..h as usize {
+            let r = &view[y * row_bytes..y * row_bytes + w_bytes];
             for px in r.as_chunks::<4>().0 {
                 let a = px[3] | opaque;
                 if bgra {
@@ -9700,7 +9701,9 @@ impl Backend {
         let row = (w * 4).div_ceil(256) * 256;
         let buf = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("capture"),
-            size: crate::readback::readback_size((row * h) as u64),
+            // (64 bits: a photo pass on a card that draws 32,768 pixels a
+            // side is past 4 GiB of rows)
+            size: crate::readback::readback_size(u64::from(row) * u64::from(h)),
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
