@@ -204,6 +204,9 @@ pub struct BuildSettings {
     pub land_brush_force: f32,
     /// Actual-root pivot: primary linkset root, or primary prim in linked editing.
     pub actual_root: bool,
+    /// The unlink confirmation, pivot point, light radius and selection
+    /// filters (settings/build_tools.rs).
+    pub tools: crate::settings::build_tools::BuildTools,
     /// SelectReflectionProbes: off at each start (settings.xml, Persist=0).
     #[serde(skip)]
     pub select_probes: bool,
@@ -363,10 +366,12 @@ pub fn copyable_object(world: &World, idx: usize) -> bool {
 /// permMove read the root's flags; a permanent (pathfinding) object only
 /// counts as movable in the agent's region (isPermanentEnforced). The
 /// right-click menu's temporary selection skips this check, as
-/// LLToolSelect::handleObjectSelection does with temp_select.
+/// LLToolSelect::handleObjectSelection does with temp_select. The same
+/// place refuses, when asked, what is not copyable (FSSelectCopyableOnly)
+/// and what we may move (FSSelectLockedOnly: locked objects only).
 pub fn passes_select_filters(world: &World, s: &BuildSettings, idx: usize) -> bool {
-    use crate::ui::context::flags::{AFFECTS_NAVMESH, OBJECT_MOVE, OBJECT_YOU_OWNER};
-    if !s.select_owned_only && !s.select_movable_only {
+    use crate::ui::context::flags::{AFFECTS_NAVMESH, OBJECT_COPY, OBJECT_MOVE, OBJECT_YOU_OWNER};
+    if !s.select_owned_only && !s.select_movable_only && !s.tools.select_copyable && !s.tools.select_locked {
         return true;
     }
     let Some(root) = world.objects.get(root_of(world, idx)) else {
@@ -374,7 +379,22 @@ pub fn passes_select_filters(world: &World, s: &BuildSettings, idx: usize) -> bo
     };
     let flags = root.update_flags;
     let permanent_enforced = flags & AFFECTS_NAVMESH != 0 && world.main_region != Some(root.key.region);
-    !(s.select_owned_only && flags & OBJECT_YOU_OWNER == 0) && !(s.select_movable_only && (flags & OBJECT_MOVE == 0 || permanent_enforced))
+    let movable = flags & OBJECT_MOVE != 0 && !permanent_enforced;
+    !(s.select_owned_only && flags & OBJECT_YOU_OWNER == 0)
+        && !(s.select_movable_only && !movable)
+        && !(s.tools.select_copyable && flags & OBJECT_COPY == 0)
+        && !(s.tools.select_locked && movable)
+}
+
+/// FSSelectIncludeGroupOwned off: a rectangle leaves the group-owned
+/// objects out (LLSelectMgr::highlightObjectOnly).
+fn passes_rect_group_filter(world: &World, s: &BuildSettings, idx: usize) -> bool {
+    use crate::ui::context::flags::OBJECT_GROUP_OWNED;
+    s.tools.select_group_owned
+        || world
+            .objects
+            .get(root_of(world, idx))
+            .is_some_and(|root| root.update_flags & OBJECT_GROUP_OWNED == 0)
 }
 
 /// LLSelectMgr::highlightObjectAndFamily for the objects of ForceObjectSelect:
@@ -646,6 +666,7 @@ impl Default for BuildSettings {
             land_brush_size: 2.0,
             land_brush_force: 1.0,
             actual_root: false,
+            tools: Default::default(),
             select_probes: false,
             select_owned_only: false,
             select_movable_only: false,
@@ -820,6 +841,9 @@ pub struct BuildTool {
     /// menu selection of LLViewerMenuHolderGL, dropped by deselectUnused
     /// when the menu closes outside build mode). Outlined like in build mode.
     pub menu_selection: bool,
+    /// The build options of `BuildSettings::tools` as last shown (the
+    /// unlink confirmation reads them where no settings are passed).
+    pub options: crate::settings::build_tools::BuildTools,
     /// Selection mode of `selection`.
     pub selection_linked: bool,
     /// Ordered link instruction awaiting confirmed simulator parents.
@@ -895,6 +919,7 @@ impl Default for BuildTool {
             link_triangles: HashMap::new(),
             link_properties: HashSet::new(),
             pending_unlink: None,
+            options: Default::default(),
             props: HashMap::new(),
             cam: Cam::default(),
             out: Vec::new(),
@@ -1751,7 +1776,10 @@ impl BuildTool {
         }
     }
 
-    /// Ctrl+Shift+L: every selected prim (SEND_INDIVIDUALS).
+    /// Ctrl+Shift+L: every selected prim (SEND_INDIVIDUALS). Asked first
+    /// when a linkset would come apart and the confirmation is on
+    /// (LLSelectMgr::unlinkObjects, FSUnlinkConfirmEnabled): the prims are
+    /// kept for the answer (`unlink_confirmed`).
     pub fn unlink(&mut self, world: &mut World) {
         if self.attachment_selected(world) {
             return;
@@ -1765,7 +1793,31 @@ impl BuildTool {
         if prims.is_empty() {
             return;
         }
-        for (handle, ids) in self.group_by_region(world, &prims) {
+        // getRootObjectCount: the selected prims that are roots themselves
+        let roots = prims.iter().filter(|&&i| root_of(world, i) == i).count();
+        if self.options.unlink_needs_confirm(prims.len(), roots) {
+            let keys = prims.iter().filter_map(|&i| world.objects.get(i).map(|o| o.key)).collect();
+            self.ui.unlink_ask = Some(keys);
+            return;
+        }
+        self.unlink_prims(world, &prims);
+    }
+
+    /// The answer to the unlink confirmation: the prims asked about, those
+    /// still there and ours to modify.
+    pub fn unlink_confirmed(&mut self, world: &mut World, keys: &[ObjKey]) {
+        let prims: Vec<usize> = keys
+            .iter()
+            .filter_map(|k| world.objects.index_of(k))
+            .filter(|&i| self.can_modify(world, i))
+            .collect();
+        if !prims.is_empty() {
+            self.unlink_prims(world, &prims);
+        }
+    }
+
+    fn unlink_prims(&mut self, world: &mut World, prims: &[usize]) {
+        for (handle, ids) in self.group_by_region(world, prims) {
             self.send(BuildCmd::Delink { handle, local_ids: ids });
         }
         // with "Edit linked" the selection already holds each prim
@@ -1925,6 +1977,7 @@ impl BuildTool {
             };
             if taken
                 && passes_select_filters(world, s, idx)
+                && passes_rect_group_filter(world, s, idx)
                 && let Some(u) = Self::unit_of(world, idx, s.edit_linked)
                 && seen.insert(u)
             {

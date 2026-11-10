@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 pub mod area_search;
 pub mod backup;
+pub mod build_tools;
 pub mod draw_stepping;
 mod hover_height;
 pub mod registry;
@@ -3053,6 +3054,7 @@ impl Settings {
             512.0
         };
         self.render_extras.sanitize();
+        self.build.tools.sanitize();
         self.tonemapper = self.tonemapper.min(TONEMAPPER_MAX);
         self.tonemap_mix = if self.tonemap_mix.is_finite() {
             self.tonemap_mix.clamp(0.0, 1.0)

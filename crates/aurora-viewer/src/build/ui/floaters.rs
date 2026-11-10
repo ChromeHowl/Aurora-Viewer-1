@@ -771,6 +771,46 @@ pub(super) fn link_error(ctx: &egui::Context, p: &Palette, tool: &mut BuildTool)
     }
 }
 
+/// The ConfirmUnlink question (LLSelectMgr::confirmUnlinkObjects):
+/// "Unlink" goes on with the prims asked about, "Cancel" or Escape drops it.
+pub(super) fn unlink_confirm(ctx: &egui::Context, p: &Palette, tool: &mut BuildTool, world: &mut World) {
+    let Some(keys) = tool.ui.unlink_ask.clone() else { return };
+    let mut cancel = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+    let mut unlink = false;
+    crate::ui::widgets::Modal::new(egui::Id::unique("build-unlink-confirm")).show(ctx, |ui| {
+        ui.set_max_width(340.0);
+        ui.label(RichText::new(aurora_i18n::tr!("b7-unlink-confirm")).color(p.ink));
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            let size = Vec2::new(0.0, 26.0);
+            cancel |= crate::ui::widgets::action_button(
+                ui,
+                p,
+                "x",
+                aurora_i18n::tr!("common-cancel"),
+                crate::ui::widgets::ActionKind::Flat,
+                size,
+            )
+            .clicked();
+            unlink = crate::ui::widgets::action_button(
+                ui,
+                p,
+                "unlink",
+                aurora_i18n::tr!("ui-context-unlink"),
+                crate::ui::widgets::ActionKind::Primary,
+                size,
+            )
+            .clicked();
+        });
+    });
+    if unlink {
+        tool.ui.unlink_ask = None;
+        tool.unlink_confirmed(world, &keys);
+    } else if cancel {
+        tool.ui.unlink_ask = None;
+    }
+}
+
 #[cfg(test)]
 mod link_error_tests {
     use super::*;
