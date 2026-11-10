@@ -92,7 +92,13 @@ enum ProfileStep {
 
 struct Job {
     purpose: Purpose,
+    /// The size it is drawn at: `output` times `supersample`, never
+    /// assembled (65,536 a side for a 16K photo at 16 samples).
     size: (u32, u32),
+    /// The size of the picture assembled in `pixels`.
+    output: (u32, u32),
+    /// Its passes, in the pixels of `output`: each one is drawn
+    /// `supersample` times larger (`Tile::scaled`).
     tiles: Vec<TilePass>,
     next: usize,
     /// The current tile's frame is asked.
@@ -105,8 +111,8 @@ struct Job {
     interface: bool,
     huds: bool,
     started: Instant,
-    /// Drawn at this many times the photo's size, reduced once complete
-    /// (the photo quality's supersampling).
+    /// Drawn at this many times the photo's size on each side, each part
+    /// reduced as it is read back (`quality::reduce_into`).
     supersample: u32,
     /// Cut out by the isolation (`snapshot::isolate`): its alpha is kept.
     cutout: bool,
@@ -526,6 +532,18 @@ impl App {
         self.drawing_paused() && self.snapshots.capturing.is_none()
     }
 
+    /// The focus distance every part of the photo being drawn is drawn at:
+    /// the lens's when it started (`Job::focus`), so that no part focuses
+    /// on what the pointer is over in another part's frame.
+    pub(super) fn photo_locked_focus(&self) -> Option<f32> {
+        self.snapshots
+            .job
+            .as_ref()
+            .filter(|j| j.purpose != Purpose::Preview)
+            .and_then(|j| j.focus)
+            .filter(|d| d.is_finite())
+    }
+
     /// Whether the photo mode holds the world still.
     pub(super) fn photo_world_frozen(&self) -> bool {
         self.snapshots.world_freeze.is_some()
@@ -616,7 +634,7 @@ impl App {
                 context: aurora_render::PhotoContext::Record,
             });
         }
-        let tile = job.tiles[job.next].draw;
+        let tile = job.tiles[job.next].draw.scaled(job.supersample);
         let single = job.tiles.len() == 1;
         let spec = SnapshotSpec {
             width: tile.width,
@@ -691,7 +709,9 @@ impl App {
             return;
         }
         let pass = job.tiles[job.next];
-        let Some((_, _, pixels)) = answer.filter(|(w, h, _)| (*w, *h) == (pass.draw.width, pass.draw.height)) else {
+        // (what the pass drew: its part at the supersampling's size)
+        let drawn = pass.draw.scaled(job.supersample);
+        let Some((_, _, pixels)) = answer.filter(|(w, h, _)| (*w, *h) == (drawn.width, drawn.height)) else {
             log::warn!("photo: part {} of {} not drawn", job.next + 1, job.tiles.len());
             self.snapshots.job = None;
             self.snapshots.message = Some((aurora_i18n::tr!("photo-draw-failed").to_owned(), true));
@@ -719,17 +739,17 @@ impl App {
             && self
                 .snapshots
                 .gpu_cost
-                .failed(u64::from(pass.draw.width) * u64::from(pass.draw.height), renderer.size())
+                .failed(u64::from(drawn.width) * u64::from(drawn.height), renderer.size())
         {
             let part = (job.next + 1, job.tiles.len());
-            let size = job.size;
-            let tiles = self.photo_tiles(renderer, size);
+            let (output, factor) = (job.output, job.supersample);
+            let tiles = self.photo_tiles(renderer, output, factor);
             log::warn!(
                 "photo: part {} of {} ({} x {}) came back black (a GPU reset, or a black part): drawn again in {} part(s)",
                 part.0,
                 part.1,
-                pass.draw.width,
-                pass.draw.height,
+                drawn.width,
+                drawn.height,
                 tiles.len()
             );
             if let Some(job) = self.snapshots.job.as_mut() {
@@ -740,17 +760,17 @@ impl App {
             }
             return;
         }
-        if job.tiles.len() == 1 {
+        if job.tiles.len() == 1 && job.supersample == 1 {
             job.pixels = pixels;
         } else {
             if job.pixels.is_empty() {
                 // (1 GiB for a 16K photo: asked of the system, not assumed)
-                let Some(buffer) = snapshot::photo_buffer(snapshot::photo_bytes(job.size)) else {
+                let Some(buffer) = snapshot::photo_buffer(snapshot::photo_bytes(job.output)) else {
                     log::warn!(
                         "photo: no memory for {} x {} ({} MB)",
-                        job.size.0,
-                        job.size.1,
-                        snapshot::photo_bytes(job.size) >> 20
+                        job.output.0,
+                        job.output.1,
+                        snapshot::photo_bytes(job.output) >> 20
                     );
                     self.snapshots.job = None;
                     self.snapshots.message = Some((aurora_i18n::tr!("p16-memory").to_owned(), true));
@@ -758,33 +778,35 @@ impl App {
                 };
                 job.pixels = buffer;
             }
-            snapshot::stitch(&mut job.pixels, job.size.0, pass, &pixels);
+            if job.supersample == 1 {
+                snapshot::stitch(&mut job.pixels, job.output.0, pass, &pixels);
+            } else {
+                // back to the photo's size at once: each pixel the mean of
+                // the ones drawn, the enlarged photo never assembled
+                let f = job.supersample;
+                let skip = ((pass.keep.x - pass.draw.x) * f, (pass.keep.y - pass.draw.y) * f);
+                snapshot::quality::reduce_into(&mut job.pixels, job.output.0, pass.keep, &pixels, drawn.width, skip, f);
+            }
         }
         job.next += 1;
         if job.next < job.tiles.len() {
             return;
         }
-        let Some(mut job) = self.snapshots.job.take() else {
+        let Some(job) = self.snapshots.job.take() else {
             return;
         };
         let render_ms = job.started.elapsed().as_millis();
         if job.purpose != Purpose::Preview {
             log::info!(
-                "photo: {} x {} drawn in {} part(s), {render_ms} ms",
-                job.size.0,
-                job.size.1,
-                job.tiles.len()
+                "photo: {} x {} drawn in {} part(s) at {} sample(s) a pixel, {render_ms} ms",
+                job.output.0,
+                job.output.1,
+                job.tiles.len(),
+                job.supersample * job.supersample
             );
         }
-        if job.supersample > 1 {
-            // back to the photo's size: each pixel the mean of the ones drawn
-            let t0 = Instant::now();
-            let (w, h) = (job.size.0 / job.supersample, job.size.1 / job.supersample);
-            let (_, _, px) = save::downscale(job.size.0, job.size.1, &job.pixels, w.max(h));
-            job.size = (w, h);
-            job.pixels = px;
-            log::info!("photo: reduced to {w} x {h} in {} ms", t0.elapsed().as_millis());
-        }
+        // (from here on the photo is the picture assembled)
+        let job = Job { size: job.output, ..job };
         match job.purpose {
             Purpose::Preview => {
                 let image = egui::ColorImage::from_rgba_unmultiplied([job.size.0 as usize, job.size.1 as usize], &job.pixels);
@@ -1115,12 +1137,14 @@ impl App {
         } else {
             full
         };
-        // the photo quality draws a photo (not its preview) at twice its size
-        let supersample = if purpose != Purpose::Preview && !outfit && self.settings.photo_held.is_some() {
-            snapshot::quality::supersample(size)
+        // a photo (not its preview) is drawn at the supersampling chosen, or
+        // at twice its size by the photo quality
+        let supersample = if purpose != Purpose::Preview && !outfit {
+            self.photo_factor(size)
         } else {
             1
         };
+        let output = size;
         let size = (size.0 * supersample, size.1 * supersample);
         // the choosing in the scene stops: its outlines are not in the
         // photo, which shows what is chosen (the scene follows before the
@@ -1129,10 +1153,12 @@ impl App {
             self.world.photo_isolation.set_picking(false);
         }
         self.snapshots.gpu_cost.new_photo();
-        let tiles = self.photo_tiles(renderer, size);
+        let tiles = self.photo_tiles(renderer, output, supersample);
         if purpose != Purpose::Preview {
             log::info!(
-                "photo: {} x {} planned in {} part(s), at most {} Mpx a pass (memory and GPU time; {} bytes a pixel, {})",
+                "photo: {} x {} drawn at {} x {} planned in {} part(s), at most {} Mpx a pass (memory and GPU time; {} bytes a pixel, {})",
+                output.0,
+                output.1,
                 size.0,
                 size.1,
                 tiles.len(),
@@ -1154,6 +1180,7 @@ impl App {
         self.snapshots.job = Some(Job {
             purpose,
             size,
+            output,
             tiles,
             next: 0,
             asked: false,
@@ -1225,18 +1252,37 @@ impl App {
     /// this photo gets, its `max_coc` grows with its height) read the image
     /// farther than the screen-space passes, and the contact shadows as far
     /// as their rays reach at this photo's scale.
-    fn photo_tiles(&self, renderer: &Renderer, size: (u32, u32)) -> Vec<snapshot::TilePass> {
+    /// `size` is the photo's; its passes are drawn `factor` times larger
+    /// (`snapshot::plan_supersampled`), the band counted in the pixels drawn.
+    fn photo_tiles(&self, renderer: &Renderer, size: (u32, u32), factor: u32) -> Vec<snapshot::TilePass> {
+        let output = size;
+        let size = (size.0 * factor.max(1), size.1 * factor.max(1));
         let bloom = if self.settings.bloom { self.settings.bloom_strength } else { 0.0 };
         let dof = self
             .photo_dof_max_coc(size.1, renderer.size().1)
             .map_or(0, aurora_render::dof_tile_reach);
         let scale = snapshot::viewfinder_scale(size, renderer.size(), self.settings.render_scale_percent);
         let contact = aurora_render::contact_tile_reach(self.settings.contact_shadows, scale);
-        let guard = snapshot::TILE_GUARD
+        // (GTAO's radius is in metres: drawn `factor` times larger, it
+        // spans as many more pixels, the band as many photo pixels as
+        // without the supersampling)
+        let guard = (snapshot::TILE_GUARD * factor.max(1))
             .max(aurora_render::bloom_tile_reach(bloom))
             .max(dof)
             .max(contact);
-        snapshot::plan(size, self.photo_max_side(renderer), self.photo_max_pixels(renderer), guard)
+        snapshot::plan_supersampled(
+            output,
+            factor,
+            self.photo_max_side(renderer),
+            self.photo_max_pixels(renderer),
+            guard,
+        )
+    }
+
+    /// Times its size a photo of `size` is drawn at on each side: the
+    /// supersampling chosen in the window, or the photo quality's own.
+    pub(super) fn photo_factor(&self, size: (u32, u32)) -> u32 {
+        snapshot::quality::factor(self.settings.snapshot.supersampling, self.settings.photo_held.is_some(), size)
     }
 
     /// The largest side drawn in one pass: the card's, or in demo
@@ -2199,7 +2245,7 @@ LUT_3D_SIZE {n}
             let inventory = (self.snapshots.ui.destination == Destination::Inventory).then(|| self.photo_inventory_view(window));
             let profile = (self.snapshots.ui.destination == Destination::Profile).then(|| self.photo_profile_view(window));
             let email = (self.snapshots.ui.destination == Destination::Email).then(|| self.photo_email_view(window));
-            let tiles = self.photo_tiles(renderer, photo).len();
+            let tiles = self.photo_tiles(renderer, photo, self.photo_factor(photo)).len();
             let busy = self.photo_busy_line();
             if let Some((_, what)) = &busy {
                 let now = ctx.input(|i| i.time);
@@ -2260,7 +2306,7 @@ LUT_3D_SIZE {n}
             let profile = (self.snapshots.ui.destination == Destination::Profile).then(|| self.photo_profile_view(window));
             let email = (self.snapshots.ui.destination == Destination::Email).then(|| self.photo_email_view(window));
             let mut state = std::mem::take(&mut self.snapshots.ui);
-            let tiles = self.photo_tiles(renderer, photo).len();
+            let tiles = self.photo_tiles(renderer, photo, self.photo_factor(photo)).len();
             let s = &self.snapshots;
             let busy = if let Some(t) = s.detail_wait {
                 let wait = snapshot::quality::DETAIL_WAIT.as_secs_f32();

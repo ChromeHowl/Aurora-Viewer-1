@@ -13549,3 +13549,8 @@ ui-options-draw-distance-stepping-hint = Après la connexion et après une tél�
 
 # Photo: sizes up to 16,384 pixels, supersampling, full save, photo profiles
 p16-memory = Pas assez de mémoire pour une photo aussi grande. Choisissez une taille plus petite.
+p16-supersampling = Suréchantillonnage
+p16-supersampling-hint = Échantillons rendus pour chaque pixel de la photo, puis moyennés : des bords plus lisses et des détails plus fins, à toutes les tailles. Le rendu de la photo dure autant de fois plus longtemps.
+p16-supersampling-quality-hint = Désactivé : la Qualité photo rend quand même cette photo avec 4 échantillons par pixel, comme avant.
+p16-supersampling-off = Désactivé
+p16-supersampling-samples = { $count }x

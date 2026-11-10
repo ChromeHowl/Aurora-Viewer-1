@@ -8,6 +8,7 @@
 use super::widgets::{self, ActionKind, Floater};
 use crate::snapshot::inventory::TextureSize;
 use crate::snapshot::profile::ProfileSize;
+use crate::snapshot::quality::Supersampling;
 use crate::snapshot::{Aspect, FileFormat, Guide, Resolution, Settings};
 use crate::theme::Palette;
 use egui::{Color32, Pos2, Rect, RichText, Sense, Stroke, Vec2};
@@ -669,6 +670,33 @@ impl SnapshotUi {
             Some(aurora_i18n::tr!("photo-quality-hint")),
             |ui| {
                 widgets::switch(ui, p, &mut s.quality);
+            },
+        );
+        // samples a pixel; Off leaves the photo quality its own 4 samples
+        // for the photos it always drew at twice their size
+        let auto = s.quality && s.supersampling == Supersampling::Off && crate::snapshot::quality::supersample(view.photo) > 1;
+        row(
+            ui,
+            p,
+            aurora_i18n::tr!("p16-supersampling"),
+            Some(if auto {
+                aurora_i18n::tr!("p16-supersampling-quality-hint")
+            } else {
+                aurora_i18n::tr!("p16-supersampling-hint")
+            }),
+            |ui| {
+                let labels: Vec<String> = Supersampling::ALL
+                    .iter()
+                    .map(|c| match c {
+                        Supersampling::Off => aurora_i18n::tr!("p16-supersampling-off").to_owned(),
+                        c => aurora_i18n::tr!("p16-supersampling-samples", count = c.samples()).to_owned(),
+                    })
+                    .collect();
+                let options: Vec<(&str, bool)> = labels.iter().map(|l| (l.as_str(), true)).collect();
+                let mut i = Supersampling::ALL.iter().position(|c| *c == s.supersampling).unwrap_or(0);
+                if widgets::segmented(ui, p, &mut i, &options) {
+                    s.supersampling = Supersampling::ALL[i];
+                }
             },
         );
         row(

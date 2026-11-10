@@ -261,6 +261,8 @@ pub struct Settings {
     /// "Photo quality": the graphics raised while the window is open
     /// (`quality`), the user's settings back once it closes.
     pub quality: bool,
+    /// Samples drawn for each pixel of the photo (`quality::Supersampling`).
+    pub supersampling: quality::Supersampling,
     /// The warning before the first "Photo quality" was accepted: a modest
     /// PC may freeze or crash with every graphics setting at its maximum.
     pub quality_warned: bool,
@@ -302,6 +304,7 @@ impl Default for Settings {
             postcard_size: profile::ProfileSize::S800,
             dof: Default::default(),
             quality: false,
+            supersampling: Default::default(),
             quality_warned: false,
             quality_off_after_crash: true,
             viewfinder: Default::default(),
@@ -423,6 +426,19 @@ pub struct Tile {
     pub y: u32,
     pub width: u32,
     pub height: u32,
+}
+
+impl Tile {
+    /// The tile in the pixels of the photo drawn at `factor` times its size.
+    pub fn scaled(self, factor: u32) -> Tile {
+        let f = factor.max(1);
+        Tile {
+            x: self.x * f,
+            y: self.y * f,
+            width: self.width * f,
+            height: self.height * f,
+        }
+    }
 }
 
 /// One pass of a photo: the tile it keeps, and the larger part of the photo
@@ -700,6 +716,18 @@ pub fn plan(size: (u32, u32), max_side: u32, max_pixels: u64, guard: u32) -> Vec
         }
     }
     tiles
+}
+
+/// How a photo of `size` drawn at `factor` times its size on each side is
+/// drawn ([`plan`]), in the photo's own pixels: each pass draws its part
+/// `factor` times larger (`Tile::scaled`) and is reduced as it is read back
+/// (`quality::reduce_into`), so every edge of a tile falls on a whole pixel
+/// of the photo. `max_side`, `max_pixels` and `guard` are what a pass may
+/// draw and the band its effects need, in drawn pixels: the band is as
+/// many photo pixels as cover it.
+pub fn plan_supersampled(size: (u32, u32), factor: u32, max_side: u32, max_pixels: u64, guard: u32) -> Vec<TilePass> {
+    let f = factor.max(1);
+    plan(size, max_side / f, max_pixels / (u64::from(f) * u64::from(f)), guard.div_ceil(f))
 }
 
 /// The largest power of two within `v` (at least 1).

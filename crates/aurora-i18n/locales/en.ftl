@@ -13553,3 +13553,8 @@ ui-options-draw-distance-stepping-hint = After logging in and after a teleport t
 
 # Photo: sizes up to 16,384 pixels, supersampling, full save, photo profiles
 p16-memory = Not enough memory for a photo this large. Choose a smaller size.
+p16-supersampling = Supersampling
+p16-supersampling-hint = Samples drawn for each pixel of the photo, then averaged: smoother edges and finer detail, at any size. The photo takes that many times longer to draw.
+p16-supersampling-quality-hint = Off: Photo quality still draws this photo with 4 samples per pixel, as before.
+p16-supersampling-off = Off
+p16-supersampling-samples = { $count }x

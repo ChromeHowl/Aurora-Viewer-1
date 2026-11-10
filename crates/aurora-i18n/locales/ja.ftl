@@ -13520,3 +13520,8 @@ ui-options-draw-distance-stepping-hint = ログイン後と別のリージョン
 
 # Photo: sizes up to 16,384 pixels, supersampling, full save, photo profiles
 p16-memory = この大きさの写真にはメモリが足りません。小さいサイズを選んでください。
+p16-supersampling = スーパーサンプリング
+p16-supersampling-hint = 写真の1ピクセルごとに描画して平均するサンプル数です。どのサイズでも輪郭がなめらかになり、細部が精細になります。描画時間はその倍数だけ長くなります。
+p16-supersampling-quality-hint = オフ：「写真の品質」はこれまでどおり、この写真を1ピクセルあたり4サンプルで描画します。
+p16-supersampling-off = オフ
+p16-supersampling-samples = { $count }x
