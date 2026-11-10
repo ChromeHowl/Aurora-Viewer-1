@@ -374,7 +374,7 @@ fn list_part(
                 }
                 let width = ui.available_width().min(ui.clip_rect().right() - ui.cursor().left()).max(0.0);
                 let bounds = Rect::from_min_size(ui.cursor().min, Vec2::new(width, if compact { COMPACT_H } else { RICH_H }));
-                let count = 4 + usize::from(!row.friend && row.id != world.agent_id);
+                let count = 4 + usize::from(can_befriend(world, row));
                 let badge_count = badges(p, row).len();
                 let (rect, resp) = super::rows::allocate(ui, row.id, bounds.size());
                 if !ui.is_rect_visible(rect) {
@@ -752,6 +752,12 @@ fn paint_badges(
     tip
 }
 
+/// A friendship can be offered: not to ourselves, a friend shown on the row
+/// or a hidden one (still a friend for the server).
+fn can_befriend(world: &World, row: &Row) -> bool {
+    !row.friend && row.id != world.agent_id && !world.social.is_friend_hidden(&row.id)
+}
+
 /// The quick actions of a row: profile, instant message, a friendship
 /// offer to a stranger, contact details, and the row's whole menu.
 fn quick_actions(world: &World, row: &Row) -> Vec<(&'static str, &'static str)> {
@@ -759,7 +765,7 @@ fn quick_actions(world: &World, row: &Row) -> Vec<(&'static str, &'static str)> 
         ("user-filled", aurora_i18n::tr!("common-view-profile")),
         ("message-circle-filled", aurora_i18n::tr!("ui-context-send-im")),
     ];
-    if !row.friend && row.id != world.agent_id {
+    if can_befriend(world, row) {
         buttons.push(("user-plus", aurora_i18n::tr!("radar-add-friend")));
     }
     buttons.push(("info-circle-filled", aurora_i18n::tr!("people-show-contact-sheet")));

@@ -9894,7 +9894,7 @@ impl App {
             for id in self.world.mutes.blocked_ids() {
                 exceptions.insert(id, 3);
             }
-            let friends: std::collections::HashSet<uuid::Uuid> = self.world.social.friends.iter().map(|f| f.id).collect();
+            let friends: std::collections::HashSet<uuid::Uuid> = self.world.social.shown_friends().map(|f| f.id).collect();
             self.scene.update_complexity(
                 &self.world,
                 &crate::scene::complexity::Rules {

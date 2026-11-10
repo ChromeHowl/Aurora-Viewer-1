@@ -13546,3 +13546,13 @@ ui-options-attached-particles-hint = Affiche les particules de ce que portent le
 # Preferences › Graphics: progressive draw distance (FSRenderFarClipStepping)
 ui-options-draw-distance-stepping = Distance d'affichage progressive
 ui-options-draw-distance-stepping-hint = Après la connexion et après une téléportation vers une autre région, la distance d'affichage part de 32 m et double jusqu'à la vôtre, pour que ce qui est proche se charge d'abord.
+
+# Hide a friend: a friend hidden in this viewer only (People › Hidden)
+hidefriend-hide = Masquer cet ami
+hidefriend-hide-tip = Masque cet ami dans ce viewer uniquement : il reste votre ami et n'en est pas informé. Ses messages, appels et offres arrivent toujours.
+hidefriend-unhide = Ne plus masquer cet ami
+hidefriend-unhide-short = Ne plus masquer
+hidefriend-tab = Masqués
+hidefriend-list-hint = Amis masqués dans ce viewer uniquement. Ils restent vos amis et n'en sont pas informés ; leurs messages, appels et offres arrivent toujours.
+hidefriend-list-empty = Aucun ami n'est masqué.
+hidefriend-row-sub = Ami masqué

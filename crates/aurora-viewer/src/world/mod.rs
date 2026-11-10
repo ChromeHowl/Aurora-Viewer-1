@@ -41,6 +41,7 @@ pub mod group_data;
 pub mod group_money;
 pub mod groups;
 pub mod hand_ik;
+pub mod hidden_friends;
 pub mod home;
 pub mod hover_height;
 pub mod hud_lock;
@@ -2577,6 +2578,7 @@ impl World {
                 self.agent.set_look_at(l.look_at);
                 self.social = social::Social::from_login(&l.raw);
                 let account = crate::settings::account_dir(&l.agent_id);
+                self.social.hidden = hidden_friends::HiddenFriends::load(account.join(hidden_friends::FILE));
                 self.region_tracker_path = Some(account.join(region_tracker::FILE));
                 self.region_tracker = region_tracker::RegionTracker::load(&account.join(region_tracker::FILE));
                 self.contact_sets = contact_sets::ContactSets::load(account.join(contact_sets::CONTACT_SETS_FILE));

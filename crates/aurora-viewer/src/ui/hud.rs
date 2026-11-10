@@ -292,7 +292,7 @@ fn plate_content(
         }
     };
     let blocked = !own && world.is_avatar_blocked(&id);
-    let friend = !own && world.social.is_friend(&id);
+    let friend = !own && world.social.is_friend_shown(&id);
     // the same rule as the classic tag (FSTagShowARW and its two options)
     let detail = complexity.and_then(|tc| {
         let shown = (own && tc.own) || (!own && (!tc.only_too_complex || tc.too_complex.contains(&idx)));
@@ -314,7 +314,7 @@ fn plate_content(
         })
     });
     Content {
-        appearance: world.contact_sets.appearance(&id).clone(),
+        appearance: world.contact_appearance(&id).clone(),
         name,
         username,
         title: o.group_title().filter(|_| world.group_titles.shows(own)),
@@ -448,7 +448,7 @@ pub fn draw(
             // the name tags' settings, their distance and their timer
             // (LLVOAvatar::idleUpdateNameTag: visible_chat)
             let chatting = bubbles.as_ref().is_some_and(|b| super::chat_bubbles::shows(world, b, o.full_id, d));
-            let names = avatar_tags == AvatarTags::Shown && name_tag_enabled(settings, own, world.social.is_friend(&o.full_id));
+            let names = avatar_tags == AvatarTags::Shown && name_tag_enabled(settings, own, world.social.is_friend_shown(&o.full_id));
             if !chatting && (!names || d > settings.name_tag_distance) {
                 continue;
             }

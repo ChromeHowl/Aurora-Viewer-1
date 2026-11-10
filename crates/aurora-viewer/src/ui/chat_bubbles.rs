@@ -119,8 +119,7 @@ pub fn layout(painter: &egui::Painter, p: &Palette, world: &World, frame: &Frame
     }
     // UserChatColor / AgentChatColor, then the contact set's chat colour
     let new = world
-        .contact_sets
-        .appearance(&id)
+        .contact_appearance(&id)
         .chat_text
         .map(|c| crate::interface_colors::on_panel(super::colors::set_color(c)))
         .unwrap_or(if own { p.violet_pale } else { p.ink });

@@ -262,7 +262,9 @@ fn person(
     let (p, world) = (c.p, c.world);
     let own = id == world.agent_id;
     let profile = world.profiles.get(&id);
-    let friend = world.social.friends.iter().find(|f| f.id == id);
+    let friend = world.social.shown_friend(&id);
+    // the friendship itself: no offer to a hidden friend
+    let can_befriend = !own && !world.social.is_friend(&id);
     let blocked = world.is_avatar_blocked(&id);
     let here = context::avatar_position(world, &id).is_some();
     if profile.is_some_and(|pr| !pr.sl_image.is_nil()) {
@@ -280,7 +282,7 @@ fn person(
     let buttons = [
         Btn::new("map", aurora_i18n::tr!("ui-profile-show-on-map-2")).enabled(here && !own),
         Btn::new("send-filled", aurora_i18n::tr!("ui-profile-offer-teleport")).enabled(!own),
-        Btn::new("user-plus", aurora_i18n::tr!("ui-profile-add-friend")).enabled(friend.is_none() && !own),
+        Btn::new("user-plus", aurora_i18n::tr!("ui-profile-add-friend")).enabled(can_befriend),
         Btn::new("coin-filled", aurora_i18n::tr!("common-pay")).enabled(!own),
         Btn::new("message-circle-filled", aurora_i18n::tr!("ui-profile-instant-message")).enabled(!own),
         Btn::new("ban", block).enabled(!own),

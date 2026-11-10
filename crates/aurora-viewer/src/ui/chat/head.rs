@@ -236,6 +236,7 @@ pub(super) fn show(
             }
             // the friendship offer of FSFloaterIM's add_friend_btn, hidden
             // (not greyed, as there) once they are our friend
+            // (the friendship itself: no offer to a hidden friend)
             if !world.social.is_friend(&other)
                 && tool(ui, p, slot(), "user-plus", aurora_i18n::tr!("ui-chat-add-friend"), Tone::Plain).clicked()
             {

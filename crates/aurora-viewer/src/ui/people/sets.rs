@@ -42,8 +42,6 @@ fn list(ui: &mut egui::Ui, c: &mut Ctx, data: &super::RadarData, st: &mut People
     let set = choice(c);
     let mutable = !ContactSets::is_internal(&set);
     let world = c.world;
-    let friends: Vec<Uuid> = world.social.friends.iter().map(|f| f.id).collect();
-    let is_friend = |id: &Uuid| world.social.is_friend(id);
     set_pills(ui, c, &set);
     ui.add_space(6.0);
     // search, and "Add" (residents chosen in the picker)
@@ -76,9 +74,9 @@ fn list(ui: &mut egui::Ui, c: &mut Ctx, data: &super::RadarData, st: &mut People
             .or_else(|| world.social.names.get(id).cloned())
             .unwrap_or_else(|| "…".into())
     };
-    let online = |id: &Uuid| world.social.friends.iter().any(|f| f.id == *id && f.online);
+    let online = |id: &Uuid| world.social.shown_friend(id).is_some_and(|f| f.online);
     let filter = st.filter.trim().to_lowercase();
-    let mut members = world.contact_sets.members(&set, &friends, is_friend);
+    let mut members = world.contact_set_members(&set);
     members.retain(|id| super::matches_name(world, id, &name_of(id), &filter));
     // FSPanelContactSets::updateAvatarListSorting
     if world.contact_sets.sorts_by_online(&set) {
@@ -109,8 +107,7 @@ fn set_pills(ui: &mut egui::Ui, c: &mut Ctx, set: &str) {
     let p = c.p;
     let world = c.world;
     let names = world.contact_sets.set_names();
-    let friends: Vec<Uuid> = world.social.friends.iter().map(|f| f.id).collect();
-    let count = |s: &str| world.contact_sets.members(s, &friends, |id| world.social.is_friend(id)).len();
+    let count = |s: &str| world.contact_set_members(s).len();
     let new_w = widgets::filter_pill_width(ui, "plus", aurora_i18n::tr!("people-sets-new"));
     let more_w = widgets::filter_pill_width(ui, "", "+00");
     let mut chosen: Option<String> = None;
@@ -215,7 +212,7 @@ fn second_line(c: &Ctx, id: &Uuid) -> String {
         .unwrap_or_else(|| world.social.name_of(id));
     if world.contact_sets.pseudonym(id).is_some_and(|a| a != DN_REMOVED) {
         aurora_i18n::tr!("people-sets-nickname-of", name = legacy)
-    } else if !world.social.is_friend(id) {
+    } else if !world.social.is_friend_shown(id) {
         aurora_i18n::tr!("people-sets-non-friend").to_owned()
     } else {
         legacy
@@ -240,7 +237,7 @@ fn row(ui: &mut egui::Ui, c: &mut Ctx, data: &super::RadarData, st: &mut PeopleU
     let hot = (ui.rect_contains_pointer(rect) && !resp.dragged()) || st.row_menu == Some(id) || st.demo_hover == Some(id);
     rows::face(ui, p, rect, selected, hot);
     let left = rows::picture(ui, p, world, rect, data.pics.get(&id), id, name, false);
-    let friend = world.social.is_friend(&id);
+    let friend = world.social.is_friend_shown(&id);
     let mutable = !ContactSets::is_internal(set);
     // under the pointer: move, take out, the menu; else the friend's heart
     let buttons: Option<Vec<(&str, &str)>> = hot.then(|| {
@@ -337,7 +334,7 @@ fn hover_actions(ui: &mut egui::Ui, c: &mut Ctx, st: &mut PeopleUi, set: &str, i
             }
             "circle-minus" if resp.clicked() => c.contacts.ask_remove_from_set(set, targets(st, id)),
             "dots-filled" => {
-                let kind = if world.social.is_friend(&id) {
+                let kind = if world.social.is_friend_shown(&id) {
                     AvatarList::Friend
                 } else {
                     AvatarList::Name

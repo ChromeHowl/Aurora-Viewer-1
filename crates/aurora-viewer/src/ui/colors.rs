@@ -50,8 +50,7 @@ pub fn set_color(v: [f32; 4]) -> Color32 {
 
 pub fn resident_name(world: &World, id: &Uuid, fallback: Color32) -> Color32 {
     world
-        .contact_sets
-        .appearance(id)
+        .contact_appearance(id)
         .ui_name
         .map(|v| crate::interface_colors::on_panel(set_color(v)))
         .unwrap_or(fallback)
@@ -59,7 +58,7 @@ pub fn resident_name(world: &World, id: &Uuid, fallback: Color32) -> Color32 {
 
 pub fn contact_chat_color(line: &ChatLine, world: &World) -> Option<Color32> {
     matches!(line.kind, ChatKind::Local(_) | ChatKind::Im | ChatKind::Own(_))
-        .then(|| world.contact_sets.appearance(&line.source).chat_text.map(set_color))
+        .then(|| world.contact_appearance(&line.source).chat_text.map(set_color))
         .flatten()
         .map(crate::interface_colors::on_panel)
 }
@@ -67,7 +66,7 @@ pub fn contact_chat_color(line: &ChatLine, world: &World) -> Option<Color32> {
 pub fn contact_sender_color(line: &ChatLine, world: &World) -> Option<Color32> {
     matches!(line.kind, ChatKind::Local(_) | ChatKind::Im | ChatKind::Own(_))
         .then(|| {
-            let a = world.contact_sets.appearance(&line.source);
+            let a = world.contact_appearance(&line.source);
             a.chat_name.or(a.ui_name).map(set_color)
         })
         .flatten()
@@ -90,8 +89,9 @@ fn is_linden_avatar(world: &World, id: &Uuid, name: &str) -> bool {
     }
 }
 
+/// A friend shown as one: a hidden friend takes the others' colours.
 fn is_friend(world: &World, id: &Uuid) -> bool {
-    world.social.friends.iter().any(|f| f.id == *id)
+    world.social.is_friend_shown(id)
 }
 
 /// The keyword colour of a line that holds a keyword while "Change the
@@ -182,7 +182,7 @@ pub fn tag_color(world: &World, id: &Uuid, name: &str, custom_display_name: bool
 
 /// Minimap marker color of an avatar.
 pub fn map_color(world: &World, id: &Uuid, name: &str) -> Color32 {
-    if let Some(color) = world.contact_sets.appearance(id).minimap {
+    if let Some(color) = world.contact_appearance(id).minimap {
         return set_color(color);
     }
     let k = get();

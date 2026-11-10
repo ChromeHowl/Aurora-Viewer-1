@@ -482,7 +482,7 @@ pub(super) fn contact_tip(resp: egui::Response, detail: Option<&str>) {
 /// row is part of a selection of several (menu_fs_radar_multiselect.xml),
 /// else the resident's own.
 pub(super) fn person_menu(resp: &egui::Response, p: &Palette, world: &World, sel: &[Uuid], id: Uuid) {
-    let kind = if world.social.is_friend(&id) {
+    let kind = if world.social.is_friend_shown(&id) {
         AvatarList::Friend
     } else {
         AvatarList::Nearby

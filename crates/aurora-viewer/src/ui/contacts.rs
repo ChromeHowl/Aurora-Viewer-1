@@ -730,8 +730,7 @@ fn friend_rows(world: &World, settings: &ContactsSettings, filter: &str) -> Vec<
     let social = &world.social;
     let mut rows: Vec<FriendRow> = world
         .social
-        .friends
-        .iter()
+        .shown_friends()
         .map(|f| {
             let (user, display, full) = match names.get(&f.id) {
                 Some(n) => (
@@ -746,7 +745,7 @@ fn friend_rows(world: &World, settings: &ContactsSettings, filter: &str) -> Vec<
             };
             let color = settings
                 .colorize_friends
-                .then(|| world.contact_sets.color_to_show(&f.id, |id| social.is_friend(id)))
+                .then(|| world.contact_sets.color_to_show(&f.id, |id| social.is_friend_shown(id)))
                 .flatten()
                 .map(color32);
             let color = world
@@ -1008,7 +1007,7 @@ fn friend_menu(
     id: Uuid,
     actions: &mut Vec<ContactsAction>,
 ) {
-    let friend = world.social.friends.iter().find(|f| f.id == id);
+    let friend = world.social.shown_friend(&id);
     let online = friend.is_some_and(|f| f.online);
     let here = context::avatar_position(world, &id).is_some();
     // the selection when the clicked row is part of it
@@ -1070,6 +1069,11 @@ fn friend_menu(
     menu::todo(ui, p, "current-location-filled", aurora_i18n::tr!("common-follow"));
     if menu::item(ui, p, "user-minus", aurora_i18n::tr!("common-remove-this-friend")) {
         st.dialog = Some(Dialog::RemoveFriends(ids.clone()));
+    }
+    if menu::item(ui, p, "user-off", aurora_i18n::tr!("hidefriend-hide")) {
+        for id in &ids {
+            context::request(ui.ctx(), CtxAction::HideFriend(*id));
+        }
     }
     menu::separator(ui, p);
     if menu::item(ui, p, "copy-filled", aurora_i18n::tr!("common-copy-name")) {
@@ -1204,7 +1208,7 @@ fn options_menu(ui: &mut egui::Ui, p: &Palette, s: &mut ContactsSettings) {
 fn friend_buttons(ui: &mut egui::Ui, p: &Palette, world: &World, st: &mut ContactsUi, actions: &mut Vec<ContactsAction>) {
     let sel = &st.friends_sel;
     let n = sel.len();
-    let all_online = sel.iter().all(|id| world.social.friends.iter().any(|f| f.id == *id && f.online));
+    let all_online = sel.iter().all(|id| world.social.shown_friend(id).is_some_and(|f| f.online));
     let soon = aurora_i18n::tr!("ui-contacts-coming-soon-in-aurora");
     let im_tip = if n > 1 {
         aurora_i18n::tr!("ui-contacts-multi-person-conference-coming-soon-in-aurora")
@@ -1283,7 +1287,7 @@ fn friend_buttons(ui: &mut egui::Ui, p: &Palette, world: &World, st: &mut Contac
     ui.label(
         RichText::new(aurora_i18n::tr!(
             "ui-contacts-friends",
-            value0 = format!("{}", world.social.friends.len())
+            value0 = format!("{}", world.social.shown_friends().count())
         ))
         .size(12.0)
         .color(p.muted),
@@ -1600,9 +1604,8 @@ fn sets_tab(
     };
     st.set_choice = Some(choice.clone());
     let mutable = !ContactSets::is_internal(&choice);
-    let friend_ids: Vec<Uuid> = world.social.friends.iter().map(|f| f.id).collect();
     let social = &world.social;
-    let mut members = world.contact_sets.members(&choice, &friend_ids, |id| social.is_friend(id));
+    let mut members = world.contact_set_members(&choice);
     let o = social.avatar_names.options;
     let name_of = |id: &Uuid| {
         social
@@ -1612,7 +1615,7 @@ fn sets_tab(
             .or_else(|| social.names.get(id).cloned())
             .unwrap_or_else(|| "…".into())
     };
-    let online = |id: &Uuid| social.friends.iter().any(|f| f.id == *id && f.online);
+    let online = |id: &Uuid| social.shown_friend(id).is_some_and(|f| f.online);
     let count = members.len();
     let filter = st.set_filter.trim().to_lowercase();
     members.retain(|id| super::people::matches_name(world, id, &name_of(id), &filter));
@@ -1625,7 +1628,7 @@ fn sets_tab(
     let rows: Vec<(Uuid, String, bool, Option<Color32>)> = members
         .iter()
         .map(|id| {
-            let color = world.contact_sets.friend_color(id, |x| social.is_friend(x)).map(color32);
+            let color = world.contact_sets.friend_color(id, |x| social.is_friend_shown(x)).map(color32);
             (*id, name_of(id), online(id), color)
         })
         .collect();

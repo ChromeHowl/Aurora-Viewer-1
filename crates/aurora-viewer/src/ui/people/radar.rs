@@ -393,7 +393,7 @@ pub(super) fn rows(world: &World, data: &RadarData, filter: &str) -> Vec<Row> {
             Some(Row {
                 id: e.id,
                 name,
-                friend: world.social.is_friend(&e.id),
+                friend: world.social.is_friend_shown(&e.id),
                 muted,
                 // a blocked resident shows no voice state (FSRadarEntry)
                 voice: data.voice.get(&e.id).filter(|_| !muted).map(|(_, speaking)| *speaking),
@@ -868,6 +868,7 @@ pub fn tab(
     let line = Vec2::new(ui.available_width(), TOOL);
     ui.allocate_ui_with_layout(line, egui::Layout::right_to_left(egui::Align::Center), |ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
+        // the friendship itself: a hidden friend is still one
         let can_befriend = first.is_some_and(|id| !world.social.is_friend(&id));
         let add = ui
             .add_enabled(can_befriend, tool_button(p, "user-plus", can_befriend))

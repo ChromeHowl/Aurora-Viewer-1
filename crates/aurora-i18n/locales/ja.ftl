@@ -13517,3 +13517,13 @@ ui-options-attached-particles-hint = アバターが装着しているものの�
 # Preferences › Graphics: progressive draw distance (FSRenderFarClipStepping)
 ui-options-draw-distance-stepping = 描画距離を段階的に広げる
 ui-options-draw-distance-stepping-hint = ログイン後と別のリージョンへのテレポート後、描画距離を32mから始めて設定値まで倍々に広げ、近くのものから読み込みます。
+
+# Hide a friend: a friend hidden in this viewer only (People › Hidden)
+hidefriend-hide = このフレンドを非表示にする
+hidefriend-hide-tip = このビューアでのみフレンドを非表示にします。フレンド関係はそのままで、相手には通知されません。メッセージ、通話、オファーはこれまでどおり届きます。
+hidefriend-unhide = このフレンドを再表示する
+hidefriend-unhide-short = 再表示
+hidefriend-tab = 非表示
+hidefriend-list-hint = このビューアでのみ非表示にしているフレンドです。フレンド関係はそのままで、相手には通知されません。メッセージ、通話、オファーはこれまでどおり届きます。
+hidefriend-list-empty = 非表示のフレンドはいません。
+hidefriend-row-sub = 非表示のフレンド

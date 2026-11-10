@@ -381,8 +381,7 @@ fn build_suggestions(world: &World, list: &LandmarkList, query: &str) -> Vec<Sug
     }
     let mut friends: Vec<(Uuid, String)> = world
         .social
-        .friends
-        .iter()
+        .shown_friends()
         .filter(|f| f.online && f.rights_has & rights::MAP_LOCATION != 0)
         .map(|f| (f.id, world.social.name_of(&f.id)))
         .filter(|(_, n)| n.to_lowercase().contains(&q))
@@ -891,7 +890,7 @@ impl WorldMapUi {
                 q.clone(),
                 world.map.sims.len(),
                 world.inventory.generation,
-                world.social.friends.iter().filter(|f| f.online).count(),
+                world.social.shown_friends().filter(|f| f.online).count(),
                 world.tp_storage.items.len(),
             );
             if self.ov.built_for.as_ref() != Some(&key) || now - self.ov.built_at > SUGGEST_REFRESH {
@@ -1002,7 +1001,7 @@ impl WorldMapUi {
         );
         let ui = &mut panel.frame.content_ui;
         ui.set_height(height - 2.0 * f32::from(PAD) - 2.0);
-        let online = world.social.friends.iter().filter(|f| f.online).count();
+        let online = world.social.shown_friends().filter(|f| f.online).count();
         // the tabs
         let count = self.ov.landmarks.items.len().to_string();
         let friends = online.to_string();
@@ -1139,8 +1138,7 @@ impl WorldMapUi {
             Drawer::Friends => {
                 let mut friends: Vec<(Uuid, String, bool)> = world
                     .social
-                    .friends
-                    .iter()
+                    .shown_friends()
                     .filter(|f| f.online)
                     .map(|f| (f.id, world.social.name_of(&f.id), f.rights_has & rights::MAP_LOCATION != 0))
                     .filter(|(_, n, _)| n.to_lowercase().contains(filter))

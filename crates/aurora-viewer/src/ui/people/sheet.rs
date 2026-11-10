@@ -110,7 +110,7 @@ pub(super) fn show(
 ) -> bool {
     let found = super::radar::rows(world, data, "").into_iter().find(|r| r.id == id);
     let row = found.as_ref();
-    let friend = world.social.friends.iter().find(|f| f.id == id).cloned();
+    let friend = world.social.shown_friend(&id).cloned();
     let (content, bottom) = frame(ui, p);
     if !data.pics.contains_key(&id) {
         st.want_pic(id, ui.input(|i| i.time));
@@ -593,6 +593,19 @@ fn footer(ui: &mut egui::Ui, p: &Palette, world: &World, id: Uuid, friend: Optio
         .clicked()
         {
             context::request(ui.ctx(), CtxAction::RemoveFriend(id));
+        }
+        let hide = aurora_i18n::tr!("hidefriend-hide");
+        if widgets::action_button(ui, p, "user-off", hide, ActionKind::Flat, size)
+            .on_hover_text(aurora_i18n::tr!("hidefriend-hide-tip"))
+            .clicked()
+        {
+            context::request(ui.ctx(), CtxAction::HideFriend(id));
+        }
+    } else if world.social.is_friend_hidden(&id) {
+        // a hidden friend is shown as a stranger, without a friendship offer
+        let unhide = aurora_i18n::tr!("hidefriend-unhide");
+        if widgets::action_button(ui, p, "user-check", unhide, ActionKind::Flat, size).clicked() {
+            context::request(ui.ctx(), CtxAction::UnhideFriend(id));
         }
     } else if widgets::action_button(ui, p, "user-plus", aurora_i18n::tr!("radar-add-friend"), ActionKind::Flat, size).clicked() {
         context::request(ui.ctx(), CtxAction::AddFriend(id));

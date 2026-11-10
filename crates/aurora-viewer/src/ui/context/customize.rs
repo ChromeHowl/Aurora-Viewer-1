@@ -361,6 +361,8 @@ fn action_key(action: &CtxAction) -> String {
         CtxAction::GrantRights { .. } => "GrantRights",
         CtxAction::AddFriend(..) => "AddFriend",
         CtxAction::RemoveFriend(..) => "RemoveFriend",
+        CtxAction::HideFriend(..) => "HideFriend",
+        CtxAction::UnhideFriend(..) => "UnhideFriend",
         CtxAction::RemoveFriends(..) => "RemoveFriends",
         CtxAction::Conference(..) => "Conference",
         CtxAction::ConferenceCall(..) => "ConferenceCall",

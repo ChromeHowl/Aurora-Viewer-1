@@ -13550,3 +13550,13 @@ ui-options-attached-particles-hint = Draw the particles of what avatars wear: sp
 # Preferences › Graphics: progressive draw distance (FSRenderFarClipStepping)
 ui-options-draw-distance-stepping = Progressive draw distance
 ui-options-draw-distance-stepping-hint = After logging in and after a teleport to another region, the draw distance starts at 32 m and doubles back up to yours, so that what is near loads first.
+
+# Hide a friend: a friend hidden in this viewer only (People › Hidden)
+hidefriend-hide = Hide this friend
+hidefriend-hide-tip = Hides this friend in this viewer only: they stay your friend and are not told. Their messages, calls and offers still arrive.
+hidefriend-unhide = Un-hide this friend
+hidefriend-unhide-short = Un-hide
+hidefriend-tab = Hidden
+hidefriend-list-hint = Friends hidden in this viewer only. They stay your friends and are not told; their messages, calls and offers still arrive.
+hidefriend-list-empty = No friend is hidden.
+hidefriend-row-sub = Hidden friend
