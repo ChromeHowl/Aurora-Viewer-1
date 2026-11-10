@@ -157,6 +157,7 @@ impl Session<'_> {
                 }
             }
             NetCommand::ChatSession { method, session } => self.chat_session_request(*method, *session),
+            NetCommand::ModerateText { session, agent, mute } => self.moderate_text(*session, *agent, *mute),
             NetCommand::Call {
                 method,
                 session,
@@ -250,6 +251,30 @@ impl Session<'_> {
                 result,
                 not_found,
             });
+        });
+    }
+
+    /// LLIMSpeakerMgr::moderationActionCoro: the "mute update" POST; a
+    /// refusal is shown as showSessionEventError("mute", …) shows it.
+    fn moderate_text(&mut self, session: uuid::Uuid, agent: uuid::Uuid, mute: bool) {
+        let failed = move |status_403: bool| NetEvent::SessionError {
+            session,
+            event: "mute".into(),
+            error: if status_403 { "not_a_mod_error" } else { "generic_request_error" }.into(),
+        };
+        let Some(url) = self.main_cap("ChatSessionRequest") else {
+            log::warn!("ChatSessionRequest: no capability (mute update)");
+            emit(self.sh, failed(false));
+            return;
+        };
+        let http = self.sh.caps_http.clone();
+        let events = self.sh.events.clone();
+        tokio::spawn(async move {
+            let body = social::mute_update_body(session, agent, mute);
+            if let Err(e) = crate::caps::post_llsd(&http, &url, &body).await {
+                log::warn!("ChatSessionRequest mute update for {session}: {e}");
+                let _ = events.send(failed(matches!(e, crate::caps::CapsError::Status(403))));
+            }
         });
     }
 

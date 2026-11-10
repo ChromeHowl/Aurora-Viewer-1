@@ -3,7 +3,7 @@
 //! event-queue messages (`newview/llimview.cpp`, `llspeakers.cpp`,
 //! `llagent.cpp` in Firestorm).
 
-use aurora_llsd::Llsd;
+use aurora_llsd::{Llsd, llsd_map};
 use uuid::Uuid;
 
 /// A group the agent belongs to (AgentGroupDataUpdate, LLGroupData).
@@ -80,6 +80,21 @@ impl SessionMethod {
             SessionMethod::DeclineInvitation => "decline invitation",
             SessionMethod::FetchHistory => "fetch history",
         }
+    }
+}
+
+/// The body of a moderator's "mute update" (LLIMSpeakerMgr::
+/// toggleAllowTextChat, indra/newview/llspeakers.cpp, originally LGPL 2.1):
+/// `mute` is the participant's new state, "text" false gives them their
+/// text back.
+pub fn mute_update_body(session: Uuid, agent: Uuid, mute: bool) -> Llsd {
+    llsd_map! {
+        "method" => "mute update",
+        "session-id" => session,
+        "params" => llsd_map! {
+            "agent_id" => agent,
+            "mute_info" => llsd_map! { "text" => mute },
+        },
     }
 }
 
@@ -327,7 +342,17 @@ pub fn ll_crc(data: &[u8]) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aurora_llsd::llsd_map;
+
+    #[test]
+    fn a_mute_update_says_the_new_state() {
+        let (session, agent) = (Uuid::from_u128(7), Uuid::from_u128(8));
+        let body = mute_update_body(session, agent, true);
+        assert_eq!(body["method"].as_str(), "mute update");
+        assert_eq!(body["session-id"].as_uuid(), session);
+        assert_eq!(body["params"]["agent_id"].as_uuid(), agent);
+        assert!(body["params"]["mute_info"]["text"].as_bool());
+        assert!(!mute_update_body(session, agent, false)["params"]["mute_info"]["text"].as_bool());
+    }
 
     #[test]
     fn voice_invitations_are_told_apart_from_messages() {

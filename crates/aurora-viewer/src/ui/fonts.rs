@@ -514,11 +514,16 @@ pub fn semibold_format(family: &egui::FontFamily, size: f32, color: egui::Color3
 pub(crate) struct TextEmphasis {
     pub italics: bool,
     pub strong: bool,
+    /// Underlined (a group moderator's text, FSModTextStyle).
+    pub underline: bool,
 }
 
 impl From<bool> for TextEmphasis {
     fn from(italics: bool) -> Self {
-        Self { italics, strong: false }
+        Self {
+            italics,
+            ..Self::default()
+        }
     }
 }
 
@@ -531,6 +536,9 @@ impl TextEmphasis {
         if self.italics {
             text = text.italics();
         }
+        if self.underline {
+            text = text.underline();
+        }
         text
     }
 
@@ -541,6 +549,9 @@ impl TextEmphasis {
             egui::TextFormat::simple(egui::FontId::proportional(size), color)
         };
         format.italics = self.italics;
+        if self.underline {
+            format.underline = egui::Stroke::new(1.0, color);
+        }
         format
     }
 }

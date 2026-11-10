@@ -1569,6 +1569,15 @@ pub enum NetCommand {
         method: crate::social::SessionMethod,
         session: Uuid,
     },
+    /// A moderator allows or forbids a participant's text in a group chat
+    /// or conference: the "mute update" of ChatSessionRequest
+    /// (LLIMSpeakerMgr::toggleAllowTextChat); a failure comes back as a
+    /// `NetEvent::SessionError` of the "mute" event.
+    ModerateText {
+        session: Uuid,
+        agent: Uuid,
+        mute: bool,
+    },
     /// Voice call request on ChatSessionRequest (credentials, P2P start /
     /// decline); `server_type` is the region's VoiceServerType.
     Call {

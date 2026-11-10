@@ -109,8 +109,24 @@ pub fn keyword_color(line: &ChatLine) -> Option<Color32> {
 }
 
 /// Text color of a chat line (LLViewerChat::getChatColor): the keyword
-/// colour for a line that holds a keyword, else the sender's.
+/// colour for a line that holds a keyword, else the sender's, diminished
+/// when said from afar.
 pub fn chat_color(line: &ChatLine, world: &World) -> Color32 {
+    beyond_range(line, world, chat_color_near(line, world))
+}
+
+/// A line's colour, diminished by FSBeyondNearbyChatColorDiminishFactor when
+/// it was said from beyond the near chat radius (`world/chat_range.rs`).
+pub fn beyond_range(line: &ChatLine, world: &World, color: Color32) -> Color32 {
+    if world.said_far(line) {
+        color.gamma_multiply(crate::ui::chat::display::get().beyond_range_dim)
+    } else {
+        color
+    }
+}
+
+/// `chat_color` without the distance.
+pub fn chat_color_near(line: &ChatLine, world: &World) -> Color32 {
     if let Some(color) = contact_chat_color(line, world) {
         return color;
     }

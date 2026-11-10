@@ -14,7 +14,9 @@ mod arrival_wait;
 pub mod beacons;
 pub mod bridge;
 pub mod calls;
+mod chat_copies;
 pub mod chat_log;
+pub mod chat_range;
 pub mod collisions;
 pub mod contact_markers;
 pub mod contact_sets;
@@ -292,6 +294,14 @@ pub enum Origin {
     /// The chat server's recent messages of a group
     /// (CHAT_STYLE_SERVER_HISTORY).
     ServerLog,
+    /// A resident's IM or group line copied into the nearby chat
+    /// (FSShowIMInChatHistory, `chat_copies.rs`): its name as written, with
+    /// its "IM:" or group prefix, faded, never written to a transcript.
+    Copy,
+    /// What a blocked resident or object said, kept greyed in the nearby
+    /// chat (FSShowMutedChatHistory, `chat_copies.rs`): never over the world,
+    /// never written to a transcript.
+    Muted,
 }
 
 #[derive(Debug, Clone)]
@@ -395,6 +405,15 @@ pub struct World {
     /// announcement (FSAnnounceIncomingIM, `im_announce.rs`), given every
     /// frame by the app.
     pub announce_incoming_im: bool,
+    /// The chat display options (Preferences › Chat), given every frame by
+    /// the app: the copies of `chat_copies.rs` and the muted chat kept.
+    pub chat_display: crate::settings::chat_display::ChatDisplay,
+    /// IMs and group lines copied for the nearby chat lines over the world
+    /// only (FSLogImToChatConsole, `chat_copies.rs`), within a short bound.
+    pub console_copies: VecDeque<ChatLine>,
+    /// The nearby lines said from beyond the near chat radius
+    /// (`chat_range.rs`).
+    pub far_chat: chat_range::FarChat,
     /// Fly override (the Legacy Viewer's FSAlwaysFly, read by LLAgent::canFly
     /// in indra/newview/llagent.cpp): the parcel's and the region's no-fly
     /// no longer stop a takeoff nor land the avatar. Never saved, off at
@@ -837,6 +856,9 @@ impl World {
             chat_badge: 0,
             quiet_automated_chat: false,
             announce_incoming_im: false,
+            chat_display: Default::default(),
+            console_copies: VecDeque::new(),
+            far_chat: Default::default(),
             fly_override: false,
             notice_topics: Default::default(),
             chat_log: Default::default(),
@@ -1003,11 +1025,13 @@ impl World {
         chat_log.logout();
         // a setting, not the session's: the arrival's lines follow it too
         let quiet = self.quiet_automated_chat;
+        let display = std::mem::take(&mut self.chat_display);
         let fly_override = self.fly_override;
         *self = World::new(lib);
         self.chat_log = chat_log;
         self.cache_dir = cache_dir;
         self.quiet_automated_chat = quiet;
+        self.chat_display = display;
         self.fly_override = fly_override;
     }
 
@@ -4309,7 +4333,12 @@ impl World {
         if !own_attachment && !self.rlva.receive_chat(&mut c, self.agent_id) {
             return;
         }
-        if c.message.is_empty() || self.lsl_bridge.hides(&c) || self.chat_blocked(&c) || self.object_chat_filtered(&c) {
+        if c.message.is_empty() || self.lsl_bridge.hides(&c) || self.object_chat_filtered(&c) {
+            return;
+        }
+        if self.chat_blocked(&c) {
+            // dropped, or kept greyed (FSShowMutedChatHistory)
+            self.keep_muted_chat(c);
             return;
         }
         if self.receive_hand_contacts(&c, Instant::now()) {
@@ -4396,8 +4425,10 @@ impl World {
                 );
             }
         }
+        let time = SystemTime::now();
+        self.note_chat_range(time, c.source_id, c.position);
         self.push_chat(ChatLine {
-            time: SystemTime::now(),
+            time,
             from,
             text: c.message,
             kind,
@@ -4782,6 +4813,9 @@ impl World {
             _ => Data::None,
         };
         let id = self.notifications.push(Kind::Group, title, text, data);
+        if let Some(group) = group {
+            self.copy_group_notice(group, im.from_agent_id, from, subject, body);
+        }
         if let (Some(group), Some(name)) = (group, group_name) {
             self.notifications.link_name(id, name, NameTarget::Group(group));
         }
@@ -5315,8 +5349,9 @@ impl World {
             ImKind::Private | ImKind::Conference => prefs.im,
         };
         // Aurora's paused bell still keeps them in "To do", silently; a
-        // toast alone has nothing to show then
-        if !wanted || in_sight || (self.status.dnd && !(self.notifications.aurora && prefs.im_in_bell)) {
+        // toast alone has nothing to show then. A message shown in the
+        // nearby chat lines has no toast (FSLogImToChatConsole)
+        if !wanted || self.message_in_console(m.kind) || in_sight || (self.status.dnd && !(self.notifications.aurora && prefs.im_in_bell)) {
             return;
         }
         let Some(line) = self.resident_line(m) else {

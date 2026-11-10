@@ -8,7 +8,7 @@
 //! Each conversation keeps its draft, and its field takes the keyboard as
 //! in the other styles (#422, #425).
 
-use super::{ChatUi, ConvAction, OutgoingChat, SendKey, ooc, parse_channel, send_enter, sidebar, suggest, typing};
+use super::{ChatUi, ConvAction, OutgoingChat, SendKey, parse_channel, send_enter, sidebar, suggest, typed_line, typing};
 use crate::theme::Palette;
 use crate::ui::menu;
 use crate::world::World;
@@ -120,6 +120,7 @@ pub(super) fn show(
             let mut emoji_btn = None;
             let mut send_clicked = false;
             let local = st.selected.is_none();
+            let display = super::display::get();
             let roomy = width > 520.0;
             // ---- the recent emojis, over the box
             if st.recent_emojis.above {
@@ -134,11 +135,14 @@ pub(super) fn show(
                     ui.set_min_height(BOX_H - 8.0);
                     ui.horizontal_centered(|ui| {
                         ui.spacing_mut().item_spacing.x = 4.0;
-                        let b = box_button(ui, p, "mood-smile-filled", aurora_i18n::tr!("ui-chat-emoji"), st.emoji_open);
-                        emoji_btn = Some(b.rect);
-                        if b.clicked() {
-                            st.emoji_open = !st.emoji_open;
-                            st.gif_open = false;
+                        // FSShowEmojiButton
+                        if display.show_emoji_button {
+                            let b = box_button(ui, p, "mood-smile-filled", aurora_i18n::tr!("ui-chat-emoji"), st.emoji_open);
+                            emoji_btn = Some(b.rect);
+                            if b.clicked() {
+                                st.emoji_open = !st.emoji_open;
+                                st.gif_open = false;
+                            }
                         }
                         // shown once a key is entered (Preferences › Chat › GIFs)
                         if st.gifs.usable() {
@@ -148,7 +152,8 @@ pub(super) fn show(
                         // narrow, only its icon. An IM has no attach button:
                         // inventory is given by dropping it on the
                         // conversation, which says so during the drag (#627)
-                        if kind.is_none() {
+                        // FSShowChatType: the volume of the nearby chat
+                        if kind.is_none() && display.show_chat_type {
                             volume_button(ui, p, st, roomy);
                         }
                         // the right end first: what it takes fixes the field's width
@@ -157,7 +162,10 @@ pub(super) fn show(
                         // in the narrow layout ("/n" before the text still works)
                         let chip = local && roomy && st.show_channel;
                         let chip_w = if chip { 34.0 } else { 0.0 };
-                        let field_w = (ui.available_width() - chip_w - BUTTON - 12.0).max(40.0);
+                        // FSShowIMSendButton: a conversation's send button
+                        let send_shown = local || display.show_im_send_button;
+                        let send_w = if send_shown { BUTTON } else { 0.0 };
+                        let field_w = (ui.available_width() - chip_w - send_w - 12.0).max(40.0);
                         let hint = super::input::hint(
                             ui,
                             match st.selected {
@@ -189,7 +197,7 @@ pub(super) fn show(
                             channel_chip(ui, p, &mut draft, channel);
                         }
                         let has_text = !draft.trim().is_empty();
-                        send_clicked = send_button(ui, p, has_text).clicked() && has_text;
+                        send_clicked = send_shown && send_button(ui, p, has_text).clicked() && has_text;
                         output
                             .response
                             .response
@@ -247,10 +255,7 @@ pub(super) fn show(
                 None
             };
             if let Some(send) = send {
-                let mut text = st.suggest.expand(st.selected, draft.trim());
-                if send == SendKey::Ooc {
-                    text = ooc(&text);
-                }
+                let text = typed_line(&st.suggest.expand(st.selected, draft.trim()), send == SendKey::Ooc);
                 if !text.is_empty() {
                     sent = true;
                     st.input_history.entry(st.selected).or_default().record(conv_input, &draft);

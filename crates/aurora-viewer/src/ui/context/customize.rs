@@ -309,6 +309,7 @@ fn action_key(action: &CtxAction) -> String {
         CtxAction::SetVoiceVolume(..) => "SetVoiceVolume",
         CtxAction::ToggleVoiceMute(..) => "ToggleVoiceMute",
         CtxAction::ModerateVoice(..) => "ModerateVoice",
+        CtxAction::ModerateText(..) => "ModerateText",
         CtxAction::ToggleOwnerParticleFilter(..) => "ToggleOwnerParticleFilter",
         CtxAction::SetOwnerSoundBlock { .. } => "SetOwnerSoundBlock",
         CtxAction::InviteToGroup(..) => "InviteToGroup",

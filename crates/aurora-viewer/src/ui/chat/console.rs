@@ -14,12 +14,31 @@ use egui::Color32;
 
 use super::{BubbleJob, JobLook, Link, bubble_link, bubble_sender_link, hhmm, line_extras, line_job, thread};
 use crate::theme::Palette;
-use crate::ui::fonts::chat_size;
-use crate::world::{ChatKind, ChatLine, World};
+use crate::world::{ChatKind, ChatLine, Origin, World};
 use aurora_net::ChatType;
 
 /// The widest a card gets.
 const WIDTH: f32 = 470.0;
+/// The size of a text of the lines: the chat's, by ChatConsoleFontSize.
+pub(super) fn console_size(ctx: &egui::Context, base: f32) -> f32 {
+    crate::ui::fonts::chat_size(ctx, base) * super::display::get().console_font.scale()
+}
+
+/// How wide the lines get: `WIDTH`, or the window's width with
+/// ChatFullWidth.
+pub(super) fn width(ctx: &egui::Context) -> f32 {
+    if super::display::get().console_full_width {
+        (ctx.content_rect().width() - 16.0).max(WIDTH)
+    } else {
+        WIDTH
+    }
+}
+
+/// The background's opacity (ConsoleBackgroundOpacity).
+pub(super) fn opacity() -> f32 {
+    super::display::get().console_opacity
+}
+
 /// Side of the sender's picture.
 const PICTURE: f32 = 26.0;
 /// Between the picture and the text.
@@ -76,13 +95,26 @@ pub(super) fn recent(
 ) -> Vec<&ChatLine> {
     let mut remaining = max_lines as usize;
     let mut recent = Vec::new();
-    for line in world
+    // the nearby chat's own lines, with the IMs copied for these lines
+    // (FSLogImToChatConsole): the copies kept in the nearby chat and the
+    // muted lines stay there (`world/chat_copies.rs`)
+    let max = max_lines as usize;
+    let mut lines: Vec<&ChatLine> = world
         .chat
         .iter()
         .rev()
+        .filter(|l| !matches!(l.origin, Origin::Copy | Origin::Muted))
         .filter(|l| residents || !super::said_by_resident(l))
+        .take(max)
+        .chain(world.console_copies.iter().rev().take(max))
+        .collect();
+    if !world.console_copies.is_empty() {
+        lines.sort_by(|a, b| b.time.cmp(&a.time));
+    }
+    for line in lines
+        .into_iter()
         // Bound the look-back even when every recent message has expired.
-        .take(max_lines as usize)
+        .take(max)
         .filter(|l| now.duration_since(l.time).map(|d| d.as_secs_f32() < seconds).unwrap_or(false))
     {
         let count = rows(line).max(1);
@@ -147,12 +179,12 @@ pub(super) fn cards(
             } else {
                 0.0
             };
-            let size = chat_size(ctx, super::object_row::TEXT);
+            let size = console_size(ctx, super::object_row::TEXT);
             let lead = time_w + if line.kind.is_notice() { super::pic_side(size) + 2.0 } else { 0.0 };
-            (WIDTH - 18.0 - lead, size, JobLook::Compact)
+            (width(ctx) - 18.0 - lead, size, JobLook::Compact)
         } else {
-            let width = WIDTH - 18.0 - if line.kind.is_notice() { 0.0 } else { PICTURE + GAP };
-            (width, chat_size(ctx, TEXT), JobLook::Body)
+            let width = width(ctx) - 18.0 - if line.kind.is_notice() { 0.0 } else { PICTURE + GAP };
+            (width, console_size(ctx, TEXT), JobLook::Body)
         };
         rows(ctx, line, line_job(ctx, line, p, world, want_names, width, size, false, look))
     });
@@ -169,11 +201,11 @@ pub(super) fn cards(
         .interactable(false)
         .order(egui::Order::Background)
         .show(ctx, |ui| {
-            ui.set_max_width(WIDTH);
+            ui.set_max_width(width(ctx));
             ui.spacing_mut().item_spacing.y = 0.0;
             for group in groups(&recent) {
                 let card_alpha = group.iter().map(|l| alpha(seconds, l, now)).fold(0.0_f32, f32::max);
-                let tint = Color32::from_rgba_unmultiplied(p.bar.r(), p.bar.g(), p.bar.b(), (190.0 * card_alpha) as u8);
+                let tint = Color32::from_rgba_unmultiplied(p.bar.r(), p.bar.g(), p.bar.b(), (opacity() * 255.0 * card_alpha) as u8);
                 let radius = ui.visuals().window_corner_radius;
                 let glass = p.panel_alpha < 255;
                 let mut slot = None;
@@ -252,7 +284,7 @@ fn card<'a>(
         // appendMessage stamps the system's lines too, #1999)
         let time = hhmm(first.time);
         if times && !time.is_empty() {
-            ui.label(egui::RichText::new(time).size(chat_size(ui.ctx(), 10.5)).color(p.muted_dim));
+            ui.label(egui::RichText::new(time).size(console_size(ui.ctx(), 10.5)).color(p.muted_dim));
         }
         body(
             ui,
@@ -260,13 +292,13 @@ fn card<'a>(
             world,
             want_names,
             first,
-            WIDTH - 18.0,
+            width(ui.ctx()) - 18.0,
             alpha(seconds, first, now) / card_alpha.max(0.01),
             links,
         );
         return;
     }
-    let text_w = WIDTH - 18.0 - PICTURE - GAP;
+    let text_w = width(ui.ctx()) - 18.0 - PICTURE - GAP;
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         let (pic, _) = ui.allocate_exact_size(egui::vec2(PICTURE, PICTURE), egui::Sense::hover());
@@ -279,7 +311,7 @@ fn card<'a>(
             ui.spacing_mut().item_spacing.y = 1.0;
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
-                let font = egui::FontId::new(chat_size(ui.ctx(), 12.5), crate::ui::fonts::semibold(ui.ctx()));
+                let font = egui::FontId::new(console_size(ui.ctx(), 12.5), crate::ui::fonts::semibold(ui.ctx()));
                 let galley = ui
                     .painter()
                     .layout(first.from.clone(), font, name_color(p, first, world), text_w * 0.6);
@@ -295,7 +327,7 @@ fn card<'a>(
                 if times {
                     ui.label(
                         egui::RichText::new(hhmm(first.time))
-                            .size(chat_size(ui.ctx(), 10.5))
+                            .size(console_size(ui.ctx(), 10.5))
                             .color(p.muted_dim),
                     );
                 }
@@ -326,7 +358,7 @@ fn compact_card<'a>(
     names: &mut Vec<(egui::Rect, &'a ChatLine)>,
 ) {
     use egui::emath::GuiRounding as _;
-    let size = chat_size(ui.ctx(), super::object_row::TEXT);
+    let size = console_size(ui.ctx(), super::object_row::TEXT);
     ui.spacing_mut().item_spacing.y = 1.0;
     for &line in group {
         let fade = alpha(seconds, line, now) / card_alpha.max(0.01);
@@ -351,7 +383,7 @@ fn compact_card<'a>(
             p,
             world,
             want_names,
-            WIDTH - 18.0 - lead,
+            width(ui.ctx()) - 18.0 - lead,
             size,
             false,
             JobLook::Compact,
@@ -442,7 +474,7 @@ fn body(
     fade: f32,
     links: &mut Vec<(egui::Rect, Link, Color32)>,
 ) {
-    let size = chat_size(ui.ctx(), TEXT);
+    let size = console_size(ui.ctx(), TEXT);
     let BubbleJob {
         job,
         links: line_links,
