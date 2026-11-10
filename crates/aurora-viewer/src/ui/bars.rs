@@ -25,6 +25,12 @@ use egui::{Color32, RichText, Vec2};
 
 #[derive(Default)]
 pub enum BarAction {
+    /// World › Camera lock.
+    CameraLock,
+    /// World › Previous view (true) / Next view.
+    ViewStep(bool),
+    /// World › Clear view history.
+    ViewHistoryClear,
     ToggleVr,
     IkEdit,
     Poser,
@@ -261,6 +267,9 @@ pub struct StatusInfo<'a> {
     pub quickjump: bool,
     /// Show Friends Only is on (World › Show Friends only).
     pub friends_only: bool,
+    /// The Camera Lock is on; the view history has a view to go back to,
+    /// and one to go forward to (`App::camera_tools_state`).
+    pub camera_tools: (bool, bool, bool),
     pub show_name_tags: bool,
     /// The fly override is on (Me › Fly override).
     pub fly_override: bool,
@@ -1246,10 +1255,33 @@ fn main_menus(ui: &mut egui::Ui, p: &Palette, panels: &mut Panels, st: &StatusIn
         if menu::item(ui, p, "camera-filled", aurora_i18n::tr!("ui-bars-reset-camera-esc")) {
             *action = BarAction::ResetCamera;
         }
+        // Aurora's camera tools: the lock, the view history, the path
+        let (locked, back, forward) = st.camera_tools;
+        let lock = crate::keybinds::chord_label("KeyL", false, true, true);
+        if menu::check_keys(ui, p, "lock-filled", aurora_i18n::tr!("camtools-lock"), locked, true, &lock) {
+            *action = BarAction::CameraLock;
+        }
+        if menu::item_if(ui, p, "arrow-back-up", aurora_i18n::tr!("camtools-view-previous"), back) {
+            *action = BarAction::ViewStep(true);
+        }
+        if menu::item_if(ui, p, "arrow-forward-up", aurora_i18n::tr!("camtools-view-next"), forward) {
+            *action = BarAction::ViewStep(false);
+        }
+        if menu::item_if(ui, p, "trash-filled", aurora_i18n::tr!("camtools-view-clear"), back || forward) {
+            *action = BarAction::ViewHistoryClear;
+        }
         let photo = crate::keybinds::chord_label("KeyS", true, false, true);
         if menu::item_keys(ui, p, "photo-filled", aurora_i18n::tr!("photo-title"), &photo) {
             super::widgets::toggle_floater(ui.ctx(), super::snapshot::WINDOW, &mut panels.snapshot);
         }
+        flip_window(
+            ui,
+            p,
+            "route",
+            aurora_i18n::tr!("camtools-path-title"),
+            super::camera_path::WINDOW,
+            &mut panels.camera_path,
+        );
     });
     menu::submenu(ui, p, "box", aurora_i18n::tr!("common-build"), true, |ui| {
         build_menu(ui, p, action, &st.ik_keys, st.edit_particles);
@@ -2186,6 +2218,8 @@ pub fn run_command(ctx: &egui::Context, cmd: &str, panels: &mut Panels) -> BarAc
         "minimap" => panels.minimap = !panels.minimap,
         "worldmap" => toggle("worldmap", &mut panels.world_map),
         "regiontracker" => toggle(super::region_tracker::WINDOW, &mut panels.region_tracker),
+        "camera_path" => toggle(super::camera_path::WINDOW, &mut panels.camera_path),
+        "camera_lock" => return BarAction::CameraLock,
         "places" => toggle("places", &mut panels.places),
         "search" => toggle(super::search::WINDOW, &mut panels.search),
         "areasearch" => toggle(super::area_search::WINDOW, &mut panels.area_search),
@@ -2296,6 +2330,7 @@ fn command_active(cmd: &str, panels: &Panels, flying: bool, seated: bool, mousel
         "assetblacklist" => panels.asset_blacklist,
         "group_titles" => panels.group_titles,
         "regiontracker" => panels.region_tracker,
+        "camera_path" => panels.camera_path,
         "gridstatus" => panels.grid_status,
         "webbrowser" => panels.web_browser,
         "voice" => panels.voice_controls,
@@ -3025,6 +3060,8 @@ pub(crate) fn toolbar_row(
             !toolbar.show_name_tags
         } else if b.command == "RFO" {
             toolbar.friends_only_active
+        } else if b.command == "camera_lock" {
+            toolbar.camera_lock_active
         } else if b.command == "vr_view" {
             ui.ctx()
                 .data(|data| data.get_temp::<bool>(egui::Id::unique("vr-active")))

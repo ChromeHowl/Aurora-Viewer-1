@@ -15,13 +15,18 @@ pub mod demo;
 mod focus;
 pub(crate) mod follow;
 pub mod free;
+pub mod history;
 mod mouselook_zoom;
+pub mod path;
+pub mod path_file;
 pub mod presets;
 mod settings;
+pub mod takeover;
 
 pub use focus::FocusObject;
 pub use free::FreeCamera;
 pub use settings::{CameraPreset, CameraSettings, CameraShot, DEFAULT_FOV, FOV_RANGE, SMOOTHING_RANGE, SavedViews, VrView, zoom_lens};
+pub use takeover::{Owner, View};
 
 /// Reference for a rolled view, shared with flycam handoff and AgentUpdate.
 /// At a vertical pole the world Z axis cannot define an up direction.
@@ -345,6 +350,12 @@ pub struct Camera {
     /// Roll of the view around its direction (radians, positive turns the
     /// picture clockwise): the photo viewfinder's tilt, 0 elsewhere.
     pub roll: f32,
+    /// The Camera Lock or a Camera Path showing its own view instead of
+    /// this camera's (`takeover.rs`).
+    takeover: takeover::Takeover,
+    /// The user moved the camera since `take_touched` (a drag, the wheel,
+    /// the camera keys, a focus click, the free camera's flight).
+    touched: bool,
 }
 
 impl Default for Camera {
@@ -413,6 +424,8 @@ impl Default for Camera {
             flycam_lens: None,
             shake: Vec3::ZERO,
             roll: 0.0,
+            takeover: Default::default(),
+            touched: false,
         }
     }
 }
@@ -524,6 +537,9 @@ impl Camera {
         // mouselook ends the free camera (the flycam's toggle the other way)
         self.free = None;
         self.clear_flycam();
+        // and gives the view back from a lock or a path: its own transition
+        // starts from the view shown
+        self.release_view(false);
         // the view keeps its direction: the avatar turns to it
         agent.yaw += self.orbit_yaw;
         self.orbit_yaw = 0.0;
@@ -770,6 +786,7 @@ impl Camera {
         agent: &mut AgentState,
         s: &CameraSettings,
     ) {
+        self.touched = true;
         self.set_focus_on_avatar(false, true, true, agent, s);
         let focus = match object {
             Some((_, g)) => g.position + self.object_pick_offset(&g, point, Some(ray)),
@@ -845,6 +862,7 @@ impl Camera {
         agent: &mut AgentState,
         s: &CameraSettings,
     ) {
+        self.touched = true;
         self.set_focus_on_avatar(false, true, true, agent, s);
         if zoom {
             let distance = selection_distance(extent, s.fov, aspect).min((self.position - center).length());
@@ -859,6 +877,7 @@ impl Camera {
     /// attached to `object` when there is one, so the camera follows it as
     /// it moves (TrackFocusObject).
     pub fn zoom_to(&mut self, point: Vec3, object: Option<(Uuid, FocusObject)>, agent: &mut AgentState, s: &CameraSettings) {
+        self.touched = true;
         self.set_focus_on_avatar(false, true, true, agent, s);
         let dir = (self.position - point).normalize_or(-self.forward());
         self.set_camera_pos_and_focus(point + dir * 3.0, point, object, s);
@@ -868,6 +887,7 @@ impl Camera {
     /// the camera faces the avatar, a little above its centre, and keeps it
     /// as the focus object so it follows the avatar as it moves.
     pub fn zoom_avatar(&mut self, avatar: (Uuid, FocusObject), agent: &mut AgentState, s: &CameraSettings) {
+        self.touched = true;
         self.set_focus_on_avatar(false, true, true, agent, s);
         let g = avatar.1;
         let eye = g.position + g.rotation * Vec3::new(AVATAR_ZOOM_DISTANCE, 0.0, AVATAR_ZOOM_EYE_Z);
@@ -886,6 +906,7 @@ impl Camera {
         agent: &mut AgentState,
         s: &CameraSettings,
     ) {
+        self.touched = true;
         self.set_focus_on_avatar(false, true, true, agent, s);
         let angle = (self.fov_y * aspect.max(1.0)).max(0.1);
         let distance = extent.length() * 2.0 / angle.atan();
@@ -1041,6 +1062,7 @@ impl Camera {
     /// space moves by `delta`, so that a border crossing shows nothing.
     pub fn shift(&mut self, delta: Vec3) {
         self.follow.shift(delta);
+        self.takeover.shift(delta);
         for p in [
             &mut self.position,
             &mut self.target,
@@ -1095,6 +1117,8 @@ impl Camera {
             }
             return;
         }
+        // a held view belongs to the region left
+        self.release_view(false);
         self.clear_flycam();
         // a free camera stays in the region it left
         self.free = None;
@@ -1214,6 +1238,7 @@ impl Camera {
 
     /// LLAgentCamera::setCameraZoomFraction.
     pub fn set_zoom_fraction(&mut self, fraction: f32) {
+        self.touched = true;
         let f = fraction.clamp(0.0, 1.0);
         if self.focus_on_avatar && self.third_person() {
             self.zoom_fraction = MAX_ZOOM_FRACTION + (MIN_ZOOM_FRACTION - MAX_ZOOM_FRACTION) * f;
@@ -1285,6 +1310,7 @@ impl Camera {
             }
             return false;
         }
+        self.touched = true;
         if self.mode == CameraMode::Follow && self.focus_on_avatar {
             if !s.disable_wheel_zoom && self.follow.zoom(clicks) {
                 self.change_to_mouselook(agent, s, false);
@@ -1331,6 +1357,7 @@ impl Camera {
     /// Already eased by the edit tool; translate the view in this frame,
     /// preserving the focus offset so tracking cannot undo the edge pan.
     pub fn pan_edit(&mut self, delta: Vec3, agent: &mut AgentState, s: &CameraSettings) -> bool {
+        self.touched = true;
         if delta == Vec3::ZERO || !delta.is_finite() || !self.third_person() {
             return false;
         }
@@ -1381,6 +1408,7 @@ impl Camera {
     /// Mouse motion during a camera drag (LLToolCamera::handleHover), in
     /// window pixels (y down). A full window width turns 360°.
     pub fn drag(&mut self, mode: ToolMode, dx: f32, dy: f32, width: f32, agent: &mut AgentState) {
+        self.touched = true;
         let Some(t) = &mut self.tool else {
             return;
         };
@@ -1441,6 +1469,7 @@ impl Camera {
     /// Right drag (Aurora): around the avatar without turning it, or around
     /// the alt-camera focus point.
     pub fn orbit_drag(&mut self, dx: f32, dy: f32, sensitivity: f32, agent: &mut AgentState) {
+        self.touched = true;
         let k = DRAG_RATE * sensitivity;
         if self.focus_on_avatar && self.third_person() {
             self.orbit_yaw -= dx * k;
@@ -1464,6 +1493,7 @@ impl Camera {
         if !keys.any() || self.mouselook() {
             return;
         }
+        self.touched = true;
         self.unlock_view(agent, s);
         let over = keys.orbit_up - keys.orbit_down;
         if over != 0.0 {
@@ -1493,8 +1523,106 @@ impl Camera {
     /// third-person camera; mouselook uses AgentState::pitch instead.
     pub fn joystick_pitch(&mut self, rate: f32, dt: f32) {
         if !self.mouselook() && rate != 0.0 {
+            self.touched = true;
             self.pitch_by(-rate * dt.clamp(0.0, 0.2));
         }
+    }
+
+    // --------------------------------------------------------------- takeover
+
+    /// The view shown now.
+    pub fn current_view(&self) -> View {
+        View {
+            position: self.position,
+            target: self.target,
+            fov: self.fov_y,
+            roll: self.roll,
+        }
+    }
+
+    /// What holds the view instead of this camera (`takeover.rs`).
+    pub fn view_owner(&self) -> Option<Owner> {
+        self.takeover.owner()
+    }
+
+    /// The Camera Lock is on.
+    pub fn locked(&self) -> bool {
+        self.takeover.locked()
+    }
+
+    /// `owner` holds `view` from now on, whatever moves this camera. False:
+    /// refused (mouselook, a locked camera asked by a path, a broken view).
+    /// The caller checks the RLVa restrictions (`Rlva::camera_restricted`);
+    /// `update` releases the view under them anyway.
+    pub fn take_view(&mut self, owner: Owner, view: View) -> bool {
+        !self.mouselook() && self.takeover.take(owner, view, self.roll)
+    }
+
+    /// The view `owner` holds moves. False: it no longer holds the view.
+    pub fn hold_view(&mut self, owner: Owner, view: View) -> bool {
+        self.takeover.hold(owner, view)
+    }
+
+    /// The view back to this camera: gliding there (`takeover::RELEASE_TIME`)
+    /// when `blend`, at once otherwise.
+    pub fn release_view(&mut self, blend: bool) {
+        if self.takeover.idle() {
+            return;
+        }
+        self.takeover.release(blend);
+        if self.takeover.idle() {
+            self.roll = self.takeover.base_roll();
+        }
+    }
+
+    /// This camera goes on from the view a path holds, as if the user had
+    /// placed it there: an alt-camera on the point ahead, the roll kept;
+    /// only the lens glides back to the user's.
+    pub fn adopt_view(&mut self, agent: &mut AgentState, s: &CameraSettings) {
+        let Some(view) = self.takeover.held_view() else {
+            return;
+        };
+        self.takeover.release(false);
+        self.place(view, agent, s);
+        self.takeover.ease_from(view, view.roll);
+    }
+
+    /// Glide to `view` (a step of the view history, a waypoint asked for):
+    /// this camera is placed there as `set_view` does, and the way from the
+    /// view shown is eased. False: a lock or a path holds the view.
+    pub fn go_to_view(&mut self, view: View, agent: &mut AgentState, s: &CameraSettings) -> bool {
+        if self.takeover.owner().is_some() || self.mouselook() || !view.is_finite() {
+            return false;
+        }
+        let from = self.current_view();
+        self.place(view, agent, s);
+        self.takeover.ease_from(from, view.roll);
+        true
+    }
+
+    /// `set_view` without its own transition or smoothing, with the roll.
+    fn place(&mut self, view: View, agent: &mut AgentState, s: &CameraSettings) {
+        self.set_view(view.position, view.target, agent, s);
+        self.anim = None;
+        self.smoothing_stop = true;
+        self.roll = view.roll;
+    }
+
+    /// The user moved the camera since the last call.
+    pub fn take_touched(&mut self) -> bool {
+        std::mem::take(&mut self.touched)
+    }
+
+    /// After the normal camera's frame: what a lock or a path shows instead.
+    fn show_takeover(&mut self, dt: f32) {
+        if self.takeover.idle() {
+            return;
+        }
+        let shown = self.takeover.apply(self.current_view(), dt);
+        self.position = shown.position;
+        self.target = shown.target;
+        self.fov_y = shown.fov;
+        self.roll = shown.roll;
     }
 
     // ------------------------------------------------------------------ frame
@@ -1503,7 +1631,14 @@ impl Camera {
     pub fn update(&mut self, world: &mut World, s: &CameraSettings, f: &FrameInput) {
         if !world.rlva.enabled() {
             self.update_unrestricted(world, s, f);
+            self.show_takeover(f.dt);
             return;
+        }
+        // RLVa camera restrictions win over a lock or a path: the view goes
+        // back to the camera they constrain, and the limits below apply to
+        // whatever is shown meanwhile
+        if world.rlva.camera_restricted() {
+            self.release_view(true);
         }
         let settings = world.rlva.camera_settings(s, f.aspect);
         let no_mouselook =
@@ -1515,6 +1650,7 @@ impl Camera {
             self.set_focus_on_avatar(true, false, false, &mut world.agent, &settings);
         }
         self.update_unrestricted(world, &settings, f);
+        self.show_takeover(f.dt);
         for (origin, low, high) in [
             (world.agent.position, "setcam_avdistmin", "setcam_avdistmax"),
             (self.target, "setcam_origindistmin", "setcam_origindistmax"),
@@ -1531,7 +1667,9 @@ impl Camera {
         if let Some((min, max)) = world.rlva.camera_fov_limits(f.aspect) {
             self.fov_y = self.fov_y.clamp(min, max);
         }
-        if let Some(flycam) = self.flycam.as_mut() {
+        if let Some(flycam) = self.flycam.as_mut()
+            && self.takeover.idle()
+        {
             // Keep the integrated pose and AgentUpdate frame at the view
             // allowed by RLVa, including when the flight is toggled off.
             flycam.position = self.position;
@@ -1558,15 +1696,20 @@ impl Camera {
         self.avatar = avatar_frame(world, s, f.now);
         self.sync_seat(&mut world.agent, s);
         if let Some(flycam) = self.flycam {
+            let target = flycam.position + flycam.forward();
+            self.touched |= self.takeover.idle() && (self.position != flycam.position || self.target != target);
             self.position = flycam.position;
-            self.target = flycam.position + flycam.forward();
+            self.target = target;
             self.fov_y = flycam.fov;
-            self.roll = flycam.roll();
+            if self.takeover.idle() {
+                self.roll = flycam.roll();
+            }
             self.anim = None;
             return;
         }
         if let Some(free) = self.free {
             // the free camera's own view; the avatar's waits for its return
+            self.touched |= self.takeover.idle() && (self.position != free.position || self.target != free.target());
             self.position = free.position;
             self.target = free.target();
             self.fov_y = self.zoomed_fov(s, f.aspect);
@@ -1978,7 +2121,9 @@ impl Camera {
     }
 
     pub fn view(&self) -> Mat4 {
-        if let Some(flycam) = self.flycam {
+        if let Some(flycam) = self.flycam
+            && self.takeover.idle()
+        {
             return glam::camera::rh::view::look_to_mat4(self.position + self.shake, flycam.forward(), flycam.up());
         }
         // Scripts may set identical eye / focus points or look vertically.
@@ -1988,7 +2133,9 @@ impl Camera {
     }
 
     pub fn view_up(&self) -> Vec3 {
-        if let Some(flycam) = self.flycam {
+        if let Some(flycam) = self.flycam
+            && self.takeover.idle()
+        {
             return flycam.up();
         }
         let direction = self.forward();
@@ -4020,5 +4167,183 @@ mod tests {
             }
             assert!(camera.position.abs_diff_eq(stopped, 1e-4));
         }
+    }
+
+    // ------------------------------------------------- lock, history, path
+
+    fn rlva_camera_rule(w: &mut World, rule: &str) {
+        w.rlva.configure(true);
+        assert!(w.rlva.receive(&aurora_net::ChatMessage {
+            from_name: "Camera test object".to_owned(),
+            source_id: Uuid::from_u128(1),
+            owner_id: Uuid::from_u128(2),
+            source_type: aurora_net::ChatSourceType::Object,
+            chat_type: aurora_net::ChatType::OwnerSay,
+            position: w.agent.position,
+            message: rule.to_owned(),
+        }));
+    }
+
+    #[test]
+    fn a_locked_camera_stays_while_the_avatar_walks_then_glides_back() {
+        let s = CameraSettings::default();
+        let mut w = world_at(Vec3::new(128.0, 128.0, 25.0));
+        let mut cam = Camera::default();
+        settle(&mut cam, &mut w, &s);
+        let locked = cam.current_view();
+        assert!(cam.take_view(Owner::Lock, locked));
+        assert!(cam.locked());
+        // the avatar walks away, the user orbits, a preset is applied
+        for n in 0..120 {
+            w.agent.position.x += 0.1;
+            if n == 30 {
+                cam.orbit_drag(200.0, 40.0, 1.0, &mut w.agent);
+                cam.reset_to_defaults(&mut w.agent, &s);
+            }
+            cam.update(&mut w, &s, &frame(1.0 / 60.0));
+            assert_eq!(cam.current_view(), locked, "frame {n}");
+        }
+        // unlocked: half a second of glide, no jump, then the normal camera
+        let mut normal = cam.clone();
+        normal.release_view(false);
+        normal.update(&mut w, &s, &frame(0.0));
+        assert!(normal.position.distance(locked.position) > 5.0, "the camera went with the avatar");
+        cam.release_view(true);
+        assert!(!cam.locked());
+        let mut last = locked.position;
+        let mut longest = 0.0f32;
+        for _ in 0..40 {
+            cam.update(&mut w, &s, &frame(1.0 / 60.0));
+            longest = longest.max(cam.position.distance(last));
+            last = cam.position;
+        }
+        assert!(longest < 1.0, "eased: {longest}");
+        assert!(
+            cam.position.distance(normal.position) < 0.05,
+            "{:?} {:?}",
+            cam.position,
+            normal.position
+        );
+        assert_eq!(cam.view_owner(), None);
+    }
+
+    #[test]
+    fn rlva_camera_restrictions_win_over_the_lock() {
+        let s = CameraSettings::default();
+        let mut w = world_at(Vec3::new(128.0, 128.0, 25.0));
+        let mut cam = Camera::default();
+        settle(&mut cam, &mut w, &s);
+        let avatar = w.agent.position;
+        let far = View {
+            position: avatar + Vec3::X * 60.0,
+            target: avatar,
+            fov: 0.3,
+            roll: 0.0,
+        };
+        assert!(!w.rlva.camera_restricted());
+        assert!(cam.take_view(Owner::Lock, far));
+        cam.update(&mut w, &s, &frame(1.0 / 60.0));
+        assert_eq!(cam.position, far.position);
+        // a restriction arrives: the lock is released, and its limits apply
+        // from the first frame, glide included
+        rlva_camera_rule(&mut w, "@setcam_avdistmax:2=n,setcam_fovmin:0.8=n");
+        assert!(w.rlva.camera_restricted());
+        let f = frame(1.0 / 60.0);
+        for _ in 0..3 {
+            cam.update(&mut w, &s, &f);
+            assert!(!cam.locked());
+            assert!(cam.position.distance(w.agent.position) <= 2.001);
+            assert!(cam.fov_y >= 0.8 - 1e-4);
+        }
+    }
+
+    #[test]
+    fn mouselook_and_a_teleport_release_the_lock_and_a_crossing_keeps_it() {
+        let s = CameraSettings::default();
+        let mut w = world_at(Vec3::new(128.0, 128.0, 25.0));
+        let mut cam = Camera::default();
+        settle(&mut cam, &mut w, &s);
+        let view = cam.current_view();
+        assert!(cam.take_view(Owner::Lock, view));
+        // a border crossing: the frozen view stays the same place
+        let delta = Vec3::new(-256.0, 0.0, 0.0);
+        cam.shift(delta);
+        cam.update(&mut w, &s, &frame(1.0 / 60.0));
+        assert!(cam.locked());
+        assert_eq!(cam.position, view.position + delta);
+        cam.change_to_mouselook(&mut w.agent, &s, true);
+        assert!(!cam.locked() && cam.view_owner().is_none());
+        // and no lock can be taken in mouselook
+        assert!(!cam.take_view(Owner::Lock, view));
+        cam.change_to_default(&mut w.agent, &s);
+        assert!(cam.take_view(Owner::Lock, view));
+        cam.on_teleport_arrival(&s, false);
+        assert!(!cam.locked());
+        // a teleport inside the region keeps it
+        assert!(cam.take_view(Owner::Lock, view));
+        cam.on_teleport_arrival(&s, true);
+        assert!(cam.locked());
+    }
+
+    #[test]
+    fn user_input_is_noticed_and_the_camera_following_is_not() {
+        let s = CameraSettings::default();
+        let mut w = world_at(Vec3::new(128.0, 128.0, 25.0));
+        let mut cam = Camera::default();
+        settle(&mut cam, &mut w, &s);
+        assert!(!cam.take_touched());
+        for _ in 0..30 {
+            w.agent.position.x += 0.1;
+            cam.update(&mut w, &s, &frame(1.0 / 60.0));
+        }
+        assert!(!cam.take_touched(), "following the avatar is not a camera move");
+        cam.orbit_drag(50.0, 0.0, 1.0, &mut w.agent);
+        assert!(cam.take_touched());
+        assert!(!cam.take_touched(), "taken once");
+    }
+
+    #[test]
+    fn a_step_of_the_history_glides_to_the_view_and_a_path_view_is_adopted() {
+        let s = CameraSettings::default();
+        let mut w = world_at(Vec3::new(128.0, 128.0, 25.0));
+        let mut cam = Camera::default();
+        settle(&mut cam, &mut w, &s);
+        let start = cam.position;
+        let avatar = w.agent.position;
+        let view = View {
+            position: avatar + Vec3::new(0.0, 12.0, 6.0),
+            target: avatar,
+            fov: cam.fov_y,
+            roll: 0.2,
+        };
+        assert!(cam.go_to_view(view, &mut w.agent, &s));
+        cam.update(&mut w, &s, &frame(1.0 / 60.0));
+        assert!(cam.position.distance(start) < 1.0, "no jump");
+        for _ in 0..60 {
+            cam.update(&mut w, &s, &frame(1.0 / 60.0));
+        }
+        assert!(cam.position.distance(view.position) < 0.05, "{:?}", cam.position);
+        assert!((cam.roll - 0.2).abs() < 1e-5);
+        assert!(cam.forward().dot(view.forward()) > 0.999);
+        // a path holds another view; the user takes the camera from there
+        let shot = View {
+            position: avatar + Vec3::new(20.0, 0.0, 10.0),
+            target: avatar + Vec3::new(25.0, 0.0, 10.0),
+            fov: 0.4,
+            roll: 0.0,
+        };
+        assert!(cam.take_view(Owner::Path, shot));
+        assert!(!cam.go_to_view(view, &mut w.agent, &s), "the path holds the view");
+        cam.update(&mut w, &s, &frame(1.0 / 60.0));
+        assert_eq!(cam.current_view(), shot);
+        cam.adopt_view(&mut w.agent, &s);
+        assert_eq!(cam.view_owner(), None);
+        for _ in 0..60 {
+            cam.update(&mut w, &s, &frame(1.0 / 60.0));
+            assert!(cam.position.distance(shot.position) < 0.05, "stays where the path left it");
+        }
+        assert!(cam.forward().dot(shot.forward()) > 0.999);
+        // only the lens went back to the user's
+        assert!((cam.fov_y - s.fov).abs() < 0.05);
     }
 }

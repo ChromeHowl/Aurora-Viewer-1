@@ -48,6 +48,7 @@ mod blender_shape;
 mod buy_currency;
 mod buy_land;
 mod camera_presets;
+mod camera_tools;
 mod chat_commands;
 mod chat_import;
 mod click_pick;
@@ -842,6 +843,8 @@ pub struct App {
     people_map_ui: ui::minimap::MiniMap,
     worldmap_ui: ui::worldmap::WorldMapUi,
     region_tracker_ui: ui::region_tracker::RegionTrackerUi,
+    /// The Camera Lock, the view history and the Camera Path.
+    camera_tools: camera_tools::CameraTools,
     map_tiles: ui::map_tiles::MapTiles,
     options_ui: ui::options::OptionsUi,
     grids_ui: ui::grids::Manager,
@@ -1775,6 +1778,7 @@ impl App {
             people_map_ui: Default::default(),
             worldmap_ui: Default::default(),
             region_tracker_ui: Default::default(),
+            camera_tools: Default::default(),
             map_tiles: ui::map_tiles::MapTiles::new(),
             options_ui: Default::default(),
             grids_ui: Default::default(),
@@ -3993,6 +3997,7 @@ impl App {
                 if !self.world.arrived_by_crossing {
                     let local = self.world.arrived_by_local_teleport;
                     self.camera.on_teleport_arrival(&self.settings.camera, local);
+                    self.camera_tools.on_teleport(local);
                     log::info!(
                         "camera: teleport arrival (inside the region {local}, return after teleport {}), on the avatar {}",
                         self.settings.camera.reset_on_teleport,
@@ -4622,6 +4627,11 @@ impl App {
             Action::SitGround => self.sit_stand_shortcut(),
             Action::Mouselook => self.toggle_mouselook(),
             Action::CameraControls => self.request_controls(false, true),
+            Action::CameraLock => self.toggle_camera_lock(),
+            Action::ViewPrevious => self.camera_view_step(true),
+            Action::ViewNext => self.camera_view_step(false),
+            Action::PathPlayStop => self.path_play_stop(),
+            Action::PathCapture => self.path_capture(),
             Action::LensZoomIn | Action::LensZoomOut | Action::LensZoomDefault => {
                 if self.world.rlva.camera_owner().is_none() {
                     let aspect = self.view_aspect();
@@ -9112,6 +9122,7 @@ impl App {
         let shift = self.world.take_origin_shift();
         if shift != Vec3::ZERO {
             self.camera.shift(shift);
+            self.camera_tools.shift(shift);
             if let Some(ap) = &mut self.autopilot {
                 ap.shift(shift);
             }
@@ -9446,6 +9457,7 @@ impl App {
                 self.end_mouselook_zoom();
             }
             self.follow_awaited_zoom();
+            self.camera_tools_tick(dt);
             let frame = crate::camera::FrameInput {
                 dt,
                 aspect: self.camera_aspect(),
@@ -13954,6 +13966,9 @@ impl App {
             BarAction::SitGround => self.toggle_ground_sit(),
             BarAction::StandUp => self.send(NetCommand::OneShotControl(control::STAND_UP)),
             BarAction::ResetCamera => self.reset_camera_view(),
+            BarAction::CameraLock => self.toggle_camera_lock(),
+            BarAction::ViewStep(back) => self.camera_view_step(back),
+            BarAction::ViewHistoryClear => self.camera_history_clear(),
             BarAction::BanLines(v) => self.settings.maps.ban_lines = v,
             BarAction::WorldOverlays(overlays) => {
                 self.settings.world_overlays = overlays;
@@ -15731,6 +15746,7 @@ impl App {
                     double_click: self.double_click_action(),
                     quickjump: self.settings.quickjump,
                     friends_only: self.world.friends_only(),
+                    camera_tools: self.camera_tools_state(),
                     show_name_tags: self.settings.show_name_tags,
                     fly_override: self.world.fly_override,
                     quiet_snapshots: !self.settings.snapshot.sound,
@@ -17602,6 +17618,7 @@ impl App {
                 };
                 self.toolbar_ui.chat_bar_active = self.chat_ui.bar_shown();
                 self.toolbar_ui.friends_only_active = self.world.friends_only();
+                self.toolbar_ui.camera_lock_active = self.camera.locked();
                 let pointer_busy = ctx.input(|i| i.pointer.any_down() || i.pointer.any_released());
                 self.chat_ui.note_frame(pointer_busy);
                 for pa in acts {
@@ -17841,6 +17858,7 @@ impl App {
                     &mut self.panels.region_tracker,
                     &mut self.panels.world_map,
                 );
+                self.camera_path_window(&ctx, &p);
                 for wa in wm {
                     match wa {
                         ui::worldmap::WorldMapAction::TrackRegion(name) => {

@@ -28,6 +28,7 @@ impl App {
                 speed: flight.speed,
                 no_collisions: flight.no_collisions,
             }),
+            camera_tools: self.camera_tools_state(),
         };
         let out = self.controls_ui.show(
             ctx,
@@ -97,6 +98,8 @@ impl App {
             ControlAction::Zoom(fraction) => self.camera.set_zoom_fraction(fraction),
             ControlAction::Mouselook => self.toggle_mouselook(),
             ControlAction::ObjectView => self.object_view = !self.object_view,
+            ControlAction::CameraLock => self.toggle_camera_lock(),
+            ControlAction::ViewStep(back) => self.camera_view_step(back),
             ControlAction::Walk | ControlAction::Run => {
                 if self.world.agent.flying {
                     self.toggle_fly();

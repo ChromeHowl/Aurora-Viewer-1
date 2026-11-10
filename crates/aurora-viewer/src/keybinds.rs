@@ -353,6 +353,15 @@ pub enum Action {
     /// The Controls window, on its Camera tab (Firestorm's View › Camera
     /// Controls).
     CameraControls,
+    /// Aurora's Camera Lock: the view frozen where it is (Alt+Shift+L).
+    CameraLock,
+    /// The camera's view history, back and forth (Alt+Shift+Z / Y).
+    ViewPrevious,
+    ViewNext,
+    /// The Camera Path: play or stop (Alt+Shift+P), capture the view as a
+    /// waypoint (Alt+Shift+K).
+    PathPlayStop,
+    PathCapture,
     /// Change the viewing angle (Legacy Viewer View.ZoomIn / Out / Default).
     LensZoomIn,
     LensZoomOut,
@@ -545,6 +554,11 @@ pub fn sections() -> &'static Vec<(&'static str, Vec<(Action, &'static str)>)> {
                     (Action::ZoomSelection, aurora_i18n::tr!("keybinds-zoom-selection")),
                     (Action::Flycam, aurora_i18n::tr!("joystick-flycam")),
                     (Action::CameraControls, aurora_i18n::tr!("controls-camera-title")),
+                    (Action::CameraLock, aurora_i18n::tr!("camtools-lock")),
+                    (Action::ViewPrevious, aurora_i18n::tr!("camtools-view-previous")),
+                    (Action::ViewNext, aurora_i18n::tr!("camtools-view-next")),
+                    (Action::PathPlayStop, aurora_i18n::tr!("camtools-path-key-play")),
+                    (Action::PathCapture, aurora_i18n::tr!("camtools-path-key-capture")),
                     (Action::LensZoomIn, aurora_i18n::tr!("keybinds-lens-zoom-in")),
                     (Action::LensZoomOut, aurora_i18n::tr!("keybinds-lens-zoom-out")),
                     (Action::LensZoomDefault, aurora_i18n::tr!("keybinds-lens-zoom-default")),
@@ -770,6 +784,12 @@ impl KeyBindings {
             (Action::ZoomSelection, [kmod(K::KeyH, false, true), None]),
             (Action::Flycam, [kalt(K::KeyF, false, true), None]),
             (Action::CameraControls, [kmod(K::KeyC, true, true), None]),
+            // Aurora's own, on Alt+Shift chords the Legacy Viewer's menus leave free
+            (Action::CameraLock, [kalt(K::KeyL, false, true), None]),
+            (Action::ViewPrevious, [kalt(K::KeyZ, false, true), None]),
+            (Action::ViewNext, [kalt(K::KeyY, false, true), None]),
+            (Action::PathPlayStop, [kalt(K::KeyP, false, true), None]),
+            (Action::PathCapture, [kalt(K::KeyK, false, true), None]),
             (Action::LensZoomIn, [kmod(K::Digit0, true, false), kmod(K::Numpad0, true, false)]),
             (Action::LensZoomOut, [kmod(K::Digit8, true, false), kmod(K::Numpad8, true, false)]),
             (
