@@ -1107,6 +1107,11 @@ impl Camera {
     /// teleport to another region always brings the camera back
     /// (TELEPORT_START_ARRIVAL's resetView in update_tp_display); Aurora
     /// keeps the orbit, pitch and zoom there when the switch is off.
+    ///
+    /// The Camera Lock outlives a teleport inside the region, whatever the
+    /// switch: the camera underneath comes back to the avatar, the frozen
+    /// view stays (nothing moves a locked camera). A view held from another
+    /// region is let go at once.
     pub fn on_teleport_arrival(&mut self, s: &CameraSettings, local: bool) {
         if local && !s.reset_on_teleport {
             // the eye jumps with the avatar instead of gliding across the
@@ -1117,8 +1122,10 @@ impl Camera {
             }
             return;
         }
-        // a held view belongs to the region left
-        self.release_view(false);
+        if !local {
+            // a held view belongs to the region left
+            self.release_view(false);
+        }
         self.clear_flycam();
         // a free camera stays in the region it left
         self.free = None;
