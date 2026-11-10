@@ -1353,7 +1353,8 @@ pub struct Settings {
     /// experimental setting, off by default.
     pub colored_sky_ambient: bool,
     /// 0 Khronos PBR Neutral, 1 ACES (RenderTonemapType: ACES by default,
-    /// like the Legacy Viewer)
+    /// like the Legacy Viewer), then Aurora's own: 2 Reinhard, 3 Uncharted 2,
+    /// 4 AgX ([`tonemapper_of`])
     pub tonemapper: u8,
     /// Share of the tone mapped color over the exposed linear one, on skies
     /// that are not classic (RenderTonemapMix, 0.7 like the Legacy Viewer).
@@ -1559,6 +1560,23 @@ pub(crate) const FONT_SCALE_MAX: f32 = 2.0;
 
 /// The default strength of the bloom (half of the light over its threshold).
 pub(crate) const BLOOM_STRENGTH: f32 = 0.5;
+
+/// The largest `Settings::tonemapper`.
+pub(crate) const TONEMAPPER_MAX: u8 = 4;
+
+/// The tone curve of a `Settings::tonemapper`: the Legacy Viewer's numbers
+/// for its two (RenderTonemapType), Aurora's three after them. Any other
+/// number is Khronos PBR Neutral, as before they came.
+pub(crate) fn tonemapper_of(setting: u8) -> aurora_render::Tonemapper {
+    use aurora_render::Tonemapper;
+    match setting {
+        1 => Tonemapper::Aces,
+        2 => Tonemapper::Reinhard,
+        3 => Tonemapper::Uncharted2,
+        4 => Tonemapper::Agx,
+        _ => Tonemapper::KhronosNeutral,
+    }
+}
 
 /// RenderTonemapMix's default (settings.xml).
 pub(crate) const TONEMAP_MIX: f32 = 0.7;
@@ -3004,7 +3022,7 @@ impl Settings {
         } else {
             512.0
         };
-        self.tonemapper = self.tonemapper.min(1);
+        self.tonemapper = self.tonemapper.min(TONEMAPPER_MAX);
         self.tonemap_mix = if self.tonemap_mix.is_finite() {
             self.tonemap_mix.clamp(0.0, 1.0)
         } else {
@@ -3197,7 +3215,7 @@ impl Settings {
     }
 
     pub fn render_settings(&self) -> aurora_render::RenderSettings {
-        use aurora_render::{AntiAliasing, AoMethod, FsrQuality, Tonemapper};
+        use aurora_render::{AntiAliasing, AoMethod, FsrQuality};
         let mut water_effects = self.water_effects.render();
         water_effects.particle_budget = self.max_particles;
         aurora_render::RenderSettings {
@@ -3220,11 +3238,7 @@ impl Settings {
                 _ => AntiAliasing::Smaa,
             },
             fsr_sharpness: (self.fsr_sharpness > 0).then(|| self.fsr_sharpness.min(100) as f32 / 100.0),
-            tonemapper: if self.tonemapper == 1 {
-                Tonemapper::Aces
-            } else {
-                Tonemapper::KhronosNeutral
-            },
+            tonemapper: tonemapper_of(self.tonemapper),
             hdr: self.hdr_emissive,
             shadow_resolution: self.shadow_params().0,
             projector_shadow_limit: if self.projector_shadows { self.projector_shadow_limit } else { 0 },
@@ -4145,6 +4159,33 @@ mod tests {
         };
         let chosen = chosen.sanitized();
         assert_eq!((chosen.tonemapper, chosen.tonemap_mix), (0, 0.7));
+    }
+
+    /// The two tone mappers of the Legacy Viewer keep their numbers, the
+    /// three others come after them and survive a load; a number past the
+    /// last one falls back on the last.
+    #[test]
+    fn the_tone_mapper_numbers_are_kept_and_the_new_ones_follow() {
+        use aurora_render::Tonemapper;
+        assert_eq!(tonemapper_of(0), Tonemapper::KhronosNeutral);
+        assert_eq!(tonemapper_of(1), Tonemapper::Aces);
+        assert_eq!(tonemapper_of(2), Tonemapper::Reinhard);
+        assert_eq!(tonemapper_of(3), Tonemapper::Uncharted2);
+        assert_eq!(tonemapper_of(TONEMAPPER_MAX), Tonemapper::Agx);
+        for n in 0..=TONEMAPPER_MAX {
+            let s = Settings {
+                tonemapper: n,
+                ..Settings::default()
+            }
+            .sanitized();
+            assert_eq!(s.tonemapper, n);
+            assert_eq!(s.render_settings().tonemapper, tonemapper_of(n));
+        }
+        let beyond = Settings {
+            tonemapper: 200,
+            ..Settings::default()
+        };
+        assert_eq!(beyond.sanitized().tonemapper, TONEMAPPER_MAX);
     }
 
     /// Performance does not open with the session: off by default, off

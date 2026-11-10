@@ -13546,3 +13546,8 @@ ui-options-attached-particles-hint = Affiche les particules de ce que portent le
 # Preferences › Graphics: progressive draw distance (FSRenderFarClipStepping)
 ui-options-draw-distance-stepping = Distance d'affichage progressive
 ui-options-draw-distance-stepping-hint = Après la connexion et après une téléportation vers une autre région, la distance d'affichage part de 32 m et double jusqu'à la vôtre, pour que ce qui est proche se charge d'abord.
+
+# Preferences › Graphics › Tone mapping: Aurora's own tone curves
+tone-curves-reinhard = Reinhard
+tone-curves-uncharted2 = Uncharted 2 (filmique)
+tone-curves-agx = AgX

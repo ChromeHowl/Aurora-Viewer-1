@@ -13550,3 +13550,8 @@ ui-options-attached-particles-hint = Draw the particles of what avatars wear: sp
 # Preferences › Graphics: progressive draw distance (FSRenderFarClipStepping)
 ui-options-draw-distance-stepping = Progressive draw distance
 ui-options-draw-distance-stepping-hint = After logging in and after a teleport to another region, the draw distance starts at 32 m and doubles back up to yours, so that what is near loads first.
+
+# Preferences › Graphics › Tone mapping: Aurora's own tone curves
+tone-curves-reinhard = Reinhard
+tone-curves-uncharted2 = Uncharted 2 (filmic)
+tone-curves-agx = AgX

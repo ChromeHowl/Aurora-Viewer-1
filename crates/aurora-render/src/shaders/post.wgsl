@@ -1,4 +1,5 @@
-// Tonemapping (Khronos PBR Neutral or ACES), optional FXAA, output encoding.
+// Tonemapping (Khronos PBR Neutral, ACES, Reinhard, Uncharted 2 or AgX),
+// optional FXAA, output encoding.
 
 @group(0) @binding(0) var hdr: texture_2d<f32>;
 @group(0) @binding(1) var hdr_sampler: sampler;
@@ -6,7 +7,9 @@
 struct PostParams {
     exposure: f32,
     output_srgb: f32,
-    tonemapper: f32, // 0 Khronos PBR Neutral, 1 ACES, 2 none (classic skies)
+    // 0 Khronos PBR Neutral, 1 ACES, 2 none (classic skies), 3 Reinhard,
+    // 4 Uncharted 2, 5 AgX (Tonemapper::shader_id)
+    tonemapper: f32,
     fxaa: f32,
     sharpen: f32, // AMD CAS sharpness (0 = off)
     glow: f32,    // 1: add the blurred glow (glowcombineF.glsl)
@@ -95,6 +98,77 @@ fn aces(x: vec3<f32>) -> vec3<f32> {
     return clamp(ACES_OUTPUT * (a / b), vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
+// The three curves below are Aurora's own choices beside the Legacy Viewer's
+// two; tone_curves.rs mirrors them (and the two above) for the tests: keep
+// both in step. Past the largest half float a color is far over each
+// curve's white: cutting it there keeps the squares finite.
+const CURVE_INPUT_MAX: f32 = 65504.0;
+
+// Reinhard's extended curve on the luminance (Reinhard et al., "Photographic
+// Tone Reproduction for Digital Images", 2002, equation 4): the color keeps
+// its hue and saturation, a luminance of REINHARD_WHITE becomes white.
+const REINHARD_WHITE: f32 = 4.0;
+
+fn reinhard(color_in: vec3<f32>) -> vec3<f32> {
+    let c = min(color_in, vec3<f32>(CURVE_INPUT_MAX));
+    let l = dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
+    // l * (1 + l / white^2) / (1 + l) over l: no division by a black pixel
+    let scale = (1.0 + l / (REINHARD_WHITE * REINHARD_WHITE)) / (1.0 + l);
+    return clamp(c * scale, vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
+// Uncharted 2's filmic curve (John Hable, "Filmic Tonemapping Operators",
+// 2010): shoulder 0.15, linear 0.50 at an angle of 0.10, toe 0.20 with a
+// numerator of 0.02 and a denominator of 0.30, an exposure bias of 2 and a
+// linear white of 11.2.
+const HABLE_WHITE: f32 = 11.2;
+
+fn hable_curve(x: vec3<f32>) -> vec3<f32> {
+    let num = x * (0.15 * x + 0.10 * 0.50) + 0.20 * 0.02;
+    let den = x * (0.15 * x + 0.50) + 0.20 * 0.30;
+    return num / den - 0.02 / 0.30;
+}
+
+fn hable(color_in: vec3<f32>) -> vec3<f32> {
+    let c = min(color_in, vec3<f32>(CURVE_INPUT_MAX));
+    let white = hable_curve(vec3<f32>(HABLE_WHITE));
+    return clamp(hable_curve(2.0 * c) / white, vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
+// AgX, base look (Troy Sobotka's transform in Benjamin Wrensch's minimal
+// form, "Minimal AgX Implementation", 2023): the inset matrix, log2 over
+// AGX_MIN_EV..AGX_MAX_EV, a sixth degree fit of the sigmoid, the outset
+// matrix and the 2.2 display curve undone, since this pass encodes itself.
+const AGX_INSET = mat3x3<f32>(
+    vec3<f32>(0.842479062253094, 0.0423282422610123, 0.0423756549057051),
+    vec3<f32>(0.0784335999999992, 0.878468636469772, 0.0784336),
+    vec3<f32>(0.0792237451477643, 0.0791661274605434, 0.879142973793104),
+);
+const AGX_OUTSET = mat3x3<f32>(
+    vec3<f32>(1.19687900512017, -0.0528968517574562, -0.0529716355144438),
+    vec3<f32>(-0.0980208811401368, 1.15190312990417, -0.0980434501171241),
+    vec3<f32>(-0.0990297440797205, -0.0989611768448433, 1.15107367264116),
+);
+const AGX_MIN_EV: f32 = -12.47393;
+const AGX_MAX_EV: f32 = 4.026069;
+
+fn agx_contrast(x: vec3<f32>) -> vec3<f32> {
+    let x2 = x * x;
+    let x4 = x2 * x2;
+    return 15.5 * x4 * x2 - 40.14 * x4 * x + 31.96 * x4 - 6.868 * x2 * x + 0.4298 * x2 + 0.1191 * x - 0.00232;
+}
+
+fn agx(color_in: vec3<f32>) -> vec3<f32> {
+    // the logarithm of black is not defined: far under the lowest stop kept
+    let inset = max(AGX_INSET * color_in, vec3<f32>(1.0e-10));
+    let ev = clamp(log2(inset), vec3<f32>(AGX_MIN_EV), vec3<f32>(AGX_MAX_EV));
+    let x = (ev - AGX_MIN_EV) / (AGX_MAX_EV - AGX_MIN_EV);
+    // the fit ends a little under 0 and the outset can leave the gamut:
+    // clamped before the power, whose base may not be negative
+    let display = clamp(AGX_OUTSET * agx_contrast(x), vec3<f32>(0.0), vec3<f32>(1.0));
+    return pow(display, vec3<f32>(2.2));
+}
+
 // Preferences' exposure times the automatic one (final_exposure).
 fn exposure() -> f32 {
     return post.exposure * post.auto_exposure;
@@ -105,12 +179,18 @@ fn exposure() -> f32 {
 fn tonemap(c: vec3<f32>) -> vec3<f32> {
     let e = max(c * exposure(), vec3<f32>(0.0));
     var m: vec3<f32>;
-    if (post.tonemapper > 1.5) {
+    if (post.tonemapper > 1.5 && post.tonemapper < 2.5) {
         // classic skies (tonemapUtilF NO_POST): exposure, then clamp
         m = e;
     } else {
         var t: vec3<f32>;
-        if (post.tonemapper > 0.5) {
+        if (post.tonemapper > 4.5) {
+            t = agx(e);
+        } else if (post.tonemapper > 3.5) {
+            t = hable(e);
+        } else if (post.tonemapper > 2.5) {
+            t = reinhard(e);
+        } else if (post.tonemapper > 0.5) {
             t = aces(e);
         } else {
             t = neutral(e);
