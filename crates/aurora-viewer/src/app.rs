@@ -9811,6 +9811,8 @@ impl App {
             };
             self.scene.lod_factor = self.settings.lod_factor;
             self.scene.tree_lod_factor = self.settings.tree_lod_factor;
+            self.scene.render_types = self.settings.render_extras.types;
+            self.scene.terrain_scale = self.settings.render_extras.terrain_scale;
             self.scene.surface_protection = self.settings.surface_protection();
             self.scene.textures.set_max_resolution(self.settings.max_texture_resolution);
             self.scene.max_avatars = self.settings.max_avatars as usize;
@@ -10595,6 +10597,10 @@ impl App {
             }
         }
         env.sky.moon_texture = slots[2];
+        // the clouds' rendering type: no cloud texture, no clouds
+        if !self.settings.render_extras.types.clouds {
+            env.sky.cloud_texture = 0;
+        }
         env.water.normal_texture = slots[3];
         env.sky.rainbow_texture = slots[4];
         env.sky.halo_texture = slots[5];
@@ -10646,6 +10652,11 @@ impl App {
             if self.settings.world_overlays.hide_particles {
                 self.scene.lists.particles.clear();
             }
+            // the terrain and water rendering types, and the water an
+            // environment hides (FSAllowEEPWaterDerender)
+            let extras = &self.settings.render_extras;
+            let water = extras.types.water && !crate::settings::render_extras::eep_hides_water(extras.eep_water_derender, env.textures[3]);
+            extras.types.strip(&mut self.scene.lists, water);
             t_part = Instant::now();
         }
         let (lights, spot_shadows) = if in_world {
@@ -10658,11 +10669,13 @@ impl App {
                 dt,
                 projector_shadows: self.settings.projector_shadows && self.settings.shadow_quality > 0,
                 projector_shadow_limit: aurora_render::projector_shadows::effective_limit(
-                    self.settings.shadow_params().0,
+                    self.settings.render_extras.shadow_resolution(self.settings.shadow_params().0),
                     self.settings.projector_shadow_limit,
                     gfx.renderer.max_texture_dimension(),
                 ),
                 others_attached_lights: self.settings.others_attached_lights,
+                scene_lights: self.settings.render_extras.scene_lights,
+                strength: self.settings.render_extras.light_strength,
             };
             self.scene.local_lights(&self.world, &mut gfx.renderer, &view)
         } else {
@@ -10676,7 +10689,11 @@ impl App {
                 self.probes.level = self.settings.reflection_probes.min(3);
                 self.probes.reset();
             }
-            self.probes.range = self.settings.probe_range.min(self.settings.draw_distance);
+            // within the draw distance, never nearer than 64 m
+            self.probes.range = self
+                .settings
+                .probe_range
+                .min(self.settings.draw_distance.max(crate::settings::PROBE_RANGE_MIN));
             if self.probes.hdr != self.settings.hdr_emissive {
                 self.probes.hdr = self.settings.hdr_emissive;
                 self.probes.refresh();
@@ -10797,11 +10814,21 @@ impl App {
                     None => self.camera.proj(aspect),
                 };
                 let fov = 2.0 * (1.0 / lens_proj.y_axis.y.max(1e-6)).atan();
-                self.dof_frame(&mut gfx.renderer, dt, fov, lod_height, h)
+                self.dof_frame(&mut gfx.renderer, dt, fov, lod_height, h).map(|mut lens| {
+                    lens.front_blur = self.settings.render_extras.dof_front_blur;
+                    lens.dispersion = self.settings.render_extras.dof_dispersion;
+                    lens
+                })
             },
             // the photo's isolation, "show only" on an empty background
             cutout: self.world.photo_isolation.empty_background(),
             look: None,
+            grade: self.settings.render_extras.grade.render(),
+            deband: self.settings.render_extras.deband,
+            // RenderDisablePostProcessing applies while building
+            // (LLPipeline::tonemap: buildNoPost && gFloaterTools)
+            no_post: !self.settings.render_extras.types.post_processing && self.build.open,
+            hide_sky: !self.settings.render_extras.types.sky,
         };
         // a photo's look, or the live view's in the photo mode
         let focus = fp.dof.as_ref().map(|d| d.focus);

@@ -430,9 +430,10 @@ pub struct ObjGpu {
     pub built_faces: usize,
     pub is_avatar: bool,
     pub parcel_hidden: bool,
-    /// Left out by the photo's isolation (`snapshot::isolate`): kept, only
-    /// flagged for the GPU lists (`object_flags::PHOTO_HIDDEN`) and left
-    /// out of the CPU ones, so that it comes back at once.
+    /// Left out by the photo's isolation (`snapshot::isolate`), or by a
+    /// hidden rendering type (`Scene::render_types`): kept, only flagged
+    /// for the GPU lists (`object_flags::PHOTO_HIDDEN`) and left out of the
+    /// CPU ones, so that it comes back at once.
     pub photo_hidden: bool,
     pub hud: bool,
     pub sculpt_wait: Option<Uuid>,
@@ -713,6 +714,8 @@ struct RegionGpu {
     chunks: HashMap<u32, TerrainChunk>,
     surface: SurfaceGpu,
     offset: Vec3,
+    /// The terrain scale its records were written with.
+    scale: f32,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -851,6 +854,13 @@ pub struct Scene {
     pub too_complex: std::collections::HashSet<usize>,
     parcel_visibility_version: u64,
     photo_isolation_version: u64,
+    /// The rendering types of the session (Preferences › Graphics): trees,
+    /// grass and avatars hidden join what the photo's isolation leaves out.
+    pub render_types: crate::settings::render_extras::RenderTypes,
+    render_types_synced: crate::settings::render_extras::RenderTypes,
+    /// RenderTerrainScale: metres per repeat of the classic terrain's
+    /// detail textures (terrain_surface.rs).
+    pub terrain_scale: f32,
     /// The instant a photo drawn in several frames shows
     /// (`snapshot::Hold`): the sync places and moves what it visits at it,
     /// not at the clock's.
@@ -1233,6 +1243,16 @@ pub(super) fn object_lod(o: &Object, radius: f32, distance: f32, lod_factor: f32
     plants::plant_lod(o, distance, tree_factor, lod_factor).unwrap_or_else(|| lod_for(radius, distance, lod_factor, fov_y))
 }
 
+/// Whether the object at `idx` is drawn under the session's rendering
+/// types: trees and grass by their own kind, an avatar with everything it
+/// wears (LLPipeline::hasRenderType of their drawables).
+fn render_type_drawn(world: &World, idx: usize, types: &crate::settings::render_extras::RenderTypes) -> bool {
+    types.all_objects()
+        || crate::snapshot::isolate::root_of(world, idx)
+            .and_then(|(root, _)| world.objects.get(root))
+            .is_none_or(|o| types.object_drawn(o.pcode, o.is_avatar()))
+}
+
 /// Prim material code of light sources (material_codes.h LL_MCODE_LIGHT).
 const LL_MCODE_LIGHT: u8 = 7;
 
@@ -1549,6 +1569,9 @@ impl Scene {
             too_complex: Default::default(),
             parcel_visibility_version: 0,
             photo_isolation_version: 0,
+            render_types: Default::default(),
+            render_types_synced: Default::default(),
+            terrain_scale: crate::settings::render_extras::TERRAIN_SCALE,
             held_at: None,
             photo_marks: Default::default(),
             give_marks: Default::default(),
@@ -2646,19 +2669,22 @@ impl Scene {
     fn sync_photo_isolation(&mut self, renderer: &mut Renderer, world: &World, synced: &[usize]) {
         use crate::snapshot::isolate;
         let iso = &world.photo_isolation;
-        if self.photo_isolation_version != iso.version {
+        let types = self.render_types;
+        let hidden_of = |idx: usize| !isolate::object_visible(world, idx) || !render_type_drawn(world, idx, &types);
+        if self.photo_isolation_version != iso.version || self.render_types_synced != types {
             self.photo_isolation_version = iso.version;
+            self.render_types_synced = types;
             for idx in 0..self.gpu.len() {
-                let hidden = !isolate::object_visible(world, idx);
+                let hidden = hidden_of(idx);
                 let g = &mut self.gpu[idx];
                 if g.photo_hidden != hidden {
                     g.photo_hidden = hidden;
                     renderer.cull.objects.set(idx, g.cull_object(idx));
                 }
             }
-        } else if iso.applied() {
+        } else if iso.applied() || !types.all_objects() {
             for &idx in synced {
-                let hidden = !isolate::object_visible(world, idx);
+                let hidden = hidden_of(idx);
                 if let Some(g) = self.gpu.get_mut(idx) {
                     g.photo_hidden = hidden;
                 }

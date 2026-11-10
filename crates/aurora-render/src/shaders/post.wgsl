@@ -1,5 +1,5 @@
-// Tonemapping (Khronos PBR Neutral, ACES, Reinhard, Uncharted 2 or AgX),
-// optional FXAA, output encoding.
+// Tonemapping (Khronos PBR Neutral, ACES, Reinhard, Uncharted 2, AgX or
+// Filmic), optional FXAA, colour grade, debanding, output encoding.
 
 @group(0) @binding(0) var hdr: texture_2d<f32>;
 @group(0) @binding(1) var hdr_sampler: sampler;
@@ -8,7 +8,7 @@ struct PostParams {
     exposure: f32,
     output_srgb: f32,
     // 0 Khronos PBR Neutral, 1 ACES, 2 none (classic skies), 3 Reinhard,
-    // 4 Uncharted 2, 5 AgX (Tonemapper::shader_id)
+    // 4 Uncharted 2, 5 AgX, 6 Filmic (Tonemapper::shader_id)
     tonemapper: f32,
     fxaa: f32,
     sharpen: f32, // AMD CAS sharpness (0 = off)
@@ -32,11 +32,19 @@ struct PostParams {
     // shows through each pixel; 1: the photo, straight color and coverage,
     // 2: the live view, over a checkerboard
     cutout: f32,
-    _pad: f32,
+    // 1: no post-processing (RenderDisablePostProcessing): no exposure
+    no_post: f32,
     // the part of the photo this frame draws, in fractions of the photo
     // (left, top, width, height; 0, 0, 1, 1 outside a tiled photo): the
     // glow's 512 x 512 texels are the whole photo's, as in one pass
     photo_part: vec4<f32>,
+    // the colour grade (grade.rs): the white balance's gains on the scene's
+    // light (1 when neutral), then lift, gamma's power, gain and vibrance
+    white_balance: vec4<f32>,
+    grade: vec4<f32>,
+    // x: 1 when lift, gamma, gain or vibrance change something; y: the
+    // debanding in 8-bit levels (0 off)
+    grade_on: vec4<f32>,
 };
 @group(0) @binding(2) var<uniform> post: PostParams;
 // Blurred glow (512x512, display space), see glow.wgsl.
@@ -169,22 +177,39 @@ fn agx(color_in: vec3<f32>) -> vec3<f32> {
     return pow(display, vec3<f32>(2.2));
 }
 
-// Preferences' exposure times the automatic one (final_exposure).
+// A fixed filmic curve (Jim Hejl and Richard Burgess-Dawson's, as shown in
+// John Hable's "Uncharted 2: HDR Lighting", GDC 2010): no parameter, a
+// toe of 0.004 and a soft shoulder; its 2.2 display curve undone, since
+// this pass encodes itself.
+fn filmic(color_in: vec3<f32>) -> vec3<f32> {
+    let x = max(min(color_in, vec3<f32>(CURVE_INPUT_MAX)) - vec3<f32>(0.004), vec3<f32>(0.0));
+    let display = (x * (6.2 * x + 0.5)) / (x * (6.2 * x + 1.7) + 0.06);
+    return pow(clamp(display, vec3<f32>(0.0), vec3<f32>(1.0)), vec3<f32>(2.2));
+}
+
+// Preferences' exposure times the automatic one (final_exposure); none
+// without post-processing.
 fn exposure() -> f32 {
+    if (post.no_post > 0.5) {
+        return 1.0;
+    }
     return post.exposure * post.auto_exposure;
 }
 
 // toneMap (tonemapUtilF.glsl): exposed, tone mapped, mixed back with the
 // exposed linear color by RenderTonemapMix, clamped.
 fn tonemap(c: vec3<f32>) -> vec3<f32> {
-    let e = max(c * exposure(), vec3<f32>(0.0));
+    // the white balance on the scene's light, before the curve (grade.rs)
+    let e = max(c * exposure() * post.white_balance.rgb, vec3<f32>(0.0));
     var m: vec3<f32>;
     if (post.tonemapper > 1.5 && post.tonemapper < 2.5) {
         // classic skies (tonemapUtilF NO_POST): exposure, then clamp
         m = e;
     } else {
         var t: vec3<f32>;
-        if (post.tonemapper > 4.5) {
+        if (post.tonemapper > 5.5) {
+            t = filmic(e);
+        } else if (post.tonemapper > 4.5) {
             t = agx(e);
         } else if (post.tonemapper > 3.5) {
             t = hable(e);
@@ -337,6 +362,42 @@ fn cas(uv: vec2<f32>) -> vec3<f32> {
     return clamp((b * w + d * w + f * w + h * w + e) * rcp_w, vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
+// The display part of the colour grade (grade.rs): lift and gain, the
+// gamma, then the vibrance, on the encoded image as a photo editor's.
+fn grade(m: vec3<f32>) -> vec3<f32> {
+    var c = linear_to_srgb(clamp(m, vec3<f32>(0.0), vec3<f32>(1.0)));
+    c = clamp(post.grade.z * (c + post.grade.x * (vec3<f32>(1.0) - c)), vec3<f32>(0.0), vec3<f32>(1.0));
+    c = pow(c, vec3<f32>(post.grade.y));
+    let l = dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
+    let sat = max(c.r, max(c.g, c.b)) - min(c.r, min(c.g, c.b));
+    c = clamp(mix(vec3<f32>(l), c, 1.0 + post.grade.w * (1.0 - sat)), vec3<f32>(0.0), vec3<f32>(1.0));
+    return srgb_to_linear_post(c);
+}
+
+// PCG's hash (Jarzynski and Olano, "Hash Functions for GPU Rendering",
+// 2020): integers only, the same on every GPU.
+fn pcg_hash(v: u32) -> u32 {
+    let x = v * 747796405u + 2891336453u;
+    let w = ((x >> ((x >> 28u) + 4u)) ^ x) * 277803737u;
+    return (w >> 22u) ^ w;
+}
+
+// A triangular noise in -1..1 for the pixel: the sum of two uniform ones.
+fn dither(px: vec2<u32>) -> f32 {
+    let a = pcg_hash(px.x + pcg_hash(px.y));
+    let b = pcg_hash(a);
+    return f32(a >> 8u) / 16777216.0 + f32(b >> 8u) / 16777216.0 - 1.0;
+}
+
+// Debanding: the encoded colour moved by a triangular noise of
+// `grade_on.y` 8-bit levels before the 8-bit target rounds it, so that a
+// smooth gradient (a sky, fog) shows no steps.
+fn deband(m: vec3<f32>, clip: vec2<f32>) -> vec3<f32> {
+    let n = dither(vec2<u32>(clip)) * post.grade_on.y / 255.0;
+    let c = clamp(linear_to_srgb(clamp(m, vec3<f32>(0.0), vec3<f32>(1.0))) + vec3<f32>(n), vec3<f32>(0.0), vec3<f32>(1.0));
+    return srgb_to_linear_post(c);
+}
+
 // glowExtractF.glsl (RenderGlowMinLuminance 9999: only the glow amount
 // accumulated in the scene alpha counts) on the gamma-corrected image,
 // blended with BT_ADD_WITH_ALPHA: rgb x alpha. LL takes one tap per glow
@@ -414,6 +475,12 @@ fn fs_post(in: Out) -> @location(0) vec4<f32> {
         let a = textureSampleLevel(hdr, hdr_sampler, in.uv, 0.0).a;
         let l = dot(m, vec3<f32>(0.2126, 0.7152, 0.0722));
         m = vec3<f32>(clamp(a * 10.0, 0.0, 1.0), clamp(a * 2.0, 0.0, 1.0), l * 0.5);
+    }
+    if (post.grade_on.x > 0.5) {
+        m = grade(m);
+    }
+    if (post.grade_on.y > 0.0) {
+        m = deband(m, in.clip.xy);
     }
     var alpha = 1.0;
     if (post.cutout > 1.5) {

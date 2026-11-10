@@ -349,6 +349,15 @@ fn quality(cx: &mut Cx) {
                 .changed()
             },
         );
+        cx.keywords("RenderTerrainScale").row(
+            tr!("gfx-extras-terrain-scale"),
+            tr!("gfx-extras-terrain-scale-help"),
+            &field!(render_extras.terrain_scale),
+            |ui, s| {
+                use crate::settings::render_extras::TERRAIN_SCALE_RANGE;
+                decimal_slider(ui, &mut s.render_extras.terrain_scale, TERRAIN_SCALE_RANGE, 1.0, " m")
+            },
+        );
         cx.row(
             tr!("common-particles"),
             tr!("ui-options-maximum-particles-0-disabled"),
@@ -557,6 +566,7 @@ fn quality(cx: &mut Cx) {
             &field!(snapshot.quality_off_after_crash),
         );
     });
+    rendering_types(cx);
 }
 
 fn light(cx: &mut Cx) {
@@ -566,6 +576,20 @@ fn light(cx: &mut Cx) {
             tr!("ui-options-others-attached-lights"),
             tr!("ui-options-others-attached-lights-help"),
             &field!(others_attached_lights),
+        );
+        cx.keywords("RenderDeferredLights").toggle(
+            tr!("gfx-extras-scene-lights"),
+            tr!("gfx-extras-scene-lights-help"),
+            &field!(render_extras.scene_lights),
+        );
+        cx.row(
+            tr!("gfx-extras-light-strength"),
+            tr!("gfx-extras-light-strength-help"),
+            &field!(render_extras.light_strength),
+            |ui, s| {
+                use crate::settings::render_extras::LIGHT_STRENGTH_RANGE;
+                decimal_slider(ui, &mut s.render_extras.light_strength, LIGHT_STRENGTH_RANGE, 0.05, "")
+            },
         );
     });
     cx.group(tr!("ui-options-shadows"), |cx| {
@@ -591,6 +615,15 @@ fn light(cx: &mut Cx) {
         cx.track(&field!(shadows));
         let off = cx.s.shadow_quality == 0;
         cx.subs(off, |cx| {
+            cx.keywords("RenderShadowResolutionScale").row(
+                tr!("gfx-extras-shadow-scale"),
+                tr!("gfx-extras-shadow-scale-help"),
+                &field!(render_extras.shadow_resolution_scale),
+                |ui, s| {
+                    use crate::settings::render_extras::SHADOW_SCALE_RANGE;
+                    decimal_slider(ui, &mut s.render_extras.shadow_resolution_scale, SHADOW_SCALE_RANGE, 0.1, "×")
+                },
+            );
             cx.toggle(
                 tr!("ui-options-projector-shadows"),
                 tr!("ui-options-projector-shadows-help"),
@@ -741,6 +774,32 @@ fn reflections_and_water(cx: &mut Cx) {
             &field!(mirrors),
             &levels,
         );
+        let off = cx.s.mirrors == 0;
+        cx.subs(off, |cx| {
+            cx.keywords("RenderHeroProbeResolution").combo(
+                tr!("gfx-extras-mirror-resolution"),
+                tr!("gfx-extras-mirror-resolution-help"),
+                &field!(render_extras.mirror_resolution),
+                &[
+                    (0, tr!("gfx-extras-mirror-resolution-auto")),
+                    (256, "256"),
+                    (512, "512"),
+                    (1024, "1024"),
+                    (2048, "2048"),
+                ],
+            );
+            cx.keywords("RenderHeroProbeUpdateRate").combo(
+                tr!("gfx-extras-mirror-rate"),
+                tr!("gfx-extras-mirror-rate-help"),
+                &field!(render_extras.mirror_update_rate),
+                &[
+                    (6, tr!("ui-options-low")),
+                    (3, tr!("common-medium")),
+                    (2, tr!("ui-options-high")),
+                    (1, tr!("ui-options-ultra")),
+                ],
+            );
+        });
         cx.toggle(
             tr!("ui-options-screen-space-reflections-ssr"),
             tr!("ui-options-shiny-surfaces-expensive-disabled-by-default"),
@@ -777,7 +836,7 @@ fn reflections_and_water(cx: &mut Cx) {
             &field!(probe_range),
             |ui, s| {
                 ui.add(
-                    egui::Slider::new(&mut s.probe_range, 32.0..=512.0)
+                    egui::Slider::new(&mut s.probe_range, crate::settings::PROBE_RANGE_MIN..=512.0)
                         .custom_parser(aurora_i18n::parse_number)
                         .step_by(16.0)
                         .suffix(" m")
@@ -907,6 +966,7 @@ fn image(cx: &mut Cx) {
                             (2, tr!("tone-curves-reinhard")),
                             (3, tr!("tone-curves-uncharted2")),
                             (4, tr!("tone-curves-agx")),
+                            (5, tr!("gfx-extras-filmic")),
                         ],
                     );
                 })
@@ -960,6 +1020,7 @@ fn image(cx: &mut Cx) {
             },
         );
     });
+    color_grade(cx);
     depth_of_field(cx);
 }
 
@@ -1057,6 +1118,20 @@ fn depth_of_field(cx: &mut Cx) {
                 &field!(dof.quality),
                 |ui, s| plain_slider(ui, &mut s.dof.quality, 0.25..=1.0, "", 2),
             );
+            cx.keywords("RenderDepthOfFieldFront").toggle(
+                tr!("gfx-extras-dof-front"),
+                tr!("gfx-extras-dof-front-help"),
+                &field!(render_extras.dof_front_blur),
+            );
+            cx.keywords("bokeh chromatic").row(
+                tr!("gfx-extras-dof-dispersion"),
+                tr!("gfx-extras-dof-dispersion-help"),
+                &field!(render_extras.dof_dispersion),
+                |ui, s| {
+                    use crate::settings::render_extras::DISPERSION_RANGE;
+                    plain_slider(ui, &mut s.render_extras.dof_dispersion, DISPERSION_RANGE, "", 2)
+                },
+            );
         });
     });
 }
@@ -1129,5 +1204,103 @@ fn parcel_list(
             }
         });
         changed
+    });
+}
+
+/// A slider of a decimal setting, stepped.
+fn decimal_slider(ui: &mut egui::Ui, v: &mut f32, range: std::ops::RangeInclusive<f32>, step: f64, suffix: &str) -> bool {
+    ui.add(
+        egui::Slider::new(v, range)
+            .custom_parser(aurora_i18n::parse_number)
+            .step_by(step)
+            .suffix(suffix)
+            .trailing_fill(true),
+    )
+    .changed()
+}
+
+/// The Legacy Viewer's rendering types (Develop › Rendering Types) and
+/// No Post-processing, for the session; the water an environment hides.
+fn rendering_types(cx: &mut Cx) {
+    use aurora_i18n::tr;
+    cx.group(tr!("gfx-extras-types"), |cx| {
+        let session = tr!("gfx-extras-session-hint");
+        for (label, f) in [
+            (tr!("gfx-extras-sky"), field!(render_extras.types.sky)),
+            (tr!("gfx-extras-clouds"), field!(render_extras.types.clouds)),
+            (tr!("gfx-extras-water"), field!(render_extras.types.water)),
+            (tr!("gfx-extras-terrain"), field!(render_extras.types.terrain)),
+            (tr!("gfx-extras-trees"), field!(render_extras.types.trees)),
+            (tr!("gfx-extras-grass"), field!(render_extras.types.grass)),
+            (tr!("gfx-extras-avatars"), field!(render_extras.types.avatars)),
+        ] {
+            cx.keywords("Rendering Types").toggle(label, session, &f);
+        }
+        cx.keywords("RenderDisablePostProcessing").toggle(
+            tr!("gfx-extras-post-processing"),
+            tr!("gfx-extras-post-processing-help"),
+            &field!(render_extras.types.post_processing),
+        );
+        cx.keywords("FSAllowEEPWaterDerender").toggle(
+            tr!("gfx-extras-eep-water"),
+            tr!("gfx-extras-eep-water-help"),
+            &field!(render_extras.eep_water_derender),
+        );
+    });
+}
+
+/// Aurora's colour grade and debanding, after the tone curve.
+fn color_grade(cx: &mut Cx) {
+    use aurora_i18n::tr;
+    cx.group(tr!("gfx-extras-grade"), |cx| {
+        cx.toggle(
+            tr!("gfx-extras-grade-enable"),
+            tr!("gfx-extras-grade-enable-help"),
+            &field!(render_extras.grade.enabled),
+        );
+        let off = !cx.s.render_extras.grade.enabled;
+        cx.subs(off, |cx| {
+            for (label, hint, f) in [
+                (
+                    tr!("gfx-extras-temperature"),
+                    tr!("gfx-extras-temperature-help"),
+                    field!(render_extras.grade.temperature),
+                ),
+                (
+                    tr!("gfx-extras-tint"),
+                    tr!("gfx-extras-tint-help"),
+                    field!(render_extras.grade.tint),
+                ),
+                (
+                    tr!("gfx-extras-lift"),
+                    tr!("gfx-extras-lift-help"),
+                    field!(render_extras.grade.lift),
+                ),
+                (
+                    tr!("gfx-extras-gamma"),
+                    tr!("gfx-extras-gamma-help"),
+                    field!(render_extras.grade.gamma),
+                ),
+                (
+                    tr!("gfx-extras-gain"),
+                    tr!("gfx-extras-gain-help"),
+                    field!(render_extras.grade.gain),
+                ),
+                (
+                    tr!("gfx-extras-vibrance"),
+                    tr!("gfx-extras-vibrance-help"),
+                    field!(render_extras.grade.vibrance),
+                ),
+            ] {
+                let get = f.get_mut;
+                cx.row(label, hint, &f, |ui, s| decimal_slider(ui, get(s), -1.0..=1.0, 0.05, ""));
+            }
+        });
+        cx.keywords("dither banding").row(
+            tr!("gfx-extras-deband"),
+            tr!("gfx-extras-deband-help"),
+            &field!(render_extras.deband),
+            |ui, s| decimal_slider(ui, &mut s.render_extras.deband, 0.0..=2.0, 0.25, ""),
+        );
     });
 }

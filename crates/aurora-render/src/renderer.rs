@@ -196,9 +196,16 @@ struct PostU {
     auto_exposure: f32,
     /// A cut-out photo (cutout.rs): 1 the snapshot, 2 the live view.
     cutout: f32,
-    _pad: f32,
+    /// 1: no post-processing (`FrameParams::no_post`).
+    no_post: f32,
     /// The part of the photo the frame draws ([`photo_part`]).
     photo_part: [f32; 4],
+    /// The colour grade (grade.rs): the white balance's gains, then lift,
+    /// gamma, gain and vibrance; x of `grade_on` 1 when the latter change
+    /// something, y the debanding.
+    white_balance: [f32; 4],
+    grade: [f32; 4],
+    grade_on: [f32; 4],
 }
 
 /// Where `PostU::auto_exposure` sits in the post uniforms.
@@ -1692,6 +1699,9 @@ pub(crate) struct Backend {
     /// Opaque casters shared between the cascades (shadow_merge.rs).
     shadow_merge: crate::shadow_merge::ShadowMerge,
     post_buffer: wgpu::Buffer,
+    /// The mirror image last drawn, read until it is drawn again
+    /// (RenderHeroProbeUpdateRate).
+    mirror_kept: Option<MirrorKept>,
     post_sampler: wgpu::Sampler,
     shadow_sampler: wgpu::Sampler,
     glow: Glow,
@@ -2360,6 +2370,35 @@ pub(crate) fn make_view(
 }
 
 /// Reflection of points about the plane dot(n, p) + d = 0.
+/// The mirror target's share of the screen: RenderHeroProbeResolution's
+/// longer side in pixels when it is set (never past the screen), else the
+/// mirror quality's share.
+fn mirror_target_scale(scale: f32, resolution: u32, w: u32, h: u32) -> f32 {
+    if scale <= 0.0 || resolution == 0 {
+        return scale;
+    }
+    (resolution as f32 / w.max(h).max(1) as f32).min(1.0)
+}
+
+/// A mirror image drawn on an earlier frame (RenderHeroProbeUpdateRate):
+/// its plane, the camera it was reflected through, and the frames since.
+#[derive(Clone, Copy, Debug)]
+struct MirrorKept {
+    plane: glam::Vec4,
+    view_proj: Mat4,
+    age: u32,
+}
+
+/// Whether the mirror is drawn this frame: every `rate` frames, and at once
+/// for a photo, another mirror (or one that moved) or none kept.
+fn mirror_due(kept: Option<&MirrorKept>, plane: glam::Vec4, rate: u32, photo: bool) -> bool {
+    match kept {
+        _ if photo || rate <= 1 => true,
+        None => true,
+        Some(k) => k.plane != plane || k.age + 1 >= rate,
+    }
+}
+
 fn reflection_matrix(n: Vec3, d: f32) -> Mat4 {
     let n = n.normalize_or(Vec3::Z);
     Mat4::from_cols(
@@ -3475,6 +3514,7 @@ impl Backend {
             shadow_count: 2,
             shadow_merge,
             post_buffer,
+            mirror_kept: None,
             post_sampler,
             shadow_sampler,
             glow,
@@ -4620,7 +4660,7 @@ impl Backend {
             .then(|| contact.targets(device, &depth_ss, DEPTH_FORMAT, w, h));
         let water_refl = refl("water reflection", s.water_reflection_scale, false);
         let water_air = refl("water exterior", crate::water_optics::scale(s.water_effects), true);
-        let mirror = refl("mirror", s.mirror_scale, false);
+        let mirror = refl("mirror", mirror_target_scale(s.mirror_scale, s.mirror_resolution, w, h), false);
         let post_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("post"),
             layout: post_layout,
@@ -5235,6 +5275,8 @@ impl Backend {
         let made = self.live_bytes().saturating_sub(before);
         self.target_bytes = Some((made, u64::from(size.0) * u64::from(size.1)));
         self.targets = targets;
+        // a new mirror target holds no image yet
+        self.mirror_kept = None;
         self.smaa_targets = smaa;
         self.exposure
             .bind(&self.device, &self.targets.color, &self.targets.depth_ss, &self.glow.views[1]);
@@ -5398,7 +5440,8 @@ impl Backend {
             || s.contact_shadows != self.settings.contact_shadows
             || s.water_reflection_scale != self.settings.water_reflection_scale
             || crate::water_optics::scale(s.water_effects) != crate::water_optics::scale(self.settings.water_effects)
-            || s.mirror_scale != self.settings.mirror_scale;
+            || s.mirror_scale != self.settings.mirror_scale
+            || s.mirror_resolution != self.settings.mirror_resolution;
         let taa_was = self.taa.is_some();
         if let Some((samples, scene, impostors)) = rebuilt {
             self.msaa_samples = samples;
@@ -6611,6 +6654,17 @@ impl Backend {
         let do_water_air = air_view.is_some();
         let air_vp = air_view.map_or(Mat4::IDENTITY, |(v, p)| p * v);
         let mirror = f.mirror.filter(|_| self.targets.mirror.is_some());
+        // RenderHeroProbeUpdateRate: whether the mirror is drawn this frame
+        // (a photo always draws it); between two, the image kept is read
+        // through the camera it was drawn with
+        let mirror_plane = mirror.map(|m| {
+            let n = m.normal.normalize_or(Vec3::Z);
+            n.extend(-n.dot(m.point))
+        });
+        let mirror_now = mirror_plane.is_some_and(|plane| {
+            let photo = snapshot.is_some() || f.photo_tile != Mat4::IDENTITY;
+            mirror_due(self.mirror_kept.as_ref(), plane, self.settings.mirror_update_rate, photo)
+        });
 
         self.show_ao_method();
         self.contact_now = self.contact_on(f.shadows);
@@ -6682,8 +6736,27 @@ impl Backend {
             main.mirror_plane = n.extend(-n.dot(m.point)).to_array();
             main.mirror_box = m.world_to_box.to_cols_array_2d();
             // the camera of the mirror pass (refl_frame below), which
-            // mirror_tap projects the reflected rays through
-            main.mirror_view_proj = (f.proj * f.view * reflection_matrix(n, -n.dot(m.point))).to_cols_array_2d();
+            // mirror_tap projects the reflected rays through: this frame's,
+            // or the one the kept image was drawn with
+            let now_vp = f.proj * f.view * reflection_matrix(n, -n.dot(m.point));
+            let vp = match (&mut self.mirror_kept, mirror_plane) {
+                (Some(kept), _) if !mirror_now => {
+                    kept.age += 1;
+                    kept.view_proj
+                }
+                (kept, Some(plane)) => {
+                    *kept = Some(MirrorKept {
+                        plane,
+                        view_proj: now_vp,
+                        age: 0,
+                    });
+                    now_vp
+                }
+                (_, None) => now_vp,
+            };
+            main.mirror_view_proj = vp.to_cols_array_2d();
+        } else {
+            self.mirror_kept = None;
         }
         // local lights by screen tile and depth, for the main view (light_tiles.rs)
         let light_culling = LightCulling::from_env();
@@ -6877,7 +6950,7 @@ impl Backend {
             water_vp = Mat4::from_cols_array_2d(&u.view_proj);
             self.queue.write_buffer(&self.refl_buffers[0], 0, bytemuck::bytes_of(&u));
         }
-        if let Some(m) = &mirror {
+        if let Some(m) = mirror.as_ref().filter(|_| mirror_now) {
             let n = m.normal.normalize_or(Vec3::Z);
             let mut u = refl_frame(self, n, -n.dot(m.point), 0.01);
             u.sky_star_pass = star_pass(&self.targets.mirror);
@@ -7014,8 +7087,9 @@ impl Backend {
             } else {
                 0.0
             },
-            // classic skies are not tone mapped (Firestorm: no_post + legacy gamma)
-            tonemapper: if f.sky.no_post || !hdr {
+            // classic skies are not tone mapped (Firestorm: no_post + legacy
+            // gamma), nor anything without post-processing
+            tonemapper: if f.sky.no_post || !hdr || f.no_post {
                 crate::types::TONEMAPPER_NONE
             } else {
                 self.settings.tonemapper.shader_id()
@@ -7059,8 +7133,16 @@ impl Backend {
                 (true, true) => 1.0,
                 (true, false) => 2.0,
             },
-            _pad: 0.0,
+            no_post: if f.no_post { 1.0 } else { 0.0 },
             photo_part: photo_part(f.photo_tile),
+            white_balance: f.grade.white_balance().extend(1.0).to_array(),
+            grade: f.grade.display(),
+            grade_on: [
+                if f.grade.display_neutral() { 0.0 } else { 1.0 },
+                crate::grade::deband_strength(f.deband),
+                0.0,
+                0.0,
+            ],
         };
         self.queue.write_buffer(&self.post_buffer, 0, bytemuck::bytes_of(&post));
         if let (true, Some(t)) = (self.contact_now, &self.targets.contact) {
@@ -7291,7 +7373,7 @@ impl Backend {
                 (g.reflections || do_water_air, frame_flags::REFLECTIONS),
                 (do_water_refl, frame_flags::WATER),
                 (do_water_air, frame_flags::WATER_AIR),
-                (mirror.is_some(), frame_flags::MIRROR),
+                (mirror_now, frame_flags::MIRROR),
                 (probe.is_some(), frame_flags::PROBE),
                 (occl, frame_flags::OCCLUSION),
                 (profile(), frame_flags::SHADOW_STATS),
@@ -7357,7 +7439,7 @@ impl Backend {
             rg.water_air_terrain = push(cpu, &cull_cmds_to_view(air_vp, &lists.reflection_terrain));
             rg.water_air_terrain_pbr = push(cpu, &cull_cmds_to_view(air_vp, &lists.reflection_terrain_pbr));
         }
-        if mirror.is_some() {
+        if mirror_now {
             rg.refl_mirror = push(cpu, &cull_to_view(mirror_vp, &lists.reflection));
         }
         // terrain of the reflection passes, each culled to its own frustum
@@ -7369,7 +7451,7 @@ impl Backend {
             rg.refl_terrain_water = push(cpu, &cull_cmds_to_view(water_vp, &lists.reflection_terrain));
             rg.refl_terrain_pbr_water = push(cpu, &cull_cmds_to_view(water_vp, &lists.reflection_terrain_pbr));
         }
-        if mirror.is_some() {
+        if mirror_now {
             rg.refl_terrain_mirror = push(cpu, &cull_cmds_to_view(mirror_vp, &lists.reflection_terrain));
             rg.refl_terrain_pbr_mirror = push(cpu, &cull_cmds_to_view(mirror_vp, &lists.reflection_terrain_pbr));
         }
@@ -8018,7 +8100,7 @@ impl Backend {
                 BIN_REFL_WATER,
             ),
             (
-                mirror.is_some(),
+                mirror_now,
                 self.targets.mirror.as_ref(),
                 &self.groups.refl[1],
                 "mirror",
@@ -8424,7 +8506,7 @@ impl Backend {
                 multiview_mask: None,
             });
             bind_mesh(&mut pass, &self.groups.a);
-            if !f.cutout {
+            if !f.cutout && !f.hide_sky {
                 pass.set_pipeline(&self.pipelines.sky);
                 pass.draw(0..3, 0..1);
             }
@@ -10570,5 +10652,54 @@ mod tests {
         // (every kind of face is on screen: well over a tenth of the samples)
         assert!(drawn > SIZE * SIZE * SAMPLES / 10, "{drawn} samples drawn");
         assert_eq!(differ, 0, "samples whose scene depth is not the prepass depth, of {drawn} drawn");
+    }
+}
+
+#[cfg(test)]
+mod mirror_rate_tests {
+    use super::{MirrorKept, mirror_due, mirror_target_scale};
+    use glam::{Mat4, Vec4};
+
+    #[test]
+    fn the_mirror_resolution_is_its_longer_side_and_never_past_the_screen() {
+        assert_eq!(mirror_target_scale(0.25, 0, 1920, 1080), 0.25, "0 keeps the quality's share");
+        assert_eq!(mirror_target_scale(0.0, 1024, 1920, 1080), 0.0, "mirrors off stay off");
+        assert!((mirror_target_scale(0.25, 960, 1920, 1080) - 0.5).abs() < 1e-6);
+        assert!((mirror_target_scale(0.25, 1080, 1080, 1920) - 0.5625).abs() < 1e-6);
+        assert_eq!(mirror_target_scale(0.25, 2048, 1280, 720), 1.0);
+    }
+
+    #[test]
+    fn the_mirror_is_drawn_every_rate_frames_and_at_once_when_it_changes() {
+        let plane = Vec4::new(0.0, 0.0, 1.0, -2.0);
+        let kept = |age| MirrorKept {
+            plane,
+            view_proj: Mat4::IDENTITY,
+            age,
+        };
+        assert!(mirror_due(None, plane, 6, false), "nothing kept");
+        assert!(mirror_due(Some(&kept(0)), plane, 1, false), "every frame");
+        assert!(!mirror_due(Some(&kept(0)), plane, 2, false));
+        assert!(mirror_due(Some(&kept(1)), plane, 2, false), "every other frame");
+        assert!(!mirror_due(Some(&kept(4)), plane, 6, false));
+        assert!(mirror_due(Some(&kept(5)), plane, 6, false));
+        assert!(
+            mirror_due(Some(&kept(0)), Vec4::new(1.0, 0.0, 0.0, 0.0), 6, false),
+            "another mirror"
+        );
+        assert!(mirror_due(Some(&kept(0)), plane, 6, true), "a photo");
+        // frames counted as the renderer does: drawn, then kept rate - 1 times
+        let rate = 3;
+        let mut k: Option<MirrorKept> = None;
+        let mut drawn = 0;
+        for _ in 0..30 {
+            if mirror_due(k.as_ref(), plane, rate, false) {
+                drawn += 1;
+                k = Some(kept(0));
+            } else if let Some(k) = &mut k {
+                k.age += 1;
+            }
+        }
+        assert_eq!(drawn, 10);
     }
 }
