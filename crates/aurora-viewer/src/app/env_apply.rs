@@ -763,7 +763,7 @@ impl App {
 /// is the file's, the skies and water are read from the `skies` and `water`
 /// folders beside its folder, or from Firestorm's built-in presets when a
 /// folder is missing.
-fn import_day_file(path: &Path) -> Result<DayDoc, String> {
+pub(super) fn import_day_file(path: &Path) -> Result<DayDoc, String> {
     let name = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     let shown = path.display().to_string();
     let fail = |reasons: String| {

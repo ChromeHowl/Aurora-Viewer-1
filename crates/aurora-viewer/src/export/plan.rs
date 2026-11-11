@@ -36,6 +36,8 @@ pub struct PrimInput {
     pub faces: usize,
     pub te: TextureEntry,
     pub extra: ExtraParams,
+    /// Its particle system, when it has one.
+    pub particles: Option<aurora_prim::particles::PartSysData>,
 }
 
 impl PrimInput {
@@ -60,8 +62,8 @@ impl PrimInput {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LeftOut {
     Rights(ExportRefusal),
-    /// Collada: a sculpt (its map is a picture this export does not read),
-    /// or a mesh whose geometry is not loaded.
+    /// Collada: a mesh whose geometry, or a sculpt whose map, is not
+    /// loaded.
     Geometry,
 }
 
@@ -95,7 +97,9 @@ pub fn plan(inv: &Inventory, prims: Vec<PrimInput>, format: ExportFormat, has_ge
         let verdict = actions::export_prim(inv, &prim.rule_input(), format)
             .map_err(LeftOut::Rights)
             .and_then(|()| {
-                let geometry = format == ExportFormat::Backup || (sculpted.is_none_or(|s| s.is_mesh()) && has_geometry(&prim));
+                // a sculpt's map is read only once the prim passed the rule,
+                // which holds its map to it (export_prim → export_asset)
+                let geometry = format == ExportFormat::Backup || has_geometry(&prim);
                 if geometry { Ok(()) } else { Err(LeftOut::Geometry) }
             });
         if let Err(why) = verdict {
@@ -130,6 +134,16 @@ pub fn plan(inv: &Inventory, prims: Vec<PrimInput>, format: ExportFormat, has_ge
         }
         if let Some(sculpt) = sculpted.filter(|s| !s.is_mesh()) {
             note(&mut out.textures, sculpt.texture);
+        }
+        // FSFloaterObjectExport::addPrim: a particle texture that fails the
+        // rule is written as the null id
+        if let Some(particles) = prim.particles.as_mut() {
+            if actions::export_texture(inv, particles.part_image_id) {
+                note(&mut out.textures, particles.part_image_id);
+            } else if !particles.part_image_id.is_nil() {
+                particles.part_image_id = Uuid::nil();
+                out.dropped += 1;
+            }
         }
         out.dropped += prim.extra.render_materials.len();
         prim.extra.render_materials.clear();

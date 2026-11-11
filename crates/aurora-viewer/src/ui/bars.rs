@@ -141,6 +141,9 @@ pub enum BarAction {
     /// World › Environment › New sky / water / day cycle (World.EnvPreset
     /// new_sky, new_water, new_day_cycle).
     NewEnvironment(crate::world::env_select::SettingsKind),
+    /// World › Environment › Import Windlight › Days, Skies or Water
+    /// (File.ImportWindlightBulk).
+    ImportWindlight(crate::world::env_select::SettingsKind),
     /// World › Teleport history (ToggleTeleportHistory, Alt+H).
     TeleportHistory,
     /// The balance, or Me › Buy L$ (LLStatusBar::onClickBuyCurrency).
@@ -1198,6 +1201,18 @@ fn main_menus(ui: &mut egui::Ui, p: &Palette, panels: &mut Panels, st: &StatusIn
                     *action = BarAction::NewEnvironment(kind);
                 }
             }
+            // menu_viewer.xml: File › Import › Windlight
+            menu::submenu(ui, p, "file-import", aurora_i18n::tr!("l3-env-bulk-menu"), true, |ui| {
+                for (kind, icon, label) in [
+                    (SettingsKind::Day, "sunset-2-filled", aurora_i18n::tr!("l3-env-bulk-days")),
+                    (SettingsKind::Sky, "sun-filled", aurora_i18n::tr!("l3-env-bulk-skies")),
+                    (SettingsKind::Water, "droplet-filled", aurora_i18n::tr!("l3-env-bulk-water")),
+                ] {
+                    if menu::item(ui, p, icon, label) {
+                        *action = BarAction::ImportWindlight(kind);
+                    }
+                }
+            });
         });
         // menu_viewer.xml: World › Asset Blacklist, after the explorers
         flip_window(

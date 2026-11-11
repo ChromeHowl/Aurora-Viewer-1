@@ -50,6 +50,8 @@ pub struct Sources<'a> {
     pub world: &'a World,
     pub build: &'a BuildTool,
     pub meshes: &'a mut MeshStreamer,
+    /// The sculpt maps' pixels, for a Collada sculpt.
+    pub textures: &'a mut crate::scene::textures::TextureStreamer,
     pub texture_cache: &'a Path,
     pub grid: String,
 }
@@ -69,6 +71,11 @@ fn root_of(world: &World, idx: usize) -> usize {
 
 fn mesh_of(p: &PrimInput) -> Option<Uuid> {
     p.volume.sculpt.or(p.extra.sculpt).filter(|s| s.is_mesh()).map(|s| s.texture)
+}
+
+/// The map of a sculpted (not mesh) prim.
+fn sculpt_map_of(p: &PrimInput) -> Option<Uuid> {
+    p.volume.sculpt.or(p.extra.sculpt).filter(|s| !s.is_mesh()).map(|s| s.texture)
 }
 
 /// The prims of the clicked prim's linkset, root first.
@@ -108,6 +115,7 @@ fn inputs(world: &World, build: &BuildTool, meshes: &MeshStreamer, clicked: Uuid
                 faces,
                 te: o.te.as_deref().cloned().unwrap_or_default(),
                 extra: o.extra.clone(),
+                particles: o.particles.as_deref().and_then(aurora_prim::particles::PartSysData::parse),
             }
         })
         .collect()
@@ -121,7 +129,7 @@ fn reason(why: LeftOut) -> &'static str {
         LeftOut::Rights(ExportRefusal::MeshInBackup) => "b8-export-why-mesh-backup",
         LeftOut::Rights(ExportRefusal::MeshCreator) => "b8-export-why-mesh-creator",
         LeftOut::Rights(ExportRefusal::SculptCreator) => "b8-export-why-sculpt",
-        LeftOut::Geometry => "b8-export-why-geometry",
+        LeftOut::Geometry => "l3-export-why-geometry",
     })
 }
 
@@ -165,12 +173,36 @@ pub fn transforms(prims: &[PrimInput]) -> Vec<Mat4> {
 enum Shape {
     Prim(aurora_prim::params::VolumeParams),
     Mesh(MeshView),
+    /// A sculpt and the pixels of its map (LLVolume::sculpt, the geometry
+    /// the scene draws).
+    Sculpt(aurora_prim::params::VolumeParams, std::sync::Arc<crate::scene::jobs::SculptMap>),
 }
 
 /// The Collada faces of one prim (off the main thread).
 fn faces(shape: &Shape, colors: &[[f32; 4]]) -> Vec<dae::Face> {
     let color = |i: usize| colors.get(i).copied().unwrap_or([1.0; 4]);
+    let volume_faces = |mesh: aurora_prim::volume::VolumeMesh| -> Vec<dae::Face> {
+        mesh.faces
+            .into_iter()
+            .enumerate()
+            .map(|(i, f)| dae::Face {
+                positions: f.positions,
+                normals: f.normals,
+                uvs: f.uvs,
+                indices: f.indices,
+                color: color(i),
+            })
+            .collect()
+    };
     match shape {
+        Shape::Sculpt(volume, map) => volume_faces(aurora_prim::generate_sculpt(
+            volume,
+            aurora_prim::volume::DETAIL_SCALES[3],
+            map.width,
+            map.height,
+            map.components,
+            &map.pixels,
+        )),
         Shape::Prim(volume) => aurora_prim::volume::generate_volume(volume, aurora_prim::volume::DETAIL_SCALES[3])
             .faces
             .into_iter()
@@ -237,9 +269,22 @@ impl ExportUi {
                 if let Some(mesh) = mesh_of(prim).filter(|_| job.format == ExportFormat::Collada) {
                     src.meshes.want(mesh, 3);
                 }
+                // a sculpt's map is asked for only when the rule lets it
+                // into the file (canExportAsset)
+                if let Some(map) = sculpt_map_of(prim).filter(|_| job.format == ExportFormat::Collada)
+                    && actions::export_asset(&src.world.inventory, map)
+                {
+                    src.textures.want_sculpt(&map);
+                }
             }
         }
-        let has_geometry = |prim: &PrimInput| mesh_of(prim).is_none_or(|m| src.meshes.view(&m).is_some_and(|v| v.lod_section(3).is_some()));
+        let inv = &src.world.inventory;
+        let textures = &*src.textures;
+        let has_geometry = |prim: &PrimInput| match (mesh_of(prim), sculpt_map_of(prim)) {
+            (Some(m), _) => src.meshes.view(&m).is_some_and(|v| v.lod_section(3).is_some()),
+            (None, Some(map)) => actions::export_asset(inv, map) && textures.sculpt_map(&map).is_some(),
+            (None, None) => true,
+        };
         let ready = !prims.is_empty()
             && prims
                 .iter()
@@ -393,9 +438,13 @@ fn start_save(format: ExportFormat, name: &str, plan: Plan, src: &Sources<'_>) -
                 .into_iter()
                 .zip(&plan.prims)
                 .map(|(transform, prim)| {
-                    let shape = match mesh_of(prim).and_then(|m| src.meshes.view(&m)) {
-                        Some(view) => Shape::Mesh(view),
-                        None => Shape::Prim(prim.volume),
+                    let sculpt = sculpt_map_of(prim)
+                        .filter(|map| actions::export_asset(&src.world.inventory, *map))
+                        .and_then(|map| src.textures.sculpt_map(&map));
+                    let shape = match (mesh_of(prim).and_then(|m| src.meshes.view(&m)), sculpt) {
+                        (Some(view), _) => Shape::Mesh(view),
+                        (None, Some(map)) => Shape::Sculpt(prim.volume, map),
+                        (None, None) => Shape::Prim(prim.volume),
                     };
                     let colors = prim.te.faces.iter().map(|f| f.color).collect();
                     (prim.name().to_owned(), transform, shape, colors)
