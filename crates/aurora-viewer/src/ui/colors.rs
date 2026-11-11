@@ -53,10 +53,13 @@ pub fn set_color(v: [f32; 4]) -> Color32 {
 /// never while RLVa hides their name. The theme's danger colour,
 /// daltonised like the others.
 pub fn shadow_red(world: &World, id: &Uuid) -> Option<Color32> {
-    world.shadow_red(id).then(|| {
-        let danger = crate::interface_colors::skin().map_or_else(|| crate::theme::Theme::default().skin_palette().danger, |p| p.danger);
-        crate::colorblind::adapt(danger, crate::colorblind::current())
-    })
+    world.shadow_red(id).then(shadow_red_color)
+}
+
+/// The Shadow Realm's red itself (its window draws it from its own rows).
+pub fn shadow_red_color() -> Color32 {
+    let danger = crate::interface_colors::skin().map_or_else(|| crate::theme::Theme::default().skin_palette().danger, |p| p.danger);
+    crate::colorblind::adapt(danger, crate::colorblind::current())
 }
 
 pub fn resident_name(world: &World, id: &Uuid, fallback: Color32) -> Color32 {

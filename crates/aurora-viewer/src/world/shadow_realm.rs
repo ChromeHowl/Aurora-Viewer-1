@@ -134,7 +134,7 @@ impl ShadowRealm {
     }
 
     pub fn is_listed(&self, id: &Uuid) -> bool {
-        !self.list.is_empty() && self.list.contains(id)
+        self.list.contains(id)
     }
 
     /// The resident appears nowhere now.
@@ -253,10 +253,11 @@ impl ShadowRealm {
 impl World {
     /// The account's list, read at the login before any object arrives.
     pub(super) fn load_shadow_realm(&mut self, account: &std::path::Path) {
-        let (enabled, range) = (self.shadow_realm.enabled, self.shadow_realm.range);
+        let (enabled, range, version) = (self.shadow_realm.enabled, self.shadow_realm.range, self.shadow_realm.version);
         self.shadow_realm = ShadowRealm::load(account.join(FILE));
         self.shadow_realm.configure(enabled, range);
-        self.shadow_realm.bump();
+        // never a version the scene or the sounds already saw, across logins
+        self.shadow_realm.version = version.wrapping_add(1);
     }
 
     /// Per frame: the settings, then the check when due.
@@ -360,6 +361,13 @@ impl World {
             return true;
         }
         self.objects.index_of_uuid(object).is_some_and(|i| self.shadow_hides_index(i))
+    }
+
+    /// The radar's alerts without those naming a listed resident.
+    pub fn shadow_filter_radar_events(&self, events: &mut Vec<super::radar::Event>) {
+        if self.shadow_realm.active() {
+            events.retain(|e| !self.shadow_realm.is_listed(&e.avatar()));
+        }
     }
 
     /// Nearby chat of a hidden resident or of their objects.
@@ -744,5 +752,131 @@ mod tests {
         assert!(world.rlva.receive(&restriction));
         assert!(!world.rlva_can_name(id(1)));
         assert!(!world.shadow_red(&id(1)), "RLVa wins");
+    }
+
+    #[test]
+    fn their_objects_dialogs_questions_and_urls_never_show() {
+        use aurora_net::NetEvent;
+        let (mut world, _) = crate::world::derender::tests_support::demo_world();
+        let wolf = crate::demo::DEMO_LOUP;
+        let hat = crate::demo::wolf_hat();
+        world.shadow_realm_add(wolf);
+        let sender = "127.0.0.1:13000".parse::<std::net::SocketAddr>().expect("an address");
+        let dialog = |object: Uuid, owner: Uuid| NetEvent::ScriptDialog {
+            sender,
+            object_id: object,
+            object_name: "Box".into(),
+            owner_name: "Owner".into(),
+            owner_id: owner,
+            message: "Choose".into(),
+            channel: 5,
+            buttons: vec!["OK".into()],
+        };
+        let url = |object: Uuid, owner: Uuid| NetEvent::LoadUrl {
+            object_name: "Box".into(),
+            object_id: object,
+            owner_id: owner,
+            message: "Visit".into(),
+            url: "https://example.invalid/".into(),
+        };
+        let question = |object: Uuid| NetEvent::ScriptQuestion {
+            task_id: object,
+            item_id: id(5),
+            object_name: "Box".into(),
+            owner_name: "Owner".into(),
+            questions: 0x10,
+            experience: Uuid::nil(),
+            region: 0,
+        };
+        let count = |w: &World| w.notifications.list.len();
+        // by the owner the message names, or by what the world knows (worn)
+        for ev in [
+            dialog(id(60), wolf),
+            url(id(61), wolf),
+            dialog(hat, Uuid::nil()),
+            url(hat, Uuid::nil()),
+            question(hat),
+        ] {
+            let before = count(&world);
+            let _ = world.apply(ev);
+            assert_eq!(count(&world), before, "nothing of a hidden resident shows");
+        }
+        // a stranger's object, and the wolf's once shown again
+        let before = count(&world);
+        let _ = world.apply(dialog(id(62), id(2)));
+        let _ = world.apply(url(id(63), id(2)));
+        assert_eq!(count(&world), before + 2);
+        world.shadow_realm_remove(&wolf);
+        let before = count(&world);
+        let _ = world.apply(dialog(hat, Uuid::nil()));
+        let _ = world.apply(url(hat, Uuid::nil()));
+        assert_eq!(count(&world), before + 2);
+    }
+
+    #[test]
+    fn lists_minimap_and_radar_alerts_leave_them_out_but_rlva_still_knows_them() {
+        use super::super::radar::{Event, sightings, sightings_all};
+        let (mut world, handle) = crate::world::derender::tests_support::demo_world();
+        let wolf = crate::demo::DEMO_LOUP;
+        let far = id(77);
+        world.coarse.insert(handle, vec![(far, Vec3::new(10.0, 10.0, 20.0))]);
+        let has = |list: Vec<super::super::radar::Sighting>, who: &Uuid| list.iter().any(|s| s.id == *who);
+        let on_map = |w: &World, who: &Uuid| crate::ui::minimap::avatars(w).iter().any(|a| a.0 == *who);
+        let nearby = |w: &World, who: &Uuid| crate::ui::people::nearby(w).iter().any(|a| a.0 == *who);
+        for who in [wolf, far] {
+            assert!(has(sightings(&world), &who) && on_map(&world, &who) && nearby(&world, &who));
+        }
+        world.shadow_realm_add(wolf);
+        world.shadow_realm_add(far);
+        for who in [wolf, far] {
+            assert!(!has(sightings(&world), &who), "not on the radar nor the nearby lists");
+            assert!(!on_map(&world, &who), "not on the mini-map");
+            assert!(!nearby(&world, &who), "not in the picker's near me");
+            assert!(has(sightings_all(&world), &who), "RLVa's name filter still knows them");
+        }
+        let mut events = vec![Event::ChatEnter(wolf, 5.0), Event::DrawLeave(id(3)), Event::RegionLeave(far)];
+        world.shadow_filter_radar_events(&mut events);
+        assert_eq!(events.len(), 1, "no alert names someone of the list");
+        // in range: back everywhere
+        world.shadow_realm.tick(Instant::now(), Vec3::ZERO, |_| Seen::Exact(Vec3::ONE));
+        for who in [wolf, far] {
+            assert!(has(sightings(&world), &who) && on_map(&world, &who));
+        }
+    }
+
+    #[test]
+    fn the_sounds_are_checked_again_whenever_someone_hides_or_shows() {
+        let mut world = World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
+        world.agent_id = ME;
+        let mut seen = world.sound_rules_version();
+        let mut changed = |w: &World| {
+            let now = w.sound_rules_version();
+            let moved = now != seen;
+            seen = now;
+            moved
+        };
+        world.shadow_realm_add(id(1));
+        assert!(changed(&world), "added: hidden");
+        world.shadow_realm.tick(Instant::now(), Vec3::ZERO, |_| Seen::Exact(Vec3::ONE));
+        assert!(changed(&world), "in range: their looping sounds start again");
+        world.shadow_realm.tick(Instant::now() + CHECK_EVERY, Vec3::ZERO, |_| Seen::Nowhere);
+        assert!(changed(&world), "out of range");
+        world.shadow_realm.configure(false, 10.0);
+        assert!(changed(&world), "switched off");
+        world.shadow_realm.configure(true, 10.0);
+        assert!(changed(&world));
+        world.shadow_realm_remove(&id(1));
+        assert!(changed(&world), "removed");
+        // a new login never repeats a version already seen
+        let before = world.shadow_realm.version();
+        let dir = temp_dir();
+        world.load_shadow_realm(&dir);
+        assert!(world.shadow_realm.version() != before && changed(&world));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_session_with_no_voice_is_not_the_nearby_channel() {
+        assert!(!crate::voice::Voice::default().on_spatial());
     }
 }

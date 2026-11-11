@@ -3662,7 +3662,8 @@ impl World {
                 let notice = self.social.avatar_names.on_update(&name, &old_display_name);
                 self.refresh_task_inventory_offers();
                 log::info!("display name update: {notice}");
-                if self.social.avatar_names.notify_changes {
+                // (not for someone the Shadow Realm hides now)
+                if self.social.avatar_names.notify_changes && !self.shadow_hides(&name.id) {
                     self.system_message(notice);
                 }
                 None

@@ -70,7 +70,6 @@ impl ShadowRealmUi {
         }
         let mut action = None;
         let mut changed = false;
-        let red = p.danger;
         let mut floater = Floater::new(
             WINDOW,
             aurora_i18n::tr!("sr-title"),
@@ -139,9 +138,10 @@ impl ShadowRealmUi {
                                     ui.painter().rect_filled(rect, ui.visuals().window_corner_radius, color);
                                 }
                                 let split = rect.left() + rect.width() * 0.62;
-                                // red in range, as everywhere, unless RLVa hides the name
+                                // red in range, as everywhere (the same colour, adapted to
+                                // colour blindness), unless RLVa hides the name
                                 let name_color = if row.shown && row.can_name && settings.enabled {
-                                    red
+                                    super::colors::shadow_red_color()
                                 } else {
                                     p.ink
                                 };

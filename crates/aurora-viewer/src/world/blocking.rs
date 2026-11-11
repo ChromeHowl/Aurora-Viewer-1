@@ -228,6 +228,19 @@ impl World {
             || self.anti_spam.is_blocked(super::anti_spam::Queue::Sound, *owner)
     }
 
+    /// Changes whenever a rule of `sound_blocked` or `sound_blacklisted`
+    /// may have changed: the block list, anti-spam, the blacklist and the
+    /// Shadow Realm (who is hidden). The app silences and restores the
+    /// objects' looping sounds on a change: a looping sound stopped while
+    /// its owner was hidden starts again when they show.
+    pub fn sound_rules_version(&self) -> u64 {
+        self.mutes
+            .version
+            .wrapping_add(self.anti_spam.version)
+            .wrapping_add(self.derender.generation)
+            .wrapping_add(self.shadow_realm.version())
+    }
+
     /// is_sound_blacklisted (indra/newview/llviewermessage.cpp): flags distinguish
     /// gestures, attachments (including linked children), and rezzed objects.
     pub fn sound_blacklisted(&self, asset: Uuid, object: Uuid, owner: Uuid) -> bool {

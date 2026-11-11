@@ -1149,13 +1149,19 @@ mod tests {
         assert_eq!(back.position, moved);
         assert!(world.objects.index_of_uuid(&hat).is_some(), "with what it wears");
         assert_eq!(world.derender.take_requests().len(), 1, "and the simulator is asked for it");
-        // derendered again, then a relog: only permanent entries are loaded,
-        // and the simulator's first update of it shows it
+        // derendered again, the hat for good, then a relog from the same
+        // account file: only the permanent entry comes back, and the
+        // simulator's first update of the avatar shows it
         let wolf_update = crate::build::replace::demo_update(back);
-        assert!(!world.derender(wolf, entry(Kind::Resident, false)));
         let dir = std::env::temp_dir().join(format!("aurora-derender-relog-{}", Uuid::new_v4()));
-        world.derender = Derender::load(dir.join(FILE));
-        assert!(!world.derender.contains(&wolf));
+        let path = dir.join(FILE);
+        world.derender = Derender::load(path.clone());
+        assert!(!world.derender(wolf, entry(Kind::Resident, false)));
+        assert!(!world.derender(hat, entry(Kind::Object, true)));
+        assert!(path.exists(), "the permanent entry is saved");
+        world.derender = Derender::load(path);
+        assert!(!world.derender.contains(&wolf), "a temporary entry never survives a relog");
+        assert!(world.derender.contains(&hat), "a permanent one does");
         let _ = world.apply(NetEvent::ObjectUpdates {
             handle,
             objects: vec![wolf_update],

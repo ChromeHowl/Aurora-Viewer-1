@@ -5586,13 +5586,9 @@ impl App {
     /// sound message (the order LL handles them in).
     fn flush_object_sounds(&mut self) {
         let engine = self.audio_engine.as_ref();
-        // the block list changed: silence / restore the sounds it covers
-        let version = self
-            .world
-            .mutes
-            .version
-            .wrapping_add(self.world.anti_spam.version)
-            .wrapping_add(self.world.derender.generation);
+        // the block list, the blacklist or the Shadow Realm changed: silence
+        // / restore the sounds they cover
+        let version = self.world.sound_rules_version();
         let recheck = self.sound_blocks.0 != version;
         self.sound_blocks.0 = version;
         let blocked = |world: &World, o: &crate::world::objects::Object| {
@@ -6848,12 +6844,11 @@ impl App {
         // the alerts to scripts: ScriptDialogReply from ourselves, a chat on
         // a negative channel that reaches our attachments
         let script_alerts = self.radar.script_alerts(s.enter_scripts, s.leave_scripts);
-        // no alert ever names someone of the Shadow Realm: hidden they were
-        // never seen, in range their coming and going would point at them
-        if self.world.shadow_realm.active() {
-            let realm = &self.world.shadow_realm;
-            events.retain(|e| !realm.is_listed(&e.avatar()));
-        }
+        // no alert names someone of the Shadow Realm: hidden they were never
+        // seen, in range their coming and going would point at them (the
+        // alerts to our own scripts come from the sweep, which never sees
+        // them hidden)
+        self.world.shadow_filter_radar_events(&mut events);
         if self.world.rlva.has("shownearby") {
             events.clear();
         } else {
