@@ -230,6 +230,11 @@ are planned or in progress: they are not in the viewer yet.
   up from (Paris, Tokyo, Sydney… or your own latitude) and how bright the
   stars shine, in Preferences or Personal Lighting; the Legacy Viewer's
   random stars stay one click away.
+- **More picture controls**: Reinhard, Uncharted 2, AgX and Filmic tone
+  curves, colour grade (white balance, lift, gamma, gain, vibrance),
+  debanding, mirror and shadow resolution, rendering types to hide sky,
+  water, trees or avatars for the session, and auto-tune to a target frame
+  rate, in Preferences › Graphics.
 
 ### The Second Life you know
 
@@ -270,6 +275,23 @@ are planned or in progress: they are not in the viewer yet.
   to see at once whether the grid has a known problem.
 - **Unbox in one click**: copy an object's contents into a new inventory
   folder, or wear them straight away, replacing your outfit or adding to it.
+- **The Legacy Viewer's chat options**: IMs in nearby chat, group notices in
+  the group's conversation, moderator styles, OOC markers, dimmed far chat,
+  seconds in timestamps, a Conversation Log of past conversations, and
+  translation of incoming chat with your own Azure, Google or DeepL key.
+- **Omnifilter**: rules that hide, replace, highlight or set aside chat,
+  IMs, notices, offers and script dialogs; Legacy Omnifilter notecards
+  import and export.
+- **People tools**: track a resident from the radar, colour marks, estate
+  kick, teleport home and ban from their menu, ban from all your groups,
+  name tag distances, chat range spheres.
+- **Teleport and notification options**: cancel a teleport, keep the map
+  open, the back SLURL, script dialogs in the corner you choose, the
+  Legacy toasts' times.
+- **Pose stand and avatar alignment**: hold a pose for your shape work
+  (seen by you only), turn to a compass point or to the nearest avatar.
+- **Inventory helpers**: bulk thumbnails by name, the protected folders
+  manager, Windlight presets imported in bulk.
 - **Sound Explorer**: find which object plays a sound, preview it, stop it or
   block it.
 - **Experiences that set the scene**: an experience you allow can change
@@ -321,8 +343,18 @@ are planned or in progress: they are not in the viewer yet.
   and a level to keep the horizon straight, or tilt it.
 - **A camera that goes where you want**: orbit, free or first person from an
   on-screen camera pad, and a 2 s or 10 s self-timer to get into your pose.
-- **Up to 8K**: 4K by default, in PNG, JPEG or BMP, to disk, inventory or the
-  profile feed ([how to use it](#photos)).
+- **Up to 16K**: 4K by default, in PNG, JPEG or BMP, to disk (up to 16,384
+  pixels a side), inventory or the profile feed, with up to 16 samples a
+  pixel at any size ([how to use it](#photos)).
+- **360° and depth photos**: a panorama ready for photo sites and viewers,
+  and the scene's depth in grey for your editing software.
+- **Full save**: the photo, your cut-out subject and the background alone,
+  from the same instant, in one click.
+- **Photo profiles**: save the photo window's settings by name, reset all or
+  one part.
+- **Camera Lock and Camera Path**: freeze the view where it is, step back and
+  forth through your recent views, or record waypoints and play them back
+  smoothly for machinima, with sharp textures all along.
 - **A photo roll**: the session's last 10 photos pile up in a small stack in
   the viewfinder; look through them, then upload, e-mail or delete one
   without taking another.
@@ -341,8 +373,9 @@ are planned or in progress: they are not in the viewer yet.
 - **Quiet snapshots**: like the Legacy Viewer, the shutter is heard around you
   and your avatar plays the snapshot animation; one switch keeps both quiet.
 - **Isolate your subject**: your avatar alone, or the avatars and objects you
-  click, on a transparent background: a PNG ready for a poster or a profile,
-  with soft hair and glass kept partly transparent.
+  click, or every avatar in the shot, on a transparent background or a matte
+  colour: a PNG ready for a poster or a profile, with soft hair and glass
+  kept partly transparent.
 - **Filters and effects, live**: the Legacy Viewer's 30 photo filters, 36 of
   Aurora's own (film grain, teal and orange, instant photo, halation, chromatic
   aberration, cinema bars, VHS, glitch, oil paint, sketch…) and your own `.cube`
@@ -355,6 +388,15 @@ are planned or in progress: they are not in the viewer yet.
 <img width="1600" height="900" alt="The photo mode's filter panel: three effects stacked (silver black and white, old lens, glitch), the glitch's sliders, and the Aurora tab with its sections" src="docs/screenshots/photo-looks.webp" />
 
 ### Creator tools
+
+- **Backups and Collada of what you made**: save your own linksets as a
+  backup (.oxp) or a Collada model; only what you created goes in, as on
+  the Legacy Viewer, and the window tells you what was left out and why.
+- **Edit scripts in VS Code**: the script editor link of the Legacy Viewer
+  (off by default, local only) works with the Second Life extension; and
+  recompile all the scripts of a selection.
+- **The Legacy build options**: unlink confirmation, pivot point, selection
+  filters, light radius of selected lights and hide selected objects.
 
 - **LiveMesh**: see your Blender mesh in the viewer while you edit it, with
   nothing uploaded. Rigged meshes follow your own avatar, with their weights,
@@ -370,8 +412,10 @@ are planned or in progress: they are not in the viewer yet.
   who agree to it, joint by joint: body, face, hands, other bones and
   physics, with a Left / Right / Mirror side choice, a finger grid and
   whole-pose actions. Save poses to a library, export them as BVH or import
-  them as an animation, with Ctrl+Z / Ctrl+Y as you go. The pose is seen by
-  you only ([details](docs/POSER.md)).
+  them as an animation, with Ctrl+Z / Ctrl+Y as you go. Black Dragon pose
+  files load and save, and your inventory animations play under the pose
+  with pause, stop and edit. The pose is seen by you only
+  ([details](docs/POSER.md)).
 - **An IK workbench**: reusable pose projects that keep chosen bones on their
   targets, with contacts that compatible viewers apply to nearby avatars
   ([details](docs/IK_EDIT.md)).
@@ -559,6 +603,17 @@ are planned or in progress: they are not in the viewer yet.
 
 ### Only in Aurora
 
+- **How many people are there**: the number of residents in a region shows
+  wherever a place is shown: place details, About Land, search, Places,
+  favourites and the mini-map.
+- **Hide a friend**: in this viewer only, a friend leaves your lists and
+  online notices, while their messages still reach you.
+- **What they wear**: a Worn tab on profiles lists an avatar's attachments
+  by body part or kind, with their complexity, to derender or highlight.
+- **Stay online**: automatic reconnection after a lost link or a region
+  restart, and evacuation to a backup landmark before a restart, both off
+  by default.
+
 - <img src="docs/readme/pill-experimental.svg" alt="Experimental" height="18" align="absmiddle"> **Immersive sound**: world sounds muffled behind walls, hills
   and inside closed boxes, heard in front, behind, above or below with
   headphones (HRTF), and given the reverb of the place around you, changing
@@ -683,7 +738,7 @@ frame on your own PC.
   grids without AIS.
 - **Photos and camera** — a full-screen viewfinder with face autofocus, lens
   rings, focus peaking, a live histogram, exposure lock and a self-timer;
-  group focus, HUDs and the poser in the viewfinder; snapshots up to 8K to
+  group focus, HUDs and the poser in the viewfinder; snapshots up to 16K to
   disk, inventory or the profile feed; isolation of your avatar or chosen subjects on a
   transparent background; 66 stackable filters and effects with their own
   sliders, and your `.cube` LUTs; camera presets, a frozen world, quiet
@@ -744,7 +799,6 @@ completed work from features awaiting that validation.
 
 **Not there yet**
 
-- Depth exports and 360° snapshots.
 - Automatic updates on macOS (the viewer points to the new release).
 - Automatic installation of updates on Linux (the viewer points to the
   new release instead).
@@ -902,7 +956,7 @@ Legacy Viewer's floater remain in Preferences › Aurora › Photo window.
 
 In the panel, choose a
 destination (disk, inventory or profile feed), an aspect ratio and a
-resolution. Disk photos support PNG, JPEG and BMP, with presets up to 8K (4K by default).
+resolution. Disk photos support PNG, JPEG and BMP, with presets up to 16K (4K by default; up to 16,384 pixels a side).
 Inventory uploads use the grid's upload charge; the profile destination
 offers a caption and an optional location.
 
