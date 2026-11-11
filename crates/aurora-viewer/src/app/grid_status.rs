@@ -31,10 +31,17 @@ impl App {
             self.grid_status.fresh.clear();
         }
         self.grid_status_was_open = open;
-        let wanted = open || (self.in_world() && self.grid_status_listed);
+        // AutoQueryGridStatus: the latest news in nearby chat at login
+        let login = self
+            .grid_status
+            .login_wants(self.in_world(), self.settings.notification_options.grid_status_at_login);
+        let wanted = open || (self.in_world() && self.grid_status_listed) || login;
         let news = self
             .grid_status
             .poll(self.net.runtime(), feed.as_deref(), page.as_deref(), wanted, Instant::now());
+        if let Some(line) = self.grid_status.login_report() {
+            self.world.system_notice(line, crate::world::notice_topics::Topic::Info);
+        }
         let now = ctx.input(|i| i.time);
         let flash = &mut self.grid_status.flash;
         flash.set_on(true);
