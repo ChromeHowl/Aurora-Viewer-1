@@ -531,10 +531,7 @@ impl Editor {
             side = widgets::icon_track(ui, p, "sides", TOGGLE, self.poser.side as usize, TrackLit::Quiet, &sides);
         });
         if let Some(i) = mode {
-            self.poser.transform = i;
-            self.tool = if i == 0 { Tool::Rotate } else { Tool::Move };
-            self.gizmo.cancel();
-            self.poser.scale_gizmo.cancel();
+            self.set_pose_transform(i);
         }
         if let Some(i) = side {
             self.set_pose_side([Side::Left, Side::Right, Side::Mirror][i], rig, frame);
