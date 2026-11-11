@@ -53,7 +53,7 @@ fn parse(value: &str) -> Option<Scenario> {
     let mut scenario = Scenario { open, down: 0, turn: 0 };
     for part in parts {
         match part.split_once('=') {
-            Some(("down", n)) => scenario.down = n.parse().ok()?.min(20),
+            Some(("down", n)) => scenario.down = n.parse::<u32>().ok()?.min(20),
             Some(("turn", n)) => scenario.turn = n.parse::<i32>().ok()?.clamp(-20, 20),
             _ => return None,
         }

@@ -18954,8 +18954,7 @@ impl App {
                     // FSDisableTeleportScreens: the small progress bar, with
                     // the same Cancel as the teleport screen
                     let cancel = self.world.tp_cancel.offered(self.settings.always_show_tp_cancel);
-                    tp_cancel_pressed =
-                        ui::loading::mini_progress(&ctx, &p, &self.world.tp_status, self.world.tp_progress, cancel);
+                    tp_cancel_pressed = ui::loading::mini_progress(&ctx, &p, &self.world.tp_status, self.world.tp_progress, cancel);
                 }
                 if tp_cancel_pressed {
                     self.cancel_teleport();

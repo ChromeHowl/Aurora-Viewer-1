@@ -5,8 +5,8 @@
 
 use super::super::cx::{Cx, field};
 use crate::settings::notification_options::{
-    BOTTOM_MARGIN, DIALOG_ROWS, DialogPosition, FADE_SECONDS, GAP, INFO_SECONDS, OFFER_SECONDS, OVERFLOW_HEIGHT,
-    THROTTLE_COUNT, TIP_SECONDS,
+    BOTTOM_MARGIN, DIALOG_ROWS, DialogPosition, FADE_SECONDS, GAP, INFO_SECONDS, OFFER_SECONDS, OVERFLOW_HEIGHT, THROTTLE_COUNT,
+    TIP_SECONDS,
 };
 
 /// The script dialogs' rows after "Script dialogs per object", in the
