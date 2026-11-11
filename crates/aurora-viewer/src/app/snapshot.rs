@@ -2949,6 +2949,8 @@ LUT_3D_SIZE {n}
             self.env_ui.scan_left = usize::MAX;
         }
         self.env_ui.refresh(ctx, &self.world.inventory);
+        let settings = &mut self.scene.settings;
+        self.env_ui.sort_pbr_skies(|asset| settings.probe_pbr_sky(asset));
     }
 
     /// The exposure the frame is drawn with: the photo's, else Preferences'.
