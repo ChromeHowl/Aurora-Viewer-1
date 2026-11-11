@@ -161,7 +161,7 @@ CameraZoomFocusZOffset,F32,unreviewed,,named in Aurora: aurora-viewer/src/camera
 CameraZoomFraction,F32,unreviewed,,,Mousewheel driven fraction of zoom
 CefVerboseLog,Boolean,unreviewed,,,Enable/disable CEF verbose logging
 CertStore,String,unreviewed,,,Specifies the Certificate Store for certificate trust verification
-ChannelBottomPanelMargin,S32,unreviewed,,,Space from a lower toast to the Bottom Tray
+ChannelBottomPanelMargin,S32,in-aurora,,"ported (2026-11), `settings/notification_options.rs`; default 0, Aurora's",Space from a lower toast to the Bottom Tray
 ChatAutocompleteGestures,Boolean,unreviewed,,,Auto-complete gestures in nearby chat
 ChatBubbleOpacity,F32,unreviewed,,field `chat_bubble_opacity`,"Opacity of chat bubble background (0.0 = completely transparent, 1.0 = completely opaque)"
 ChatConsoleFontSize,S32,in-aurora,,"ported (2026-11), `settings/chat_display.rs`","Size of chat text in chat console (0 to 3, small to huge)"
@@ -398,10 +398,10 @@ FSAdvancedWorldmapRegionInfo,Boolean,in-aurora,,"ported (2026-11), `settings/tel
 FSAllowDoubleClickOnScriptedObjects,Boolean,in-aurora,,double_click_scripted,"If enabled, allows double-click movement action (walk/teleport) to scripted objects"
 FSAllowEEPWaterDerender,Boolean,in-aurora,,"ported (2026-11), `settings/render_extras.rs`",Allow EEP assets to disable water rendering to increase FPS
 FSAlwaysFly,Boolean,in-aurora,,"a session toggle (fly override), not saved, as in the Legacy Viewer","Fly Override, for no-fly zones. Must be activated each time."
-FSAlwaysShowInboxButton,Boolean,to-add,low,,"If enabled, the Received Items folder aka Inbox is always shown at the bottom of the inventory, even if it is shown as folder in the invento"
+FSAlwaysShowInboxButton,Boolean,in-aurora,,"ported (2026-11), `InventoryPreferences::always_show_received_tab`; default on, Aurora's view","If enabled, the Received Items folder aka Inbox is always shown at the bottom of the inventory, even if it is shown as folder in the invento"
 FSAlwaysShowTPCancel,Boolean,in-aurora,,"ported (2026-11), `settings/teleport_extras.rs`",Always show the TP cancel button even if the sim says it cant be canceled. The sim will always know if it can and will ignore cancel request
 FSAlwaysTrackPayments,Boolean,in-aurora,,always_track_payments,Always track payments even if the money tracker is closed
-FSAnimatedScriptDialogs,Boolean,to-add,low,,Animates script dialogs V1 style. Only effective when dialogs in top right are activated.
+FSAnimatedScriptDialogs,Boolean,in-aurora,,"ported (2026-11), `settings/notification_options.rs`",Animates script dialogs V1 style. Only effective when dialogs in top right are activated.
 FSAnimationPreviewExpanded,Boolean,not-applicable,,a window's last state; Aurora keeps its own window state,Expand or collapse the advanced animation information in the animation preview floater by default
 FSAnnounceIncomingIM,Boolean,in-aurora,,announce_incoming_im,Opens the IM floater and announces an incoming IM as soon as somebody is starting to write an IM to you.
 FSAppearanceShowHints,Boolean,in-aurora,,shape_show_hints,"If enabled, show visual hints (avatar images) in appearance editor"
@@ -714,7 +714,7 @@ FSMuteAllGroups,Boolean,in-aurora,,mute_all_groups,Disable ALL group chats.
 FSMuteGroupWhenNoticesDisabled,Boolean,in-aurora,,mute_groups_without_notices,"When 'Receive group notices' is disabled, disable group chat as well."
 FSNameTagShowLegacyUsernames,Boolean,in-aurora,,legacy_username_format,Show legacy name (Firstname Lastname) in user tags instead of username
 FSNameTagZOffsetCorrection,S32,in-aurora,,"ported (2026-11), `settings/people.rs`",Changes the default Z-offset of the avatar nametags.
-FSNearbyChatToastsOffset,S32,to-add,low,,Vertical offset of the nearby chat toasts
+FSNearbyChatToastsOffset,S32,not-applicable,,floating nearby-chat toasts only,Vertical offset of the nearby chat toasts
 FSNearbyChatbar,Boolean,check,,nearby_chat_window may cover it,Set to true to add a chat bar to the Nearby Chat window
 FSNetMapDoubleClickAction,S32,in-aurora,,maps.mini_double_click,"Defines the action happening if the a double click occurs on a minimap instance (minimap floater or within people panel): 0 = Nothing, 1 = O"
 FSNetMapPhantomOpacity,U32,check,,named in minimap.rs: may be built in,Percentage of opacity for phantom objects on netmap.
@@ -822,7 +822,7 @@ FSShowGroupNameLength,S32,in-aurora,,"ported (2026-11), `settings/chat_display.r
 FSShowGroupTitleInTooltip,Boolean,in-aurora,,hover_tips.group_titles,Shows the group title of an avatar in the tooltip.
 FSShowIMInChatHistory,Boolean,in-aurora,,"ported (2026-11), `settings/chat_display.rs`","If true, IM will also be shown in the nearby chat transcript."
 FSShowIMSendButton,Boolean,in-aurora,,"ported (2026-11), `settings/chat_display.rs`",Shows the send chat button in IM session windows
-FSShowInboxFolder,Boolean,to-add,low,,"If enabled, the Received Items folder aka Inbox is shown in the inventory as folder."
+FSShowInboxFolder,Boolean,in-aurora,,"ported (2026-11), `InventoryPreferences::show_inbox_folder`; default on, Aurora's view","If enabled, the Received Items folder aka Inbox is shown in the inventory as folder."
 FSShowInterfaceInMouselook,Boolean,in-aurora,,camera.show_interface_in_mouselook,"If true, the Legacy Viewer will show user interface in mouselook mode."
 FSShowInventoryThumbnailTooltips,Boolean,in-aurora,,inventory.thumbnail_tooltips,Shows the inventory item thumbnail as tooltip
 FSShowJoinedGroupInvitations,Boolean,in-aurora,,show_joined_group_invitations,"If enabled, invitations to groups you are already a member in will be shown"
@@ -1357,9 +1357,9 @@ NearbyListShowIcons,Boolean,unreviewed,,,Show/hide people icons in nearby list
 NearbyListShowMap,Boolean,unreviewed,,,Show/hide map above nearby people list (unused by the Legacy Viewer)
 NearbyListShowRange,Boolean,unreviewed,,,Show range field on nearby avList?
 NearbyPeopleSortOrder,U32,unreviewed,,,"Specifies sort order for nearby people (0 = by name, 3 = by distance, 4 = by most recent)"
-NearbyToastFadingTime,S32,unreviewed,,,Number of seconds while a nearby chat toast is fading
-NearbyToastLifeTime,S32,unreviewed,,,Number of seconds while a nearby chat toast exists
-NearbyToastWidth,S32,unreviewed,,,Width of a the nearby chat toasts in percent of screen width
+NearbyToastFadingTime,S32,not-applicable,,floating nearby-chat toasts only; the console fades over 3 s,Number of seconds while a nearby chat toast is fading
+NearbyToastLifeTime,S32,not-applicable,,floating nearby-chat toasts only; Aurora shows the console (`chat_toast_seconds`),Number of seconds while a nearby chat toast exists
+NearbyToastWidth,S32,not-applicable,,floating nearby-chat toasts only,Width of a the nearby chat toasts in percent of screen width
 NewCacheLocation,String,unreviewed,,named in Aurora: aurora-viewer/src/cache_location.rs:2,Change the location of the local disk cache to this
 NewCacheLocationTopFolder,String,unreviewed,,,Change the top folder location of the local disk cache to this
 NewObjectCreationThrottle,S32,unreviewed,,,"maximum number of new objects created per frame, -1 to disable this throttle"
@@ -1417,9 +1417,9 @@ OctreeDistanceFactor,Vector3,unreviewed,,,Multiplier on distance for determining
 OctreeMaxNodeCapacity,U32,unreviewed,,,Maximum number of elements to store in a single octree node
 OctreeMinimumNodeSize,F32,unreviewed,,,Minimum size of any octree node
 OctreeStaticObjectSizeFactor,S32,unreviewed,,,Multiplier on static object size for determining octree node size
-OmnifilterControls,Boolean,unreviewed,,,"If true, the Legacy Viewer will show the omnifilter controls (enable, drop down) in upper right corner of the screen. Useful, if multiple omnifilter"
+OmnifilterControls,Boolean,to-add,low,top-bar Omnifilter switch and rule set list not built,"If true, the Legacy Viewer will show the omnifilter controls (enable, drop down) in upper right corner of the screen. Useful, if multiple omnifilter"
 OmnifilterEnabled,Boolean,in-aurora,,"ported (2026-11), `world/omnifilter.rs`",The operating state of the Omnifilter.
-OmnifilterRuleSetID,S32,unreviewed,,,The id of the current rule set for the Omnifilter.
+OmnifilterRuleSetID,S32,in-aurora,,"ported (2026-11), `world/omnifilter.rs` (RuleSet::current, per account)",The id of the current rule set for the Omnifilter.
 OnlineOfflinetoNearbyChat,Boolean,unreviewed,,field `friends_online_in_chat`,Send online/offline notifications to Nearby Chat panel (v1-style behavior)
 OnlineOfflinetoNearbyChatHistory,Boolean,unreviewed,,,Show online/offline notifications only in chat transcript
 OnlyShowSelectedNormals,Boolean,unreviewed,,,Only render the normals for selected objects. in conjunction with render debug normals
@@ -1445,7 +1445,7 @@ OutfitGallerySortOrder,S32,unreviewed,,,"Gallery sorting: 0 - sort outfits by na
 OutfitListFilterFullList,Boolean,unreviewed,,,0 - show only matches. 1 - show all items in outfit as long as outfit or item inside matches.
 OutfitListSortOrder,S32,unreviewed,,,How outfit list in Avatar's floater is sorted. 0 - by name 1 - favorites to top (unused in favour of FSOutfitListSortOrder)
 OutfitOperationsTimeout,S32,unreviewed,,,Timeout for outfit related operations.
-OverflowToastHeight,S32,unreviewed,,,Height of an overflow toast
+OverflowToastHeight,S32,in-aurora,,"ported (2026-11), `settings/notification_options.rs`; default 0, Aurora's",Height of an overflow toast
 OverlayTitle,String,unreviewed,,,"Controls watermark text message displayed on screen when ""ShowOverlayTitle"" is enabled (one word, underscores become spaces)"
 OverridePieColors,Boolean,unreviewed,,,Override the pie menu color defined by the currently selected skin
 PTTCurrentlyEnabled,Boolean,unreviewed,,,Use Push to Talk mode
@@ -2027,7 +2027,7 @@ ShowMyComplexityChanges,U32,unreviewed,,,How long to show notices about avatar c
 ShowNavbarFavoritesPanel,Boolean,unreviewed,,,Show/hide navigation bar favorites panel
 ShowNavbarNavigationPanel,Boolean,unreviewed,,,Show/hide navigation bar navigation panel
 ShowNetStats,Boolean,unreviewed,,field `show_net_stats`,Show the Status Indicators for the Viewer and Network Usage in the Status Overlay.
-ShowNewInventory,Boolean,unreviewed,,,Automatically views new notecards/textures/landmarks
+ShowNewInventory,Boolean,in-aurora,,"ported (2026-11), `show_new_inventory`; default off, no window opens unasked",Automatically views new notecards/textures/landmarks
 ShowObjectRenderingCost,Boolean,unreviewed,,,Show the object rendering cost in build tools
 ShowObjectUpdates,Boolean,unreviewed,,,Show when update messages are received for individual objects
 ShowOfferedInventory,Boolean,unreviewed,,,Show inventory window with last inventory offer selected when receiving inventory from other users.
@@ -2084,7 +2084,7 @@ SpeedTest,Boolean,unreviewed,,,"Performance testing mode, no network"
 SpellCheck,Boolean,unreviewed,,field `spelling`,Enable spellchecking on line and text editors
 SpellCheckDictionary,String,unreviewed,,field `spelling`,Current primary and secondary dictionaries used for spell checking
 StarLightShowMapDetails,Boolean,unreviewed,,,Show the details panel on the side of the World Map
-StartUpToastLifeTime,S32,unreviewed,,,Number of seconds while a Startup toast exist
+StartUpToastLifeTime,S32,not-applicable,,Aurora has no startup toast: what arrived while away is in the notification list,Number of seconds while a Startup toast exist
 StatsAutoRun,Boolean,unreviewed,,,Play back autopilot
 StatsFile,String,unreviewed,,,Filename for stats logging output
 StatsFrametimeEventThreshold,F32,unreviewed,,,"The percentage that the frametime difference must exceed in order to register a frametime event. 0.1 = 10%, 0.25 = 25%, etc."
@@ -2138,7 +2138,7 @@ ThreadPoolSizes,LLSD,unreviewed,,,Map of size overrides for specific thread pool
 ThrottleBandwidthKBPS,F32,unreviewed,,field `bandwidth_kbps`,Maximum allowable downstream bandwidth (kilo bits per second)
 TipToastMessageLineCount,S32,unreviewed,,,Max line count of text message on tip toast.
 ToastButtonWidth,S32,unreviewed,,,"Default width of buttons in the toast. Notes: If required width will be less than this one, a button will be reshaped to default size , othe"
-ToastFadingTime,S32,unreviewed,,,Number of seconds while a toast is fading
+ToastFadingTime,S32,in-aurora,,"ported (2026-11), `settings/notification_options.rs`; default 0, Aurora's",Number of seconds while a toast is fading
 ToastGap,S32,in-aurora,,"ported (2026-11), `settings/notification_options.rs`",Gap between toasts on a screen (min. value is 5)
 ToolTipDelay,F32,in-aurora,,"ported (2026-11), `settings/legacy_prefs.rs`",Seconds before displaying tooltip when mouse stops over UI element
 ToolTipFadeTime,F32,unreviewed,,,Seconds over which tooltip fades away
