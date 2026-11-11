@@ -86,7 +86,7 @@ impl State {
             .values()
             .any(|it| it.name == item_name && actions::under(inv, it.id, folder))
         {
-            return Err(aurora_i18n::tr!("nb-omnifilter-notecard-exists", name = item_name).into());
+            return Err(aurora_i18n::tr!("nb-omnifilter-notecard-exists", name = item_name));
         }
         let text = legacy::export(&set.rules, &name);
         Notecard::validate_text(&text)?;

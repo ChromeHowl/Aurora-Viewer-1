@@ -1435,7 +1435,7 @@ fn a_click_beside_the_joints_unselects_and_the_pelvis_is_not_picked_again() {
         }
     };
     assert!(editor.selected.is_some());
-    click(&mut editor, egui::pos2(790.0, 890.0));
+    click(&mut frames, &mut editor, egui::pos2(790.0, 890.0));
     assert_eq!(editor.selected, None, "the ground beside unselects");
     assert!(editor.poser.unselected);
     click(&mut editor, egui::pos2(790.0, 880.0));
@@ -2415,7 +2415,7 @@ fn a_marker_click_selects_its_joint_right_after_switching_avatars_even_with_none
     crate::ui::widgets::minimize_floater(&frames.ctx, "poser");
     crate::ui::widgets::minimize_floater(&frames.ctx, "poser-compact");
     let p = crate::theme::Theme::default().palette();
-    let mut click = |editor: &mut Editor, at: egui::Pos2| -> bool {
+    let click = |frames: &mut Frames, editor: &mut Editor, at: egui::Pos2| -> bool {
         let button = |pressed| egui::Event::PointerButton {
             pos: at,
             button: egui::PointerButton::Primary,
@@ -2442,7 +2442,10 @@ fn a_marker_click_selects_its_joint_right_after_switching_avatars_even_with_none
     // click goes to an ankle, clear of the new pelvis' handles
     editor.pick_subject(&world, peer);
     assert_eq!((editor.poser.subject, editor.selected), (peer, None));
-    assert!(click(&mut editor, on(ankle)), "the pointer is on the new avatar's marker");
+    assert!(
+        click(&mut frames, &mut editor, on(ankle)),
+        "the pointer is on the new avatar's marker"
+    );
     assert_eq!(editor.poser.subject, peer);
     assert_eq!(
         editor.selected,
@@ -2450,10 +2453,10 @@ fn a_marker_click_selects_its_joint_right_after_switching_avatars_even_with_none
         "the first click on the new avatar's marker selects it"
     );
     // none selected at all (a click beside), still on the new avatar
-    click(&mut editor, egui::pos2(790.0, 890.0));
+    click(&mut frames, &mut editor, egui::pos2(790.0, 890.0));
     assert_eq!(editor.selected, None);
     assert!(editor.poser.unselected);
-    assert!(click(&mut editor, on(knee)));
+    assert!(click(&mut frames, &mut editor, on(knee)));
     assert_eq!(editor.selected, Some(knee), "a marker selects its joint with none selected");
     assert!(!editor.poser.unselected);
 }
