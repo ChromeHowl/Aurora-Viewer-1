@@ -33,8 +33,11 @@
 //!   or replaces its text; a script dialog's text holds its buttons
 //!   ("button_name=…", FIRE-36647). The Legacy automatic dialog replies and
 //!   web page requests are not ported;
-//! - the rules can be read from and written to a Legacy Omnifilter notecard
-//!   saved as a file (`legacy.rs`).
+//! - the rules are kept in named rule sets, one in use, as the Legacy
+//!   Viewer's (the first, Default, never removed);
+//! - a rule set can be read from and written to a Legacy Omnifilter
+//!   notecard, in the inventory or saved as a file (`legacy.rs`); one read
+//!   becomes a new rule set, as in the Legacy Viewer.
 
 use super::World;
 use crate::settings::Rgba;
@@ -241,53 +244,217 @@ impl Default for Rule {
     }
 }
 
-/// The account's rules and the filter's switch (OmnifilterEnabled, off).
+/// A named list of rules (OmnifilterEngine's rule sets, FIRE-36763).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NamedRules {
+    pub name: String,
+    pub rules: Vec<Rule>,
+}
+
+/// The name of the first rule set, which is never removed (the Legacy
+/// Viewer's "Default").
+pub const DEFAULT_SET: &str = "Default";
+/// Most rule sets kept.
+pub const MAX_SETS: usize = 50;
+/// Longest rule set name, in characters (an inventory name's 63 bytes,
+/// less "[Omnifilter] ").
+pub const MAX_SET_NAME: usize = 50;
+
+/// Why a rule set was not added.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetError {
+    /// No name (OmnifilterEngine::addNewRuleSet's empty name).
+    NoName,
+    /// The name is taken (its "already exists").
+    Taken,
+    /// `MAX_SETS` reached.
+    Full,
+}
+
+/// The account's rules and the filter's switch (OmnifilterEnabled, off),
+/// in rule sets: one is in use (OmnifilterRuleSetID), its rules in `rules`
+/// (matched and edited), the others kept by name in `sets`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct RuleSet {
     pub version: u32,
     pub on: bool,
+    /// The rules of the set in use.
     pub rules: Vec<Rule>,
+    /// Every rule set, in its order, the first the Default one; the entry of
+    /// the set in use has its rules in `rules`, its own list left empty.
+    /// Empty: only the Default set, in use (`normalize` fills it).
+    pub sets: Vec<NamedRules>,
+    /// The index in `sets` of the set in use.
+    pub current: usize,
+}
+
+fn parse_rules(value: Option<&serde_json::Value>, skipped: &mut usize) -> Vec<Rule> {
+    value
+        .and_then(serde_json::Value::as_array)
+        .map(|list| {
+            list.iter()
+                .filter_map(|r| match serde_json::from_value::<Rule>(r.clone()) {
+                    Ok(rule) => Some(rule),
+                    Err(_) => {
+                        *skipped += 1;
+                        None
+                    }
+                })
+                .take(MAX_RULES)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 impl RuleSet {
     /// A file as written by any version: a rule that cannot be read is left
-    /// out alone, the others kept; an unreadable file gives no rules.
+    /// out alone, the others kept; an unreadable file gives no rules. A file
+    /// written before the rule sets holds the Default set alone.
     pub fn parse(bytes: &[u8]) -> (RuleSet, usize) {
         let Ok(value) = serde_json::from_slice::<serde_json::Value>(bytes) else {
-            return (RuleSet::default(), 0);
+            let mut set = RuleSet::default();
+            set.normalize();
+            return (set, 0);
         };
         let mut skipped = 0;
-        let rules = value
-            .get("rules")
+        let rules = parse_rules(value.get("rules"), &mut skipped);
+        let on = value.get("on").and_then(serde_json::Value::as_bool).unwrap_or(false);
+        let sets = value
+            .get("sets")
             .and_then(serde_json::Value::as_array)
             .map(|list| {
                 list.iter()
-                    .filter_map(|r| match serde_json::from_value::<Rule>(r.clone()) {
-                        Ok(rule) => Some(rule),
-                        Err(_) => {
-                            skipped += 1;
-                            None
-                        }
+                    .take(MAX_SETS)
+                    .map(|s| NamedRules {
+                        name: s.get("name").and_then(serde_json::Value::as_str).unwrap_or_default().to_owned(),
+                        rules: parse_rules(s.get("rules"), &mut skipped),
                     })
-                    .take(MAX_RULES)
                     .collect()
             })
             .unwrap_or_default();
-        let on = value.get("on").and_then(serde_json::Value::as_bool).unwrap_or(false);
-        (
-            RuleSet {
-                version: VERSION,
-                on,
-                rules,
-            },
-            skipped,
-        )
+        let current = value
+            .get("current")
+            .and_then(serde_json::Value::as_u64)
+            .map_or(0, |c| usize::try_from(c).unwrap_or(usize::MAX));
+        let mut set = RuleSet {
+            version: VERSION,
+            on,
+            rules,
+            sets,
+            current,
+        };
+        set.normalize();
+        (set, skipped)
     }
 
     fn to_bytes(&self) -> Vec<u8> {
         let mut copy = self.clone();
         copy.version = VERSION;
         serde_json::to_vec_pretty(&copy).unwrap_or_default()
+    }
+
+    /// The sets within their bounds: the Default one first, names given and
+    /// distinct, the set in use existing and its rules in `rules` alone.
+    pub fn normalize(&mut self) {
+        self.rules.truncate(MAX_RULES);
+        self.sets.truncate(MAX_SETS);
+        if self.sets.is_empty() {
+            self.sets.push(NamedRules {
+                name: DEFAULT_SET.to_owned(),
+                rules: Vec::new(),
+            });
+        }
+        if self.current >= self.sets.len() {
+            self.current = 0;
+        }
+        let mut seen: Vec<String> = Vec::new();
+        for (i, set) in self.sets.iter_mut().enumerate() {
+            set.rules.truncate(MAX_RULES);
+            let mut name: String = set.name.trim().chars().take(MAX_SET_NAME).collect();
+            if i == 0 && name.is_empty() {
+                name = DEFAULT_SET.to_owned();
+            } else if name.is_empty() {
+                name = format!("{}", i + 1);
+            }
+            let base = name.clone();
+            let mut n = 2;
+            while seen.contains(&name) {
+                name = format!("{base} ({n})");
+                n += 1;
+            }
+            seen.push(name.clone());
+            set.name = name;
+        }
+        // a file written by hand may hold the rules in use in both places
+        let stored = std::mem::take(&mut self.sets[self.current].rules);
+        if self.rules.is_empty() {
+            self.rules = stored;
+        }
+    }
+
+    /// The rule sets' names, in their order.
+    pub fn set_names(&self) -> Vec<&str> {
+        self.sets.iter().map(|s| s.name.as_str()).collect()
+    }
+
+    /// The name of the set in use.
+    pub fn current_name(&self) -> &str {
+        self.sets.get(self.current).map_or(DEFAULT_SET, |s| s.name.as_str())
+    }
+
+    /// Use the set `index` (OmnifilterEngine::setCurrentRuleSet): the rules
+    /// in use go back to their set.
+    pub fn select(&mut self, index: usize) {
+        if index == self.current || index >= self.sets.len() || self.current >= self.sets.len() {
+            return;
+        }
+        self.sets[self.current].rules = std::mem::take(&mut self.rules);
+        self.rules = std::mem::take(&mut self.sets[index].rules);
+        self.current = index;
+    }
+
+    /// A name for a set not taken yet: `name`, or it numbered.
+    pub fn free_name(&self, name: &str) -> String {
+        let base: String = name.trim().chars().take(MAX_SET_NAME).collect();
+        let base = if base.is_empty() { DEFAULT_SET.to_owned() } else { base };
+        let mut candidate = base.clone();
+        let mut n = 2;
+        while self.sets.iter().any(|s| s.name == candidate) {
+            candidate = format!("{base} ({n})");
+            n += 1;
+        }
+        candidate
+    }
+
+    /// A new set holding `rules`, put in use (addNewRuleSet with no rules,
+    /// addClonedRuleSet with a copy of those in use, a notecard's import).
+    pub fn add(&mut self, name: &str, mut rules: Vec<Rule>) -> Result<(), SetError> {
+        let name: String = name.trim().chars().take(MAX_SET_NAME).collect();
+        if name.is_empty() {
+            return Err(SetError::NoName);
+        }
+        if self.sets.iter().any(|s| s.name == name) {
+            return Err(SetError::Taken);
+        }
+        if self.sets.len() >= MAX_SETS {
+            return Err(SetError::Full);
+        }
+        rules.truncate(MAX_RULES);
+        self.sets.push(NamedRules { name, rules });
+        self.select(self.sets.len() - 1);
+        Ok(())
+    }
+
+    /// Remove the set in use, never the Default one, which is used next
+    /// (removeCurrentRuleSet).
+    pub fn remove_current(&mut self) -> bool {
+        if self.current == 0 || self.current >= self.sets.len() {
+            return false;
+        }
+        self.sets.remove(self.current);
+        self.current = 0;
+        self.rules = std::mem::take(&mut self.sets[0].rules);
+        true
     }
 }
 
@@ -444,7 +611,7 @@ impl Omnifilter {
     }
 
     fn install(&mut self, mut set: RuleSet) {
-        set.rules.truncate(MAX_RULES);
+        set.normalize();
         self.compiled.clear();
         self.broken.clear();
         for (index, rule) in set.rules.iter().enumerate() {

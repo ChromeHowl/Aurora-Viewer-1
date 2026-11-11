@@ -562,6 +562,8 @@ pub struct App {
     /// Open right-click menu.
     context_menu: Option<ui::context::ContextMenu>,
     context_customization: ui::context::Customization,
+    /// The Omnifilter's rule set to or from an inventory notecard.
+    omnifilter_notecards: ui::omnifilter_notecards::State,
     avatar_textures: ui::context::AvatarTexturesUi,
     object_profile: ui::context::ObjectProfileUi,
     pathfinding_ui: ui::context::PathfindingUi,
@@ -1702,6 +1704,7 @@ impl App {
             right_gesture: RightGesture::default(),
             context_menu: None,
             context_customization: Default::default(),
+            omnifilter_notecards: Default::default(),
             avatar_textures: Default::default(),
             object_profile: Default::default(),
             pathfinding_ui: Default::default(),
@@ -3483,6 +3486,12 @@ impl App {
                 }
                 return;
             }
+            if self.omnifilter_notecards.saved(request, &result) {
+                if let Ok(item) = result {
+                    self.world.inventory.add_items(vec![item]);
+                }
+                return;
+            }
             if self.context_customization.notecards.saved(request, &result) {
                 if let Ok(item) = result {
                     self.world.inventory.add_items(vec![item]);
@@ -3633,6 +3642,21 @@ impl App {
             }
             if ui::inventory::context_notecards::loaded(&mut self.inventory_ui, &mut self.settings.inventory, item, &result) {
                 self.settings.save();
+            }
+            // a Legacy Omnifilter notecard: a new rule set, put in use
+            // (importRuleSetFromNotecard)
+            if let Some((name, rules)) = self.omnifilter_notecards.loaded(item, &result) {
+                let mut set = self.world.omnifilter.rules().clone();
+                let name = set.free_name(&name);
+                let count = rules.len().min(crate::world::omnifilter::MAX_RULES);
+                self.options_ui.omnifilter_note = Some(match set.add(&name, rules) {
+                    Ok(()) => {
+                        self.world.omnifilter.replace(set);
+                        aurora_i18n::tr!("nb-omnifilter-imported-set", count = count as i64, name = name)
+                    }
+                    Err(_) => aurora_i18n::tr!("nb-omnifilter-sets-full").to_owned(),
+                });
+                return;
             }
             if let Some(menus) = self.context_customization.notecards.loaded(item, &result) {
                 self.context_customization
@@ -17695,6 +17719,10 @@ impl App {
                         .notecards
                         .show(&ctx, &p, &mut self.world.inventory, &self.settings.world_context_menus)
                 {
+                    self.send(command);
+                }
+                let filter = self.in_world().then(|| self.world.omnifilter.rules());
+                if let Some(command) = self.omnifilter_notecards.show(&ctx, &p, &mut self.world.inventory, filter) {
                     self.send(command);
                 }
                 self.object_menu_ui(&ctx, &p);

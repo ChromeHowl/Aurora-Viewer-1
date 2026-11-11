@@ -18,6 +18,17 @@ impl App {
         if std::mem::take(&mut o.omnifilter_clear_log) {
             self.world.omnifilter.clear_log();
         }
+        // a notecard of the inventory to save the rule set in use to, or to
+        // read a new one from (the app shows the picker or the name)
+        if let Some(mode) = o.omnifilter_notecard.take()
+            && in_world
+        {
+            let name = self.world.omnifilter.rules().current_name().to_owned();
+            self.omnifilter_notecards.open(mode, &name);
+        }
+        if let Some(message) = self.omnifilter_notecards.message.take() {
+            o.omnifilter_note = Some(message);
+        }
         let filter = &self.world.omnifilter;
         let rules = in_world.then(|| filter.rules());
         if o.omnifilter.as_ref() != rules {
