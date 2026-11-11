@@ -111,7 +111,12 @@ pub(super) fn editor(
     } else {
         egui::TextStyle::Body
     };
-    let font = style.resolve(ui.style());
+    let mut font = style.resolve(ui.style());
+    // the notecard text's own font (FSNotecardFontName, FSNotecardFontSize)
+    if matches!(appearance, Appearance::Classic) {
+        let tuning = super::super::text_tuning::current(ui.ctx());
+        font = egui::FontId::new(font.size * tuning.notecard_size.scale(), tuning.notecard_font.family());
+    }
     let markdown = if let Appearance::Markdown(rendered, _) = &appearance {
         Some(*rendered)
     } else {
@@ -196,7 +201,7 @@ pub(super) fn editor(
             .desired_width(size.x)
             .min_size(size)
             .desired_rows(1)
-            .font(style.clone())
+            .font(font.clone())
             .lock_focus(editable && matches!(appearance, Appearance::CodeSource(..)))
             .layouter(&mut layouter)
             .show(ui)

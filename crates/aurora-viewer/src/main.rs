@@ -92,6 +92,7 @@ mod slapp;
 mod slurl;
 mod slurl_handoff;
 mod snapshot;
+mod socks_credentials;
 mod spelling;
 mod stream_fade;
 mod stream_title;

@@ -97,6 +97,7 @@ fn the_plan_lists_only_what_is_ours_and_each_login_once() {
             Part::Secret(Secret::Translation(Service::Azure)),
             Part::Secret(Secret::Translation(Service::Google)),
             Part::Secret(Secret::Translation(Service::DeepL)),
+            Part::Secret(Secret::SocksProxy),
             Part::BlenderAddon,
         ]
     );
@@ -127,6 +128,7 @@ fn the_store_entries_are_the_ones_the_viewer_writes() {
         Secret::Translation(Service::DeepL).entry(),
         ("Aurora Viewer translation", "deepl".to_owned())
     );
+    assert_eq!(Secret::SocksProxy.entry(), ("Aurora Viewer proxy", "socks5".to_owned()));
 }
 
 #[test]

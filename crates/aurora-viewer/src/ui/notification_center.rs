@@ -394,7 +394,7 @@ pub fn show(
     let (presence, peek) = (&nui.center.presence, &nui.center.peek);
     list.list
         .retain(|n| !n.transient || presence.iter().any(|t| t.id == n.id) || peek.iter().any(|p| p.id == n.id));
-    cards::dialogs_apart(ctx, p, icons, world, list, nui, env, true, &mut answers);
+    cards::dialogs_apart(ctx, p, icons, world, list, nui, env, true, dnd, &mut answers);
     let Some(bell) = nui.bell else {
         return (answers, asks);
     };

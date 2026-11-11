@@ -42,7 +42,7 @@ pub struct LegacyPrefs {
     pub web_proxy_port: u16,
     /// HttpProxyType "Web" (with BrowserProxyEnabled): the viewer's other
     /// HTTP traffic (login, capabilities, assets) through the same proxy.
-    /// The Legacy Viewer's "Socks" choice is not offered (no SOCKS 5).
+    /// Its "Socks" choice is `settings/socks_proxy.rs`'s, which comes first.
     pub proxy_other_http: bool,
     /// ConnectionPortEnabled (off): the region traffic leaves from a fixed
     /// UDP port, for a firewall or a router.
@@ -91,6 +91,17 @@ impl Default for LegacyPrefs {
     }
 }
 
+/// A proxy's host as the user may type it: a name or an address, without
+/// a scheme, a path, spaces or control characters (the Legacy Viewer
+/// resolves the name as it is, LLHost::setHostByName).
+pub fn usable_host(host: &str) -> bool {
+    !host.is_empty()
+        && !host.contains("://")
+        && !host
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_control() || matches!(c, '/' | '@' | '?' | '#'))
+}
+
 fn finite_or(value: f32, default: f32) -> f32 {
     if value.is_finite() { value } else { default }
 }
@@ -111,21 +122,14 @@ impl LegacyPrefs {
         self.stream_fade_out = finite_or(self.stream_fade_out, STREAM_FADE_OUT).clamp(0.0, MAX_STREAM_FADE);
     }
 
-    /// The web proxy, as `host:port`, when it is on and usable: a host
-    /// without a scheme, a path, spaces or control characters (the Legacy
-    /// Viewer resolves the name as it is, LLHost::setHostByName).
+    /// The web proxy, as `host:port`, when it is on and its host usable
+    /// (`usable_host`).
     pub fn web_proxy_address(&self) -> Option<String> {
         if !self.web_proxy {
             return None;
         }
         let host = self.web_proxy_host.trim();
-        let usable = !host.is_empty()
-            && self.web_proxy_port != 0
-            && !host.contains("://")
-            && !host
-                .chars()
-                .any(|c| c.is_whitespace() || c.is_control() || matches!(c, '/' | '@' | '?' | '#'));
-        usable.then(|| {
+        (usable_host(host) && self.web_proxy_port != 0).then(|| {
             // an IPv6 address goes between brackets
             if host.contains(':') && !host.starts_with('[') {
                 format!("[{host}]:{}", self.web_proxy_port)

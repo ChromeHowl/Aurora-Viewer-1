@@ -46,6 +46,7 @@ pub mod sim_console;
 mod sim_tls;
 pub mod slm;
 pub mod social;
+pub mod socks5;
 pub mod stats;
 pub mod task_inventory;
 pub mod terrain;
@@ -109,6 +110,10 @@ pub struct NetClient {
     /// The viewer's part of Linden Lab's viewer statistics (viewer_stats.rs).
     viewer_stats: Arc<Mutex<viewer_stats::ViewerSide>>,
     viewer_stats_posts: Arc<viewer_stats::PostsInFlight>,
+    /// The proxy of the HTTP clients (`set_options`).
+    route: ProxyRoute,
+    /// The options the next login applies (`set_options`).
+    network: Arc<Mutex<NetOptions>>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -172,46 +177,133 @@ fn asset_limits(mode: AssetConnections, fixed: Option<usize>) -> (Option<usize>,
     }
 }
 
-/// The network preferences read at start (Preferences › Network, the Legacy
-/// Viewer's proxy settings and ConnectionPort, LLStartUp::startLLProxy and
-/// start_messaging_system).
+/// The network preferences (Preferences › Network, the Legacy Viewer's
+/// proxy settings and ConnectionPort), applied again at each login like
+/// LLStartUp::startLLProxy and start_messaging_system
+/// (`NetClient::set_options`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct NetOptions {
-    /// `host:port` of the HTTP proxy of the login, the capabilities and the
-    /// assets (HttpProxyType "Web"); None: no proxy set by the viewer (the
-    /// system's proxy variables still apply, as before).
-    pub http_proxy: Option<String>,
+    /// The proxy of the login, the capabilities and the assets
+    /// (HttpProxyType).
+    pub http_proxy: HttpProxy,
+    /// Socks5ProxyEnabled: the region traffic (UDP) through this SOCKS 5
+    /// proxy (`socks5.rs`).
+    pub socks: Option<socks5::SocksProxy>,
     /// The UDP port of the circuits (ConnectionPort); None: the system's.
     pub udp_port: Option<u16>,
 }
 
-/// The proxy of `NetOptions::http_proxy` (LLProxy::enableHTTPProxy with
-/// LLPROXY_HTTP): every scheme through it. An address reqwest refuses is
-/// logged and left out, as the Legacy Viewer's PROXY_INVALID_HTTP_HOST.
-fn http_proxy(address: Option<&str>) -> Option<reqwest::Proxy> {
-    let address = address?;
-    match reqwest::Proxy::all(format!("http://{address}")) {
-        Ok(proxy) => {
-            log::info!("HTTP proxy: {address}");
-            Some(proxy)
-        }
-        Err(e) => {
-            log::warn!("HTTP proxy {address} refused ({e}): not used");
-            None
+/// HttpProxyType: where the viewer's HTTP traffic other than the web
+/// pages goes.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum HttpProxy {
+    /// "None": no proxy set by the viewer (the system's proxy variables
+    /// still apply, as before).
+    #[default]
+    None,
+    /// "Web": through the HTTP proxy at this `host:port`.
+    Web(String),
+    /// "Socks": through the SOCKS 5 proxy of `NetOptions::socks`.
+    Socks,
+}
+
+/// The proxy URL of the HTTP traffic for these options (startLLProxy's
+/// enableHTTPProxy with LLPROXY_HTTP or LLPROXY_SOCKS). An address that
+/// does not parse is logged and left out, as the Legacy Viewer's
+/// PROXY_INVALID_HTTP_HOST / PROXY_INVALID_SOCKS_HOST; the SOCKS
+/// credentials go in the URL, which is never logged.
+fn http_route(options: &NetOptions) -> Option<reqwest::Url> {
+    match (&options.http_proxy, &options.socks) {
+        (HttpProxy::None, _) | (HttpProxy::Socks, None) => None,
+        (HttpProxy::Web(address), _) => match reqwest::Url::parse(&format!("http://{address}")) {
+            Ok(url) if url.host().is_some() && url.path() == "/" && url.username().is_empty() => {
+                log::info!("HTTP proxy: {address}");
+                Some(url)
+            }
+            _ => {
+                log::warn!("HTTP proxy {address} refused: not used");
+                None
+            }
+        },
+        (HttpProxy::Socks, Some(socks)) => {
+            let host = socks.host.trim();
+            let host = if host.contains(':') && !host.starts_with('[') {
+                format!("[{host}]")
+            } else {
+                host.to_owned()
+            };
+            // "socks5": names resolved here, as curl's CURLPROXY_SOCKS5
+            let mut url = match reqwest::Url::parse(&format!("socks5://{host}:{}", socks.port)) {
+                Ok(url) if url.host().is_some() && url.path().is_empty() => url,
+                _ => {
+                    log::warn!("SOCKS 5 proxy {host}:{} refused for HTTP: not used", socks.port);
+                    return None;
+                }
+            };
+            if let Some(auth) = &socks.auth
+                && (url.set_username(&auth.username).is_err() || url.set_password(Some(&auth.password)).is_err())
+            {
+                return None;
+            }
+            log::info!("HTTP through the SOCKS 5 proxy {host}:{}", socks.port);
+            Some(url)
         }
     }
 }
 
-fn with_proxy(builder: reqwest::ClientBuilder, proxy: &Option<reqwest::Proxy>) -> reqwest::ClientBuilder {
-    match proxy {
-        Some(proxy) => builder.proxy(proxy.clone()),
-        None => builder,
+/// The proxy of every HTTP client: the route of the latest options, read
+/// at each connection, so a login applies its own; with none, the
+/// system's proxy variables as reqwest reads them by default.
+#[derive(Clone, Default)]
+struct ProxyRoute(Arc<Mutex<Option<reqwest::Url>>>);
+
+impl ProxyRoute {
+    fn set(&self, options: &NetOptions) {
+        *self.0.lock() = http_route(options);
     }
+
+    fn apply(&self, builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+        let route = self.0.clone();
+        let mut builder = builder.proxy(reqwest::Proxy::custom(move |_| route.lock().clone()));
+        // (a proxy given to the builder turns its reading of the
+        // environment off: the same variables, after the route)
+        for proxy in system_proxies(|name| std::env::var(name).ok()) {
+            builder = builder.proxy(proxy);
+        }
+        builder
+    }
+}
+
+/// The proxies of the environment, as reqwest reads them when no proxy is
+/// given (HTTPS_PROXY, HTTP_PROXY outside CGI, ALL_PROXY, with NO_PROXY).
+fn system_proxies(var: impl Fn(&str) -> Option<String>) -> Vec<reqwest::Proxy> {
+    let get = |upper: &str, lower: &str| var(upper).or_else(|| var(lower)).filter(|v| !v.trim().is_empty());
+    let no_proxy = get("NO_PROXY", "no_proxy").map(|v| reqwest::NoProxy::from_string(&v).unwrap_or_default());
+    let mut out = Vec::new();
+    let mut push = |proxy: reqwest::Result<reqwest::Proxy>| {
+        if let Ok(proxy) = proxy {
+            out.push(proxy.no_proxy(no_proxy.clone()));
+        }
+    };
+    if let Some(v) = get("HTTPS_PROXY", "https_proxy") {
+        push(reqwest::Proxy::https(v));
+    }
+    if var("REQUEST_METHOD").is_none()
+        && let Some(v) = get("HTTP_PROXY", "http_proxy")
+    {
+        push(reqwest::Proxy::http(v));
+    }
+    if let Some(v) = get("ALL_PROXY", "all_proxy") {
+        push(reqwest::Proxy::all(v));
+    }
+    out
 }
 
 impl NetClient {
     pub fn new(asset_connections: AssetConnections, options: NetOptions) -> Result<NetClient, NetError> {
-        let proxy = http_proxy(options.http_proxy.as_deref());
+        let route = ProxyRoute::default();
+        route.set(&options);
+        let network = Arc::new(Mutex::new(options));
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(3)
             .thread_name("aurora-net")
@@ -219,7 +311,8 @@ impl NetClient {
             .build()?;
         // Login (public host): standard verification, plus Linden Lab's own CA.
         let ll_ca = reqwest::Certificate::from_pem_bundle(include_bytes!("../lindenlab.pem")).unwrap_or_default();
-        let http = with_proxy(reqwest::Client::builder(), &proxy)
+        let http = route
+            .apply(reqwest::Client::builder())
             .user_agent(aurora_version::user_agent())
             .connect_timeout(std::time::Duration::from_secs(15))
             .tls_certs_merge(ll_ca.clone())
@@ -237,7 +330,8 @@ impl NetClient {
         // Capabilities / assets: Linden Lab's CA for any simulator name (as
         // llcorehttp, mVerifyHost = false), public authorities only for the
         // host's own name (sim_tls.rs).
-        let caps_http = with_proxy(reqwest::Client::builder(), &proxy)
+        let caps_http = route
+            .apply(reqwest::Client::builder())
             .user_agent(aurora_version::user_agent())
             .pool_max_idle_per_host(32)
             .connect_timeout(std::time::Duration::from_secs(15))
@@ -264,7 +358,8 @@ impl NetClient {
             None => log::info!("asset fetch: adaptive (24 to {} requests at once)", fetch_pace::MAX),
             Some(n) => log::info!("asset fetch: limited to {n} requests at once, {idle_per_host} kept connections per host"),
         }
-        let asset_http = with_proxy(reqwest::Client::builder(), &proxy)
+        let asset_http = route
+            .apply(reqwest::Client::builder())
             .user_agent(aurora_version::user_agent())
             .pool_max_idle_per_host(idle_per_host)
             .connect_timeout(std::time::Duration::from_secs(30))
@@ -288,7 +383,7 @@ impl NetClient {
             bandwidth_kbps: bandwidth_kbps.clone(),
             viewer_stats: viewer_stats.clone(),
             viewer_stats_posts: viewer_stats_posts.clone(),
-            udp_port: options.udp_port,
+            network: network.clone(),
         };
         rt.spawn(async move {
             while let Some(cmd) = cmd_rx.recv().await {
@@ -318,7 +413,20 @@ impl NetClient {
             caps_http: shared_caps_http,
             viewer_stats,
             viewer_stats_posts,
+            route,
+            network,
         })
+    }
+
+    /// The network preferences, applied at once to the HTTP traffic and by
+    /// the next login to the region traffic (the SOCKS 5 association and
+    /// the UDP port), as the Legacy Viewer's startLLProxy at each login.
+    pub fn set_options(&self, options: NetOptions) {
+        let mut current = self.network.lock();
+        if *current != options {
+            self.route.set(&options);
+            *current = options;
+        }
     }
 
     /// Before the process ends: wait, `timeout` at most, for the viewer
@@ -402,12 +510,76 @@ impl NetClient {
 mod asset_limit_tests {
     use super::*;
 
+    fn web(address: &str) -> NetOptions {
+        NetOptions {
+            http_proxy: HttpProxy::Web(address.into()),
+            ..NetOptions::default()
+        }
+    }
+
     #[test]
     fn the_http_proxy_is_used_only_when_set_and_valid() {
-        assert!(http_proxy(None).is_none());
-        assert!(http_proxy(Some("10.0.0.2:3128")).is_some());
-        assert!(http_proxy(Some("[::1]:8080")).is_some());
-        assert!(http_proxy(Some("bad host:1")).is_none());
+        assert_eq!(http_route(&NetOptions::default()), None);
+        assert_eq!(
+            http_route(&web("10.0.0.2:3128")).map(String::from).as_deref(),
+            Some("http://10.0.0.2:3128/")
+        );
+        assert!(http_route(&web("[::1]:8080")).is_some());
+        assert_eq!(http_route(&web("bad host:1")), None);
+        assert_eq!(http_route(&web("user@host:1")), None);
+    }
+
+    #[test]
+    fn http_through_socks_carries_the_credentials_in_the_url_only() {
+        let mut options = NetOptions {
+            http_proxy: HttpProxy::Socks,
+            ..NetOptions::default()
+        };
+        assert_eq!(http_route(&options), None, "no SOCKS proxy set");
+        options.socks = Some(socks5::SocksProxy {
+            host: "proxy.example".into(),
+            port: 1080,
+            auth: None,
+        });
+        assert_eq!(
+            http_route(&options).map(String::from).as_deref(),
+            Some("socks5://proxy.example:1080")
+        );
+        options.socks = Some(socks5::SocksProxy {
+            host: "::1".into(),
+            port: 9050,
+            auth: Some(socks5::SocksAuth {
+                username: "a b".into(),
+                password: "p@ss:".into(),
+            }),
+        });
+        let url = http_route(&options).expect("route");
+        assert_eq!(url.scheme(), "socks5");
+        assert_eq!(url.port(), Some(9050));
+        assert_eq!((url.username(), url.password()), ("a%20b", Some("p%40ss%3A")));
+        // the options' own Debug hides them
+        assert!(!format!("{options:?}").contains("p@ss"));
+    }
+
+    #[test]
+    fn the_environment_proxies_follow_reqwest() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |name: &str| pairs.iter().find(|(n, _)| *n == name).map(|(_, v)| (*v).to_owned())
+        };
+        assert!(system_proxies(env(&[])).is_empty());
+        assert_eq!(
+            system_proxies(env(&[("https_proxy", "http://p:1"), ("HTTP_PROXY", "http://p:2")])).len(),
+            2
+        );
+        // HTTP_PROXY is ignored under CGI, as reqwest does
+        assert_eq!(
+            system_proxies(env(&[("HTTP_PROXY", "http://p:2"), ("REQUEST_METHOD", "GET")])).len(),
+            0
+        );
+        assert_eq!(
+            system_proxies(env(&[("ALL_PROXY", "http://p:3"), ("NO_PROXY", "localhost")])).len(),
+            1
+        );
     }
 
     #[test]

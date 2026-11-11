@@ -21,9 +21,11 @@ pub mod registry;
 pub mod render_extras;
 pub mod render_photo;
 mod saver;
+pub mod socks_proxy;
 pub mod stream_list;
 pub mod teleport;
 pub mod teleport_extras;
+pub mod text_tuning;
 
 /// Where a contact-set marker stands on an avatar (`ui/contact_markers.rs`).
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -974,6 +976,11 @@ pub struct Settings {
     /// proxy and UDP port, web and microphone options, simulator version,
     /// music fade (`settings/legacy_prefs.rs`).
     pub legacy_prefs: legacy_prefs::LegacyPrefs,
+    /// The SOCKS 5 proxy (Preferences › Network, `settings/socks_proxy.rs`).
+    pub socks_proxy: socks_proxy::SocksPrefs,
+    /// Line spacing, the notecard editor's font and the inventory's picture
+    /// tooltip delay (Preferences › Layout, `settings/text_tuning.rs`).
+    pub text_tuning: text_tuning::TextTuning,
     /// Toast when a friend comes online or goes offline (ChatOnlineNotification, on).
     pub toast_friends_online: bool,
     /// The same notices as a line of nearby chat (OnlineOfflinetoNearbyChat;
@@ -2228,6 +2235,8 @@ impl Default for Settings {
             chat_display: Default::default(),
             chat_translation: Default::default(),
             legacy_prefs: Default::default(),
+            socks_proxy: Default::default(),
+            text_tuning: Default::default(),
             toast_friends_online: true,
             friends_online_in_chat: false,
             presence_position: PresencePosition::TopRight,
@@ -3178,6 +3187,8 @@ impl Settings {
         self.chat_console_max_lines = self.chat_console_max_lines.min(50);
         self.chat_display.sanitize();
         self.legacy_prefs.sanitize();
+        self.socks_proxy.sanitize();
+        self.text_tuning.sanitize();
         crate::world::rlva::strings::sanitize(&mut self.rlva.strings);
         self.chat_bubble_opacity = if self.chat_bubble_opacity.is_finite() {
             self.chat_bubble_opacity.clamp(0.0, 1.0)

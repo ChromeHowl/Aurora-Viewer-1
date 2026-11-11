@@ -135,6 +135,7 @@ pub(crate) mod spelling;
 pub mod staff;
 pub mod stream_title;
 pub(crate) mod text_menu;
+pub mod text_tuning;
 pub mod texture_library;
 pub mod texture_picker;
 #[cfg(test)]

@@ -115,6 +115,15 @@ pub const OFFER_SECONDS: std::ops::RangeInclusive<f32> = 5.0..=300.0;
 pub const TIP_SECONDS: std::ops::RangeInclusive<f32> = 1.0..=30.0;
 /// ToastGap's slider: pixels.
 pub const GAP: std::ops::RangeInclusive<f32> = 0.0..=30.0;
+/// ToastFadingTime's slider: seconds.
+pub const FADE_SECONDS: std::ops::RangeInclusive<f32> = 0.0..=10.0;
+/// OverflowToastHeight's slider: pixels.
+pub const OVERFLOW_HEIGHT: std::ops::RangeInclusive<f32> = 0.0..=250.0;
+/// ChannelBottomPanelMargin offered: pixels.
+pub const BOTTOM_MARGIN: std::ops::RangeInclusive<f32> = 0.0..=100.0;
+/// FSAnimatedScriptDialogs: a dialog unrolls at 2.5 of its height a second
+/// (LLScriptFloater::draw).
+pub const UNROLL_PER_SECOND: f64 = 2.5;
 /// FSOfferThrottleMaxCount: offers within the throttle's 10 seconds.
 pub const THROTTLE_COUNT: std::ops::RangeInclusive<u32> = 1..=50;
 
@@ -177,6 +186,21 @@ pub struct NotificationOptions {
     /// The question to take L$ answers Deny by default
     /// (FSPermissionDebitDefaultDeny, on).
     pub debit_default_deny: bool,
+    /// Script dialogs unroll from the top when they come, in a top corner
+    /// (FSAnimatedScriptDialogs, off).
+    pub animated_script_dialogs: bool,
+    /// Seconds a toast takes to fade out after its time (ToastFadingTime;
+    /// 0, Aurora's toasts leaving at once, where the Legacy Viewer fades
+    /// for 2).
+    pub toast_fade_seconds: f32,
+    /// Height of the "+ N more" row under the toasts (OverflowToastHeight;
+    /// 0, Aurora's single line, where the Legacy Viewer's overflow toast
+    /// is 72 pixels high).
+    pub overflow_toast_height: f32,
+    /// Room left under the script dialogs of a bottom corner
+    /// (ChannelBottomPanelMargin; 0, Aurora's place, the Legacy Viewer
+    /// leaving 35 pixels above its bottom tray).
+    pub toast_bottom_margin: f32,
 }
 
 impl Default for NotificationOptions {
@@ -202,6 +226,10 @@ impl Default for NotificationOptions {
             payments_in_chat: false,
             grid_status_at_login: false,
             debit_default_deny: true,
+            animated_script_dialogs: false,
+            toast_fade_seconds: 0.0,
+            overflow_toast_height: 0.0,
+            toast_bottom_margin: 0.0,
         }
     }
 }
@@ -224,6 +252,29 @@ impl NotificationOptions {
         self.tip_toast_seconds = finite_in(self.tip_toast_seconds, TIP_SECONDS, d.tip_toast_seconds);
         self.toast_gap = finite_in(self.toast_gap, GAP, d.toast_gap);
         self.offer_throttle_count = self.offer_throttle_count.clamp(*THROTTLE_COUNT.start(), *THROTTLE_COUNT.end());
+        self.toast_fade_seconds = finite_in(self.toast_fade_seconds, FADE_SECONDS, d.toast_fade_seconds);
+        self.overflow_toast_height = finite_in(self.overflow_toast_height, OVERFLOW_HEIGHT, d.overflow_toast_height);
+        self.toast_bottom_margin = finite_in(self.toast_bottom_margin, BOTTOM_MARGIN, d.toast_bottom_margin);
+    }
+
+    /// How much of an arriving script dialog shows, `elapsed` seconds after
+    /// it came (FSAnimatedScriptDialogs, only in a top corner as
+    /// LLScriptFloater::initFromNotification): 0 to 1.
+    pub fn dialog_unrolled(&self, elapsed: f64) -> f32 {
+        let top = self.script_dialog_position.corner().is_some_and(|c| c.y() == egui::Align::Min);
+        if !self.animated_script_dialogs || !top {
+            return 1.0;
+        }
+        (elapsed.max(0.0) * UNROLL_PER_SECOND).min(1.0) as f32
+    }
+
+    /// The opacity of a toast `left` seconds before it leaves
+    /// (ToastFadingTime): opaque until its last `toast_fade_seconds`.
+    pub fn toast_opacity(&self, left: f64) -> f32 {
+        if self.toast_fade_seconds <= 0.0 {
+            return 1.0;
+        }
+        (left / f64::from(self.toast_fade_seconds)).clamp(0.0, 1.0) as f32
     }
 }
 
@@ -259,6 +310,44 @@ mod tests {
         assert_eq!(o.tip_toast_seconds, 1.0);
         assert_eq!(o.toast_gap, 0.0);
         assert_eq!(o.offer_throttle_count, 1);
+        let mut o = NotificationOptions {
+            toast_fade_seconds: 99.0,
+            overflow_toast_height: -1.0,
+            toast_bottom_margin: f32::NAN,
+            ..NotificationOptions::default()
+        };
+        o.sanitize();
+        assert_eq!(
+            (o.toast_fade_seconds, o.overflow_toast_height, o.toast_bottom_margin),
+            (10.0, 0.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn dialogs_unroll_only_when_asked_in_a_top_corner() {
+        let mut o = NotificationOptions {
+            animated_script_dialogs: true,
+            ..NotificationOptions::default()
+        };
+        assert_eq!(o.dialog_unrolled(0.0), 1.0, "with the notifications");
+        o.script_dialog_position = DialogPosition::BottomRight;
+        assert_eq!(o.dialog_unrolled(0.0), 1.0, "a bottom corner");
+        o.script_dialog_position = DialogPosition::TopLeft;
+        assert_eq!(o.dialog_unrolled(0.0), 0.0);
+        assert_eq!(o.dialog_unrolled(0.2), 0.5);
+        assert_eq!(o.dialog_unrolled(1.0), 1.0);
+        o.animated_script_dialogs = false;
+        assert_eq!(o.dialog_unrolled(0.0), 1.0);
+    }
+
+    #[test]
+    fn toasts_fade_in_their_last_seconds_only() {
+        let mut o = NotificationOptions::default();
+        assert_eq!(o.toast_opacity(0.1), 1.0, "Aurora's: no fade");
+        o.toast_fade_seconds = 2.0;
+        assert_eq!(o.toast_opacity(5.0), 1.0);
+        assert_eq!(o.toast_opacity(1.0), 0.5);
+        assert_eq!(o.toast_opacity(-1.0), 0.0);
     }
 
     #[test]

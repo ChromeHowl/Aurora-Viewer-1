@@ -106,10 +106,21 @@ fn options(ctx: &egui::Context) -> NotificationOptions {
     ctx.data(|d| d.get_temp(options_id())).unwrap_or_default()
 }
 
-/// A script menu or text box drawn apart, in a corner of the screen
-/// (ScriptDialogsPosition), rather than with the other notifications.
+/// A scripted object's window drawn apart, in a corner of the screen
+/// (ScriptDialogsPosition), rather than with the other notifications: the
+/// script floaters of LLScriptFloaterManager::getObjectType, a script
+/// menu or text box (llDialog, llTextBox), a web page offer (llLoadURL)
+/// and an object's inventory offer (ObjectGiveItem).
 pub(super) fn dialog_apart(n: &Notification, o: &NotificationOptions) -> bool {
-    o.script_dialog_position.corner().is_some() && super::notification_center::dnd_shows(n)
+    o.script_dialog_position.corner().is_some() && script_floater(n)
+}
+
+/// The notifications the Legacy Viewer shows as script floaters.
+fn script_floater(n: &Notification) -> bool {
+    matches!(
+        n.data,
+        Data::Dialog { .. } | Data::TextBox { .. } | Data::Url(_) | Data::Inventory { task: true, .. }
+    )
 }
 
 /// Bell button with the unread count, in an island of the Aurora bars
@@ -910,7 +921,9 @@ fn update_toasts(list: &mut Notifications, nui: &mut NotifUi, now: f64, message_
     // the conversation in sight)
     for n in list.list.iter().filter(|n| n.id > nui.last_seen && !n.stays_until_answered()) {
         if !nui.open && !hidden && !n.read && !n.quiet && (!dnd || super::notification_center::dnd_shows(n)) {
-            nui.toasts.push((n.id, now + toast_seconds(n, message_seconds, &list.options)));
+            // (and its fade, ToastFadingTime, after its time)
+            let seconds = toast_seconds(n, message_seconds, &list.options) + f64::from(list.options.toast_fade_seconds);
+            nui.toasts.push((n.id, now + seconds));
         }
     }
     if let Some(last) = list.list.iter().map(|n| n.id).max() {
@@ -992,7 +1005,7 @@ pub fn show(
     nui.column = None;
     share_options(ctx, list.options);
     update_toasts(list, nui, now, env.message_seconds, env.hidden, dnd);
-    dialogs_apart(ctx, p, icons, world, list, nui, env, false, &mut answers);
+    dialogs_apart(ctx, p, icons, world, list, nui, env, false, dnd, &mut answers);
 
     let anchor = nui.anchor.unwrap_or(egui::pos2(8.0, 60.0));
     if nui.open {
@@ -1122,11 +1135,23 @@ pub fn show(
                             nui.toasts.retain(|(t, _)| *t != id);
                             continue;
                         }
-                        let r = if matches!(n.data, Data::Presence { .. } | Data::Message { .. }) {
-                            person_card(ui, p, icons, world, env, &mut nui.wanted_pics, n, true)
+                        // ToastFadingTime: its last seconds fade out
+                        let until = nui.toasts.iter().find(|(t, _)| *t == id).map_or(now, |(_, until)| *until);
+                        let opacity = if n.stays_until_answered() {
+                            1.0
                         } else {
-                            card(ui, p, icons, world, env.images, &mut nui.wanted_images, n, true, false)
+                            list.options.toast_opacity(until - now)
                         };
+                        let r = ui
+                            .scope(|ui| {
+                                ui.multiply_opacity(opacity);
+                                if matches!(n.data, Data::Presence { .. } | Data::Message { .. }) {
+                                    person_card(ui, p, icons, world, env, &mut nui.wanted_pics, n, true)
+                                } else {
+                                    card(ui, p, icons, world, env.images, &mut nui.wanted_images, n, true, false)
+                                }
+                            })
+                            .inner;
                         match r {
                             // closing a toast only hides it: the offer waits in
                             // the list (a scripted window too, until answered)
@@ -1139,21 +1164,8 @@ pub fn show(
                         }
                     }
                 }
-                if behind > 0 {
-                    let more = ui
-                        .add(
-                            egui::Label::new(
-                                RichText::new(aurora_i18n::tr!("ui-notifications-more", count = behind))
-                                    .size(12.0)
-                                    .strong()
-                                    .color(p.violet_light),
-                            )
-                            .sense(egui::Sense::click()),
-                        )
-                        .on_hover_cursor(egui::CursorIcon::PointingHand);
-                    if more.clicked() {
-                        nui.open = true;
-                    }
+                if behind > 0 && more_row(ui, p, behind, list.options.overflow_toast_height) {
+                    nui.open = true;
                 }
             });
         // keep toasts expiring without input
@@ -1177,6 +1189,7 @@ pub(super) fn dialogs_apart(
     nui: &mut NotifUi,
     env: &mut ToastEnv<'_>,
     aurora: bool,
+    dnd: bool,
     answers: &mut Vec<(u64, Response)>,
 ) {
     let o = list.options;
@@ -1190,7 +1203,9 @@ pub(super) fn dialogs_apart(
     let ids: Vec<u64> = list
         .list
         .iter()
-        .filter(|n| dialog_apart(n, &o) && !n.quiet && !nui.hidden.contains(&n.id))
+        // in do not disturb only the script menus come out, as the toasts
+        .filter(|n| dialog_apart(n, &o) && (!dnd || super::notification_center::dnd_shows(n)))
+        .filter(|n| !n.quiet && !nui.hidden.contains(&n.id))
         .map(|n| n.id)
         .collect();
     if ids.is_empty() {
@@ -1207,7 +1222,8 @@ pub(super) fn dialogs_apart(
         if corner.y() == egui::Align::Min {
             room.top()
         } else {
-            room.bottom()
+            // ChannelBottomPanelMargin
+            room.bottom() - o.toast_bottom_margin
         },
     );
     egui::Area::new(egui::Id::unique("notification_script_dialogs"))
@@ -1227,7 +1243,31 @@ pub(super) fn dialogs_apart(
                     answers.push((*id, Response::Dismiss));
                     continue;
                 }
-                match card(ui, p, icons, world, env.images, &mut nui.wanted_images, n, true, aurora) {
+                // FSAnimatedScriptDialogs: an arriving dialog unrolls from
+                // its top, clipped to its height of the last frame
+                let unroll = egui::Id::unique(("script_dialog_unroll", *id));
+                let shown = if o.dialog_unrolled(0.0) < 1.0 {
+                    let now = ctx.input(|i| i.time);
+                    let since = ctx.data_mut(|d| *d.get_temp_mut_or_insert_with(unroll, || now));
+                    o.dialog_unrolled(now - since)
+                } else {
+                    1.0
+                };
+                let top = ui.cursor().top();
+                let drawn = ui.scope(|ui| {
+                    if shown < 1.0 {
+                        let height = ctx.data(|d| d.get_temp::<f32>(unroll.with("height"))).unwrap_or(0.0);
+                        let mut clip = ui.clip_rect();
+                        clip.max.y = clip.max.y.min(top + height * shown);
+                        ui.set_clip_rect(clip);
+                        ui.ctx().request_repaint();
+                    }
+                    card(ui, p, icons, world, env.images, &mut nui.wanted_images, n, true, aurora)
+                });
+                if shown < 1.0 {
+                    ctx.data_mut(|d| d.insert_temp(unroll.with("height"), drawn.response.rect.height()));
+                }
+                match drawn.inner {
                     // a text box's cross hides it in the list, as its toast's
                     Some(Response::Dismiss) if !matches!(n.data, Data::Dialog { .. }) => {
                         nui.hidden.insert(*id);
@@ -1236,23 +1276,28 @@ pub(super) fn dialogs_apart(
                     None => {}
                 }
             }
-            if behind > 0 {
-                let more = ui
-                    .add(
-                        egui::Label::new(
-                            RichText::new(aurora_i18n::tr!("ui-notifications-more", count = behind))
-                                .size(12.0)
-                                .strong()
-                                .color(p.violet_light),
-                        )
-                        .sense(egui::Sense::click()),
-                    )
-                    .on_hover_cursor(egui::CursorIcon::PointingHand);
-                if more.clicked() {
-                    nui.open = true;
-                }
+            if behind > 0 && more_row(ui, p, behind, o.overflow_toast_height) {
+                nui.open = true;
             }
         });
+}
+
+/// "+ N more" under the toasts, which opens the list when clicked; at
+/// least `height` high (OverflowToastHeight, 0: one line).
+fn more_row(ui: &mut egui::Ui, p: &Palette, behind: usize, height: f32) -> bool {
+    let label = egui::Label::new(
+        RichText::new(aurora_i18n::tr!("ui-notifications-more", count = behind))
+            .size(12.0)
+            .strong()
+            .color(p.violet_light),
+    )
+    .sense(egui::Sense::click());
+    let more = if height > 0.0 {
+        ui.add_sized(Vec2::new(ui.available_width().min(WIDTH), height), label)
+    } else {
+        ui.add(label)
+    };
+    more.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
 }
 
 fn script_rows(count: usize) -> impl Iterator<Item = std::ops::Range<usize>> {
@@ -1613,17 +1658,19 @@ mod tests {
                 buttons: vec!["OK".into()],
             },
         );
+        // llLoadURL: a script floater too (LLScriptFloaterManager)
+        let page = list.push(Kind::Url, "Box", "Open", Data::Url("https://example.org/".into()));
         list.options.info_toast_seconds = 2.0;
         let n = list.list.iter().find(|n| n.id == info).expect("info");
         assert_eq!(toast_seconds(n, 30.0, &list.options), 2.0);
         let mut nui = NotifUi::default();
         update_toasts(&mut list, &mut nui, 0.0, 30.0, false, false);
-        assert_eq!(shown_toasts(&list, &nui, false).0, vec![info, menu]);
+        assert_eq!(shown_toasts(&list, &nui, false).0, vec![info, menu, page]);
         list.options.script_dialog_position = crate::settings::notification_options::DialogPosition::BottomLeft;
         assert_eq!(shown_toasts(&list, &nui, false).0, vec![info]);
         // past its time the information leaves; the menu waits for its answer
         update_toasts(&mut list, &mut nui, 2.5, 30.0, false, false);
-        assert!(nui.toasts.iter().all(|(id, _)| *id == menu));
+        assert!(nui.toasts.iter().all(|(id, _)| *id == menu || *id == page));
     }
 
     const JANE: Uuid = Uuid::from_u128(2);

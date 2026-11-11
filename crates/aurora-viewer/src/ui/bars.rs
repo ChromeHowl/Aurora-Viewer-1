@@ -111,6 +111,9 @@ pub enum BarAction {
     /// Advanced › Request Admin Status (true) / Leave Admin Status (false).
     AdminStatus(bool),
     Admin(AdminAction),
+    /// Advanced › Mouse smoothing (MouseSmooth: the mouselook smoothing of
+    /// Preferences › Camera).
+    ToggleMouseSmoothing,
     ToggleWaterWalk,
     ToggleSwimming,
     MoveLockOptions,
@@ -339,6 +342,9 @@ pub struct StatusInfo<'a> {
     /// Photos are taken without the shutter sound nor the snapshot
     /// animation (Advanced › Quiet snapshots).
     pub quiet_snapshots: bool,
+    /// The mouse's motion in mouselook is smoothed (Advanced › Mouse
+    /// smoothing).
+    pub mouse_smoothing: bool,
     /// The grid has a Marketplace (World › SL Marketplace is shown only on
     /// the Second Life grids, GridCheck "secondlife").
     pub marketplace: bool,
@@ -1581,6 +1587,11 @@ fn main_menus(ui: &mut egui::Ui, p: &Palette, panels: &mut Panels, st: &StatusIn
             // Advanced › Clear Group Cache, Release Keys (menu_viewer.xml)
             if menu::item(ui, p, "users-group", aurora_i18n::tr!("b9-clear-group-cache")) {
                 *action = BarAction::ClearGroupCache;
+            }
+            // Advanced › Mouse Smoothing (MouseSmooth)
+            let smoothing = aurora_i18n::tr!("l4-mouse-smoothing");
+            if menu::check(ui, p, "mouse-filled", smoothing, st.mouse_smoothing, true) {
+                *action = BarAction::ToggleMouseSmoothing;
             }
             if menu::item(ui, p, "keyboard-filled", aurora_i18n::tr!("b9-release-keys")) {
                 *action = BarAction::ReleaseKeys;

@@ -492,6 +492,14 @@ pub struct OptionsUi {
     pub translation_probe: bool,
     translation_key_typed: String,
     pub translation_key_edits: Vec<(crate::settings::chat_translation::Service, Option<String>)>,
+    /// The SOCKS 5 proxy's user name and password: their state (set by the
+    /// app), a look at it asked, the pair being typed, and the pair saved
+    /// or forgotten here (taken by the app, never kept in the settings).
+    pub socks_state: crate::socks_credentials::State,
+    pub socks_probe: bool,
+    socks_user_typed: String,
+    socks_pass_typed: String,
+    pub socks_edit: Option<Option<aurora_net::socks5::SocksAuth>>,
     /// The site being typed in Preferences › Protections › Trusted sites.
     trusted_site_typed: String,
     /// The site being typed in Preferences › Chat › Picture sites.

@@ -5,7 +5,8 @@
 
 use super::super::cx::{Cx, field};
 use crate::settings::notification_options::{
-    DIALOG_ROWS, DialogLimit, DialogPosition, GAP, INFO_SECONDS, OFFER_SECONDS, THROTTLE_COUNT, TIP_SECONDS,
+    BOTTOM_MARGIN, DIALOG_ROWS, DialogLimit, DialogPosition, FADE_SECONDS, GAP, INFO_SECONDS, OFFER_SECONDS, OVERFLOW_HEIGHT,
+    THROTTLE_COUNT, TIP_SECONDS,
 };
 
 pub fn groups(cx: &mut Cx) {
@@ -32,6 +33,33 @@ pub fn groups(cx: &mut Cx) {
             DIALOG_ROWS,
             "",
         );
+        // FSAnimatedScriptDialogs: only in a top corner (LLFloaterPreference
+        // enables it for those positions alone)
+        let top =
+            cx.s.notification_options
+                .script_dialog_position
+                .corner()
+                .is_some_and(|c| c.y() == egui::Align::Min);
+        cx.greyed(!top);
+        cx.toggle(
+            tr!("l4-animated-dialogs"),
+            tr!("l4-animated-dialogs-hint"),
+            &field!(notification_options.animated_script_dialogs),
+        );
+        let bottom =
+            cx.s.notification_options
+                .script_dialog_position
+                .corner()
+                .is_some_and(|c| c.y() == egui::Align::Max);
+        cx.greyed(!bottom);
+        cx.slider(
+            tr!("l4-bottom-margin"),
+            tr!("l4-bottom-margin-hint"),
+            &field!(notification_options.toast_bottom_margin),
+            BOTTOM_MARGIN,
+            " px",
+        );
+        cx.greyed(false);
         cx.toggle(
             tr!("b5c-hide-block"),
             tr!("b5c-hide-block-hint"),
@@ -120,6 +148,20 @@ pub fn groups(cx: &mut Cx) {
             " s",
         );
         cx.slider(tr!("b5c-toast-gap"), "", &field!(notification_options.toast_gap), GAP, " px");
+        cx.slider(
+            tr!("l4-toast-fade"),
+            tr!("l4-toast-fade-hint"),
+            &field!(notification_options.toast_fade_seconds),
+            FADE_SECONDS,
+            " s",
+        );
+        cx.slider(
+            tr!("l4-overflow-height"),
+            tr!("l4-overflow-height-hint"),
+            &field!(notification_options.overflow_toast_height),
+            OVERFLOW_HEIGHT,
+            " px",
+        );
         cx.toggle(
             tr!("b5c-toasts-in-front"),
             tr!("b5c-toasts-in-front-hint"),

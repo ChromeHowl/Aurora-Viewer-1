@@ -1409,6 +1409,8 @@ fn line_job(
         }
         at += n;
     }
+    let spacing = super::text_tuning::current(ctx).chat_line_spacing;
+    super::text_tuning::space_lines(ctx, &mut job, spacing);
     job.wrap.max_width = width;
     BubbleJob {
         job,

@@ -123,6 +123,7 @@ pub fn network(cx: &mut Cx) {
             &field!(legacy_prefs.proxy_other_http),
         );
         cx.greyed(false);
+        super::socks_proxy::rows(cx);
         cx.toggle(
             tr!("b9-fixed-port"),
             tr!("b9-fixed-port-hint"),
