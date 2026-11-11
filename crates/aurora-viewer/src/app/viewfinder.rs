@@ -1175,6 +1175,13 @@ impl App {
             banks: self.vf_banks(),
             prefs_grade: self.settings.render_extras.grade,
             tone_ok: self.photo_tone_why(),
+            lens_extras: (
+                self.settings.render_extras.dof_front_blur,
+                self.settings.render_extras.dof_dispersion,
+            ),
+            deband: self.settings.render_extras.deband,
+            follow: self.settings.camera.extra.follow_joint,
+            camera_locked: self.camera.locked(),
         };
         // the demo aims at the own avatar's face, then shoots
         let (aim, shoot) = self.photo_demo_viewfinder();
@@ -1241,6 +1248,28 @@ impl App {
                 Out::Bank(slot, edit) => self.vf_bank(slot, edit, renderer),
                 // (taken by the quick menu itself)
                 Out::Sheet(_) => {}
+                // Preferences' own, shown in the viewfinder too
+                Out::Deband(v) => {
+                    self.settings.render_extras.deband = v.clamp(0.0, 2.0);
+                    self.settings.save();
+                }
+                Out::Lens(crate::ui::viewfinder::LensEdit::FrontBlur(on)) => {
+                    self.settings.render_extras.dof_front_blur = on;
+                    self.settings.save();
+                }
+                Out::Lens(crate::ui::viewfinder::LensEdit::Fringe(v)) => {
+                    self.settings.render_extras.dof_dispersion = v.clamp(0.0, 1.0);
+                    self.settings.save();
+                }
+                Out::Follow(joint) => {
+                    self.settings.camera.extra.follow_joint = joint;
+                    self.settings.save();
+                }
+                Out::CameraLock => self.toggle_camera_lock(),
+                Out::CameraPath => crate::ui::widgets::toggle_floater(ctx, crate::ui::camera_path::WINDOW, &mut self.panels.camera_path),
+                Out::Cameratools => {
+                    crate::ui::widgets::toggle_floater(ctx, crate::ui::options::cameratools::WINDOW, &mut self.panels.cameratools)
+                }
                 Out::Exit => self.panels.snapshot = false,
             }
         }

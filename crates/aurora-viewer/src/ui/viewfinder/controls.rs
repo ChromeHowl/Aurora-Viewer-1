@@ -358,7 +358,7 @@ impl Viewfinder {
                 let r = self.ring(dial, s, panel, *fov, f);
                 // the title and its keys
                 let (head, _) = ui.allocate_exact_size(Vec2::new(RULER.x + 2.0 * 42.0, 14.0), Sense::hover());
-                shadow_text(
+                let title = shadow_text(
                     ui.painter(),
                     p,
                     Pos2::new(head.left() + 42.0, head.center().y),
@@ -367,6 +367,20 @@ impl Viewfinder {
                     bold(ctx, 11.0),
                     p.ink,
                 );
+                // the aperture ring's lens options (front blur, bokeh fringe)
+                if dial == Dial::Aperture {
+                    let at = Rect::from_center_size(Pos2::new(title.right() + 14.0, head.center().y), Vec2::splat(16.0));
+                    let resp = ui
+                        .interact(at.expand(3.0), ui.scope_id().with("vf_lens_options"), Sense::click())
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .on_hover_text(aurora_i18n::tr!("pcu-lens-tip"));
+                    let on = self.sheet == Some(super::Sheet::Lens);
+                    icon(ui.painter(), "aperture", at, if on || resp.hovered() { p.teal } else { p.ink });
+                    if resp.clicked() {
+                        resp.surrender_focus();
+                        self.toggle_sheet(super::Sheet::Lens, out);
+                    }
+                }
                 shadow_text(
                     ui.painter(),
                     p,
@@ -543,6 +557,16 @@ impl Viewfinder {
                                     },
                                 );
                             });
+                            // the joint the camera follows (Preferences'
+                            // FSCameraFollowJoint, global)
+                            let joints = crate::camera::extra::FollowJoint::ALL;
+                            for half in joints.chunks(4) {
+                                let items: Vec<(&str, bool, &str)> =
+                                    half.iter().map(|j| (follow_short(*j), f.follow == *j, j.label())).collect();
+                                if let Some(i) = segmented(ui, p, &items, Some(STICK * 2.0 + 14.0)) {
+                                    out.push(Out::Follow(half[i]));
+                                }
+                            }
                             // the tilt
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = 8.0;
@@ -565,6 +589,10 @@ impl Viewfinder {
                         ui.allocate_ui_with_layout(Vec2::new(32.0, 200.0), egui::Layout::top_down(egui::Align::Center), |ui| {
                             ui.set_width(32.0);
                             ui.spacing_mut().item_spacing.y = 4.0;
+                            // Cameratools (the World menu's window and icon)
+                            if widgets::icon_button(ui, p, "video-filled", aurora_i18n::tr!("camx-cameratools-title"), true) {
+                                out.push(Out::Cameratools);
+                            }
                             let (in_tip, out_tip) = if mode == CamMode::Free {
                                 (
                                     aurora_i18n::tr!("photo-vf-pad-forward-tip"),
@@ -621,6 +649,22 @@ impl Viewfinder {
                 });
             });
         ctx.request_repaint();
+    }
+}
+
+/// A followed joint's short name, for the pad's 49-point chips (the
+/// full name is the chip's tip).
+pub fn follow_short(j: crate::camera::extra::FollowJoint) -> &'static str {
+    use crate::camera::extra::FollowJoint as J;
+    match j {
+        J::Avatar => aurora_i18n::tr!("pcu-follow-avatar"),
+        J::Head => aurora_i18n::tr!("pcu-follow-head"),
+        J::Chest => aurora_i18n::tr!("pcu-follow-chest"),
+        J::Pelvis => aurora_i18n::tr!("pcu-follow-pelvis"),
+        J::LeftHand => aurora_i18n::tr!("pcu-follow-left-hand"),
+        J::RightHand => aurora_i18n::tr!("pcu-follow-right-hand"),
+        J::LeftFoot => aurora_i18n::tr!("pcu-follow-left-foot"),
+        J::RightFoot => aurora_i18n::tr!("pcu-follow-right-foot"),
     }
 }
 
@@ -973,4 +1017,19 @@ fn tilt(ui: &mut egui::Ui, p: &Palette, width: f32, roll: f32) -> Option<f32> {
 /// The colour of the level and of the tilt's value: green when straight.
 pub fn level_color(p: &Palette, roll: f32, pitch: f32) -> Color32 {
     if roll == 0.0 && pitch.abs() < 0.5 { p.success } else { p.ink }
+}
+
+#[cfg(test)]
+mod follow_tests {
+    use crate::camera::extra::FollowJoint;
+
+    #[test]
+    fn follow_lights_the_chosen_hand_or_foot() {
+        // the pad's two rows of four: every joint has its chip, lit alone
+        for chosen in FollowJoint::ALL {
+            let lit: Vec<FollowJoint> = FollowJoint::ALL.chunks(4).flatten().copied().filter(|j| *j == chosen).collect();
+            assert_eq!(lit, vec![chosen]);
+        }
+        assert_eq!(FollowJoint::ALL.chunks(4).count(), 2);
+    }
 }

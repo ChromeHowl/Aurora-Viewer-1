@@ -27,7 +27,7 @@ pub use controls::{CamMode, Pad, roll_text};
 pub use isolate::{Isolate, IsolateRow};
 pub use modes::refused_text;
 pub use presets::{Preset, PresetForm, anchor_icon};
-pub use sheets::BankEdit;
+pub use sheets::{BankEdit, LensEdit};
 pub use style::{StyleContext, style_rows};
 #[cfg(test)]
 mod message_tests;
@@ -232,6 +232,12 @@ pub struct Frame<'a> {
     /// Why the tone curves do nothing (HDR off, a classic sky); None when
     /// they apply.
     pub tone_ok: Option<&'static str>,
+    /// Preferences' depth of field: front blur, bokeh fringe; debanding;
+    /// the joint the camera follows; the camera held by Camera lock.
+    pub lens_extras: (bool, f32),
+    pub deband: f32,
+    pub follow: crate::camera::extra::FollowJoint,
+    pub camera_locked: bool,
 }
 
 /// A custom mode's slot as the viewfinder shows it.
@@ -286,6 +292,14 @@ pub enum Out {
     Shot(vf::ShotChoice),
     /// A custom mode's slot changed (C1 to C3: 0 to 2).
     Bank(u8, BankEdit),
+    /// Preferences' debanding, lens options and followed joint (global).
+    Deband(f32),
+    Lens(LensEdit),
+    Follow(crate::camera::extra::FollowJoint),
+    /// Camera lock on or off; the Camera Path and Cameratools windows.
+    CameraLock,
+    CameraPath,
+    Cameratools,
     /// A quick-menu tile opens a sheet (the viewfinder's own: never
     /// reaches the app).
     Sheet(Sheet),
@@ -563,6 +577,19 @@ fn on_off(on: bool, yes: &'static str, no: &'static str) -> &'static str {
     if on { yes } else { no }
 }
 
+/// The supersampling's tile: its samples, or with Off what Photo quality
+/// draws on its own ("Auto 4×", `quality::supersample`).
+fn supersampling_value(choice: crate::snapshot::quality::Supersampling, quality: bool, photo: (u32, u32)) -> String {
+    use crate::snapshot::quality::{Supersampling, supersample};
+    match choice {
+        Supersampling::Off if quality && supersample(photo) > 1 => {
+            aurora_i18n::tr!("pcu-ss-auto", count = supersample(photo) * supersample(photo)).to_owned()
+        }
+        Supersampling::Off => aurora_i18n::tr!("p16-supersampling-off").to_owned(),
+        c => format!("{}×", c.samples()),
+    }
+}
+
 /// The 360° photo's quality, as its row in the photo window names it.
 fn pano_quality_label(q: crate::snapshot::pano::Quality) -> &'static str {
     use crate::snapshot::pano::Quality;
@@ -765,6 +792,8 @@ impl Viewfinder {
         match self.sheet {
             Some(Sheet::Modes) if shows => self.mode_list(ctx, p, screen, panel, f, &mut out),
             Some(Sheet::Style) => self.style_sheet(ctx, p, screen, panel, f, &mut out),
+            Some(Sheet::Guide) => self.guide_sheet(ctx, p, screen, s),
+            Some(Sheet::Lens) => self.lens_sheet(ctx, p, screen, f, &mut out),
             Some(Sheet::Bank(i)) => {
                 let bank = f.banks[usize::from(i.min(2))].clone();
                 self.bank_sheet(ctx, p, screen, i, s, &bank, &mut out);
@@ -849,17 +878,20 @@ impl Viewfinder {
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 18.0;
-                    if icon_text_button(
+                    let guide = icon_text_button(
                         ui,
                         p,
                         "grid-3x3",
                         guide_label(s.guide),
                         p.ink,
                         aurora_i18n::tr!("photo-vf-guide-tip"),
-                    )
-                    .clicked()
-                    {
+                    );
+                    if guide.clicked() {
                         s.guide = next_guide(s.guide);
+                    }
+                    // its look: the Guide sheet
+                    if guide.secondary_clicked() {
+                        self.toggle_sheet(Sheet::Guide, out);
                     }
                     if s.viewfinder.timer > 0 {
                         let text = format!("{} s", s.viewfinder.timer);
@@ -1048,6 +1080,9 @@ impl Viewfinder {
                 self.toggle_sheet(Sheet::Style, out);
             }
             y += 24.0;
+        }
+        if f.camera_locked {
+            line(&mut y, "lock-filled", aurora_i18n::tr!("pcu-camera-locked"), p.ink);
         }
         if panel.freeze_world {
             line(&mut y, "snowflake", aurora_i18n::tr!("photo-vf-world-frozen"), p.ink);
@@ -2051,7 +2086,12 @@ impl Viewfinder {
                         .spacing(Vec2::splat(8.0))
                         .show(ui, |ui| {
                             for (i, (label, value, step)) in tiles.into_iter().enumerate() {
-                                if tile(ui, p, Vec2::new(tile_w, 68.0), label, &value)
+                                // a photo of 8K and more: what it takes (the size's tile)
+                                let tip = (label == aurora_i18n::tr!("photo-section-resolution")
+                                    && panel.destination == Destination::Disk
+                                    && f.photo.0.max(f.photo.1) >= 7680)
+                                    .then(|| aurora_i18n::tr!("p16-memory"));
+                                if tile(ui, p, Vec2::new(tile_w, 68.0), label, &value, tip)
                                     && let Some(o) = step(s, panel)
                                 {
                                     sheets.push(o);
@@ -2450,7 +2490,7 @@ fn dock_button(ui: &mut egui::Ui, p: &Palette, face: Face, tip: &str, on: bool) 
 }
 
 /// A tile of the quick menu; true when clicked.
-fn tile(ui: &mut egui::Ui, p: &Palette, size: Vec2, label: &str, value: &str) -> bool {
+fn tile(ui: &mut egui::Ui, p: &Palette, size: Vec2, label: &str, value: &str, tip: Option<&str>) -> bool {
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
     let radius = ui.visuals().window_corner_radius;
     ui.painter().rect_filled(rect, radius, p.panel.gamma_multiply(0.85));
@@ -2475,7 +2515,11 @@ fn tile(ui: &mut egui::Ui, p: &Palette, size: Vec2, label: &str, value: &str) ->
     job_rect.max.x = job_rect.max.x.min(rect.right() - 12.0);
     ui.painter().with_clip_rect(rect.shrink(2.0)).galley(job_rect.min, galley, p.ink);
     keep_keys(&resp);
-    resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+    let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+    match tip {
+        Some(t) => resp.on_hover_text(t).clicked(),
+        None => resp.clicked(),
+    }
 }
 
 type Step = Box<dyn FnOnce(&mut Settings, &mut SnapshotUi) -> Option<Out>>;
@@ -2590,6 +2634,28 @@ fn tiles(s: &Settings, panel: &SnapshotUi, f: &Frame) -> Vec<(&'static str, Stri
         }),
     ));
     v.push((
+        aurora_i18n::tr!("p16-supersampling"),
+        supersampling_value(s.supersampling, s.quality, f.photo),
+        Box::new(|s, _| {
+            let all = crate::snapshot::quality::Supersampling::ALL;
+            let i = all.iter().position(|c| *c == s.supersampling).unwrap_or(0);
+            s.supersampling = all[(i + 1) % all.len()];
+            None
+        }),
+    ));
+    let deband = f.deband;
+    v.push((
+        aurora_i18n::tr!("pcu-tile-deband"),
+        match sheets::preset_of(deband, &sheets::DEBANDS) {
+            Some(0) => aurora_i18n::tr!("photo-vf-off"),
+            Some(1) => aurora_i18n::tr!("pcu-low"),
+            Some(_) => aurora_i18n::tr!("pcu-high"),
+            None => aurora_i18n::tr!("pcu-custom"),
+        }
+        .to_owned(),
+        Box::new(move |_, _| Some(Out::Deband(sheets::next_preset(deband, &sheets::DEBANDS)))),
+    ));
+    v.push((
         aurora_i18n::tr!("photo-huds"),
         on_off(s.huds, aurora_i18n::tr!("photo-vf-visible"), aurora_i18n::tr!("photo-vf-hidden")).to_owned(),
         Box::new(|s, _| {
@@ -2649,6 +2715,21 @@ fn tiles(s: &Settings, panel: &SnapshotUi, f: &Frame) -> Vec<(&'static str, Stri
             s.guide = next_guide(s.guide);
             None
         }),
+    ));
+    v.push((
+        aurora_i18n::tr!("pcu-tile-guide-style"),
+        guide_label(s.guide).to_owned(),
+        Box::new(|_, _| Some(Out::Sheet(Sheet::Guide))),
+    ));
+    v.push((
+        aurora_i18n::tr!("camtools-lock"),
+        yes_no(f.camera_locked),
+        Box::new(|_, _| Some(Out::CameraLock)),
+    ));
+    v.push((
+        aurora_i18n::tr!("camtools-path-title"),
+        aurora_i18n::tr!("pcu-open").to_owned(),
+        Box::new(|_, _| Some(Out::CameraPath)),
     ));
     v.push((
         aurora_i18n::tr!("photo-vf-peaking"),
@@ -2861,5 +2942,39 @@ mod shutter_tests {
             "{out:?}"
         );
         assert_eq!(v.sheet, Some(Sheet::Modes));
+    }
+}
+
+#[cfg(test)]
+mod tile_tests {
+    use super::{next_pano_quality, supersampling_value};
+    use crate::snapshot::pano::Quality;
+    use crate::snapshot::quality::Supersampling;
+
+    #[test]
+    fn the_tiles_cycle_every_choice() {
+        let mut q = Quality::ALL[0];
+        let mut seen = Vec::new();
+        for _ in Quality::ALL {
+            seen.push(q);
+            q = next_pano_quality(q);
+        }
+        assert_eq!(seen, Quality::ALL.to_vec());
+        assert_eq!(q, Quality::ALL[0]);
+        for c in Supersampling::ALL {
+            assert!(!supersampling_value(c, false, (3840, 2160)).is_empty());
+        }
+    }
+
+    #[test]
+    fn photo_quality_draws_four_samples_up_to_4k() {
+        let auto = supersampling_value(Supersampling::Off, true, (3840, 2160));
+        assert!(auto.contains('4'), "{auto}");
+        // larger, or without Photo quality: off
+        assert_eq!(
+            supersampling_value(Supersampling::Off, true, (7680, 4320)),
+            supersampling_value(Supersampling::Off, false, (3840, 2160))
+        );
+        assert_eq!(supersampling_value(Supersampling::X9, true, (100, 100)), "9×");
     }
 }

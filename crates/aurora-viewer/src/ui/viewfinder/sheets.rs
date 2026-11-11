@@ -2,12 +2,38 @@
 //! (one at a time, `Sheet`): a custom mode's slot here; the picture style
 //! (`style`), the guide's look and the lens options follow the same frame.
 
-use super::{BankView, Out, Viewfinder, bold};
+use super::{BankView, Frame, Out, Viewfinder, bold};
+use crate::snapshot::Guide;
 use crate::snapshot::Settings;
+use crate::snapshot::extras::Corner;
 use crate::theme::Palette;
 use crate::ui::snapshot::Action;
 use crate::ui::widgets;
 use egui::{Align2, Id, Order, Pos2, Rect};
+
+/// The guide's widths offered (points): Fine (the default), Medium, Bold.
+pub const GUIDE_WIDTHS: [f32; 3] = [1.0, 2.0, 4.0];
+/// Debanding offered (8-bit levels): Off, Low, High.
+pub const DEBANDS: [f32; 3] = [0.0, 0.5, 1.0];
+/// The bokeh's colour fringe offered: Off, Low, High.
+pub const FRINGES: [f32; 3] = [0.0, 0.25, 0.5];
+
+/// Which of `offered` a value is, if any (another one reads "Custom").
+pub fn preset_of(v: f32, offered: &[f32]) -> Option<usize> {
+    offered.iter().position(|o| (o - v).abs() < 1e-3)
+}
+
+/// The next of `offered` after `v` (a value of no preset: the first).
+pub fn next_preset(v: f32, offered: &[f32]) -> f32 {
+    preset_of(v, offered).map_or(offered[0], |i| offered[(i + 1) % offered.len()])
+}
+
+/// What the lens options ask of the app (Preferences' global settings).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LensEdit {
+    FrontBlur(bool),
+    Fringe(f32),
+}
 
 /// What a custom mode's sheet asks of the app.
 #[derive(Debug, Clone, PartialEq)]
@@ -131,5 +157,140 @@ impl Viewfinder {
         if !open {
             self.sheet = None;
         }
+    }
+
+    /// The guide's look: which guide, the spiral's corner, its colour (or
+    /// the theme's) and the width of its lines.
+    pub(super) fn guide_sheet(&mut self, ctx: &egui::Context, p: &Palette, screen: Rect, s: &mut Settings) {
+        let open = sheet(
+            ctx,
+            p,
+            screen,
+            "vf_guide_sheet",
+            "grid-3x3",
+            aurora_i18n::tr!("b1-guide-section"),
+            |ui| {
+                ui.spacing_mut().item_spacing.y = 6.0;
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = egui::Vec2::splat(4.0);
+                    for g in std::iter::once(Guide::None).chain(Guide::ALL) {
+                        let (icon, tip) = crate::ui::snapshot::guide_face(g);
+                        if widgets::icon_toggle(ui, p, icon, tip, s.guide == g) {
+                            s.guide = g;
+                        }
+                    }
+                });
+                if s.guide == Guide::Spiral {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 4.0;
+                        for (c, arrow) in Corner::ALL.into_iter().zip(["↖", "↗", "↙", "↘"]) {
+                            if crate::ui::snapshot::chip(ui, p, arrow, None, s.extras.guide_corner == c, true).clicked() {
+                                s.extras.guide_corner = c;
+                            }
+                        }
+                    });
+                }
+                let e = &mut s.extras;
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    if crate::ui::snapshot::chip(ui, p, aurora_i18n::tr!("pcu-guide-theme"), None, e.guide_color.is_none(), true).clicked()
+                    {
+                        e.guide_color = None;
+                    }
+                    // (the Legacy Viewer's yellow at half its opacity, then the user's)
+                    let mut c = e.guide_color.unwrap_or([255, 255, 0, 128]);
+                    let before = c;
+                    widgets::color_button(ui, p, "vf_guide_color", &mut c, true);
+                    if c != before {
+                        e.guide_color = Some(c);
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    let now = preset_of(e.guide_width, &GUIDE_WIDTHS);
+                    let names = [
+                        aurora_i18n::tr!("pcu-width-fine"),
+                        aurora_i18n::tr!("pcu-width-medium"),
+                        aurora_i18n::tr!("pcu-width-bold"),
+                    ];
+                    for (i, (w, name)) in GUIDE_WIDTHS.into_iter().zip(names).enumerate() {
+                        if crate::ui::snapshot::chip(ui, p, name, None, now == Some(i), true).clicked() {
+                            e.guide_width = w;
+                        }
+                    }
+                    if now.is_none() {
+                        crate::ui::snapshot::chip(ui, p, aurora_i18n::tr!("pcu-custom"), None, true, false);
+                    }
+                });
+            },
+        );
+        if !open {
+            self.sheet = None;
+        }
+    }
+
+    /// The lens options of the aperture ring: Preferences' front blur and
+    /// bokeh fringe (global settings, shown here too).
+    pub(super) fn lens_sheet(&mut self, ctx: &egui::Context, p: &Palette, screen: Rect, f: &Frame, out: &mut Vec<Out>) {
+        let (front, fringe) = f.lens_extras;
+        let open = sheet(
+            ctx,
+            p,
+            screen,
+            "vf_lens_sheet",
+            "aperture",
+            aurora_i18n::tr!("pcu-lens-title"),
+            |ui| {
+                ui.spacing_mut().item_spacing.y = 6.0;
+                let mut on = front;
+                if widgets::switch_labeled(ui, p, &mut on, aurora_i18n::tr!("pcu-lens-front")).changed() {
+                    out.push(Out::Lens(LensEdit::FrontBlur(on)));
+                }
+                ui.label(egui::RichText::new(aurora_i18n::tr!("pcu-lens-fringe")).color(p.ink));
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    let now = preset_of(fringe, &FRINGES);
+                    let names = [
+                        aurora_i18n::tr!("photo-vf-off"),
+                        aurora_i18n::tr!("pcu-low"),
+                        aurora_i18n::tr!("pcu-high"),
+                    ];
+                    for (i, (v, name)) in FRINGES.into_iter().zip(names).enumerate() {
+                        if crate::ui::snapshot::chip(ui, p, name, None, now == Some(i), true).clicked() {
+                            out.push(Out::Lens(LensEdit::Fringe(v)));
+                        }
+                    }
+                    if now.is_none() {
+                        crate::ui::snapshot::chip(ui, p, aurora_i18n::tr!("pcu-custom"), None, true, false);
+                    }
+                });
+                ui.label(egui::RichText::new(aurora_i18n::tr!("pcu-lens-global")).size(11.0).color(p.muted));
+            },
+        );
+        if !open {
+            self.sheet = None;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn values_off_the_offered_ones_read_custom() {
+        assert_eq!(preset_of(1.0, &GUIDE_WIDTHS), Some(0), "Fine is the default width");
+        assert_eq!(
+            preset_of(crate::snapshot::extras::Extras::default().guide_width, &GUIDE_WIDTHS),
+            Some(0)
+        );
+        assert_eq!(preset_of(3.0, &GUIDE_WIDTHS), None);
+        assert_eq!(preset_of(0.5, &DEBANDS), Some(1));
+        assert_eq!(preset_of(1.7, &DEBANDS), None);
+        assert_eq!(preset_of(0.25, &FRINGES), Some(1));
+        assert_eq!(preset_of(0.3, &FRINGES), None);
+        assert_eq!(next_preset(1.0, &DEBANDS), 0.0, "round");
+        assert_eq!(next_preset(1.7, &DEBANDS), 0.0, "custom: from the first");
+        assert_eq!(next_preset(0.0, &DEBANDS), 0.5);
     }
 }

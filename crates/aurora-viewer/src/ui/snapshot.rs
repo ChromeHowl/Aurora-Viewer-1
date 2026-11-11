@@ -1550,7 +1550,7 @@ pub fn outside(screen: Rect, frame: Rect) -> Vec<Rect> {
 }
 
 /// Icon and name of a guide.
-fn guide_face(g: Guide) -> (&'static str, &'static str) {
+pub(crate) fn guide_face(g: Guide) -> (&'static str, &'static str) {
     match g {
         Guide::Thirds => ("grid-3x3", aurora_i18n::tr!("photo-guide-thirds")),
         Guide::Golden => ("grid-pattern-filled", aurora_i18n::tr!("photo-guide-golden")),
