@@ -64,6 +64,10 @@ pub struct Circuit {
     /// Reliable packets given up on since the last `take_dropped`.
     dropped: Vec<u32>,
     packet_loss: PacketLoss,
+    /// The SOCKS 5 relay the packets go through, wrapped (`socks5.rs`).
+    pub relay: Option<SocketAddr>,
+    /// The wrapped packet, reused.
+    wrapped: Vec<u8>,
 }
 
 impl Circuit {
@@ -84,6 +88,8 @@ impl Circuit {
             buf: Vec::with_capacity(1500),
             dropped: Vec::new(),
             packet_loss: PacketLoss::default(),
+            relay: None,
+            wrapped: Vec::new(),
         }
     }
 
@@ -100,7 +106,14 @@ impl Circuit {
     }
 
     fn raw_send(&mut self, sock: &UdpSocket, stats: &NetStats) {
-        match sock.try_send_to(&self.buf, self.addr) {
+        let sent = match self.relay {
+            Some(relay) => {
+                crate::socks5::wrap(self.addr, &self.buf, &mut self.wrapped);
+                sock.try_send_to(&self.wrapped, relay)
+            }
+            None => sock.try_send_to(&self.buf, self.addr),
+        };
+        match sent {
             Ok(n) => {
                 stats.packets_out.fetch_add(1, Ordering::Relaxed);
                 stats.bytes_out.fetch_add(n as u64, Ordering::Relaxed);
@@ -405,6 +418,24 @@ mod tests {
         assert!(c.ping_wait_started.is_none());
         c.tick(&sock, &stats);
         assert_eq!(stats.snapshot().packets_lost, 1);
+    }
+
+    #[tokio::test]
+    async fn through_a_socks_relay_packets_leave_wrapped_for_their_simulator() {
+        let relay = UdpSocket::bind("127.0.0.1:0").await.expect("relay");
+        let sock = UdpSocket::bind("127.0.0.1:0").await.expect("viewer");
+        let stats = NetStats::default();
+        let mut c = circuit();
+        c.relay = Some(relay.local_addr().expect("address"));
+        c.send(&sock, &stats, &aurora_msg::msgs::UseCircuitCode::default(), false);
+        let mut wire = [0u8; 256];
+        let (n, _) = tokio::time::timeout(Duration::from_secs(2), relay.recv_from(&mut wire))
+            .await
+            .expect("in time")
+            .expect("datagram");
+        let (to, start) = crate::socks5::unwrap(&wire[..n]).expect("wrapped");
+        assert_eq!(to, c.addr);
+        assert_eq!(&wire[start..n], c.buf.as_slice());
     }
 
     #[tokio::test]

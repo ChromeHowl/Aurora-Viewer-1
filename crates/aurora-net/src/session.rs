@@ -234,8 +234,8 @@ pub(crate) struct Shared {
     pub viewer_stats: Arc<Mutex<crate::viewer_stats::ViewerSide>>,
     /// Reports being posted (`NetClient::wait_viewer_stats`).
     pub viewer_stats_posts: Arc<crate::viewer_stats::PostsInFlight>,
-    /// ConnectionPort: the UDP port of the circuits (None: the system's).
-    pub udp_port: Option<u16>,
+    /// The network preferences each login applies (`NetClient::set_options`).
+    pub network: Arc<Mutex<crate::NetOptions>>,
 }
 
 /// The circuits' socket (start_messaging_system's port): the fixed port
@@ -304,6 +304,8 @@ async fn post_appearance_request(http: &reqwest::Client, request: appearance_que
 struct Session<'a> {
     sh: &'a Shared,
     sock: Arc<UdpSocket>,
+    /// The SOCKS 5 relay every circuit packet goes through (`socks5.rs`).
+    udp_relay: Option<SocketAddr>,
     login: Arc<LoginResponse>,
     sims: HashMap<SocketAddr, Sim>,
     main: Option<SocketAddr>,
@@ -442,6 +444,35 @@ fn ip_from_llsd(v: &Llsd) -> Option<Ipv4Addr> {
 
 /// Run one complete session (login .. logout/disconnect).
 pub(crate) async fn run_session(sh: &Shared, req: LoginRequest, cmd_rx: &mut mpsc::UnboundedReceiver<NetCommand>) {
+    let network = sh.network.lock().clone();
+    // LLStartUp::startLLProxy, before the login: a SOCKS 5 proxy that
+    // refuses stops it there (back to the login screen with the reason)
+    let socks = match &network.socks {
+        Some(proxy) => match crate::socks5::associate(proxy).await {
+            Ok(association) => {
+                log::info!("region traffic through the SOCKS 5 proxy {}:{}", proxy.host, proxy.port);
+                Some(association)
+            }
+            Err(e) => {
+                log::warn!("SOCKS 5 proxy {}:{}: {e:?}", proxy.host, proxy.port);
+                emit(
+                    sh,
+                    NetEvent::LoginFailed {
+                        error: e.message(&proxy.host, proxy.port),
+                        mfa_required: false,
+                        tos_required: false,
+                        critical_required: false,
+                        bad_credentials: false,
+                        previous_session: false,
+                        network: false,
+                    },
+                );
+                return;
+            }
+        },
+        None => None,
+    };
+    let udp_relay = socks.as_ref().map(|a| a.relay);
     emit(
         sh,
         NetEvent::LoginProgress {
@@ -491,7 +522,7 @@ pub(crate) async fn run_session(sh: &Shared, req: LoginRequest, cmd_rx: &mut mps
         },
     );
 
-    let sock = match bind_circuit_socket(sh.udp_port).await {
+    let sock = match bind_circuit_socket(network.udp_port).await {
         Ok(s) => {
             size_socket_buffers(&s);
             Arc::new(s)
@@ -526,6 +557,7 @@ pub(crate) async fn run_session(sh: &Shared, req: LoginRequest, cmd_rx: &mut mps
     let mut s = Session {
         sh,
         sock: sock.clone(),
+        udp_relay,
         login: login.clone(),
         sims: HashMap::new(),
         main: None,
@@ -597,7 +629,16 @@ pub(crate) async fn run_session(sh: &Shared, req: LoginRequest, cmd_rx: &mut mps
             r = sock.recv_from(&mut buf) => {
                 woke = Instant::now();
                 match r {
-                    Ok((n, from)) => s.on_datagram(&buf[..n], from),
+                    Ok((n, from)) => match udp_relay {
+                        None => s.on_datagram(&buf[..n], from),
+                        // through the proxy: only the relay's datagrams,
+                        // unwrapped (LLPacketRing::receivePacket)
+                        Some(relay) if from == relay => match crate::socks5::unwrap(&buf[..n]) {
+                            Some((sim, start)) => s.on_datagram(&buf[start..n], sim),
+                            None => log::trace!("SOCKS 5 datagram dropped (fragment or unknown address)"),
+                        },
+                        Some(_) => log::trace!("datagram from {from} outside the SOCKS 5 relay dropped"),
+                    },
                     Err(e) => {
                         // Windows reports ICMP port unreachable as recv errors.
                         log::debug!("udp recv error: {e}");
@@ -657,6 +698,8 @@ pub(crate) async fn run_session(sh: &Shared, req: LoginRequest, cmd_rx: &mut mps
     sh.stats.simulators.lock().clear();
     // The next session reads the files this one leaves.
     s.object_cache.flush().await;
+    // (the association ends with its control connection)
+    drop(socks);
 }
 
 /// Buffers Firestorm asks for its socket (`RECEIVE_BUFFER_SIZE` and
@@ -734,6 +777,7 @@ impl Session<'_> {
         }
         let mut sim = Sim::new(addr, handle);
         sim.size = size;
+        sim.circuit.relay = self.udp_relay;
         self.sims.insert(addr, sim);
         let mut m = UseCircuitCode::default();
         m.circuit_code.code = self.login.circuit_code;
@@ -6336,7 +6380,7 @@ mod event_queue_tests {
             bandwidth_kbps: Default::default(),
             viewer_stats: Default::default(),
             viewer_stats_posts: Default::default(),
-            udp_port: None,
+            network: Default::default(),
         }
     }
 
@@ -6371,6 +6415,7 @@ mod event_queue_tests {
         Session {
             sh,
             sock,
+            udp_relay: None,
             login,
             sims: [(main_addr, Sim::new(main_addr, 10)), (neighbour_addr, Sim::new(neighbour_addr, 20))].into(),
             main: Some(main_addr),
@@ -6679,7 +6724,7 @@ mod script_dialog_tests {
             bandwidth_kbps: Default::default(),
             viewer_stats: Default::default(),
             viewer_stats_posts: Default::default(),
-            udp_port: None,
+            network: Default::default(),
         }
     }
 
@@ -6716,6 +6761,7 @@ mod script_dialog_tests {
         Session {
             sh,
             sock,
+            udp_relay: None,
             login: test_login(main.port()),
             sims,
             main: Some(main),

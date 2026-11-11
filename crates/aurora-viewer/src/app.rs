@@ -139,6 +139,7 @@ mod shape_editor;
 mod shortcuts;
 mod snapshot;
 mod social_menu_demo;
+mod socks_proxy;
 mod stream_list;
 mod suggest_demo;
 mod task_notecards;
@@ -952,6 +953,8 @@ pub struct App {
     /// Voice chat (WebRTC) and the HTTP client it provisions with.
     voice: crate::voice::Voice,
     voice_http: reqwest::Client,
+    /// The SOCKS 5 proxy's user name and password (`socks_credentials.rs`).
+    socks_credentials: crate::socks_credentials::SocksCredentials,
     /// Login screen news and latest version.
     login_info: ui::news::LoginInfo,
     update_demo: Option<ui::update::UpdateDemo>,
@@ -1437,16 +1440,19 @@ impl App {
         }
         // (an adapter known to drop under many downloads keeps them
         // limited: #1545, net_adapters.rs)
-        // the proxy and the UDP port of Preferences › Network, read at start
-        // (the Legacy Viewer reads them at the login, and asks a restart for
-        // the port: ChangeConnectionPort)
+        // the proxies and the UDP port of Preferences › Network: read at
+        // start for the login screen's HTTP traffic, then again at each
+        // login (`network_options`), as the Legacy Viewer's startLLProxy
         crate::media::set_web_prefs(crate::media::web_prefs(&settings.legacy_prefs));
+        let socks_credentials = crate::socks_credentials::SocksCredentials::default();
+        let socks = &settings.socks_proxy;
         let net = NetClient::new(
             crate::net_adapters::startup_mode(settings.download_connections),
-            aurora_net::NetOptions {
-                http_proxy: settings.legacy_prefs.http_proxy(),
-                udp_port: settings.legacy_prefs.udp_port(),
-            },
+            crate::settings::socks_proxy::net_options(
+                &settings.legacy_prefs,
+                socks,
+                (socks.enabled && socks.user_pass).then(|| socks_credentials.get()).flatten(),
+            ),
         )?;
         net.set_agent_language(aurora_i18n::language(), settings.language_is_public);
         let voice_http = net.caps_http();
@@ -1887,6 +1893,7 @@ impl App {
             media_cursor: None,
             voice: Default::default(),
             voice_http,
+            socks_credentials,
             update_demo,
             updater,
             plugin_pack,
@@ -3073,6 +3080,7 @@ impl App {
         // login screen selects next time
         self.settings.last_login = Some(self.settings.login_key());
         self.settings.save();
+        self.net.set_options(self.network_options());
         self.net.send(NetCommand::Login(Box::new(req)));
     }
 
@@ -9146,6 +9154,7 @@ impl App {
             self.options_ui.media_filter = rules.map(<[_]>::to_vec);
         }
         self.sync_filter_and_translation_options();
+        self.sync_socks_options();
         self.poll_inventory_images();
         // a click whose depth is back already (the render thread finished
         // the last frame while this thread waited for its next one)
@@ -14361,6 +14370,11 @@ impl App {
                 self.settings.save();
                 log::info!("quiet snapshots: {}", !self.settings.snapshot.sound);
             }
+            BarAction::ToggleMouseSmoothing => {
+                let extra = &mut self.settings.camera.extra;
+                extra.mouselook_smoothing = !extra.mouselook_smoothing;
+                self.settings.save();
+            }
             BarAction::ToggleWaterWalk => self.toggle_water_walk(),
             BarAction::ToggleSwimming => self.toggle_swimming(),
             BarAction::MoveLockOptions => self.movelock_ui.open = true,
@@ -16070,6 +16084,7 @@ impl App {
                     show_name_tags: self.settings.show_name_tags,
                     fly_override: self.world.fly_override,
                     quiet_snapshots: !self.settings.snapshot.sound,
+                    mouse_smoothing: self.settings.camera.extra.mouselook_smoothing,
                     parcel_landmark,
                     can_set_home: self.world.can_set_home(),
                     can_go_home: self.world.rlva_can_teleport_home(),

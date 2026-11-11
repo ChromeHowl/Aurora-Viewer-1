@@ -168,6 +168,7 @@ fn status(classic: bool) -> StatusInfo<'static> {
         show_name_tags: true,
         fly_override: false,
         quiet_snapshots: false,
+        mouse_smoothing: false,
         marketplace: false,
         parcel_landmark: None,
         can_set_home: false,

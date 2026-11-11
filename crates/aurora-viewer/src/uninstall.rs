@@ -17,7 +17,8 @@
 //!   key (`cache_key.rs`), each saved login's password hash and
 //!   second-factor authorization (`credentials.rs`), the crash reports'
 //!   GitHub authorization (`crash/github.rs`), the translation services'
-//!   keys (`world/translate.rs`);
+//!   keys (`world/translate.rs`), the SOCKS 5 proxy's user name and
+//!   password (`socks_credentials.rs`);
 //! - Aurora's add-on in each Blender that has it (`blender_live/installer.rs`).
 //!
 //! The folders stay: the running viewer uses them, and deleting a folder
@@ -74,6 +75,8 @@ pub enum Secret {
     CrashReports,
     /// A translation service's key (`world/translate.rs`).
     Translation(crate::settings::chat_translation::Service),
+    /// The SOCKS 5 proxy's user name and password (`socks_credentials.rs`).
+    SocksProxy,
 }
 
 impl Secret {
@@ -82,6 +85,10 @@ impl Secret {
         match self {
             Secret::CacheKey => (crate::cache_key::STORE_ENTRY.0, crate::cache_key::STORE_ENTRY.1.to_owned()),
             Secret::CrashReports => (crate::crash::github::STORE_ENTRY.0, crate::crash::github::STORE_ENTRY.1.to_owned()),
+            Secret::SocksProxy => (
+                crate::socks_credentials::STORE_ENTRY.0,
+                crate::socks_credentials::STORE_ENTRY.1.to_owned(),
+            ),
             Secret::Translation(service) => {
                 let (store, account) = crate::world::translate::store_entry(*service);
                 (store, account.to_owned())
@@ -169,6 +176,7 @@ pub fn plan(system: &dyn System, logins: &[Login]) -> Plan {
     for service in crate::settings::chat_translation::Service::ALL {
         parts.push(Part::Secret(Secret::Translation(service)));
     }
+    parts.push(Part::Secret(Secret::SocksProxy));
     parts.push(Part::BlenderAddon);
     Plan { parts }
 }
@@ -371,6 +379,7 @@ pub fn part_label(part: &Part) -> String {
         Part::NotificationId(_) => tr!("uninstall-notification-id").to_owned(),
         Part::Secret(Secret::CacheKey) => tr!("uninstall-cache-key").to_owned(),
         Part::Secret(Secret::CrashReports) => tr!("uninstall-crash-reports").to_owned(),
+        Part::Secret(Secret::SocksProxy) => tr!("l4-uninstall-socks").to_owned(),
         Part::Secret(Secret::Translation(service)) => tr!("chatxl-uninstall-key", service = service.name()).to_owned(),
         Part::Secret(Secret::Password(login)) => {
             tr!("uninstall-password", user = login.user.clone(), grid = grid_label(&login.grid)).to_owned()

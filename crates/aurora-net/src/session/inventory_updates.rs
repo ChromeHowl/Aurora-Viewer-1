@@ -340,7 +340,7 @@ mod tests {
             bandwidth_kbps: Default::default(),
             viewer_stats: Default::default(),
             viewer_stats_posts: Default::default(),
-            udp_port: None,
+            network: Default::default(),
         };
         let login = Arc::new(LoginResponse {
             agent_id: agent,
@@ -373,6 +373,7 @@ mod tests {
             asset_imports: Default::default(),
             sh: &sh,
             sock: sock.clone(),
+            udp_relay: None,
             login,
             sims: [(address, sim)].into(),
             main: Some(address),
