@@ -120,6 +120,9 @@ pub struct Rules<'a> {
     /// 3 blocked (silhouette whatever the other rules, FIRE-11783).
     pub exceptions: &'a HashMap<Uuid, u8>,
     pub friends: &'a HashSet<Uuid>,
+    /// FSImpostorAvatarExclude "User": an avatar wearing animesh is never a
+    /// silhouette nor an impostor.
+    pub exclude_animesh: bool,
 }
 
 impl Rules<'_> {
@@ -132,7 +135,15 @@ impl Rules<'_> {
         for id in self.friends {
             h = h.wrapping_add((id.as_u128() >> 64) as u64);
         }
-        h
+        h ^ u64::from(self.exclude_animesh) << 59
+    }
+
+    /// FSImpostorAvatarExclude "User" (LLVOAvatar::isVisuallyMuted,
+    /// isImpostor, shouldImpostor): the avatar `id` wears animesh
+    /// (`wears_animesh`) and is kept whole, except a blocked resident
+    /// (isInMuteList comes first); RLVa's silhouettes still win.
+    pub fn excluded(&self, id: &Uuid, wears_animesh: bool) -> bool {
+        self.exclude_animesh && wears_animesh && self.exceptions.get(id).copied() != Some(3)
     }
 
     /// LLVOAvatar::isTooComplex (+ the "do not render" exception).
@@ -151,6 +162,20 @@ impl Rules<'_> {
         // an unlimited complexity disables the area limit too (LL)
         self.max > 0 && (complexity > self.max || (self.max_area > 0.0 && area > self.max_area))
     }
+}
+
+/// LLVOAvatar::getNumAnimatedObjectAttachments > 0: one of the objects the
+/// avatar at `idx` wears is an animated object (its root flagged animesh).
+pub fn wears_animesh(world: &World, idx: usize) -> bool {
+    let Some(av) = world.objects.get(idx) else {
+        return false;
+    };
+    world.objects.children_of(&av.key).iter().any(|&att| {
+        world
+            .objects
+            .get(att)
+            .is_some_and(|o| o.extra.extended_mesh_flags.unwrap_or(0) & aurora_prim::extra::EXTENDED_MESH_ANIMATED != 0)
+    })
 }
 
 /// LLVOVolume::getTextureCost.
@@ -341,6 +366,7 @@ impl Scene {
             self.avatar_complexity.retain(|id, _| ids.contains(id));
             self.avatar_area.retain(|id, _| ids.contains(id));
             self.too_complex.retain(|idx| idxs.contains(idx));
+            self.animesh_wearers.retain(|idx| idxs.contains(idx));
             self.complexity_round = round;
             // pop() takes from the end: keep the slab order
             self.complexity_round.reverse();
@@ -362,7 +388,13 @@ impl Scene {
             let (c, area) = self.avatar_complexity(world, idx);
             self.avatar_complexity.insert(id, c);
             self.avatar_area.insert(id, area);
-            if rules.too_complex(&id, id == world.agent_id, c, area) {
+            let wears = wears_animesh(world, idx);
+            if wears {
+                self.animesh_wearers.insert(idx);
+            } else {
+                self.animesh_wearers.remove(&idx);
+            }
+            if !rules.excluded(&id, wears) && rules.too_complex(&id, id == world.agent_id, c, area) {
                 self.too_complex.insert(idx);
             } else {
                 self.too_complex.remove(&idx);
@@ -389,7 +421,8 @@ impl Scene {
             } else if self.rlva_silhouettes.contains(&idx) {
                 let complexity = self.avatar_complexity.get(&object.full_id).copied().unwrap_or_default();
                 let area = self.avatar_area.get(&object.full_id).copied().unwrap_or_default();
-                if !rules.too_complex(&object.full_id, false, complexity, area) {
+                let wears = self.animesh_wearers.contains(&idx);
+                if rules.excluded(&object.full_id, wears) || !rules.too_complex(&object.full_id, false, complexity, area) {
                     self.too_complex.remove(&idx);
                 }
             }
@@ -451,6 +484,7 @@ mod tests {
             mode: 0,
             exceptions: &exceptions,
             friends: &friends,
+            exclude_animesh: false,
         };
         let avatars = world.objects.iter().filter(|(_, o)| o.is_avatar()).count();
         assert!(avatars >= 40);
@@ -493,6 +527,29 @@ mod tests {
     }
 
     #[test]
+    fn animesh_wearers_are_kept_whole_unless_blocked() {
+        let a = Uuid::from_u128(1);
+        let none = HashMap::new();
+        let never = HashMap::from([(a, 1u8)]);
+        let blocked = HashMap::from([(a, 3u8)]);
+        let friends = HashSet::new();
+        let rules = |exceptions, exclude_animesh| Rules {
+            max: 1,
+            max_area: 0.0,
+            mode: 0,
+            exceptions,
+            friends: &friends,
+            exclude_animesh,
+        };
+        assert!(!rules(&none, false).excluded(&a, true), "the option off");
+        assert!(rules(&none, true).excluded(&a, true));
+        assert!(!rules(&none, true).excluded(&a, false), "no animesh worn");
+        assert!(rules(&never, true).excluded(&a, true), "over Never render, as the Legacy Viewer");
+        assert!(!rules(&blocked, true).excluded(&a, true), "a blocked resident stays a silhouette");
+        assert_ne!(rules(&none, true).key(), rules(&none, false).key(), "the option recomputes at once");
+    }
+
+    #[test]
     fn too_complex_rules() {
         let a = Uuid::from_u128(1);
         let friend = Uuid::from_u128(2);
@@ -505,6 +562,7 @@ mod tests {
                 mode,
                 exceptions: &exceptions.clone(),
                 friends: &friends.clone(),
+                exclude_animesh: false,
             }
             .too_complex(&a, false, 150_000, 10.0)
         };
@@ -518,6 +576,7 @@ mod tests {
             mode: 0,
             exceptions: &exceptions,
             friends: &friends,
+            exclude_animesh: false,
         };
         assert!(r.too_complex(&a, false, 1, 0.0), "never render, even without a limit");
         let none = HashMap::new();
@@ -527,6 +586,7 @@ mod tests {
             mode: 0,
             exceptions: &none,
             friends: &friends,
+            exclude_animesh: false,
         };
         assert!(r.too_complex(&a, false, 10, 2000.0), "area over the limit");
         assert!(!r.too_complex(&a, true, 10_000_000, 0.0), "never ourselves");
@@ -536,6 +596,7 @@ mod tests {
             mode: 0,
             exceptions: &none,
             friends: &friends,
+            exclude_animesh: false,
         };
         assert!(!r.too_complex(&a, false, 10, 2000.0), "no complexity limit: no area limit");
         let r = Rules {
@@ -544,6 +605,7 @@ mod tests {
             mode: 2,
             exceptions: &none,
             friends: &friends,
+            exclude_animesh: false,
         };
         assert!(r.too_complex(&a, false, 1, 0.0), "friends only");
         assert!(!r.too_complex(&friend, false, 10_000_000, 0.0), "friend shown");
@@ -553,6 +615,7 @@ mod tests {
             mode: 1,
             exceptions: &none,
             friends: &friends,
+            exclude_animesh: false,
         };
         assert!(!r.too_complex(&friend, false, 10_000_000, 0.0), "friends always full");
     }

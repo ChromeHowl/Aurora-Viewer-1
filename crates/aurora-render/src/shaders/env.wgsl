@@ -1261,6 +1261,13 @@ fn water_pixel(in: WaterOut) -> vec4<f32> {
         let volume=water_fog_segment(ref_pos-in.world_pos,frame.water_normal.w,0.0,max(in.level-ref_pos.z,0.0));
         fb=fb*volume.transmission+volume.color;
     } else { fb = fb * wf.transmission + wf.color; }
+    if ((frame.features.x & FEATURE_OPAQUE_WATER) != 0u) {
+        // waterF.glsl without TRANSPARENT_WATER: nothing seen under the
+        // surface, the fog of 2048 m of water over white
+        // (applyWaterFogViewLinear(viewVec * 2048, vec4(1)))
+        let deep = water_fog_view(view_vec * 2048.0, frame.water_fog.w);
+        fb = deep.transmission + deep.color;
+    }
 
     // reflection: planar texture, screen-space rays, or the sky
     var r = reflect(view_vec, normalize(mix(vec3<f32>(0.0, 0.0, 1.0), n, 0.6)));

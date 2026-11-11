@@ -1473,6 +1473,10 @@ pub struct FrameParams {
     /// The sky is not drawn (the rendering type of the Legacy Viewer's
     /// Develop menu): the clear colour shows behind the world.
     pub hide_sky: bool,
+    /// Opaque water (RenderTransparentWater off): the water's deep fog in
+    /// place of what lies under it, as waterF.glsl draws it without
+    /// TRANSPARENT_WATER (common.wgsl FEATURE_OPAQUE_WATER).
+    pub opaque_water: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1514,6 +1518,11 @@ pub struct DepthOfField {
     /// Bokeh dispersion: the blur's red and blue spread apart, in pixels of
     /// the image per pixel of blur (0 none, at no cost).
     pub dispersion: f32,
+    /// The blended faces opaque enough give the focus their own depth
+    /// (LLDrawPoolAlpha::renderPostDeferred's depth pass for the depth of
+    /// field: texels from 0.33 of alpha); off, they are blurred like what
+    /// lies behind them.
+    pub alphas: bool,
 }
 
 /// Views shown instead of the image, and checks painted over it

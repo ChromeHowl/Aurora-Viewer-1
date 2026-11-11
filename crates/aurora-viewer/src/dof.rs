@@ -268,6 +268,7 @@ pub fn lens(s: &Settings, focus: f32, fov_y: f32, height: u32, window_height: u3
         peaking: None,
         front_blur: true,
         dispersion: 0.0,
+        alphas: false,
     }
 }
 

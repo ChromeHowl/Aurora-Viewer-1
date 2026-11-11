@@ -13,6 +13,7 @@ mod hover_height;
 pub mod people;
 pub mod registry;
 pub mod render_extras;
+pub mod render_photo;
 mod saver;
 pub mod stream_list;
 pub mod teleport;
@@ -1450,6 +1451,10 @@ pub struct Settings {
     /// Mirror resolution and update rate, shadow and terrain scales,
     /// rendering types, colour grade, light switches (settings/render_extras.rs).
     pub render_extras: render_extras::RenderExtras,
+    /// View-only switches, transparent water, depth of field on blended
+    /// faces, animesh impostor exclusion, pre-caching delay and auto-tune
+    /// (settings/render_photo.rs).
+    pub render_photo: render_photo::RenderPhoto,
     /// Reflection probes (RenderReflectionProbeLevel): 0 none (sky only),
     /// 1 manual, 2 manual + terrain, 3 full scene.
     pub reflection_probes: u8,
@@ -2349,6 +2354,7 @@ impl Default for Settings {
             display_name_notices: true,
             mirrors: 1,
             render_extras: Default::default(),
+            render_photo: Default::default(),
             ssr: false,
             anisotropy: 8,
             cache_size_mb: 20480,
@@ -3075,6 +3081,7 @@ impl Settings {
             512.0
         };
         self.render_extras.sanitize();
+        self.render_photo.sanitize();
         self.tonemapper = self.tonemapper.min(TONEMAPPER_MAX);
         self.tonemap_mix = if self.tonemap_mix.is_finite() {
             self.tonemap_mix.clamp(0.0, 1.0)
