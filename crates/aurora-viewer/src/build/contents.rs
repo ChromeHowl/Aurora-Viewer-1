@@ -158,7 +158,26 @@ impl BuildTool {
     /// (LLPanelContents::onClickNewScript + LLViewerObject::saveScript).
     /// RezScript uses the active group, independent of the parcel's rez group
     /// (LLViewerObject::saveScript, indra/newview/llviewerobject.cpp).
+    ///
+    /// With a template chosen (FSBuildPrefs_UseCustomScript), the template
+    /// goes in instead, running, as a drop would put it
+    /// (LLToolDragAndDrop::dropScript from onClickNewScript); a template no
+    /// longer in the inventory, or one we may not copy, falls back to the
+    /// default script.
     pub fn new_script(&mut self, world: &World, idx: usize) {
+        if let Some(template) = self.new_script_template
+            && let Some(item) = world.inventory.items.get(&template)
+            && crate::settings::new_objects::script_template_allowed(item, world.agent_id)
+            && let Ok(drops) = super::contents_drop::plan(world, &[template], idx, false, super::contents_drop::Target::Panel)
+            && let Some(object_id) = world.objects.get(idx).map(|o| o.full_id)
+        {
+            // copyable: nothing leaves the inventory
+            for drop in drops {
+                self.send(drop.command);
+            }
+            self.contents_changed(object_id);
+            return;
+        }
         let Some(o) = world.objects.get(idx) else { return };
         let now = now_unix();
         let item = TaskItem {

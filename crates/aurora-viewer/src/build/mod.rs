@@ -44,6 +44,7 @@ pub mod silhouette;
 mod take_tests;
 pub mod task_inventory;
 pub mod texture_copy;
+mod texture_drag;
 pub mod ui;
 
 use crate::scene::Scene;
@@ -207,6 +208,11 @@ pub struct BuildSettings {
     /// The unlink confirmation, pivot point, light radius and selection
     /// filters (settings/build_tools.rs).
     pub tools: crate::settings::build_tools::BuildTools,
+    /// The default texture of new prims, the item put inside them and the
+    /// "New Script" template (settings/new_objects.rs).
+    pub new_objects: crate::settings::new_objects::NewObjects,
+    /// Smaller Legacy build options (settings/build_extras.rs).
+    pub extras: crate::settings::build_extras::BuildExtras,
     /// SelectReflectionProbes: off at each start (settings.xml, Persist=0).
     #[serde(skip)]
     pub select_probes: bool,
@@ -667,6 +673,8 @@ impl Default for BuildSettings {
             land_brush_force: 1.0,
             actual_root: false,
             tools: Default::default(),
+            new_objects: Default::default(),
+            extras: Default::default(),
             select_probes: false,
             select_owned_only: false,
             select_movable_only: false,
@@ -872,6 +880,18 @@ pub struct BuildTool {
     /// Prims the Create tool asked for whose new objects' look is still to
     /// be given (new_defaults.rs).
     new_defaults_pending: u32,
+    /// The account's "New Script" template while its option is on
+    /// (settings/new_objects.rs), taken each frame from the settings.
+    new_script_template: Option<Uuid>,
+    /// The face texture held by the mouse (texture_drag.rs).
+    texture_drag: Option<texture_drag::TextureDrag>,
+    /// Caps Lock held down: a texture drag changes the repeats (set by the app).
+    pub caps_lock_held: bool,
+    /// FSCommitForSaleOnChange, taken each frame from the settings.
+    pub(crate) commit_sale_on_change: bool,
+    /// A click selected this object: the app may turn the avatar toward
+    /// the selection (FSTurnAvatarToSelectedObject).
+    pub turn_request: Option<usize>,
     /// Selection rectangle being dragged (start, current in pixels, extend).
     pub rect: Option<((f32, f32), (f32, f32), bool)>,
     /// Compact section (Rights, Transform, Features, Materials, Contents, Shape).
@@ -930,6 +950,11 @@ impl Default for BuildTool {
             silhouettes: silhouette::Cache::default(),
             pending_create: None,
             new_defaults_pending: 0,
+            new_script_template: None,
+            texture_drag: None,
+            caps_lock_held: false,
+            commit_sale_on_change: false,
+            turn_request: None,
             rect: None,
             tab: 6,
             status: String::new(),
@@ -1296,6 +1321,15 @@ impl BuildTool {
             && select_type(world, i) != self.select_type(world)
         {
             self.deselect_all(world);
+        }
+        // LLToolSelect::handleObjectSelection turns the avatar toward what
+        // it selects: world objects, not avatars nor what we wear
+        if let Some(i) = idx
+            && select_type(world, i) == SelectType::World
+            && world.objects.get(i).is_some_and(|o| !o.is_avatar())
+            && !(extend && self.is_selected(&unit))
+        {
+            self.turn_request = Some(i);
         }
         if extend {
             if self.is_selected(&unit) {
@@ -2040,6 +2074,8 @@ impl BuildTool {
             .unwrap_or(0.016)
             .clamp(0.001, 0.25);
         self.last_frame = Some(now);
+        self.new_script_template = s.new_objects.script_template(world.agent_id);
+        self.commit_sale_on_change = s.extras.commit_sale_on_change;
         self.update_replacement(world, now);
         self.advance_bulk_permissions(world, now);
         self.advance_link(world, now);
@@ -2053,6 +2089,11 @@ impl BuildTool {
             return;
         }
         self.prune(world, s, now);
+        if self.tool == Tool::Edit && self.edit_mode == EditMode::Face {
+            self.texture_drag_update(world, cursor, mods);
+        } else {
+            self.texture_release(world);
+        }
         self.pick_up_created(world, s);
         self.sync_hud_zoom(world);
         self.refresh_costs(world);
@@ -2168,6 +2209,9 @@ impl BuildTool {
                 match mode {
                     EditMode::Face => {
                         let face = surface.and_then(|s| u8::try_from(s.face).ok());
+                        if let (Some(idx), Some(face), false) = (pick, face, mods.shift) {
+                            self.texture_grab(world, idx, face, cursor, s.extras.drag_texture);
+                        }
                         self.face_click(world, pick, face, mods.shift);
                         true
                     }
@@ -2320,6 +2364,7 @@ impl BuildTool {
         }
         let mut cmds = Vec::new();
         self.manip.release(world, s, self.selection_linked, &mut cmds);
+        self.texture_release(world);
         self.land.mouse_up();
         for c in cmds {
             self.send(c);

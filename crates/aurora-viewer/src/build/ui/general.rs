@@ -238,6 +238,14 @@ fn can_deed_targets(tool: &BuildTool, world: &World, targets: &[usize], group: U
         })
 }
 
+/// LLPanelPermissions::onCommitForSale / onCommitSaleInfo: whether a change
+/// of the "For sale" box (`ticked`) or, with None, of the sale type applies
+/// at once. Unticking always does; the rest waits for Apply unless
+/// FSCommitForSaleOnChange (`on_change`) is on (STORM-1453).
+fn sale_commits_at_once(on_change: bool, ticked: Option<bool>) -> bool {
+    on_change || ticked == Some(false)
+}
+
 fn valid_sale(for_sale: bool, sale_type: u8, owner_mask: u32) -> bool {
     !for_sale || owner_mask & perm::TRANSFER != 0 && (sale_type != SALE_COPY || owner_mask & perm::COPY != 0)
 }
@@ -533,8 +541,8 @@ pub fn show(ui: &mut egui::Ui, p: &Palette, tool: &mut BuildTool, world: &mut Wo
                     ) {
                         for_sale = v;
                         draft_changed = true;
-                        // unticking commits at once (onCommitSaleInfo)
-                        commit_now = !v;
+                        // unticking commits at once (onCommitForSale)
+                        commit_now = sale_commits_at_once(tool.commit_sale_on_change, Some(v));
                     }
                     if let Some(t) = combo(
                         ui,
@@ -546,6 +554,7 @@ pub fn show(ui: &mut egui::Ui, p: &Palette, tool: &mut BuildTool, world: &mut Wo
                     ) {
                         sale_type = t;
                         draft_changed = true;
+                        commit_now |= sale_commits_at_once(tool.commit_sale_on_change, None);
                     }
                 });
                 ui.horizontal(|ui| {
@@ -744,6 +753,15 @@ fn ownership_permissions(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sale_changes_wait_for_apply_unless_committed_on_change() {
+        assert!(sale_commits_at_once(false, Some(false)), "unticking always applies");
+        assert!(!sale_commits_at_once(false, Some(true)));
+        assert!(!sale_commits_at_once(false, None));
+        assert!(sale_commits_at_once(true, Some(true)));
+        assert!(sale_commits_at_once(true, None));
+    }
 
     #[test]
     fn export_needs_export_in_base_and_own_and_an_unrestricted_next_owner() {

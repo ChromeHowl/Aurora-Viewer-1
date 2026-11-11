@@ -6,6 +6,9 @@
 //! tools behave on a selection (the Texture tab's automatic choice).
 
 use super::super::cx::{Cx, field};
+use crate::settings::new_objects::Label;
+use crate::theme::Palette;
+use crate::ui::widgets;
 
 pub fn page(cx: &mut Cx) {
     use aurora_i18n::tr;
@@ -134,4 +137,161 @@ pub fn page(cx: &mut Cx) {
             &field!(build.tools.hide_selected),
         );
     });
+    // FSDefaultObjectTexture, FSBuildPrefs_EmbedItem / _Item and
+    // FSBuildPrefs_UseCustomScript / _CustomScriptItem: dropped from the
+    // inventory, as on the Legacy Viewer's drop targets (settings/new_objects.rs)
+    let p = cx.p;
+    cx.group(tr!("l5-new-group"), |cx| {
+        cx.note(tr!("l5-new-note"));
+        cx.keywords("FSDefaultObjectTexture texture").row_with(
+            tr!("l5-new-texture"),
+            tr!("l5-new-texture-hint"),
+            &field!(build.new_objects.texture),
+            |ui, s, st, _| {
+                let Some(view) = st.new_objects.as_ref() else {
+                    ui.label(tr!("l5-new-logged-out"));
+                    return false;
+                };
+                let carried = view.carried.filter(|c| c.texture).map(|c| c.asset);
+                match drop_slot(ui, &p, &view.texture, view.carried.map(|c| c.texture), true) {
+                    Slot::Dropped => carried.is_some_and(|asset| s.build.new_objects.texture.replace(asset) != Some(asset)),
+                    Slot::Cleared => s.build.new_objects.texture.take().is_some(),
+                    Slot::Idle => false,
+                }
+            },
+        );
+        cx.keywords("FSBuildPrefs_EmbedItem FSBuildPrefs_Item embed contents").row_with(
+            tr!("l5-new-embed"),
+            tr!("l5-new-embed-hint"),
+            &field!(build.new_objects.accounts),
+            |ui, s, st, _| {
+                let Some(view) = st.new_objects.as_ref() else {
+                    ui.label(tr!("l5-new-logged-out"));
+                    return false;
+                };
+                let mut a = s.build.new_objects.account(view.agent);
+                let before = a;
+                widgets::switch(ui, &p, &mut a.embed);
+                match drop_slot(ui, &p, &view.embed, view.carried.map(|c| c.embed), a.embed_item.is_some()) {
+                    Slot::Dropped => a.embed_item = view.carried.filter(|c| c.embed).map(|c| c.item).or(a.embed_item),
+                    Slot::Cleared => a.embed_item = None,
+                    Slot::Idle => {}
+                }
+                s.build.new_objects.set_account(view.agent, a);
+                a != before
+            },
+        );
+        cx.keywords("FSBuildPrefs_UseCustomScript FSBuildPrefs_CustomScriptItem script template")
+            .row_with(
+                tr!("l5-new-script"),
+                tr!("l5-new-script-hint"),
+                &field!(build.new_objects.accounts),
+                |ui, s, st, _| {
+                    let Some(view) = st.new_objects.as_ref() else {
+                        ui.label(tr!("l5-new-logged-out"));
+                        return false;
+                    };
+                    let mut a = s.build.new_objects.account(view.agent);
+                    let before = a;
+                    widgets::switch(ui, &p, &mut a.custom_script);
+                    match drop_slot(ui, &p, &view.script, view.carried.map(|c| c.script), a.script_item.is_some()) {
+                        Slot::Dropped => a.script_item = view.carried.filter(|c| c.script).map(|c| c.item).or(a.script_item),
+                        Slot::Cleared => a.script_item = None,
+                        Slot::Idle => {}
+                    }
+                    s.build.new_objects.set_account(view.agent, a);
+                    a != before
+                },
+            );
+    });
+    // the smaller Legacy build options (settings/build_extras.rs)
+    cx.group(tr!("l5-extras-group"), |cx| {
+        cx.keywords("FSExperimentalDragTexture drag texture offset").toggle(
+            tr!("l5-drag-texture"),
+            tr!("l5-drag-texture-hint"),
+            &field!(build.extras.drag_texture),
+        );
+        cx.keywords("FSCommitForSaleOnChange sale price").toggle(
+            tr!("l5-sale-on-change"),
+            tr!("l5-sale-on-change-hint"),
+            &field!(build.extras.commit_sale_on_change),
+        );
+        cx.keywords("FSRenderParcelSelectionToMaxBuildHeight parcel boundary").toggle(
+            tr!("l5-walls-to-max"),
+            tr!("l5-walls-to-max-hint"),
+            &field!(build.extras.parcel_walls_to_max),
+        );
+        cx.keywords("FSSaveInventoryScriptsAsMono mono lsl").toggle(
+            tr!("l5-inventory-mono"),
+            tr!("l5-inventory-mono-hint"),
+            &field!(build.extras.inventory_scripts_mono),
+        );
+        cx.keywords("FSTurnAvatarToSelectedObject turn").toggle(
+            tr!("l5-turn-to-selection"),
+            tr!("l5-turn-to-selection-hint"),
+            &field!(build.extras.turn_to_selection),
+        );
+    });
+}
+
+enum Slot {
+    Idle,
+    Dropped,
+    Cleared,
+}
+
+/// A drop target naming the choice, with a button that clears it. While an
+/// inventory entry is dragged over it, its outline says whether the entry
+/// is taken (`accepted`); released there, an accepted entry is `Dropped`.
+/// The drop never reaches the world behind the window.
+fn drop_slot(ui: &mut egui::Ui, p: &Palette, label: &Label, accepted: Option<bool>, clearable: bool) -> Slot {
+    use aurora_i18n::tr;
+    let text = match label {
+        Label::NotSet => tr!("l5-new-drop-here").to_owned(),
+        Label::Missing => tr!("l5-new-missing").to_owned(),
+        Label::Name(name) => name.clone(),
+    };
+    let mut out = Slot::Idle;
+    ui.horizontal(|ui| {
+        let width = (ui.available_width() - ui.spacing().interact_size.y - ui.spacing().item_spacing.x).max(80.0);
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(width, ui.spacing().interact_size.y), egui::Sense::hover());
+        let visuals = ui.visuals().widgets.inactive;
+        ui.painter().rect_filled(rect, visuals.corner_radius, visuals.weak_bg_fill);
+        let colour = if matches!(label, Label::Name(_)) { p.ink } else { p.muted };
+        ui.painter().with_clip_rect(rect).text(
+            rect.left_center() + egui::vec2(ui.spacing().button_padding.x, 0.0),
+            egui::Align2::LEFT_CENTER,
+            text,
+            egui::TextStyle::Body.resolve(ui.style()),
+            colour,
+        );
+        if let Some(accepted) = accepted
+            && ui.rect_contains_pointer(rect)
+        {
+            crate::ui::inventory::drag::feedback(
+                ui.ctx(),
+                if accepted {
+                    egui::CursorIcon::Copy
+                } else {
+                    egui::CursorIcon::NotAllowed
+                },
+            );
+            ui.painter().rect_stroke(
+                rect,
+                visuals.corner_radius,
+                egui::Stroke::new(2.0, if accepted { p.violet_light } else { p.muted_dim }),
+                egui::StrokeKind::Inside,
+            );
+            if ui.input(|i| i.pointer.button_released(egui::PointerButton::Primary)) {
+                egui::DragAndDrop::clear_payload(ui.ctx());
+                if accepted {
+                    out = Slot::Dropped;
+                }
+            }
+        }
+        if widgets::icon_button(ui, p, "x", tr!("l5-new-clear"), clearable) {
+            out = Slot::Cleared;
+        }
+    });
+    out
 }

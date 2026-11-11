@@ -508,6 +508,7 @@ impl App {
             return;
         }
         let Some(info) = self.script_info(target) else { return };
+        self.script_editors.inventory_mono = self.settings.build.extras.inventory_scripts_mono;
         if let Some(request) = self.script_editors.open(target, info.name, info.can_read, info.can_edit) {
             self.send(NetCommand::LoadScript {
                 request,

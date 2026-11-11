@@ -7338,6 +7338,7 @@ impl App {
             mods,
         );
         self.flush_build();
+        self.turn_to_selection();
         if used {
             self.left_down = true;
         }
@@ -10195,6 +10196,7 @@ impl App {
                 ctrl: self.ctrl,
                 alt: self.alt,
             };
+            self.build.caps_lock_held = self.down.contains(&Input::key(KeyCode::CapsLock));
             self.build.update(
                 &mut self.world,
                 &self.settings.build,
@@ -15348,6 +15350,7 @@ impl App {
         self.options_ui.login_favorites = self.login_favorites.key().map(|key| self.login_form.favorites.shown(key));
         self.options_ui.friends_only = (!self.world.agent_id.is_nil()).then_some(self.world.friends_only());
         self.options_ui.friends_only_keep = (!self.world.agent_id.is_nil()).then_some(self.world.friends_only.keep_after_teleport);
+        self.refresh_new_objects_view();
         self.options_ui.restart_landmarks = if self.panels.settings && self.world.login.is_some() {
             let mut list: Vec<_> = self.restart_landmarks().into_iter().map(|l| (l.item, l.name)).collect();
             list.sort_by_key(|(_, name)| crate::natural_order::key(name));

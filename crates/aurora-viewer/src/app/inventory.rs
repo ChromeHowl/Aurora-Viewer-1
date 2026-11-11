@@ -313,6 +313,11 @@ impl App {
                             }),
                             Err(reason) => self.inventory_ui.message = reason,
                         }
+                    } else if let Some(copy) = self.script_template_copy(kind, parent, &name) {
+                        // create_new_item's "lsl" branch with
+                        // FSBuildPrefs_UseCustomScript (llviewerinventory.cpp):
+                        // a copy of the template (settings/new_objects.rs)
+                        self.send(NetCommand::CopyInventoryItems(vec![copy]));
                     } else {
                         self.send(NetCommand::CreateInventoryItem {
                             parent,
@@ -993,5 +998,54 @@ impl App {
         for action in actions {
             self.apply_inventory_action(action);
         }
+    }
+
+    /// The copy a new inventory script is made from while the account's
+    /// "New Script" template is on and still a script we may copy.
+    fn script_template_copy(
+        &self,
+        kind: aurora_net::inventory::operations::NewItem,
+        parent: uuid::Uuid,
+        name: &str,
+    ) -> Option<aurora_net::inventory::operations::CopyItem> {
+        if kind != aurora_net::inventory::operations::NewItem::Script {
+            return None;
+        }
+        let agent = self.world.agent_id;
+        let template = self.settings.build.new_objects.script_template(agent)?;
+        let item = self.world.inventory.items.get(&template)?;
+        crate::settings::new_objects::script_template_allowed(item, agent).then(|| aurora_net::inventory::operations::CopyItem {
+            item: item.id,
+            owner: item.owner,
+            parent,
+            name: name.to_owned(),
+        })
+    }
+
+    /// Preferences › Build's names of the new prims' texture, item and
+    /// script template, read again only when the inventory, the choices or
+    /// the dragged entry change.
+    pub(super) fn refresh_new_objects_view(&mut self) {
+        if !self.panels.settings || self.world.login.is_none() || self.world.agent_id.is_nil() {
+            self.options_ui.new_objects = None;
+            self.options_ui.new_objects_key = None;
+            return;
+        }
+        let carried = crate::ui::inventory::drag::carried_ids(&self.egui_ctx);
+        let key = (
+            self.world.inventory.generation,
+            self.settings.build.new_objects.clone(),
+            carried.clone(),
+        );
+        if self.options_ui.new_objects_key.as_ref() == Some(&key) {
+            return;
+        }
+        self.options_ui.new_objects = Some(crate::settings::new_objects::view(
+            &self.settings.build.new_objects,
+            &self.world.inventory,
+            self.world.agent_id,
+            carried.as_deref(),
+        ));
+        self.options_ui.new_objects_key = Some(key);
     }
 }

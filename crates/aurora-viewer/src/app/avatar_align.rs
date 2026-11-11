@@ -71,4 +71,26 @@ impl App {
         }
         log::info!("avatar alignment: {action:?}, facing {bearing:.0}°");
     }
+
+    /// LLToolSelect::handleObjectSelection: with FSTurnAvatarToSelectedObject,
+    /// a click that selects a world object turns the standing avatar toward
+    /// the selection while the camera is not on the avatar. The turn goes
+    /// out with the next AgentUpdate and the body plays it, as the Legacy
+    /// Viewer's rotation-only autopilot does.
+    pub(super) fn turn_to_selection(&mut self) {
+        let Some(idx) = self.build.turn_request.take() else { return };
+        if !self.settings.build.extras.turn_to_selection
+            || self.camera.focus_point().is_none()
+            || self.world.agent.is_sitting()
+            || self.world.objects.get(idx).is_none()
+        {
+            return;
+        }
+        let Some(bounds) = self.build.bounds(&self.world, std::time::Instant::now()) else {
+            return;
+        };
+        if let Some(yaw) = crate::settings::build_extras::turn_toward(self.world.agent.position, self.world.agent.yaw, bounds.center) {
+            self.world.agent.yaw = yaw;
+        }
+    }
 }
