@@ -266,6 +266,8 @@ impl World {
 
     /// Commands queued by groups, sessions and the block list.
     pub fn take_social_commands(&mut self) -> Vec<NetCommand> {
+        // "Ban from all my groups": its next request when due
+        self.tick_group_ban_all(std::time::Instant::now());
         let mut cmds = self.groups.take_commands();
         cmds.extend(self.group_data.take_commands());
         cmds.extend(self.group_money.take_commands());

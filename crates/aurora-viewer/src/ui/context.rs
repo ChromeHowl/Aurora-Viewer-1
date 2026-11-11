@@ -318,6 +318,9 @@ pub enum CtxAction {
     EstateKick(Vec<Uuid>),
     EstateTeleportHome(Vec<Uuid>),
     EstateBan(Vec<Uuid>),
+    /// "Ban from all my groups" (true) or "Unban from all my groups": asked
+    /// first (LLGroupActions::banFromAllGroups, unbanFromAllGroups).
+    GroupBanAll(Uuid, bool),
 
     Touch(u32),
     Sit {
@@ -618,6 +621,22 @@ pub fn estate_items(ui: &mut egui::Ui, p: &Palette, world: &World, ids: &[Uuid])
     }
     if menu::item(ui, p, "ban", aurora_i18n::tr!("b6-estate-ban")) {
         act(CtxAction::EstateBan(ids.to_vec()));
+    }
+}
+
+/// "Ban from all my groups" and, with `unban`, "Unban from all my groups",
+/// only when we manage bans in one of our groups at least
+/// (can_ban_from_all_groups: LLGroupActions::canBanFromAnyGroup).
+pub fn group_ban_items(ui: &mut egui::Ui, p: &Palette, world: &World, id: Uuid, unban: bool) {
+    if world.group_ban_targets(id).is_empty() {
+        return;
+    }
+    let running = world.group_ban_all.is_some();
+    if menu::item_if(ui, p, "ban", aurora_i18n::tr!("l2s-ban-all"), !running) {
+        request(ui.ctx(), CtxAction::GroupBanAll(id, true));
+    }
+    if unban && menu::item_if(ui, p, "circle-check-filled", aurora_i18n::tr!("l2s-unban-all"), !running) {
+        request(ui.ctx(), CtxAction::GroupBanAll(id, false));
     }
 }
 
@@ -1048,6 +1067,7 @@ fn avatar_menu_reporting(
             }
             block(ui);
             estate_items(ui, p, world, &[id]);
+            group_ban_items(ui, p, world, id, false);
             // menu_fs_radar.xml / menu_mini_map.xml: Avatar.Derender and
             // Avatar.DerenderPermanent (LLAvatarActions::derender), always enabled
             for (icon, label, permanent) in [
@@ -1118,6 +1138,8 @@ fn avatar_menu_reporting(
                 ));
             }
             block(ui);
+            // menu_url_agent.xml BanFromAllGroups
+            group_ban_items(ui, p, world, id, false);
             menu::separator(ui, p);
             copy(ui);
         }

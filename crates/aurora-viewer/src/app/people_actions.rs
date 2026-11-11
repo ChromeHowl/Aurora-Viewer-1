@@ -12,7 +12,10 @@
 //! clearAvatarMarkColors (llnetmap.cpp), originally LGPL 2.1, with their
 //! TrackAvatarNotPossible, EstateKickUser, EstateKickMultiple,
 //! EstateTeleportHomeUser, EstateTeleportHomeMultiple, EstateBanUser and
-//! EstateBanUserMultiple questions (notifications.xml).
+//! EstateBanUserMultiple questions (notifications.xml); "Ban / Unban from
+//! all my groups" asked with FSBanFromAllGroups and FSUnbanFromAllGroups
+//! (LLGroupActions::confirmBanFromAllGroups), the run itself in
+//! world/group_ban_all.rs.
 use super::land_moderation::Ask;
 use super::*;
 use crate::ui::widgets::ActionKind;
@@ -138,6 +141,55 @@ impl App {
             .avatar_names
             .complete(&id)
             .unwrap_or_else(|| self.world.social.name_of(&id))
+    }
+
+    /// "Ban from all my groups" / "Unban from all my groups": asked first,
+    /// with the groups listed (confirmBanFromAllGroups).
+    pub(super) fn ask_group_ban_all(&mut self, target: Uuid, ban: bool) {
+        if self.world.group_ban_targets(target).is_empty() || self.world.group_ban_all.is_some() {
+            return;
+        }
+        let name = self.resident_name(target);
+        self.moderation_ask = Some(Ask::GroupBanAll { target, name, ban });
+    }
+
+    /// The question each frame; "Ban" or "Unban" starts the run.
+    pub(super) fn group_ban_ask_ui(&mut self, ctx: &egui::Context, p: &crate::theme::Palette) {
+        let Some(Ask::GroupBanAll { target, name, ban }) = self.moderation_ask.as_ref() else {
+            return;
+        };
+        let (target, ban) = (*target, *ban);
+        let groups = self.world.group_ban_targets(target);
+        let listed = groups.iter().map(|(_, n)| n.as_str()).collect::<Vec<_>>().join(", ");
+        let count = groups.len().to_string();
+        let (title, question, choice) = if ban {
+            (
+                aurora_i18n::tr!("l2s-ban-all"),
+                aurora_i18n::tr!("l2s-ban-all-question", name = name.as_str(), count = count.as_str()),
+                ("ban", aurora_i18n::tr!("l2s-ban"), ActionKind::Danger),
+            )
+        } else {
+            (
+                aurora_i18n::tr!("l2s-unban-all"),
+                aurora_i18n::tr!("l2s-unban-all-question", name = name.as_str(), count = count.as_str()),
+                ("circle-check-filled", aurora_i18n::tr!("l2s-unban"), ActionKind::Primary),
+            )
+        };
+        let lines = [question.as_str(), listed.as_str()];
+        let Some(answer) = ui::context::choose(ctx, p, "group_ban_all_confirm", title, &lines, &[choice]) else {
+            return;
+        };
+        let Some(Ask::GroupBanAll { name, .. }) = self.moderation_ask.take() else {
+            return;
+        };
+        if answer.is_some() {
+            log::info!(
+                "group bans: {} {target} in {} group(s)",
+                if ban { "ban" } else { "unban" },
+                groups.len()
+            );
+            self.world.start_group_ban_all(target, name, ban);
+        }
     }
 
     /// estateKickMultiple, estateTeleportHomeMultiple, estateBanMultiple:

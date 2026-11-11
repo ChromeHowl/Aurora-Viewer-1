@@ -1033,6 +1033,14 @@ pub enum NetEvent {
         group: Uuid,
         success: bool,
     },
+    /// The answer to a ban or unban POST of the GroupAPIv1 capability
+    /// (postGroupBanRequestCoro): `ok` when the server took it.
+    GroupBanDone {
+        group: Uuid,
+        action: i32,
+        ids: Vec<Uuid>,
+        ok: bool,
+    },
     /// The ban list of a group (GroupAPIv1): residents and ban dates.
     GroupBanList {
         group: Uuid,

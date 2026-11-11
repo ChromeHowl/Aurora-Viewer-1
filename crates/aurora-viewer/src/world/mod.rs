@@ -39,6 +39,7 @@ pub mod favorites;
 pub mod flying_at_exit;
 mod friend_join;
 pub mod friends_only;
+pub mod group_ban_all;
 pub mod group_data;
 pub mod group_money;
 pub mod groups;
@@ -711,6 +712,8 @@ pub struct World {
     /// Members, roles, titles and notices of the groups whose profile is
     /// open (LLGroupMgr).
     pub group_data: group_data::GroupMgr,
+    /// "Ban from all my groups" under way (`group_ban_all.rs`).
+    pub group_ban_all: Option<group_ban_all::BanAll>,
     /// The group title worn by region, and every group's titles for the
     /// Group titles window (FSGroupTitleRegionMgr).
     pub region_titles: region_titles::RegionTitles,
@@ -995,6 +998,7 @@ impl World {
             place_snapshots: Default::default(),
             search: Default::default(),
             group_data: Default::default(),
+            group_ban_all: None,
             region_titles: Default::default(),
             group_money: Default::default(),
             notifications: notifications::Notifications::default(),
@@ -3351,10 +3355,14 @@ impl World {
                 object_name,
                 owner_name,
                 owner_id: _,
-                message,
+                mut message,
                 channel,
                 buttons,
             } => {
+                // the Omnifilter's rules (`omnifilter.rs`): hidden or set aside
+                if self.omnifilter_dialog(&object_name, &mut message, &buttons) {
+                    return None;
+                }
                 let textbox = buttons.first().is_some_and(|b| b == "!!llTextBox!!");
                 let data = if textbox {
                     notifications::Data::TextBox {
@@ -4001,6 +4009,10 @@ impl World {
             // group list again, the group's data forgotten, its profile
             // asked again
             // processEjectGroupMemberReply: a failure refreshes the group
+            NetEvent::GroupBanDone { group, action, ids, ok } => {
+                self.on_group_ban_done(group, action, &ids, ok);
+                None
+            }
             NetEvent::GroupEjected { group, success } => {
                 if !success {
                     log::warn!("group {group}: ejection refused, the group is asked again");
@@ -4587,14 +4599,17 @@ impl World {
                 self.keyword_alert(im.from_agent_id, &from, &text, true, attention::Open::NearbyChat);
             }
         }
-        self.push_chat(ChatLine {
+        let line = ChatLine {
             time: SystemTime::now(),
             from,
             text,
             kind,
             source: im.from_agent_id,
             origin: Origin::Live,
-        });
+        };
+        // an object's message is translated as its nearby lines are
+        self.translate_chat(&line);
+        self.push_chat(line);
     }
 
     /// IM dialogs that are offers or notices go to the notification center.
