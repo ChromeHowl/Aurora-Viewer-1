@@ -68,6 +68,14 @@ pub struct Viewfinder {
     pub sheet: Option<Sheet>,
     /// The row of the mode list the keys are on.
     pub mode_cursor: usize,
+    /// The quick menu's tile the arrows are on, and Enter asked to step
+    /// it this frame.
+    pub tile_cursor: usize,
+    pub tile_enter: bool,
+    /// The row of the open sheet the arrows are on, and what the keys asked
+    /// this frame: rows moved (Up, Down) and the value turned (Left, Right).
+    pub sheet_row: usize,
+    pub sheet_keys: Option<(i32, i32)>,
     /// The new name typed in a custom mode's sheet.
     bank_name: String,
     /// The shutter on screen, as drawn last frame (the mode list opens
@@ -92,6 +100,8 @@ pub struct Viewfinder {
     wb_row_top: Option<f32>,
     /// The camera pad shows this frame.
     pad_shown: bool,
+    /// What the light column's cheat sheet must stay above this frame.
+    below: Vec<Rect>,
     /// The shutter half-pressed (Enter or the button held).
     pub pressed: bool,
     /// Released while the lens hunts: the photo goes as it locks.
@@ -625,6 +635,7 @@ impl Viewfinder {
     /// menu and the help.
     pub(crate) fn open_sheet(&mut self, sheet: Sheet, out: &mut Vec<Out>) {
         self.sheet = Some(sheet);
+        self.sheet_row = 0;
         self.menu = false;
         self.help = false;
         self.drawer = false;
@@ -646,6 +657,15 @@ impl Viewfinder {
             self.dial_before_wb = Some(self.dial);
             self.dial = Dial::WhiteBalance;
         }
+    }
+
+    /// The open sheet's keys this frame, on its `rows`: the row now and the
+    /// value's turn (0: none).
+    pub(super) fn sheet_nav(&mut self, rows: usize) -> (usize, i32) {
+        let (moved, turn) = self.sheet_keys.take().unwrap_or((0, 0));
+        let n = rows.max(1) as i32;
+        self.sheet_row = (self.sheet_row as i32 + moved).rem_euclid(n) as usize;
+        (self.sheet_row, turn)
     }
 
     /// The sheet opened, or closed when it is the one open.
@@ -709,6 +729,14 @@ impl Viewfinder {
         let pad = ctl && s.viewfinder.pad;
         self.pad_shown = pad;
         if full {
+            self.below = below_cheat(
+                ctx,
+                screen,
+                shows && !self.menu && !f.reel.photos.is_empty(),
+                pad,
+                ctl,
+                self.wb_row_top,
+            );
             self.top_bar(ctx, p, &back, screen, s, panel, f, &mut out);
         }
         self.af_point(ctx, p, &front, s, f);
@@ -1104,7 +1132,7 @@ impl Viewfinder {
                 Dial::Distance => aurora_i18n::tr!("photo-vf-dial-distance"),
                 Dial::WhiteBalance => aurora_i18n::tr!("pcu-wb-dial"),
             };
-            let rows: [(&str, String); 10] = [
+            let rows: [(&str, String); 11] = [
                 (
                     aurora_i18n::tr!("photo-vf-cheat-click-key"),
                     aurora_i18n::tr!("photo-vf-cheat-click").to_owned(),
@@ -1142,9 +1170,14 @@ impl Viewfinder {
                     aurora_i18n::tr!("photo-vf-cheat-camera-key"),
                     aurora_i18n::tr!("photo-vf-cheat-camera").to_owned(),
                 ),
+                ("P · B · T", aurora_i18n::tr!("pcu-cheat-pbt").to_owned()),
             ];
             let x = screen.left() + GAP;
-            for (key, text) in rows {
+            // as many rows as fit above what is drawn below (the reel's
+            // tray, the camera pad, the ring deck and its presets): the rest
+            // is in the help (H)
+            let fit = cheat_fit(y, x, rows.len(), &self.below);
+            for (key, text) in rows.into_iter().take(fit) {
                 let r = shadow_text(back, p, Pos2::new(x, y), Align2::LEFT_CENTER, key, bold(ctx, 12.0), p.ink);
                 shadow_text(
                     back,
@@ -2085,13 +2118,17 @@ impl Viewfinder {
                         .num_columns(cols as usize)
                         .spacing(Vec2::splat(8.0))
                         .show(ui, |ui| {
+                            let count = tiles.len();
+                            self.tile_cursor = self.tile_cursor.min(count.saturating_sub(1));
+                            let enter = std::mem::take(&mut self.tile_enter);
                             for (i, (label, value, step)) in tiles.into_iter().enumerate() {
                                 // a photo of 8K and more: what it takes (the size's tile)
                                 let tip = (label == aurora_i18n::tr!("photo-section-resolution")
                                     && panel.destination == Destination::Disk
                                     && f.photo.0.max(f.photo.1) >= 7680)
                                     .then(|| aurora_i18n::tr!("p16-memory"));
-                                if tile(ui, p, Vec2::new(tile_w, 68.0), label, &value, tip)
+                                let lit = i == self.tile_cursor;
+                                if (tile(ui, p, Vec2::new(tile_w, 68.0), label, &value, tip, lit) || (enter && lit))
                                     && let Some(o) = step(s, panel)
                                 {
                                     sheets.push(o);
@@ -2211,6 +2248,22 @@ impl Viewfinder {
                             if let Some(k) = f.keys.first_person {
                                 v.push((k.to_owned(), aurora_i18n::tr!("photo-vf-help-first-person-text")));
                             }
+                            // the shot modes, white balance, style, menus
+                            v.push(("P".to_owned(), aurora_i18n::tr!("pcu-help-p")));
+                            v.push((
+                                aurora_i18n::tr!("pcu-help-right-click").to_owned(),
+                                aurora_i18n::tr!("pcu-help-right-click-text"),
+                            ));
+                            v.push((
+                                aurora_i18n::tr!("pcu-help-banks").to_owned(),
+                                aurora_i18n::tr!("pcu-help-banks-text"),
+                            ));
+                            v.push(("B".to_owned(), aurora_i18n::tr!("pcu-help-b")));
+                            v.push(("T".to_owned(), aurora_i18n::tr!("pcu-help-t")));
+                            v.push((
+                                aurora_i18n::tr!("pcu-help-arrows").to_owned(),
+                                aurora_i18n::tr!("pcu-help-arrows-text"),
+                            ));
                             v.push((
                                 aurora_i18n::tr!("photo-vf-help-h").to_owned(),
                                 aurora_i18n::tr!("photo-vf-help-h-text"),
@@ -2295,6 +2348,48 @@ impl Viewfinder {
                 });
             });
     }
+}
+
+/// The rects the cheat sheet must stay above: the reel's tray, the camera
+/// pad, the ring deck (and its preset row), as drawn last frame or where
+/// they first go.
+fn below_cheat(ctx: &egui::Context, screen: Rect, tray: bool, pad: bool, deck: bool, wb_top: Option<f32>) -> Vec<Rect> {
+    let mut v = Vec::new();
+    let last = |id: &str| ctx.memory(|m| m.area_rect(Id::unique(id)));
+    if tray {
+        let size = crate::ui::photo_reel::TRAY_TILE + Vec2::splat(12.0);
+        let at = Pos2::new(screen.left() + GAP, screen.bottom() - if pad { 300.0 } else { 132.0 } - size.y);
+        v.push(last("vf_reel_tray").unwrap_or(Rect::from_min_size(at, size)));
+    }
+    if pad {
+        v.push(last("vf_pad").unwrap_or(Rect::from_min_max(
+            Pos2::new(screen.left() + GAP, screen.bottom() - 84.0 - 330.0),
+            Pos2::new(screen.left() + 300.0, screen.bottom() - 84.0),
+        )));
+    }
+    if deck {
+        let half = controls::DECK_WIDTH / 2.0;
+        let top = wb_top.unwrap_or(screen.bottom() - 134.0);
+        v.push(Rect::from_min_max(
+            Pos2::new(screen.center().x - half, top),
+            Pos2::new(screen.center().x + half, screen.bottom() - 70.0),
+        ));
+    }
+    v
+}
+
+/// The cheat sheet's rows that fit from `y` (20 points each, its key line
+/// and Hide button after them, 48 more) above every rect of `below` its
+/// column (`x` to `x` + 260) meets; at least none.
+fn cheat_fit(y: f32, x: f32, rows: usize, below: &[Rect]) -> usize {
+    let column = (x, x + 260.0);
+    let limit = below
+        .iter()
+        .filter(|r| r.right() > column.0 && r.left() < column.1)
+        .map(|r| r.top())
+        .fold(f32::INFINITY, f32::min);
+    // the last row's middle at y + 20 (n − 1); its tail ends 48 + 10 under
+    (0..=rows).rev().find(|n| y + 20.0 * *n as f32 + 48.0 + 10.0 <= limit).unwrap_or(0)
 }
 
 /// The AF point's colour: green when sharp, red when it failed, white
@@ -2490,11 +2585,14 @@ fn dock_button(ui: &mut egui::Ui, p: &Palette, face: Face, tip: &str, on: bool) 
 }
 
 /// A tile of the quick menu; true when clicked.
-fn tile(ui: &mut egui::Ui, p: &Palette, size: Vec2, label: &str, value: &str, tip: Option<&str>) -> bool {
+fn tile(ui: &mut egui::Ui, p: &Palette, size: Vec2, label: &str, value: &str, tip: Option<&str>, lit: bool) -> bool {
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
     let radius = ui.visuals().window_corner_radius;
     ui.painter().rect_filled(rect, radius, p.panel.gamma_multiply(0.85));
-    let edge = if resp.hovered() {
+    // (the arrows' tile: the hover's edge, brighter)
+    let edge = if lit {
+        p.teal
+    } else if resp.hovered() {
         p.teal.gamma_multiply(0.6)
     } else {
         p.ink.gamma_multiply(0.08)
@@ -2976,5 +3074,33 @@ mod tile_tests {
             supersampling_value(Supersampling::Off, false, (3840, 2160))
         );
         assert_eq!(supersampling_value(Supersampling::X9, true, (100, 100)), "9×");
+    }
+}
+
+#[cfg(test)]
+mod cheat_tests {
+    use super::cheat_fit;
+    use egui::{Pos2, Rect};
+
+    #[test]
+    fn at_the_smallest_window_the_cheat_sheet_stays_above_the_tray_and_the_deck() {
+        // 800 x 560: the time and white balance lines, then the rows from
+        // top + 66 + 2 x 24 + 14
+        let y = 66.0 + 48.0 + 14.0;
+        let tray = Rect::from_min_max(Pos2::new(24.0, 324.0), Pos2::new(136.0, 428.0));
+        let deck = Rect::from_min_max(Pos2::new(58.0, 426.0), Pos2::new(742.0, 490.0));
+        let n = cheat_fit(y, 24.0, 11, &[tray, deck]);
+        assert!(n < 11, "it does not all fit at 560");
+        // the Hide button's line ends above the tray
+        assert!(y + 20.0 * n as f32 + 58.0 <= 324.0);
+        // with a style line too, and the camera pad's tray higher: fewer
+        let pad = Rect::from_min_max(Pos2::new(24.0, 146.0), Pos2::new(300.0, 476.0));
+        assert!(cheat_fit(y + 24.0, 24.0, 11, &[pad]) <= n);
+        // a tall window: everything
+        let tall = Rect::from_min_max(Pos2::new(24.0, 900.0), Pos2::new(136.0, 1000.0));
+        assert_eq!(cheat_fit(y, 24.0, 11, &[tall]), 11);
+        // what is right of the column does not count
+        let right = Rect::from_min_max(Pos2::new(400.0, 150.0), Pos2::new(500.0, 200.0));
+        assert_eq!(cheat_fit(y, 24.0, 11, &[right]), 11);
     }
 }

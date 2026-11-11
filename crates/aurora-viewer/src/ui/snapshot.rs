@@ -853,7 +853,7 @@ impl SnapshotUi {
             tone_ok: view.tone_why.map_or(Ok(()), Err),
         };
         let light_before = self.light;
-        if super::viewfinder::style_rows(ui, p, &mut self.light, &cx, false) {
+        if super::viewfinder::style_rows(ui, p, &mut self.light, &cx, false, None) {
             out.push(Action::KeepStyle);
         }
         if self.light != light_before && !out.contains(&Action::Changed) {

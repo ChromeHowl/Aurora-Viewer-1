@@ -878,6 +878,21 @@ impl App {
         if !self.viewfinder_on() || mods.ctrl || mods.alt {
             return false;
         }
+        // the quick menu, the mode list or a sheet open: the arrows and
+        // Enter are theirs, before any shortcut (the arrows walk by default)
+        let v = &self.snapshots.vf;
+        let open = Open {
+            menu: v.menu,
+            modes: v.sheet == Some(Sheet::Modes),
+            sheet: v.sheet.is_some_and(|s| s != Sheet::Modes),
+        };
+        let route = nav_route(code, open);
+        if route != Nav::Pass {
+            if pressed {
+                self.vf_nav(route, repeat);
+            }
+            return true;
+        }
         if matches!(code, KeyCode::Enter | KeyCode::NumpadEnter) {
             if pressed && !repeat {
                 if let Some(mut gfx) = self.gfx.take() {
@@ -983,9 +998,42 @@ impl App {
 
     /// A shortcut of the viewer uses this key alone.
     fn vf_key_bound(&self, code: KeyCode) -> bool {
-        let input = Input::key(code);
-        let kb = &self.settings.keybinds;
-        kb.triggered(&input, Mods::default()).is_some() || !kb.held_actions_of(&input).is_empty()
+        !vf_key_free(&self.settings.keybinds, code, Mods::default())
+    }
+
+    /// A key of the quick menu, the mode list or a sheet (`nav_route`).
+    fn vf_nav(&mut self, nav: Nav, repeat: bool) {
+        let v = &mut self.snapshots.vf;
+        match nav {
+            Nav::Pass => {}
+            Nav::MoveTile(d) => v.tile_cursor = (v.tile_cursor as i32 + d).max(0) as usize,
+            Nav::StepTile => v.tile_enter |= !repeat,
+            Nav::MoveMode(d) => {
+                let n = self.vf_shot_list().len() as i32;
+                let v = &mut self.snapshots.vf;
+                v.mode_cursor = (v.mode_cursor as i32 + d).rem_euclid(n.max(1)) as usize;
+            }
+            Nav::ChooseMode => {
+                if repeat {
+                    return;
+                }
+                let list = self.vf_shot_list();
+                let Some((choice, why)) = list.get(self.snapshots.vf.mode_cursor).copied() else {
+                    return;
+                };
+                let v = &mut self.snapshots.vf;
+                v.sheet = None;
+                match (choice, why) {
+                    // an empty or lost slot: its sheet, to fill it
+                    (vf::ShotChoice::Bank(i), Some(_)) => v.sheet = Some(Sheet::Bank(i)),
+                    _ => self.vf_shot(choice),
+                }
+            }
+            Nav::Sheet(rows, turn) => {
+                let (r, t) = v.sheet_keys.unwrap_or((0, 0));
+                v.sheet_keys = Some((r + rows, t + turn));
+            }
+        }
     }
 
     /// The keys the help names: the AF mode's, the menu's (Q too when no
@@ -1329,6 +1377,73 @@ fn free_pad_axes(pad: &crate::ui::viewfinder::Pad) -> (egui::Vec2, egui::Vec2, f
     )
 }
 
+/// No shortcut of the viewer uses `code` with `mods` (an exact match, or
+/// with Shift alone an unmodified one, `KeyBindings::triggered`), nor, for
+/// an unmodified key, a held action (the movement keys): the viewfinder may
+/// take it. A user who binds it gets the viewer's action instead.
+fn vf_key_free(kb: &crate::keybinds::KeyBindings, code: KeyCode, mods: Mods) -> bool {
+    let input = Input::key(code);
+    let plain = !mods.ctrl && !mods.alt && !mods.shift;
+    kb.triggered(&input, mods).is_none() && (!plain || kb.held_actions_of(&input).is_empty())
+}
+
+/// What is open over the viewfinder, for the keys.
+#[derive(Debug, Clone, Copy, Default)]
+struct Open {
+    menu: bool,
+    modes: bool,
+    sheet: bool,
+}
+
+/// What a key does while something is open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Nav {
+    /// Not taken: the viewfinder's other keys, then the viewer's.
+    Pass,
+    MoveTile(i32),
+    /// Enter steps the quick menu's tile (never the shutter there).
+    StepTile,
+    MoveMode(i32),
+    ChooseMode,
+    /// A sheet's rows moved, its value turned.
+    Sheet(i32, i32),
+}
+
+/// The arrows and Enter: the quick menu's (9 tiles a row), the mode list's,
+/// a sheet's arrows (Enter stays the shutter there); nothing open, none.
+fn nav_route(code: KeyCode, open: Open) -> Nav {
+    use KeyCode as K;
+    let enter = matches!(code, K::Enter | K::NumpadEnter);
+    if open.menu {
+        return match code {
+            K::ArrowLeft => Nav::MoveTile(-1),
+            K::ArrowRight => Nav::MoveTile(1),
+            K::ArrowUp => Nav::MoveTile(-9),
+            K::ArrowDown => Nav::MoveTile(9),
+            _ if enter => Nav::StepTile,
+            _ => Nav::Pass,
+        };
+    }
+    if open.modes {
+        return match code {
+            K::ArrowUp => Nav::MoveMode(-1),
+            K::ArrowDown => Nav::MoveMode(1),
+            _ if enter => Nav::ChooseMode,
+            _ => Nav::Pass,
+        };
+    }
+    if open.sheet {
+        return match code {
+            K::ArrowUp => Nav::Sheet(-1, 0),
+            K::ArrowDown => Nav::Sheet(1, 0),
+            K::ArrowLeft => Nav::Sheet(0, -1),
+            K::ArrowRight => Nav::Sheet(0, 1),
+            _ => Nav::Pass,
+        };
+    }
+    Nav::Pass
+}
+
 /// What a digit key does in the viewfinder.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Digit {
@@ -1370,6 +1485,73 @@ mod digit_tests {
         assert_eq!(digit_command(1, true), Digit::Bank(0));
         assert_eq!(digit_command(3, true), Digit::Bank(2));
         assert_eq!(digit_command(4, true), Digit::Focal(85.0));
+    }
+}
+
+#[cfg(test)]
+mod key_tests {
+    use super::{KeyCode, Mods, Nav, Open, nav_route, vf_key_free};
+    use crate::keybinds::{Action, Binding, Input, KeyBindings};
+
+    #[test]
+    fn p_b_and_t_are_free_on_default_bindings_and_yield_when_bound() {
+        let mut kb = KeyBindings::default();
+        for code in [KeyCode::KeyP, KeyCode::KeyB, KeyCode::KeyT] {
+            assert!(vf_key_free(&kb, code, Mods::default()), "{code:?}");
+        }
+        kb.set(
+            Action::Fly,
+            1,
+            Some(Binding {
+                input: Input::key(KeyCode::KeyP),
+                ctrl: false,
+                shift: false,
+                alt: false,
+            }),
+        );
+        assert!(!vf_key_free(&kb, KeyCode::KeyP, Mods::default()), "the user's binding wins");
+    }
+
+    #[test]
+    fn the_arrows_are_only_taken_while_something_is_open() {
+        for code in [
+            KeyCode::ArrowUp,
+            KeyCode::ArrowDown,
+            KeyCode::ArrowLeft,
+            KeyCode::ArrowRight,
+            KeyCode::Enter,
+        ] {
+            assert_eq!(
+                nav_route(code, Open::default()),
+                Nav::Pass,
+                "{code:?}: the camera's and the shutter's"
+            );
+        }
+        let modes = Open {
+            modes: true,
+            ..Open::default()
+        };
+        assert_eq!(nav_route(KeyCode::ArrowDown, modes), Nav::MoveMode(1));
+        assert_eq!(nav_route(KeyCode::Enter, modes), Nav::ChooseMode);
+        let sheet = Open {
+            sheet: true,
+            ..Open::default()
+        };
+        assert_eq!(nav_route(KeyCode::ArrowRight, sheet), Nav::Sheet(0, 1));
+        assert_eq!(nav_route(KeyCode::Enter, sheet), Nav::Pass, "Enter stays the shutter over a sheet");
+    }
+
+    #[test]
+    fn enter_with_the_menu_open_steps_the_tile_not_the_shutter() {
+        let menu = Open {
+            menu: true,
+            ..Open::default()
+        };
+        assert_eq!(nav_route(KeyCode::Enter, menu), Nav::StepTile);
+        assert_eq!(nav_route(KeyCode::NumpadEnter, menu), Nav::StepTile);
+        assert_eq!(nav_route(KeyCode::ArrowDown, menu), Nav::MoveTile(9));
+        // closed: Enter goes on to the two-stage shutter (`vf_half_press`)
+        assert_eq!(nav_route(KeyCode::Enter, Open::default()), Nav::Pass);
     }
 }
 

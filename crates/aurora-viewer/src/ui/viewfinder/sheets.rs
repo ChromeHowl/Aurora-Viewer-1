@@ -100,6 +100,25 @@ impl Viewfinder {
     ) {
         let title = format!("C{}", slot + 1);
         let mut edits = Vec::new();
+        // the keys: Save here, the profile pinned (Left / Right through
+        // them), Unpin
+        let (row, turn) = self.sheet_nav(3);
+        if turn != 0 {
+            match row {
+                0 => edits.push(BankEdit::SaveHere),
+                1 => {
+                    let names: Vec<&String> = s.profiles.keys().collect();
+                    if !names.is_empty() {
+                        let at = names
+                            .iter()
+                            .position(|n| bank.name.as_deref() == Some(n.as_str()))
+                            .map_or(0, |i| i as i32 + turn);
+                        edits.push(BankEdit::Pin(names[at.rem_euclid(names.len() as i32) as usize].clone()));
+                    }
+                }
+                _ => edits.push(BankEdit::Unpin),
+            }
+        }
         let name_field = &mut self.bank_name;
         let open = sheet(ctx, p, screen, "vf_bank_sheet", "bookmarks", &title, |ui| {
             ui.spacing_mut().item_spacing.y = 6.0;
@@ -162,6 +181,27 @@ impl Viewfinder {
     /// The guide's look: which guide, the spiral's corner, its colour (or
     /// the theme's) and the width of its lines.
     pub(super) fn guide_sheet(&mut self, ctx: &egui::Context, p: &Palette, screen: Rect, s: &mut Settings) {
+        // the keys: the guide, its colour (the theme's or its own), the
+        // width, the spiral's corner
+        let (row, turn) = self.sheet_nav(if s.guide == Guide::Spiral { 4 } else { 3 });
+        if turn != 0 {
+            match row {
+                0 => {
+                    let all: Vec<Guide> = std::iter::once(Guide::None).chain(Guide::ALL).collect();
+                    let at = all.iter().position(|g| *g == s.guide).map_or(0, |i| i as i32 + turn);
+                    s.guide = all[at.rem_euclid(all.len() as i32) as usize];
+                }
+                1 => s.extras.guide_color = s.extras.guide_color.xor(Some([255, 255, 0, 128])),
+                2 => s.extras.guide_width = next_preset(s.extras.guide_width, &GUIDE_WIDTHS),
+                _ => {
+                    let at = Corner::ALL
+                        .iter()
+                        .position(|c| *c == s.extras.guide_corner)
+                        .map_or(0, |i| i as i32 + turn);
+                    s.extras.guide_corner = Corner::ALL[at.rem_euclid(4) as usize];
+                }
+            }
+        }
         let open = sheet(
             ctx,
             p,
@@ -233,6 +273,15 @@ impl Viewfinder {
     /// bokeh fringe (global settings, shown here too).
     pub(super) fn lens_sheet(&mut self, ctx: &egui::Context, p: &Palette, screen: Rect, f: &Frame, out: &mut Vec<Out>) {
         let (front, fringe) = f.lens_extras;
+        // the keys: front blur, the fringe
+        let (row, turn) = self.sheet_nav(2);
+        if turn != 0 {
+            out.push(Out::Lens(if row == 0 {
+                LensEdit::FrontBlur(!front)
+            } else {
+                LensEdit::Fringe(next_preset(fringe, &FRINGES))
+            }));
+        }
         let open = sheet(
             ctx,
             p,

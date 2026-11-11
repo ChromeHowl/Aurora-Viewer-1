@@ -161,9 +161,9 @@ pub struct StyleContext<'a> {
 }
 
 /// A row of a value in steps with − and +; the step asked.
-fn stepper(ui: &mut egui::Ui, p: &Palette, label: &str, value: String) -> i32 {
+fn stepper(ui: &mut egui::Ui, p: &Palette, label: &str, value: String) -> (i32, egui::Rect) {
     let mut dir = 0;
-    ui.horizontal(|ui| {
+    let r = ui.horizontal(|ui| {
         ui.label(egui::RichText::new(label).color(p.ink));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if crate::ui::widgets::icon_button(ui, p, "plus", aurora_i18n::tr!("photo-vf-ring-more"), true) {
@@ -178,7 +178,43 @@ fn stepper(ui: &mut egui::Ui, p: &Palette, label: &str, value: String) -> i32 {
             }
         });
     });
-    dir
+    (dir, r.response.rect)
+}
+
+/// The rows of the Style sheet the keys reach: the style, the white
+/// balance, the four fine-tuning rows and the tint.
+pub(super) const STYLE_ROWS: usize = 7;
+
+/// Left / Right on a row of the Style sheet: the next style (the curves
+/// skipped while tone mapping does nothing) or preset, a step of the rest.
+fn style_key(light: &mut crate::snapshot::light::PhotoLight, cx: &StyleContext, row: usize, turn: i32) {
+    let prefs = cx.prefs_grade;
+    if turn == 0 {
+        return;
+    }
+    match row {
+        0 => {
+            let all: Vec<style::Style> = std::iter::once(style::Style::AsViewer)
+                .chain(style::STYLES.iter().map(|(s, _, _)| *s).filter(|_| cx.tone_ok.is_ok()))
+                .collect();
+            let at = all
+                .iter()
+                .position(|s| *s == style::matching(light, prefs))
+                .map_or(0, |i| i as i32 + turn);
+            style::apply_style(light, prefs, all[at.rem_euclid(all.len() as i32) as usize]);
+        }
+        1 => {
+            let at = style::wb_of(light, prefs)
+                .and_then(|w| Wb::ALL.iter().position(|x| *x == w))
+                .map_or(0, |i| i as i32 + turn);
+            style::set_wb(light, prefs, Wb::ALL[at.rem_euclid(Wb::ALL.len() as i32) as usize]);
+        }
+        2..=5 => style::fine_step(light, prefs, style::Fine::ALL[row - 2], turn),
+        _ => {
+            let g = style::grade(light, prefs);
+            style::set_tint(light, prefs, style::step(g.tint, -turn));
+        }
+    }
 }
 
 /// The photo's picture style: its chips (the curves greyed with the reason
@@ -187,10 +223,30 @@ fn stepper(ui: &mut egui::Ui, p: &Palette, label: &str, value: String) -> i32 {
 /// to viewer" and "Keep this look". The viewfinder's Style sheet and the
 /// photo window's row (both interface styles) draw the same rows; true
 /// when "Keep this look" was clicked.
-pub fn style_rows(ui: &mut egui::Ui, p: &Palette, light: &mut crate::snapshot::light::PhotoLight, cx: &StyleContext, fine: bool) -> bool {
+pub fn style_rows(
+    ui: &mut egui::Ui,
+    p: &Palette,
+    light: &mut crate::snapshot::light::PhotoLight,
+    cx: &StyleContext,
+    fine: bool,
+    keys: Option<(usize, i32)>,
+) -> bool {
     let prefs = cx.prefs_grade;
+    // the keys: the row they are on marked, Left / Right its value
+    if let Some((row, turn)) = keys {
+        style_key(light, cx, row, turn);
+    }
+    let lit = |ui: &egui::Ui, r: egui::Rect, row: usize| {
+        if keys.is_some_and(|(k, _)| k == row) {
+            let bar = egui::Rect::from_min_max(
+                egui::Pos2::new(r.left() - 8.0, r.top()),
+                egui::Pos2::new(r.left() - 5.0, r.bottom()),
+            );
+            ui.painter().rect_filled(bar, 0.0, p.teal);
+        }
+    };
     let now = style::matching(light, prefs);
-    ui.horizontal_wrapped(|ui| {
+    let r = ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = egui::Vec2::splat(4.0);
         let all = std::iter::once(style::Style::AsViewer).chain(style::STYLES.iter().map(|(s, _, _)| *s));
         for st in all {
@@ -209,7 +265,8 @@ pub fn style_rows(ui: &mut egui::Ui, p: &Palette, light: &mut crate::snapshot::l
             crate::ui::snapshot::chip(ui, p, style_label(style::Style::Custom), None, true, false);
         }
     });
-    ui.horizontal_wrapped(|ui| {
+    lit(ui, r.response.rect, 0);
+    let r = ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = egui::Vec2::splat(4.0);
         let wb = style::wb_of(light, prefs);
         for w in Wb::ALL {
@@ -221,15 +278,18 @@ pub fn style_rows(ui: &mut egui::Ui, p: &Palette, light: &mut crate::snapshot::l
             }
         }
     });
+    lit(ui, r.response.rect, 1);
     if fine {
-        for row in style::Fine::ALL {
-            let dir = stepper(ui, p, fine_label(row), signed(row.steps(light, prefs)));
+        for (k, row) in style::Fine::ALL.into_iter().enumerate() {
+            let (dir, rect) = stepper(ui, p, fine_label(row), signed(row.steps(light, prefs)));
+            lit(ui, rect, 2 + k);
             if dir != 0 {
                 style::fine_step(light, prefs, row, dir);
             }
         }
         let g = style::grade(light, prefs);
-        let dir = stepper(ui, p, aurora_i18n::tr!("pcu-fine-tint"), signed(-style::steps(g.tint)));
+        let (dir, rect) = stepper(ui, p, aurora_i18n::tr!("pcu-fine-tint"), signed(-style::steps(g.tint)));
+        lit(ui, rect, 6);
         if dir != 0 {
             // (the row counts green: more green, less tint)
             style::set_tint(light, prefs, style::step(g.tint, -dir));
@@ -278,6 +338,7 @@ impl Viewfinder {
             prefs_grade: &f.prefs_grade,
             tone_ok: f.tone_ok.map_or(Ok(()), Err),
         };
+        let keys = Some(self.sheet_nav(STYLE_ROWS));
         let open = super::sheets::sheet(
             ctx,
             p,
@@ -287,7 +348,7 @@ impl Viewfinder {
             aurora_i18n::tr!("pcu-style-title"),
             |ui| {
                 ui.spacing_mut().item_spacing.y = 6.0;
-                keep = style_rows(ui, p, &mut panel.light, &cx, true);
+                keep = style_rows(ui, p, &mut panel.light, &cx, true, keys);
             },
         );
         if keep {
