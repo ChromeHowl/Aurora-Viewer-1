@@ -202,7 +202,17 @@ fn parse_fps_limit(value: &str) -> Option<u32> {
 /// The window title, ending with the build profile ("(Dev)", "(Release)",
 /// "(Debug)"): test windows of different builds can be told apart.
 pub fn window_title() -> String {
-    title_with(get().title.as_deref(), env!("AURORA_BUILD_PROFILE"), aurora_version::version())
+    let title = title_with(get().title.as_deref(), env!("AURORA_BUILD_PROFILE"), aurora_version::version());
+    with_personal_build(title, crate::updater::personal_build())
+}
+
+/// A personal build (`AURORA_PERSONAL_BUILD`) names itself in the title,
+/// so that it is never taken for an official Aurora Viewer.
+fn with_personal_build(title: String, label: Option<&str>) -> String {
+    match label {
+        Some(label) => format!("{title} [{label}]"),
+        None => title,
+    }
 }
 
 /// The viewer's identity on the Linux desktop: Wayland app_id, X11
@@ -317,6 +327,15 @@ mod tests {
             title_with(None, "debug", "0.2.0+7.gabcdef123"),
             aurora_i18n::tr!("cli-aurora-viewer", version = "0.2.0+7.gabcdef123 (Dev)").as_str()
         );
+    }
+
+    #[test]
+    fn a_personal_build_names_itself_in_the_title() {
+        assert_eq!(
+            with_personal_build("Aurora Viewer 0.2.0 (Release)".into(), Some("FireDragon build")),
+            "Aurora Viewer 0.2.0 (Release) [FireDragon build]"
+        );
+        assert_eq!(with_personal_build("Aurora Viewer 0.2.0".into(), None), "Aurora Viewer 0.2.0");
     }
 
     #[test]

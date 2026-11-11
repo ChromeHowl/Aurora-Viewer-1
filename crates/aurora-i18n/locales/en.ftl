@@ -15044,3 +15044,4 @@ sr-state-off = Shown (off)
 sr-state-shown = In range: shown
 sr-state-hidden = Hidden
 sr-remove = Remove
+update-personal-build = This is a personal build ({ $label }), built on this PC from its source code. It does not follow the official Aurora Viewer releases: to update it, use the "Update" shortcut in the Start menu.

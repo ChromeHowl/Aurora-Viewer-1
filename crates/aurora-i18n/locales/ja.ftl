@@ -14992,3 +14992,4 @@ sr-state-off = 表示中（無効）
 sr-state-shown = 範囲内：表示中
 sr-state-hidden = 非表示
 sr-remove = 削除
+update-personal-build = これは個人ビルド（{ $label }）で、このＰＣでソースコードからビルドされています。Auroraビューアの公式リリースには従いません。更新するには、スタートメニューの「Update」ショートカットを使ってください。

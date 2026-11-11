@@ -1713,6 +1713,7 @@ aurora-viewer/                  git repository (GitHub: Aurora-Viewer/Aurora-Vie
 ├─ crates/                      the code (see below)
 ├─ docs/                        BRANDING.md, TESTING.md (`AURORA_*` test options, profiling), README screenshots (`screenshots/`), README buttons and "Soon" pill (`readme/`)
 ├─ fuzz/                        fuzzing of the readers of untrusted data (its own workspace, outside the build): targets (`src/lib.rs`), stable runner `fuzz-local` (`src/main.rs`), libFuzzer binaries (`fuzz_targets/`), run nightly by `.github/workflows/fuzz.yml`
+├─ installer/                   Windows installer of the personal FireDragon build (docs/INSTALLER.md): Inno Setup script `AuroraFD.iss`, and `engine/Update.ps1` (Windows PowerShell 5.1), which installs the build tools, builds the fork on the user's PC and installs or updates the viewer; compiled by `.github/workflows/installer.yml`
 ├─ news/                        news of the login screen, written by hand: fr.md, en.md (read on `main` by the viewer, and compiled into it)
 ├─ packaging/linux/            desktop entry of the Linux archive (`aurora-viewer.desktop`; its icon is the colour logo of `assets/branding/`)
 ├─ packaging/macos/            `Info.plist` of `Aurora Viewer.app` (its texts translated in `*.lproj/InfoPlist.strings`) and the entitlements of its hardened runtime; `scripts/package-macos.ps1` builds the bundle, the release signs it

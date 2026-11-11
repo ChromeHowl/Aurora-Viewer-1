@@ -15043,3 +15043,4 @@ sr-state-off = Visible (désactivé)
 sr-state-shown = À portée : visible
 sr-state-hidden = Masqué
 sr-remove = Retirer
+update-personal-build = Ceci est une version personnelle ({ $label }), construite sur ce PC à partir de son code source. Elle ne suit pas les versions officielles d’Aurora Viewer : pour la mettre à jour, utilisez le raccourci « Update » du menu Démarrer.

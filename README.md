@@ -1201,6 +1201,12 @@ number. A source archive without Git can be built with
 `0.0.0+0.gunknown`. The Release workflow checks the version announced by the
 exe before publishing; the local build also writes it to `version.txt`.
 
+A **personal build** sets `AURORA_PERSONAL_BUILD=<label>` at build time (the
+Windows installer of [docs/INSTALLER.md](docs/INSTALLER.md) does): the label
+ends the window title (`[FireDragon build]`), and the in-viewer updater stays
+off whatever the version, so an official release never replaces that build;
+Preferences › Language and updates says to use its own Update shortcut.
+
 ### Command line
 
 | Argument | Effect |

@@ -1,0 +1,44 @@
+About FireDragon Aurora
+=======================
+
+FireDragon Aurora is a personal build of Aurora Viewer, a free viewer for
+Second Life, with the FireDragon changes of the fork
+https://github.com/ChromeHowl/Aurora-Viewer-1 .
+
+- It is NOT an official Aurora Viewer release, and it is not made or
+  supported by the Aurora Viewer team. Official builds come only from
+  aurora-viewer.org and github.com/Aurora-Viewer/Aurora-Viewer/releases.
+  Please report problems with this build to whoever gave it to you, not to
+  the Aurora Viewer team.
+
+- Like Aurora Viewer, it is a third-party viewer, not provided or supported
+  by Linden Lab, the makers of Second Life. Using any viewer on Second Life
+  is subject to Linden Lab's Terms of Service and its Third Party Viewer
+  Policy.
+
+What Setup does
+---------------
+
+This installer contains no viewer program. It builds the viewer on this
+PC, from the public source code:
+
+1. It checks for the free tools the build needs and, after asking you,
+   installs the missing ones from their official websites: the Visual
+   Studio 2022 C++ build tools (Microsoft), Rust (rust-lang.org) and Git
+   (git-for-windows on GitHub).
+2. It downloads the latest code of the fork.
+3. It builds the viewer: 20-60 minutes the first time, with about 20 GB
+   of free disk space. A window shows each step and the time spent.
+4. It installs the viewer, with Start menu and desktop shortcuts.
+
+Later, "Update FireDragon Aurora" in the Start menu gets and builds the
+latest version the same way, and keeps the previous version until the new
+one works.
+
+Your settings
+-------------
+
+The viewer keeps its settings, chat logs and cache in the same folders as
+Aurora Viewer (%APPDATA%\Aurora and %LOCALAPPDATA%\Aurora). If you also
+use the official Aurora Viewer on this PC, both share them. Uninstalling
+never deletes them unless you ask for it.
