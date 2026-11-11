@@ -15026,3 +15026,4 @@ pcu-help-t = Picture style sheet
 pcu-help-arrows = Arrows, Enter
 pcu-help-arrows-text = In the quick menu, the mode list or a sheet: move, change (Enter steps the tile or chooses the mode)
 pcu-cheat-pbt = shot mode · white balance · style
+update-personal-build = This is a personal build ({ $label }), built on this PC from its source code. It does not follow the official Aurora Viewer releases: to update it, use the "Update" shortcut in the Start menu.

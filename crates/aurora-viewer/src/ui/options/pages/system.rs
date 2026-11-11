@@ -36,6 +36,12 @@ pub fn page(cx: &mut Cx) {
             });
     });
     cx.group(tr!("update-settings"), |cx| {
+        // a personal build is updated by its own shortcut, never by the
+        // official releases (updater::official_updates)
+        if let Some(label) = crate::updater::personal_build() {
+            cx.note(&tr!("update-personal-build", label = label.to_owned()));
+            return;
+        }
         use crate::updater::Mode;
         cx.combo(
             tr!("update-settings"),

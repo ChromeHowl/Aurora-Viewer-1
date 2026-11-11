@@ -161,7 +161,21 @@ pub struct Updater {
 pub fn checks_enabled() -> bool {
     std::env::var_os("AURORA_DEMO").is_none()
         && (aurora_updater::test_environment().is_some()
-            || (env!("AURORA_BUILD_PROFILE") == "release" && published_version(aurora_version::version())))
+            || official_updates(env!("AURORA_BUILD_PROFILE"), aurora_version::version(), personal_build()))
+}
+
+/// The label of a personal build, built from source by the Windows
+/// installer of `installer/` (`AURORA_PERSONAL_BUILD`, see build.rs).
+pub fn personal_build() -> Option<&'static str> {
+    Some(env!("AURORA_PERSONAL_BUILD")).filter(|label| !label.is_empty())
+}
+
+/// Whether this build follows the official releases: a published version
+/// built in release. A personal build never does, whatever its version:
+/// its own "Update" shortcut rebuilds it, and an official package would
+/// replace it.
+fn official_updates(profile: &str, version: &str, personal: Option<&str>) -> bool {
+    personal.is_none() && profile == "release" && published_version(version)
 }
 
 /// A version the Release workflow published: a stable one, or a beta. A
@@ -604,6 +618,16 @@ mod tests {
         ] {
             assert_eq!(published_version(version), checks, "{version}");
         }
+    }
+
+    #[test]
+    fn a_personal_build_never_follows_the_official_releases() {
+        // even at an exact release tag, in release
+        assert!(official_updates("release", "0.7.6", None));
+        assert!(!official_updates("release", "0.7.6", Some("FireDragon build")));
+        assert!(!official_updates("release", "0.7.7-beta.20261025.1", Some("FireDragon build")));
+        assert!(!official_updates("release", "0.7.6+3.gabcdef123", Some("FireDragon build")));
+        assert!(!official_updates("debug", "0.7.6", None));
     }
 
     fn release(tag: &str, required: bool) -> Release {

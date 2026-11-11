@@ -14974,3 +14974,4 @@ pcu-help-t = ピクチャースタイルのシート
 pcu-help-arrows = 矢印キー、Enter
 pcu-help-arrows-text = クイックメニュー、モード一覧、シートで：移動、変更（Enter でタイルを進めるかモードを選択）
 pcu-cheat-pbt = 撮影モード · ホワイトバランス · スタイル
+update-personal-build = これは個人ビルド（{ $label }）で、このＰＣでソースコードからビルドされています。Auroraビューアの公式リリースには従いません。更新するには、スタートメニューの「Update」ショートカットを使ってください。
