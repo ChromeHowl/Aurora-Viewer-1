@@ -122,6 +122,9 @@ struct Frame {
 // emissive; blended and HUD faces keep it (pbralphaF, pbropaqueF IS_HUD)
 const FEATURE_NO_EMISSIVE: u32 = 1u;
 
+// frame.features.x: opaque water (RenderTransparentWater off, env.wgsl)
+const FEATURE_OPAQUE_WATER: u32 = 2u;
+
 fn deferred_emissive_off() -> bool {
     return (frame.features.x & FEATURE_NO_EMISSIVE) != 0u;
 }

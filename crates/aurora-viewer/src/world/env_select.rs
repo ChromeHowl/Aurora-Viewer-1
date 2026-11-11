@@ -203,6 +203,12 @@ impl SettingsCatalog {
     }
 }
 
+/// The skies made for PBR listed first, each group keeping its order (a
+/// stable sort): `pbr` tells the settings assets known to be.
+pub fn pbr_first(list: &mut [SettingsChoice], pbr: impl Fn(&Uuid) -> bool) {
+    list.sort_by_key(|c| !pbr(&c.asset));
+}
+
 /// Queue the next folder fetches of the selector's scan; returns how many
 /// folders are still to load (0: the lists are complete).
 pub fn scan_step(inv: &mut Inventory) -> usize {
@@ -294,6 +300,24 @@ pub fn matching<'a>(list: &'a [SettingsChoice], query: &str) -> Vec<&'a Settings
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn pbr_skies_come_first_in_their_order() {
+        let c = |n: u128| SettingsChoice {
+            item: Uuid::from_u128(n),
+            name: n.to_string(),
+            asset: Uuid::from_u128(n + 100),
+        };
+        let mut list = vec![c(1), c(2), c(3), c(4)];
+        let pbr = [Uuid::from_u128(103), Uuid::from_u128(104)];
+        pbr_first(&mut list, |a| pbr.contains(a));
+        let names: Vec<&str> = list.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["3", "4", "1", "2"]);
+        pbr_first(&mut list, |_| false);
+        let names: Vec<&str> = list.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["3", "4", "1", "2"], "nothing known: the order stays");
+    }
+
     use super::*;
     use aurora_net::inventory::InvFolder;
 

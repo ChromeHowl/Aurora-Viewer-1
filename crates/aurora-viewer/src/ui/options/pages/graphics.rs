@@ -532,6 +532,18 @@ fn quality(cx: &mut Cx) {
                 tr!("ui-options-friends-only"),
             ],
         );
+        cx.keywords("FSImpostorAvatarExclude animesh").toggle(
+            tr!("rphoto-impostor-exclude"),
+            tr!("rphoto-impostor-exclude-help"),
+            &field!(render_photo.impostor_exclude_animesh),
+        );
+        cx.keywords("PrecachingDelay login").slider_whole(
+            tr!("rphoto-precaching"),
+            tr!("rphoto-precaching-help"),
+            &field!(render_photo.precaching_delay),
+            crate::settings::render_photo::PRECACHING_RANGE,
+            " s",
+        );
         cx.toggle(
             tr!("ui-options-avatar-physics"),
             tr!("ui-options-avatar-physics-help"),
@@ -567,6 +579,78 @@ fn quality(cx: &mut Cx) {
         );
     });
     rendering_types(cx);
+    autotune(cx);
+}
+
+/// The auto-tune to a target frame rate (the Legacy Viewer's performance
+/// window: TargetFPS, AutoTuneFPS, AutoTuneLock, TuningFPSStrategy and the
+/// AutoTune* distances).
+fn autotune(cx: &mut Cx) {
+    use crate::settings::render_photo::{Strategy, TARGET_FPS_RANGE};
+    use aurora_i18n::tr;
+    cx.group(tr!("rphoto-autotune"), |cx| {
+        cx.keywords("AutoTuneFPS").toggle(
+            tr!("rphoto-autotune-enable"),
+            tr!("rphoto-autotune-enable-help"),
+            &field!(render_photo.autotune.enabled),
+        );
+        cx.keywords("TargetFPS").slider(
+            tr!("rphoto-autotune-target"),
+            tr!("rphoto-autotune-target-help"),
+            &field!(render_photo.autotune.target_fps),
+            TARGET_FPS_RANGE,
+            "",
+        );
+        cx.keywords("AutoTuneLock").toggle(
+            tr!("rphoto-autotune-lock"),
+            tr!("rphoto-autotune-lock-help"),
+            &field!(render_photo.autotune.lock),
+        );
+        cx.keywords("KeepAutoTuneLock").toggle(
+            tr!("rphoto-autotune-keep-lock"),
+            tr!("rphoto-autotune-keep-lock-help"),
+            &field!(render_photo.autotune.keep_lock),
+        );
+        cx.keywords("TuningFPSStrategy").combo(
+            tr!("rphoto-autotune-strategy"),
+            tr!("rphoto-autotune-strategy-help"),
+            &field!(render_photo.autotune.strategy),
+            &[
+                (Strategy::Avatars, tr!("rphoto-autotune-avatars")),
+                (Strategy::Both, tr!("rphoto-autotune-both")),
+                (Strategy::Scene, tr!("rphoto-autotune-scene")),
+            ],
+        );
+        cx.keywords("AutoTuneRenderFarClipMin").slider_whole(
+            tr!("rphoto-autotune-dd-min"),
+            tr!("rphoto-autotune-dd-min-help"),
+            &field!(render_photo.autotune.draw_distance_min),
+            32.0..=512.0,
+            " m",
+        );
+        cx.keywords("AutoTuneRenderFarClipTarget").slider_whole(
+            tr!("rphoto-autotune-dd-target"),
+            tr!("rphoto-autotune-dd-target-help"),
+            &field!(render_photo.autotune.draw_distance_target),
+            32.0..=1024.0,
+            " m",
+        );
+        cx.keywords("AutoTuneImpostorByDistEnabled").toggle(
+            tr!("rphoto-autotune-by-distance"),
+            tr!("rphoto-autotune-by-distance-help"),
+            &field!(render_photo.autotune.impostor_by_distance),
+        );
+        let off = !cx.s.render_photo.autotune.impostor_by_distance;
+        cx.subs(off, |cx| {
+            cx.keywords("AutoTuneImpostorFarAwayDistance").slider_whole(
+                tr!("rphoto-autotune-distance"),
+                tr!("rphoto-autotune-distance-help"),
+                &field!(render_photo.autotune.impostor_distance),
+                16.0..=256.0,
+                " m",
+            );
+        });
+    });
 }
 
 fn light(cx: &mut Cx) {
@@ -1132,6 +1216,11 @@ fn depth_of_field(cx: &mut Cx) {
                     plain_slider(ui, &mut s.render_extras.dof_dispersion, DISPERSION_RANGE, "", 2)
                 },
             );
+            cx.keywords("RenderDepthOfFieldAlphas transparent").toggle(
+                tr!("rphoto-dof-alphas"),
+                tr!("rphoto-dof-alphas-help"),
+                &field!(render_photo.dof_alphas),
+            );
         });
     });
 }
@@ -1236,6 +1325,21 @@ fn rendering_types(cx: &mut Cx) {
         ] {
             cx.keywords("Rendering Types").toggle(label, session, &f);
         }
+        cx.keywords("RenderEnableAlpha transparency").toggle(
+            tr!("rphoto-view-transparency"),
+            tr!("rphoto-view-transparency-help"),
+            &field!(render_photo.view.transparency),
+        );
+        cx.keywords("RenderEnableFullbright").toggle(
+            tr!("rphoto-view-fullbright"),
+            tr!("rphoto-view-fullbright-help"),
+            &field!(render_photo.view.fullbright),
+        );
+        cx.keywords("RenderTransparentWater opaque").toggle(
+            tr!("rphoto-transparent-water"),
+            tr!("rphoto-transparent-water-help"),
+            &field!(render_photo.transparent_water),
+        );
         cx.keywords("RenderDisablePostProcessing").toggle(
             tr!("gfx-extras-post-processing"),
             tr!("gfx-extras-post-processing-help"),

@@ -975,6 +975,9 @@ struct Pipelines {
     pre_contact: SidedPipelines,
     /// `pre_contact` with GTAO's mesh normals, into the occlusion's depth.
     pre_contact_normal: SidedPipelines,
+    /// The blended faces from 0.33 of alpha into the depth of field's
+    /// depth (LLDrawPoolAlpha::renderPostDeferred, setMinimumAlpha(0.33)).
+    dof_alpha_depth: SidedPipelines,
     /// FSR only (`AURORA_FSR=1`): the blended faces covered from
     /// `FSR_BLEND_ALPHA`, with their motion, into the occlusion's depth
     /// once the occlusion and the contact shadows have read it.
@@ -1707,6 +1710,9 @@ pub(crate) struct Backend {
     glow: Glow,
     /// Depth of field, made the first time it is on.
     dof: Option<crate::dof::Dof>,
+    /// The scene's depth with the blended faces for the depth of field
+    /// (`DepthOfField::alphas`), made while it is asked.
+    dof_alpha_depth: Option<(wgpu::Texture, wgpu::TextureView)>,
     /// The photo's look, made the first time one is on.
     looks: Option<crate::looks::Looks>,
     rlva_spheres: Option<crate::rlva::Spheres>,
@@ -3519,6 +3525,7 @@ impl Backend {
             shadow_sampler,
             glow,
             dof: None,
+            dof_alpha_depth: None,
             looks: None,
             rlva_spheres: None,
             motion_debug,
@@ -4170,6 +4177,14 @@ impl Backend {
         // refraction and fog (with MSAA the scene pass writes another)
         // (culled as their colour pass: a face seen from behind, which draws
         // no colour, must not give the water a depth either)
+        let dof_alpha_depth = sided_pipe(PipeDesc {
+            fs: Some("fs_depth_contact"),
+            samples: 1,
+            format: None,
+            depth_compare: wgpu::CompareFunction::Greater,
+            constants: &[("DEPTH_CONTACT_ALPHA", 0.33)],
+            ..base("dof blended depth", "vs_main", "fs_opaque")
+        });
         let blend_under_depth_ss = sided_pipe(PipeDesc {
             fs: Some("fs_depth_contact"),
             samples: 1,
@@ -4460,6 +4475,7 @@ impl Backend {
             pre_normal_portal,
             pre_contact,
             pre_contact_normal,
+            dof_alpha_depth,
             fsr_blend_normal,
             pre_msaa,
             refl_sky,
@@ -5868,7 +5884,7 @@ impl Backend {
         u.sky_stars = s.stars.uniform();
         u.sky_star_pass = [0.0; 4];
         // (common.wgsl FEATURE_NO_EMISSIVE)
-        u.features[0] = if self.settings.hdr { 0 } else { 1 };
+        u.features[0] = if self.settings.hdr { 0 } else { 1 } | if f.opaque_water { 2 } else { 0 };
         for (i, m) in cascades.iter().enumerate() {
             u.cascade_vp[i] = m.to_cols_array_2d();
         }
@@ -8998,6 +9014,55 @@ impl Backend {
             world_size,
             unjittered_vp.inverse(),
         );
+        // ---- the depth of field's depth with the blended faces opaque
+        // enough, from 0.33 of alpha (LLDrawPoolAlpha::renderPostDeferred's
+        // last pass, while the depth of field is on): a copy, so that
+        // nothing else reading the scene's depth sees them. Not with FSR,
+        // whose display depth already holds the blended faces.
+        let dof_alphas = f.dof.as_ref().is_some_and(|d| d.alphas) && n_blend > 0 && self.taa.as_ref().is_none_or(|t| t.fsr.is_none());
+        if dof_alphas {
+            let size = self.targets.depth_ss_tex.size();
+            if self.dof_alpha_depth.as_ref().is_none_or(|(t, _)| t.size() != size) {
+                self.dof_alpha_depth = None;
+                let (made, refused) = crate::gpu_alloc::scoped(&self.device, || {
+                    make_view(
+                        &self.device,
+                        "dof blended depth",
+                        size.width,
+                        size.height,
+                        DEPTH_FORMAT,
+                        1,
+                        wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_DST,
+                    )
+                });
+                if !refused {
+                    self.dof_alpha_depth = Some(made);
+                }
+            }
+            if let Some((tex, view)) = &self.dof_alpha_depth {
+                encoder.copy_texture_to_texture(self.targets.depth_ss_tex.as_image_copy(), tex.as_image_copy(), size);
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("dof blended depth"),
+                    color_attachments: &[],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                bind_mesh(&mut pass, &self.groups.a);
+                draw_sided(&mut pass, &self.pipelines.dof_alpha_depth, rg.blend, 0);
+                draw_under(&mut pass, &self.pipelines.dof_alpha_depth, rg.blend_under);
+            }
+        } else if f.dof.is_none() {
+            self.dof_alpha_depth = None;
+        }
         let enc_scene = std::mem::replace(
             &mut encoder,
             self.device
@@ -9101,12 +9166,16 @@ impl Backend {
                 ) =>
             {
                 let dof = self.dof.as_mut().expect("made by dof_targets");
+                let dof_depth = match &self.dof_alpha_depth {
+                    Some((_, view)) if dof_alphas => view,
+                    _ => post_depth,
+                };
                 post_bg = dof.encode(
                     &self.device,
                     &self.queue,
                     &mut encoder,
                     post_src,
-                    post_depth,
+                    dof_depth,
                     f.proj,
                     post_size,
                     params,
