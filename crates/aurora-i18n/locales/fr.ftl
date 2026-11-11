@@ -15092,3 +15092,12 @@ sr-state-off = Visible (désactivé)
 sr-state-shown = À portée : visible
 sr-state-hidden = Masqué
 sr-remove = Retirer
+# Sécurité des photos : ce que la dernière photo contient des effets de l’écran
+ss-effect-bloom = Bloom
+ss-effect-dof = Profondeur de champ
+ss-effect-ao = Occlusion ambiante
+ss-effect-contact = Ombres de contact
+ss-not-applied-parts = { $effect } : non appliqué (la photo a été rendue en plusieurs parties)
+ss-not-applied-screen = { $effect } : non appliqué (absent de l’écran)
+ss-unverified = { $effect } : non vérifié là où les parties de la photo se rejoignent
+ss-and-more = { $first } (et { $count } de plus)

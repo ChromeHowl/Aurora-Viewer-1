@@ -29,10 +29,11 @@ const ANIM_AGENT_SNAPSHOT: Uuid = Uuid::from_u128(0xeae8905b_271a_99e2_4c0e_3110
 const PREVIEW_SIDE: u32 = 720;
 /// The preview follows the camera once it has been still this long.
 const SETTLE: Duration = Duration::from_millis(250);
-/// How long a part of a photo waits for a render thread still busy with
-/// the frame before (a pipeline made for the photo quality, a slow part)
-/// before the photo is given up: far past any frame, short of forever.
-const PHOTO_WAIT: Duration = Duration::from_secs(30);
+/// A part of a photo still waiting for the render thread (a pipeline made
+/// for the photo quality, a slow part) after this long is logged. It is
+/// never given up for being slow: only a lost GPU or a render thread gone
+/// ends it (a photo of minutes must not be thrown away near its end).
+const PART_WAIT_WARN: Duration = Duration::from_secs(60);
 /// Bytes a photo may take when the driver does not report its memory.
 const DEFAULT_TARGET_BYTES: u64 = 1_600_000_000;
 
@@ -89,6 +90,15 @@ struct PanoRun {
     frozen: bool,
 }
 
+/// How far the effects that are on read around a pixel, in the pixels
+/// drawn (`App::photo_reach`).
+#[derive(Debug, Clone, Copy)]
+struct PhotoReach {
+    bloom: Option<u32>,
+    dof: Option<u32>,
+    contact: Option<u32>,
+}
+
 /// The side of an outfit's picture as it is drawn, reduced to 256 afterwards.
 pub(super) const OUTFIT_PHOTO_SIDE: u32 = 512;
 /// The side of the auto portrait's live preview.
@@ -142,9 +152,13 @@ struct Job {
     /// The current tile's frame is asked.
     asked: bool,
     /// Frames the current tile waited for the render thread (said once),
-    /// since when.
+    /// since when, and whether that wait was logged as long.
     waited: u32,
     waiting: Option<Instant>,
+    wait_warned: bool,
+    /// How long its passes are expected to keep the GPU busy, from the
+    /// GPU's measured cost (`snapshot::GpuCost::estimate`).
+    estimate: Option<Duration>,
     pixels: Vec<u8>,
     interface: bool,
     huds: bool,
@@ -157,6 +171,11 @@ struct Job {
     /// The looks it is drawn with, chosen when it started, their strength,
     /// and the focus distance of their depth operations.
     looks: Vec<(Resolved, u8)>,
+    /// How far they read around a pixel, in the pixels drawn (None: across
+    /// the whole photo), which its tiles draw around them.
+    looks_reach: Option<u32>,
+    /// What it is drawn with, for the list of its effects at its end.
+    effects: snapshot::effects::Inputs,
     focus: Option<f32>,
     /// The photo's size, before its supersampling or the preview's
     /// reduction: the look's pixels.
@@ -314,12 +333,22 @@ pub(super) struct Snapshots {
     pub(super) isolate_hover: Option<Uuid>,
     /// A 360° photo under way.
     pano: Option<PanoRun>,
+    /// A long photo and the agent paused for it (`snapshot::long_capture`).
+    long: snapshot::long_capture::LongCapture,
+    /// The effects the last photo does not hold as the screen shows them
+    /// (`snapshot::effects::lines`).
+    effects: Vec<String>,
 }
 
 impl Snapshots {
     /// A photo is being drawn (the crash report's effects list).
     pub(super) fn drawing(&self) -> bool {
         self.job.is_some()
+    }
+
+    /// A photo, not a preview, is being drawn.
+    pub(super) fn drawing_photo(&self) -> bool {
+        self.job.as_ref().is_some_and(|j| !j.purpose.quiet())
     }
 
     /// After a GPU recovery (gpu_recovery.rs): a photo under way is given up,
@@ -526,6 +555,8 @@ impl Default for Snapshots {
             isolate_point: None,
             isolate_hover: None,
             pano: None,
+            long: Default::default(),
+            effects: Vec::new(),
         }
     }
 }
@@ -655,18 +686,15 @@ impl App {
             // switched on, a part that took long): no frame was built and the
             // part is still asked, so this frame carries it again
             let since = *job.waiting.get_or_insert_with(Instant::now);
-            if since.elapsed() > PHOTO_WAIT {
-                // a GPU that never finishes, though not lost: the photo
-                // is given up, not drawn later for nobody
+            if since.elapsed() > PART_WAIT_WARN && !job.wait_warned {
+                // slow, not lost: the part is still drawn (a lost GPU or a
+                // render thread gone ends the photo above)
+                job.wait_warned = true;
                 log::warn!(
-                    "photo: part {} waited {:?} for the render thread: given up",
+                    "photo: part {} has waited {} s for the render thread: still waiting",
                     job.next + 1,
-                    PHOTO_WAIT
+                    since.elapsed().as_secs()
                 );
-                renderer.drop_snapshot();
-                s.job = None;
-                s.message = Some((aurora_i18n::tr!("photo-draw-failed").to_owned(), true));
-                return None;
             }
             if job.waited == 0 {
                 log::info!("photo: part {} waits for the render thread", job.next + 1);
@@ -761,6 +789,7 @@ impl App {
             job.waited = 0;
         }
         job.waiting = None;
+        job.wait_warned = false;
         if let ContextPass::Pending(size) = job.context {
             // (its pixels are not the photo's; a frame that did not come
             // back leaves the tiles without it, as before)
@@ -807,7 +836,10 @@ impl App {
         {
             let part = (job.next + 1, job.tiles.len());
             let (output, factor) = (job.output, job.supersample);
-            let tiles = self.photo_tiles(renderer, output, factor);
+            let looks = job.looks_reach.unwrap_or(0);
+            let tiles = self.photo_tiles(renderer, output, factor, looks);
+            // (its parts and their band as they are now, for the honest list)
+            let guard = self.photo_kept_guard(renderer, output, factor, looks);
             log::warn!(
                 "photo: part {} of {} ({} x {}) came back black (a GPU reset, or a black part): drawn again in {} part(s)",
                 part.0,
@@ -817,6 +849,7 @@ impl App {
                 tiles.len()
             );
             if let Some(job) = self.snapshots.job.as_mut() {
+                job.effects = job.effects.replanned(tiles.len(), guard);
                 job.tiles = tiles;
                 job.next = 0;
                 job.pixels = Vec::new();
@@ -869,6 +902,9 @@ impl App {
                 job.supersample * job.supersample
             );
         }
+        if !job.purpose.quiet() {
+            self.photo_effects(&job);
+        }
         // (from here on the photo is the picture assembled)
         let job = Job { size: job.output, ..job };
         match job.purpose {
@@ -892,6 +928,23 @@ impl App {
             }
             Purpose::Portrait { preview } => self.outfit_portrait_drawn(preview, job.size, job.pixels, job.cutout),
         }
+    }
+
+    /// What the photo just drawn holds of the effects on screen, logged and
+    /// told when one is not applied or unverified (`snapshot::effects`).
+    fn photo_effects(&mut self, job: &Job) {
+        use snapshot::effects::{self, Status};
+        let mut inputs = job.effects;
+        // the ambient occlusion of parts read the whole photo's depth
+        inputs.ao = inputs.ao.map(|_| job.context == ContextPass::Drawn);
+        let report = effects::report(&inputs);
+        for (effect, status) in &report {
+            match status {
+                Status::Applied => log::info!("photo: {effect:?} applied"),
+                other => log::warn!("photo: {effect:?} {other:?} ({} part(s), band {} px)", inputs.parts, inputs.guard),
+            }
+        }
+        self.snapshots.effects = effects::lines(&report);
     }
 
     /// The size of the photo for the chosen destination: the disk's
@@ -1169,11 +1222,17 @@ impl App {
             return;
         };
         let mut done = None;
-        while let Ok(step) = rx.try_recv() {
+        let (steps, gone) = snapshot::drain(rx);
+        for step in steps {
             match step {
                 PostcardStep::Encoded => *encoded = true,
                 PostcardStep::Done(result) => done = Some(result),
             }
+        }
+        if done.is_none() && gone {
+            done = Some(Err(aurora_net::postcard::Error::Failed(
+                "the sending ended without an answer".into(),
+            )));
         }
         let Some(result) = done else {
             return;
@@ -1232,7 +1291,6 @@ impl App {
             && matches!(purpose, Purpose::Preview | Purpose::Save(_) | Purpose::Hold);
         // (a view of a 360° photo, the depth: the scene alone)
         let plain = outfit || face.is_some() || depth;
-        let s = &self.settings.snapshot;
         let size = if purpose.quiet() {
             let (w, h) = full;
             let side = if purpose == Purpose::Preview {
@@ -1258,9 +1316,30 @@ impl App {
         // photo's frame is drawn)
         if !purpose.quiet() {
             self.world.photo_isolation.set_picking(false);
+            self.snapshots.effects.clear();
         }
         self.snapshots.gpu_cost.new_photo();
-        let tiles = self.photo_tiles(renderer, output, supersample);
+        // an outfit's picture shows the outfit: never the interface, the
+        // HUDs or the photo's looks, whatever the Photo window has chosen
+        // (the outfit's photo mode keeps the viewfinder's looks: the square
+        // shows them). The looks go in a photo only as the screen shows
+        // them: the photo window's stack, while it is open (`live_look`),
+        // so that a quick photo with the window closed holds none either.
+        let looks_wanted = !plain || (matches!(purpose, Purpose::Portrait { .. }) && self.outfit_photo_mode());
+        let looks_shown = self.panels.snapshot;
+        let layers = if depth {
+            vec![(looks::depth_map(self.camera.near, self.settings.draw_distance), 100)]
+        } else if looks_wanted && looks_shown {
+            let stack = self.photo_look_stack();
+            let settings = self.settings.snapshot.look_settings.clone();
+            looks::resolve_stack(&stack, &settings, self.photo_luts())
+        } else {
+            Vec::new()
+        };
+        let looks_asked = looks_wanted && !depth && self.settings.snapshot.looks.iter().any(|l| l.on);
+        // how far they read, in the pixels drawn (None: across the photo)
+        let looks_reach = Self::photo_looks_reach(&layers, full, size);
+        let tiles = self.photo_tiles(renderer, output, supersample, looks_reach.unwrap_or(0));
         if !purpose.quiet() {
             log::info!(
                 "photo: {} x {} drawn at {} x {} planned in {} part(s), at most {} Mpx a pass (memory and GPU time; {} bytes a pixel, {})",
@@ -1278,15 +1357,42 @@ impl App {
                 }
             );
         }
-        // an outfit's picture shows the outfit: never the interface, the
-        // HUDs or the photo's looks, whatever the Photo window has chosen
+        // (what its passes draw, the whole photo's depth included)
+        let drawn: u64 = tiles
+            .iter()
+            .map(|t| {
+                let d = t.draw.scaled(supersample);
+                u64::from(d.width) * u64::from(d.height)
+            })
+            .sum();
+        let estimate = self.snapshots.gpu_cost.estimate(drawn);
+        if !purpose.quiet()
+            && let Some(e) = estimate
+        {
+            log::info!("photo: about {:.1} s of GPU time expected", e.as_secs_f32());
+        }
+        let s = &self.settings.snapshot;
         let interface = !plain && s.interface && snapshot::same_proportions(full, window);
+        let huds = !plain && s.huds;
         // (with the ambient occlusion on: GTAO may be forced over its method)
         let context = ContextPass::plan(size, tiles.len(), self.settings.ssao > 0)
             .within(self.photo_max_side(renderer), self.photo_max_pixels(renderer));
-        // (the outfit's photo mode keeps the viewfinder's looks: the
-        // square shows them)
-        let looks = !plain || (matches!(purpose, Purpose::Portrait { .. }) && self.outfit_photo_mode());
+        // what the photo is drawn with, for the honest list of its effects
+        // (`snapshot::effects`)
+        let reach = self.photo_reach(renderer, output, supersample);
+        let single = tiles.len() == 1;
+        let effects = snapshot::effects::Inputs {
+            parts: tiles.len(),
+            guard: self.photo_kept_guard(renderer, output, supersample, looks_reach.unwrap_or(0)),
+            // (the window already says other proportions leave it out)
+            interface: interface.then_some(single),
+            huds: huds.then_some(single),
+            looks: looks_asked.then_some((looks_shown, looks_reach)),
+            bloom: reach.bloom,
+            dof: reach.dof,
+            contact: reach.contact,
+            ao: (self.settings.ssao > 0).then_some(false),
+        };
         self.snapshots.job = Some(Job {
             purpose,
             size,
@@ -1296,13 +1402,17 @@ impl App {
             asked: false,
             waited: 0,
             waiting: None,
+            wait_warned: false,
+            estimate,
             pixels: Vec::new(),
             interface,
-            huds: !plain && s.huds,
+            huds,
             started: Instant::now(),
             supersample,
             cutout: self.world.photo_isolation.empty_background(),
-            looks: Vec::new(),
+            looks: layers,
+            looks_reach,
+            effects,
             focus: self.snapshots.look_focus,
             photo: full,
             hold: None,
@@ -1311,22 +1421,18 @@ impl App {
             paused: Default::default(),
             face,
         });
-        if depth {
-            let far = self.settings.draw_distance;
-            if let Some(job) = &mut self.snapshots.job {
-                job.looks = vec![(looks::depth_map(self.camera.near, far), 100)];
-            }
-            return;
-        }
-        if !looks {
-            return;
-        }
-        let stack = self.settings.snapshot.looks.clone();
-        let settings = self.settings.snapshot.look_settings.clone();
-        let resolved = looks::resolve_stack(&stack, &settings, self.photo_luts());
-        if let Some(job) = &mut self.snapshots.job {
-            job.looks = resolved;
-        }
+    }
+
+    /// The stack of looks the screen shows in the photo mode: the chosen
+    /// one, or the one pointed at in a list.
+    fn photo_look_stack(&self) -> Vec<looks::Layer> {
+        let ui = &self.snapshots.ui.looks;
+        looks::tried(
+            &self.settings.snapshot.looks,
+            ui.hover.as_ref().map(|h| h.as_deref()),
+            ui.mode,
+            ui.selected,
+        )
     }
 
     /// The library of the user's 3D tables.
@@ -1344,13 +1450,7 @@ impl App {
         if !self.panels.snapshot {
             return None;
         }
-        let ui = &self.snapshots.ui.looks;
-        let stack = looks::tried(
-            &self.settings.snapshot.looks,
-            ui.hover.as_ref().map(|h| h.as_deref()),
-            ui.mode,
-            ui.selected,
-        );
+        let stack = self.photo_look_stack();
         let settings = self.settings.snapshot.look_settings.clone();
         let layers = looks::resolve_stack(&stack, &settings, self.photo_luts());
         let photo = self.photo_size(window);
@@ -1371,30 +1471,78 @@ impl App {
     /// farther than the screen-space passes, and the contact shadows as far
     /// as their rays reach at this photo's scale.
     /// `size` is the photo's; its passes are drawn `factor` times larger
-    /// (`snapshot::plan_supersampled`), the band counted in the pixels drawn.
-    fn photo_tiles(&self, renderer: &Renderer, size: (u32, u32), factor: u32) -> Vec<snapshot::TilePass> {
-        let output = size;
-        let size = (size.0 * factor.max(1), size.1 * factor.max(1));
-        let bloom = if self.settings.bloom { self.settings.bloom_strength } else { 0.0 };
-        let dof = self
-            .photo_dof_max_coc(size, renderer.size())
-            .map_or(0, aurora_render::dof_tile_reach);
-        let scale = snapshot::viewfinder_scale(size, renderer.size(), self.settings.render_scale_percent);
-        let contact = aurora_render::contact_tile_reach(self.settings.contact_shadows, scale);
-        // (GTAO's radius is in metres: drawn `factor` times larger, it
-        // spans as many more pixels, the band as many photo pixels as
-        // without the supersampling)
-        let guard = (snapshot::TILE_GUARD * factor.max(1))
-            .max(aurora_render::bloom_tile_reach(bloom))
-            .max(dof)
-            .max(contact);
-        snapshot::plan_supersampled(
-            output,
+    /// (`snapshot::plan_supersampled`), the band counted in the pixels drawn;
+    /// `looks`: how far the photo's looks read, in those pixels.
+    fn photo_tiles(&self, renderer: &Renderer, size: (u32, u32), factor: u32, looks: u32) -> Vec<snapshot::TilePass> {
+        let guard = self.photo_guard(renderer, size, factor, looks);
+        snapshot::plan_supersampled(size, factor, self.photo_max_side(renderer), self.photo_max_pixels(renderer), guard)
+    }
+
+    /// The band the effects of [`App::photo_tiles`]'s photo need around
+    /// each tile, in the pixels drawn.
+    fn photo_guard(&self, renderer: &Renderer, size: (u32, u32), factor: u32, looks: u32) -> u32 {
+        let reach = self.photo_reach(renderer, size, factor);
+        (snapshot::TILE_GUARD * factor.max(1))
+            .max(reach.bloom.unwrap_or(0))
+            .max(reach.dof.unwrap_or(0))
+            .max(reach.contact.unwrap_or(0))
+            .max(looks)
+    }
+
+    /// The band its tiles really draw (`snapshot::kept_guard_supersampled`).
+    fn photo_kept_guard(&self, renderer: &Renderer, size: (u32, u32), factor: u32, looks: u32) -> u32 {
+        snapshot::kept_guard_supersampled(
             factor,
             self.photo_max_side(renderer),
             self.photo_max_pixels(renderer),
-            guard,
+            self.photo_guard(renderer, size, factor, looks),
         )
+    }
+
+    /// How far the looks the screen shows read around a pixel of a photo
+    /// of `full` drawn at `drawn` (None: across the whole photo), in the
+    /// pixels drawn; 0 without a look.
+    fn photo_looks_reach(layers: &[(Resolved, u8)], full: (u32, u32), drawn: (u32, u32)) -> Option<u32> {
+        let scale = drawn.1 as f32 / full.1.max(1) as f32;
+        layers
+            .iter()
+            .flat_map(|(look, _)| look.ops.iter())
+            .try_fold(0.0f32, |most, op| Some(most.max(op.reach(full.1 as f32)?)))
+            .map(|r| (r * scale).ceil() as u32)
+    }
+
+    /// The parts the window says a photo of `photo` pixels is drawn in: as
+    /// `photo_job` plans it, the reach of the looks shown included.
+    fn photo_parts(&mut self, renderer: &Renderer, photo: (u32, u32)) -> usize {
+        let factor = self.photo_factor(photo);
+        let stack = self.photo_look_stack();
+        let settings = self.settings.snapshot.look_settings.clone();
+        let layers = looks::resolve_stack(&stack, &settings, self.photo_luts());
+        let drawn = (photo.0 * factor, photo.1 * factor);
+        let looks = Self::photo_looks_reach(&layers, photo, drawn).unwrap_or(0);
+        self.photo_tiles(renderer, photo, factor, looks).len()
+    }
+
+    /// How far around a pixel the effects that are on read the image of a
+    /// photo of `size` drawn `factor` times larger, in the pixels drawn
+    /// (None: off). The bloom's halo keeps its share of the image as on
+    /// screen (aurora-render `bloom::photo_levels`), so it reaches farther
+    /// in a photo larger than the screen.
+    fn photo_reach(&self, renderer: &Renderer, size: (u32, u32), factor: u32) -> PhotoReach {
+        let size = (size.0 * factor.max(1), size.1 * factor.max(1));
+        let bloom = if self.settings.bloom { self.settings.bloom_strength } else { 0.0 };
+        let scale = snapshot::viewfinder_scale(size, renderer.size(), self.settings.render_scale_percent);
+        let dof = self.photo_dof_max_coc(size, renderer.size()).map(aurora_render::dof_tile_reach);
+        let contact = aurora_render::contact_tile_reach(self.settings.contact_shadows, scale);
+        let bloom = aurora_render::bloom_tile_reach(bloom, scale);
+        // (GTAO's radius is in metres: drawn `factor` times larger, it
+        // spans as many more pixels, the band as many photo pixels as
+        // without the supersampling: `snapshot::TILE_GUARD`)
+        PhotoReach {
+            bloom: (bloom > 0).then_some(bloom),
+            dof,
+            contact: (contact > 0).then_some(contact),
+        }
     }
 
     /// Times its size a photo of `size` is drawn at on each side: the
@@ -1694,6 +1842,37 @@ impl App {
         }
     }
 
+    /// Each frame: AgentPause while a long photo is drawn, AgentResume once
+    /// it ends however it ends (`snapshot::long_capture`).
+    fn photo_long_capture(&mut self) {
+        use snapshot::long_capture::Step;
+        let s = &self.snapshots;
+        let job = s.job.as_ref().filter(|j| !j.purpose.quiet());
+        let capturing = job.is_some() || s.pano.is_some() || s.full_save.is_some();
+        let estimate = job.and_then(|j| j.estimate);
+        let connected = matches!(self.screen, super::Screen::World);
+        for step in self.snapshots.long.update(Instant::now(), capturing, estimate, connected) {
+            match step {
+                Step::Pause => {
+                    log::info!("photo: a long photo, the regions are told the agent is paused");
+                    self.send(NetCommand::AgentPause);
+                }
+                Step::Resume => self.send(NetCommand::AgentResume),
+                Step::Warn { elapsed, longest } => log::warn!(
+                    "photo: still drawing after {} s (longest frame {} ms); the agent is paused, the link kept",
+                    elapsed.as_secs(),
+                    longest.as_millis()
+                ),
+                Step::Ended { elapsed, longest } if elapsed >= snapshot::long_capture::LONG => log::info!(
+                    "photo: ended after {} s, the longest frame {} ms",
+                    elapsed.as_secs(),
+                    longest.as_millis()
+                ),
+                Step::Ended { .. } => {}
+            }
+        }
+    }
+
     /// Upload prices: the account's benefits (texture_upload_cost, by area
     /// for the large ones), the demo's, or the economy's single price.
     pub(super) fn photo_prices(&self) -> Prices {
@@ -1877,11 +2056,16 @@ impl App {
             return;
         };
         let mut done = None;
-        while let Ok(step) = rx.try_recv() {
+        let (steps, gone) = snapshot::drain(rx);
+        for step in steps {
             match step {
                 ProfileStep::Encoded(n) => *bytes = Some(n),
                 ProfileStep::Done(result) => done = Some(result),
             }
+        }
+        if done.is_none() && gone {
+            // (the PNG's encoder stopped, or the task was dropped)
+            done = Some(Err(profile::Error::ConfigData));
         }
         let Some(result) = done else {
             return;
@@ -1958,6 +2142,7 @@ impl App {
         }
         self.photo_full_save_update(renderer);
         self.photo_pano_update();
+        self.photo_long_capture();
         self.photo_demo(renderer);
         self.photo_reel_demo(renderer);
         self.photo_luts_update();
@@ -1981,9 +2166,14 @@ impl App {
                 self.snapshots.detail_ready = false;
             }
         }
-        // the texture encoded on its worker: its upload
+        // the texture encoded on its worker: its upload (a worker that
+        // stopped without its texture fails the photo)
         if let Some(Upload::Encoding { rx, cost }) = &self.snapshots.upload
-            && let Ok(encoded) = rx.try_recv()
+            && let Some(encoded) = match snapshot::drain(rx) {
+                (mut got, _) if !got.is_empty() => Some(got.remove(0)),
+                (_, true) => Some(Err("the encoder stopped".to_owned())),
+                _ => None,
+            }
         {
             let cost = *cost;
             match encoded {
@@ -1998,6 +2188,12 @@ impl App {
         }
         self.photo_profile_poll();
         self.photo_postcard_poll();
+        // an upload whose session ended never gets its answer: the photo
+        // ends as failed (its outcome unknown), the buttons come back
+        if matches!(self.snapshots.upload, Some(Upload::Sent(_))) && !self.in_world() {
+            log::warn!("photo: the session ended before the upload's answer");
+            self.photo_uploaded(Err(upload::Error::Unknown));
+        }
         self.photo_reel_update();
         let viewfinder = self.viewfinder_on();
         let log_to_chat = self.settings.snapshot.extras.log_to_chat;
@@ -2029,7 +2225,18 @@ impl App {
                     s.reel.done(Some(Place::Disk(saved.path.clone())), Some(tex));
                     // (a photo of the reel saved again from the quick view: no card)
                     if viewfinder && !s.reel.sent_again {
-                        s.vf.review_until = self.egui_ctx.input(|i| i.time) + crate::ui::viewfinder::CARD_TIME;
+                        let now = self.egui_ctx.input(|i| i.time);
+                        s.vf.review_until = now + crate::ui::viewfinder::CARD_TIME;
+                        // what the photo does not hold as the screen shows it
+                        if let Some(first) = s.effects.first() {
+                            let more = s.effects.len() - 1;
+                            let line = if more > 0 {
+                                aurora_i18n::tr!("ss-and-more", first = first.as_str(), count = more)
+                            } else {
+                                first.clone()
+                            };
+                            s.vf.say(line, false, now);
+                        }
                     }
                     s.gallery.truncate(gallery::SHOWN);
                     if std::mem::take(&mut s.quiet) {
@@ -2702,7 +2909,7 @@ LUT_3D_SIZE {n}
             let inventory = (self.snapshots.ui.destination == Destination::Inventory).then(|| self.photo_inventory_view(window));
             let profile = (self.snapshots.ui.destination == Destination::Profile).then(|| self.photo_profile_view(window));
             let email = (self.snapshots.ui.destination == Destination::Email).then(|| self.photo_email_view(window));
-            let tiles = self.photo_tiles(renderer, photo, self.photo_factor(photo)).len();
+            let tiles = self.photo_parts(renderer, photo);
             let busy = self.photo_busy_line();
             if let Some((_, what)) = &busy {
                 let now = ctx.input(|i| i.time);
@@ -2714,6 +2921,7 @@ LUT_3D_SIZE {n}
                 self.snapshots.vf.message = Some((line, false, now + 4.0));
             }
             let message = self.snapshots.message.clone();
+            let effects = self.snapshots.effects.clone();
             let last_saved = self.snapshots.last_saved.clone();
             let gallery = self.snapshots.gallery.clone();
             // (lent to the light panel while the viewfinder draws)
@@ -2744,6 +2952,7 @@ LUT_3D_SIZE {n}
                 pano_allowed: !snapshot::pano::rlva_blocks(|b| self.world.rlva.has(b)),
                 prefs_grade: self.settings.render_extras.grade,
                 tone_why: self.photo_tone_why(),
+                effects: &effects,
             };
             // (under the reel's quick view, nothing of the viewfinder acts:
             // no focus by a click, no shutter)
@@ -2766,8 +2975,8 @@ LUT_3D_SIZE {n}
             let inventory = (self.snapshots.ui.destination == Destination::Inventory).then(|| self.photo_inventory_view(window));
             let profile = (self.snapshots.ui.destination == Destination::Profile).then(|| self.photo_profile_view(window));
             let email = (self.snapshots.ui.destination == Destination::Email).then(|| self.photo_email_view(window));
+            let tiles = self.photo_parts(renderer, photo);
             let mut state = std::mem::take(&mut self.snapshots.ui);
-            let tiles = self.photo_tiles(renderer, photo, self.photo_factor(photo)).len();
             let s = &self.snapshots;
             let busy = if let Some(t) = s.detail_wait {
                 let wait = snapshot::quality::DETAIL_WAIT.as_secs_f32();
@@ -2826,6 +3035,7 @@ LUT_3D_SIZE {n}
                 pano_allowed: !snapshot::pano::rlva_blocks(|b| self.world.rlva.has(b)),
                 prefs_grade: self.settings.render_extras.grade,
                 tone_why: self.photo_tone_why(),
+                effects: &s.effects,
             };
             let mut open = self.panels.snapshot;
             actions.extend(state.show(

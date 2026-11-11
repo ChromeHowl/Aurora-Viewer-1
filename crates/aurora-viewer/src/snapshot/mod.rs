@@ -11,6 +11,7 @@
 //! and the cut-out's matte are kept in `extras`; the window is
 //! `ui::snapshot`, the frames `app::snapshot`.
 
+pub mod effects;
 pub mod extras;
 pub mod full_save;
 pub mod gallery;
@@ -18,6 +19,7 @@ pub mod inventory;
 pub mod isolate;
 pub mod knobs;
 pub mod light;
+pub mod long_capture;
 pub mod looks;
 pub mod lut_packs;
 pub mod luts;
@@ -734,6 +736,13 @@ impl GpuCost {
         true
     }
 
+    /// How long passes of `pixels` in all are expected to keep the GPU
+    /// busy; None until a frame was timed.
+    pub fn estimate(&self, pixels: u64) -> Option<std::time::Duration> {
+        let ns = self.ns?;
+        Some(std::time::Duration::from_secs_f64(pixels as f64 * f64::from(ns) * 1e-9))
+    }
+
     /// The most pixels one pass may draw within `ms` ([`PASS_GPU_MS`] or
     /// [`OVERLAY_PASS_GPU_MS`]), never fewer than the `window`'s frame,
     /// which is drawn every frame. Unmeasured: [`UNTIMED_PASS_PIXELS`]
@@ -757,11 +766,7 @@ pub fn plan(size: (u32, u32), max_side: u32, max_pixels: u64, guard: u32) -> Vec
     let (w, h) = (size.0.max(1), size.1.max(1));
     let max_side = max_side.max(MIN_SIDE);
     let max_pixels = max_pixels.max(u64::from(MIN_SIDE) * u64::from(MIN_SIDE));
-    // at most a quarter of the side a pass can draw, with its alignment, so
-    // that the tiles keep about half of what they draw (and always fit, down
-    // to the smallest limits)
-    let room = (max_side / 4).min(max_pixels.isqrt() as u32 / 4);
-    let guard = guard.min(room);
+    let guard = kept_guard(max_side, max_pixels, guard);
     let align = TILE_ALIGN.min(prev_power_of_two(guard.max(2)));
     // the widest a pass draws when `side` is split in `n`: a tile, a band
     // on each side it shares and the pixels that put its edges on the
@@ -815,6 +820,25 @@ pub fn plan(size: (u32, u32), max_side: u32, max_pixels: u64, guard: u32) -> Vec
         }
     }
     tiles
+}
+
+/// The band of `guard` pixels a photo's tiles really draw around what they
+/// keep ([`plan`]): at most a quarter of the side a pass can draw, with its
+/// alignment, so that the tiles keep about half of what they draw (and
+/// always fit, down to the smallest limits). An effect reaching farther is
+/// not whole where the tiles meet (`effects`).
+pub fn kept_guard(max_side: u32, max_pixels: u64, guard: u32) -> u32 {
+    let max_side = max_side.max(MIN_SIDE);
+    let max_pixels = max_pixels.max(u64::from(MIN_SIDE) * u64::from(MIN_SIDE));
+    let room = (max_side / 4).min(max_pixels.isqrt() as u32 / 4);
+    guard.min(room)
+}
+
+/// [`kept_guard`] for a photo drawn `factor` times larger
+/// ([`plan_supersampled`]), in the pixels drawn.
+pub fn kept_guard_supersampled(factor: u32, max_side: u32, max_pixels: u64, guard: u32) -> u32 {
+    let f = factor.max(1);
+    kept_guard(max_side / f, max_pixels / (u64::from(f) * u64::from(f)), guard.div_ceil(f)) * f
 }
 
 /// How a photo of `size` drawn at `factor` times its size on each side is
@@ -1119,6 +1143,22 @@ fn civil(t: &(impl chrono::Datelike + chrono::Timelike)) -> (u16, u16, u16, u16,
         t.minute() as u16,
         t.second() as u16,
     )
+}
+
+/// The messages a photo's worker sent so far (an encoder, a post on the
+/// network's runtime), and whether it is gone: ended, or stopped by a
+/// panic or a cancelled task, without its last message. A photo whose
+/// worker is gone ends as failed, so that the window's buttons come back
+/// after every save, whatever ended it.
+pub fn drain<T>(rx: &crossbeam_channel::Receiver<T>) -> (Vec<T>, bool) {
+    let mut got = Vec::new();
+    loop {
+        match rx.try_recv() {
+            Ok(v) => got.push(v),
+            Err(crossbeam_channel::TryRecvError::Empty) => return (got, false),
+            Err(crossbeam_channel::TryRecvError::Disconnected) => return (got, true),
+        }
+    }
 }
 
 #[cfg(test)]

@@ -1060,3 +1060,44 @@ fn an_opaque_png_is_written_from_rgba_a_band_at_a_time() {
     assert_eq!(back.get_pixel(36, 149).0, [36, 149, 7]);
     assert_eq!(back.get_pixel(5, 64).0, [5, 64, 7]);
 }
+
+#[test]
+fn the_gpu_time_of_a_photo_is_expected_from_the_measured_cost() {
+    let mut cost = GpuCost::default();
+    assert_eq!(cost.estimate(1_000_000_000), None, "nothing timed yet");
+    // 8 ms for a 4K frame: about 0.96 ns a pixel
+    cost.note(Some(8.0), 3840 * 2160);
+    let e = cost.estimate(65_536 * 65_536).expect("timed");
+    // a 16K photo at 16 samples: about 4.3 Gpx, some 4 s of GPU time
+    assert!(e.as_secs_f32() > 3.5 && e.as_secs_f32() < 4.6, "{e:?}");
+}
+
+#[test]
+fn the_kept_band_is_the_one_the_tiles_draw() {
+    // a card drawing 8192 a side and 16 Mpx a pass: a quarter of 4096 at most
+    assert_eq!(kept_guard(8192, 16 << 20, 346), 346);
+    assert_eq!(kept_guard(8192, 16 << 20, 5000), 1024);
+    // drawn four times larger, the band counted in the pixels drawn
+    assert_eq!(kept_guard_supersampled(4, 8192, 16 << 20, 346), 348);
+    assert_eq!(kept_guard_supersampled(4, 8192, 16 << 20, 5000), 1024);
+    // plan() keeps the same band: a tile's pass draws at most that much
+    // more than the tile on each side (with its alignment)
+    let guard = kept_guard(2048, 4 << 20, 5000);
+    let tiles = plan((8000, 6000), 2048, 4 << 20, 5000);
+    assert!(tiles.len() > 1);
+    for t in &tiles {
+        assert!(t.keep.x - t.draw.x <= guard + 64, "{t:?}");
+    }
+}
+
+#[test]
+fn a_photo_worker_that_is_gone_is_seen_as_ended() {
+    let (tx, rx) = crossbeam_channel::unbounded::<u8>();
+    tx.send(1).expect("open");
+    assert_eq!(drain(&rx), (vec![1], false), "still working");
+    tx.send(2).expect("open");
+    drop(tx);
+    // its last messages first, then the end
+    assert_eq!(drain(&rx), (vec![2], true));
+    assert_eq!(drain(&rx), (vec![], true), "ended for good: the photo fails, its buttons come back");
+}

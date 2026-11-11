@@ -343,6 +343,7 @@ mod tests {
             inventory_move_tx,
             inventory_udp_tx,
             appearance_serial: 0,
+            agent_pause: crate::agent_pause::AgentPause::default(),
             appearance_queue: Default::default(),
             own_profile: None,
             notecard_copies: HashMap::new(),

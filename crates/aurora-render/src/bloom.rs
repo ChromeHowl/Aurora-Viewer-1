@@ -27,6 +27,9 @@ pub(crate) const KNEE: f32 = 0.3;
 /// tone mapped), so a halo of only the light over the threshold would hardly
 /// show (measured in the demo: 1 and 3 barely visible, 6 a clear halo).
 pub(crate) const GAIN: f32 = 5.0;
+/// The most levels added in front of the chain for a photo drawn larger
+/// than the screen (a factor of 64 on each side).
+pub const MAX_PHOTO_LEVELS: u32 = 6;
 /// The share spread when `AURORA_BLOOM=1` or `alt` turns it on while the
 /// setting is off.
 pub(crate) const DEFAULT_STRENGTH: f32 = 0.5;
@@ -36,26 +39,42 @@ pub(crate) const DEFAULT_STRENGTH: f32 = 0.5;
 /// above and their bilinear half texel (2.5 x 2^(k-1) pixels into level
 /// k), the tent of each upsample a texel of the smaller level and a half
 /// (1.5 x 2^k into level k - 1), the post pass a texel of the first level.
-/// A photo drawn in tiles draws this much around each one (346 pixels).
-pub const TILE_REACH: u32 = (5 * ((1u32 << MAX_LEVELS) - 1)).div_ceil(2) + 3 * ((1u32 << (MAX_LEVELS + 1)) - 4) / 2 + 2;
+/// A photo drawn in tiles draws this much around each one: 346 pixels for
+/// the screen's chain of `n` = [`MAX_LEVELS`] levels.
+const fn reach(n: u32) -> u32 {
+    (5 * ((1u32 << n) - 1)).div_ceil(2) + 3 * ((1u32 << (n + 1)) - 4) / 2 + 2
+}
+
+/// The levels put in front of the chain for an image `scale` times taller
+/// than the screen's view of it (`FrameParams::photo_scale`): the halo
+/// keeps its share of the image, as on screen, instead of shrinking with
+/// the photo's pixels. A whole number of halvings, the nearest one.
+pub fn photo_levels(scale: f32) -> u32 {
+    if !scale.is_finite() || scale <= 1.0 {
+        return 0;
+    }
+    (scale.log2().round().max(0.0) as u32).min(MAX_PHOTO_LEVELS)
+}
 
 /// The pixels a tile of a photo must draw around what it keeps for the
-/// bloom of `setting` (its strength, 0 off; `AURORA_BLOOM` included): 0
-/// when it is off.
-pub fn tile_reach(setting: f32) -> u32 {
+/// bloom of `setting` (its strength, 0 off; `AURORA_BLOOM` included), the
+/// photo `scale` times taller than the screen's view: 0 when it is off.
+pub fn tile_reach(setting: f32, scale: f32) -> u32 {
     if Override::from_env().strength(setting, 0).1 {
-        TILE_REACH
+        reach(MAX_LEVELS as u32 + photo_levels(scale))
     } else {
         0
     }
 }
 
 /// The size of each level: half the image, then halved, while the short
-/// side stays at least [`MIN_SIDE`].
-pub(crate) fn levels(width: u32, height: u32) -> Vec<(u32, u32)> {
+/// side stays at least [`MIN_SIDE`]; `extra` more levels at most for a
+/// photo ([`photo_levels`]).
+pub(crate) fn levels(width: u32, height: u32, extra: u32) -> Vec<(u32, u32)> {
+    let most = MAX_LEVELS + extra as usize;
     let mut out = Vec::new();
     let (mut w, mut h) = (width.max(1).div_ceil(2), height.max(1).div_ceil(2));
-    while out.len() < MAX_LEVELS && (out.is_empty() || w.min(h) >= MIN_SIDE) {
+    while out.len() < most && (out.is_empty() || w.min(h) >= MIN_SIDE) {
         out.push((w, h));
         w = w.div_ceil(2);
         h = h.div_ceil(2);
@@ -111,6 +130,9 @@ struct Level {
 
 struct Targets {
     size: (u32, u32),
+    /// The first levels of a photo's chain: they only carry the halo up
+    /// to the image, their own light left out (`photo_levels`).
+    skip: usize,
     levels: Vec<Level>,
     /// The post pass's group 1 reading the first level.
     post_bg: wgpu::BindGroup,
@@ -262,7 +284,9 @@ impl Bloom {
 
     /// 1 / the number of levels added up (0 while off).
     pub(crate) fn norm(&self) -> f32 {
-        self.targets.as_ref().map_or(0.0, |t| 1.0 / t.levels.len() as f32)
+        self.targets
+            .as_ref()
+            .map_or(0.0, |t| 1.0 / t.levels.len().saturating_sub(t.skip).max(1) as f32)
     }
 
     /// The levels are dropped with the effect.
@@ -270,13 +294,22 @@ impl Bloom {
         self.targets = None;
     }
 
-    /// Levels for an image of `size`, made again when it changes.
-    pub(crate) fn ensure(&mut self, device: &wgpu::Device, size: (u32, u32)) {
-        if self.targets.as_ref().is_some_and(|t| t.size == size) {
+    /// Levels for an image of `size`, made again when it changes; `extra`
+    /// levels in front for a photo ([`photo_levels`]).
+    pub(crate) fn ensure(&mut self, device: &wgpu::Device, size: (u32, u32), extra: u32) {
+        let sizes = levels(size.0, size.1, extra);
+        // (only the levels the image has room for beyond the screen's
+        // chain are skipped: a small photo keeps its own light)
+        let skip = sizes.len().saturating_sub(MAX_LEVELS).min(extra as usize);
+        if self
+            .targets
+            .as_ref()
+            .is_some_and(|t| t.size == size && t.levels.len() == sizes.len() && t.skip == skip)
+        {
             return;
         }
         let usage = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING;
-        let levels: Vec<Level> = levels(size.0, size.1)
+        let levels: Vec<Level> = sizes
             .into_iter()
             .enumerate()
             .map(|(i, (w, h))| {
@@ -299,7 +332,12 @@ impl Bloom {
             })
             .collect();
         let post_bg = Self::post_group(device, &self.post_layout, &levels[0].view);
-        self.targets = Some(Targets { size, levels, post_bg });
+        self.targets = Some(Targets {
+            size,
+            skip,
+            levels,
+            post_bg,
+        });
     }
 
     /// The levels from the image the post pass reads (`scene_bg`, its
@@ -341,8 +379,10 @@ impl Bloom {
         for i in 1..t.levels.len() {
             run(encoder, &t.levels[i].view, false, &self.down, &t.levels[i - 1].bg);
         }
+        // a skipped level is cleared under the halo it carries up: its own
+        // light, finer than the screen's first level, is not added
         for i in (1..t.levels.len()).rev() {
-            run(encoder, &t.levels[i - 1].view, true, &self.up, &t.levels[i].bg);
+            run(encoder, &t.levels[i - 1].view, i > t.skip, &self.up, &t.levels[i].bg);
         }
     }
 }
@@ -354,13 +394,38 @@ mod tests {
     #[test]
     fn levels_halve_from_half_resolution_down_to_eight_pixels() {
         assert_eq!(
-            levels(2560, 1369),
+            levels(2560, 1369, 0),
             vec![(1280, 685), (640, 343), (320, 172), (160, 86), (80, 43), (40, 22)]
         );
         // a small window stops early, its short side at 8 or more
-        assert_eq!(levels(100, 40), vec![(50, 20), (25, 10)]);
+        assert_eq!(levels(100, 40, 0), vec![(50, 20), (25, 10)]);
         // never none
-        assert_eq!(levels(1, 1), vec![(1, 1)]);
+        assert_eq!(levels(1, 1, 0), vec![(1, 1)]);
+    }
+
+    #[test]
+    fn a_photo_four_times_taller_ends_its_chain_at_the_screen_s_last_level() {
+        assert_eq!(photo_levels(1.0), 0);
+        assert_eq!(photo_levels(0.5), 0, "a preview keeps the screen's chain");
+        assert_eq!(photo_levels(f32::NAN), 0);
+        assert_eq!(photo_levels(4.0), 2);
+        assert_eq!(photo_levels(5.0), 2, "the nearest halving");
+        assert_eq!(photo_levels(1000.0), MAX_PHOTO_LEVELS);
+        // the screen's 2560 x 1369 at four times its size: two more levels
+        // in front, the last one the screen's last (40 x 22)
+        let photo = levels(10240, 5476, photo_levels(4.0));
+        assert_eq!(photo.len(), MAX_LEVELS + 2);
+        assert_eq!(photo[2], (1280, 685), "the screen's first level");
+        assert_eq!(*photo.last().unwrap(), (40, 22));
+    }
+
+    #[test]
+    fn a_photo_s_tiles_reach_as_far_as_its_larger_halo() {
+        let screen = reach(MAX_LEVELS as u32);
+        assert_eq!(screen, 346);
+        // each level in front about doubles what a tile must draw around it
+        assert!(reach(MAX_LEVELS as u32 + 2) > 4 * screen - 20);
+        assert!(reach(MAX_LEVELS as u32 + 2) < 4 * screen + 20);
     }
 
     #[test]

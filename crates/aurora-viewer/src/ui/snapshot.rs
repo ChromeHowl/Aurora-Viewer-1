@@ -179,6 +179,9 @@ pub struct View<'a> {
     /// why its tone curves change nothing now (None: they apply).
     pub prefs_grade: crate::settings::render_extras::Grade,
     pub tone_why: Option<&'static str>,
+    /// The effects the last photo does not hold as the screen shows them
+    /// (`snapshot::effects::lines`): never one it holds.
+    pub effects: &'a [String],
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -484,6 +487,11 @@ impl SnapshotUi {
                     ui.add(egui::Label::new(RichText::new(text).size(12.0).color(color)).truncate());
                 });
             });
+            if !*error {
+                for line in view.effects {
+                    ui.label(RichText::new(line).size(12.0).color(p.muted));
+                }
+            }
         }
         gallery(ui, p, view, out);
     }

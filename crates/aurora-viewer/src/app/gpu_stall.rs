@@ -23,6 +23,10 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 
 /// No frame for this long and the notice shows.
 const NOTICE_AFTER: Duration = Duration::from_secs(6);
+/// The same while a photo's part is on the GPU: a pass of a large photo may
+/// take long without the card being stuck, and the notice offers to close
+/// the viewer, which would throw the photo away.
+const PHOTO_NOTICE_AFTER: Duration = Duration::from_secs(60);
 /// Kept waiting from the notice: shown again after this long if still stuck.
 const NOTICE_AGAIN: Duration = Duration::from_secs(60);
 
@@ -59,9 +63,14 @@ pub(super) struct GpuStall {
     pub(super) recover: Option<bool>,
 }
 
-/// Whether to show the notice now.
-fn notice_due(stalled: Duration, shown: bool, waited_at: Option<Instant>, now: Instant) -> bool {
-    !shown && stalled >= NOTICE_AFTER && waited_at.is_none_or(|at| now.duration_since(at) >= NOTICE_AGAIN)
+/// After how long a stall is noted and told: longer while a photo is drawn.
+fn notice_after(photo: bool) -> Duration {
+    if photo { PHOTO_NOTICE_AFTER } else { NOTICE_AFTER }
+}
+
+/// Whether to show the notice now, `after` the stall's length that tells.
+fn notice_due(stalled: Duration, after: Duration, shown: bool, waited_at: Option<Instant>, now: Instant) -> bool {
+    !shown && stalled >= after && waited_at.is_none_or(|at| now.duration_since(at) >= NOTICE_AGAIN)
 }
 
 impl App {
@@ -109,9 +118,10 @@ impl App {
             }
             return;
         }
+        let after = notice_after(self.snapshots.drawing_photo());
         match renderer.stalled_for() {
             Some(stalled) => {
-                if !stall.noted && stalled >= NOTICE_AFTER {
+                if !stall.noted && stalled >= after {
                     stall.noted = true;
                     log::warn!(
                         "the graphics card has not finished a frame for {} s: notice shown",
@@ -119,7 +129,7 @@ impl App {
                     );
                     crate::crash::gpu_stalled(stalled.as_secs());
                 }
-                if notice_due(stalled, stall.notice.is_some(), stall.waited_at, now) {
+                if notice_due(stalled, after, stall.notice.is_some(), stall.waited_at, now) {
                     let (title, body) = text(stalled.as_secs());
                     stall.notice = show(title, body, true);
                 }
@@ -460,12 +470,24 @@ mod tests {
     #[test]
     fn the_notice_waits_for_a_real_stall_and_for_the_user_s_patience() {
         let now = Instant::now();
-        assert!(!notice_due(Duration::from_secs(3), false, None, now));
-        assert!(notice_due(NOTICE_AFTER, false, None, now));
-        assert!(!notice_due(Duration::from_secs(30), true, None, now), "already shown");
+        let after = notice_after(false);
+        assert!(!notice_due(Duration::from_secs(3), after, false, None, now));
+        assert!(notice_due(NOTICE_AFTER, after, false, None, now));
+        assert!(!notice_due(Duration::from_secs(30), after, true, None, now), "already shown");
         // kept waiting a moment ago: not again at once, but later
-        assert!(!notice_due(Duration::from_secs(30), false, Some(now), now));
-        assert!(notice_due(Duration::from_secs(90), false, Some(now), now + NOTICE_AGAIN));
+        assert!(!notice_due(Duration::from_secs(30), after, false, Some(now), now));
+        assert!(notice_due(Duration::from_secs(90), after, false, Some(now), now + NOTICE_AGAIN));
+    }
+
+    #[test]
+    fn a_slow_photo_part_is_given_a_minute_before_the_notice() {
+        let now = Instant::now();
+        let photo = notice_after(true);
+        assert!(
+            !notice_due(Duration::from_secs(20), photo, false, None, now),
+            "a long pass, not a stuck card"
+        );
+        assert!(notice_due(Duration::from_secs(60), photo, false, None, now));
     }
 
     #[test]
