@@ -727,17 +727,23 @@ fn ooc_with(text: &str, prefix: &str, postfix: &str) -> String {
         .join(" ")
 }
 
-/// AutoCloseOOC (applyAutoCloseOoc, fscommon.cpp, originally LGPL 2.1): a
-/// line that opens "((" and never closes it gets its "))".
+/// AutoCloseOOC (FSCommon::applyAutoCloseOoc, fscommon.cpp, originally
+/// LGPL 2.1): a line that opens "((" (or "[[") and never closes it gets its
+/// "))" (or "]]"): " ))" after an opener followed by a space, else "))", a
+/// space first when the line already ends with ")" so that it never reads
+/// ")))". The first case that applies wins, parentheses before brackets.
 pub(crate) fn auto_close_ooc(text: &str) -> String {
     let mut out = text.to_owned();
-    if !out.contains("((") || out.contains("))") {
-        return out;
+    for (open, close, last) in [("((", "))", ')'), ("[[", "]]", ']')] {
+        if !out.contains(open) || out.contains(close) {
+            continue;
+        }
+        if out.contains(&format!("{open} ")) || out.ends_with(last) {
+            out.push(' ');
+        }
+        out.push_str(close);
+        break;
     }
-    if out.contains("(( ") || !out.ends_with(' ') {
-        out.push(' ');
-    }
-    out.push_str("))");
     out
 }
 
@@ -4379,8 +4385,14 @@ mod tests {
         assert_eq!(super::ooc_with("brb", "((", "))"), "(( brb ))");
         assert_eq!(super::ooc_with("", "((", "))"), "");
         assert_eq!(super::auto_close_ooc("(( brb"), "(( brb ))");
-        assert_eq!(super::auto_close_ooc("((brb"), "((brb ))");
+        assert_eq!(super::auto_close_ooc("((brb"), "((brb))");
         assert_eq!(super::auto_close_ooc("((brb "), "((brb ))");
+        assert_eq!(super::auto_close_ooc("((brb :)"), "((brb :) ))");
+        assert_eq!(super::auto_close_ooc("[[ note"), "[[ note ]]");
+        assert_eq!(super::auto_close_ooc("[[note]"), "[[note] ]]");
+        assert_eq!(super::auto_close_ooc("[[ a ]]"), "[[ a ]]");
+        // the parentheses first: one closer at most
+        assert_eq!(super::auto_close_ooc("(( a [[ b"), "(( a [[ b ))");
         assert_eq!(super::auto_close_ooc("(( brb ))"), "(( brb ))");
         assert_eq!(super::auto_close_ooc("hello"), "hello");
     }

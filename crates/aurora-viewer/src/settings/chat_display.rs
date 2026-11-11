@@ -63,7 +63,7 @@ pub struct ChatDisplay {
     /// FSMarkObjects (off): an object without a name reads "(No name)".
     pub mark_unnamed_objects: bool,
     /// FSBeyondNearbyChatColorDiminishFactor (0.8): the colour of nearby
-    /// chat said from beyond the near chat radius (10 m,
+    /// chat said from beyond the region's say range (20 m,
     /// `world/chat_range.rs`) is diminished by this factor; 1 changes
     /// nothing.
     pub beyond_range_dim: f32,
