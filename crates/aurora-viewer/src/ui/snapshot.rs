@@ -196,6 +196,9 @@ pub enum Action {
     PersonalLighting,
     /// "Keep this light": the photo's environment becomes the user's.
     KeepLight,
+    /// "Keep this look": the photo's picture style and white balance
+    /// become Preferences' own (`snapshot::style`).
+    KeepStyle,
     /// Open the Controls window (it drives the free camera).
     Controls,
     /// The upload's price was confirmed (true) or not.
@@ -1246,6 +1249,17 @@ fn light_rows(
             out.push(Action::PersonalLighting);
         }
     });
+    // the photo's picture style and white balance, kept as the light is
+    let look = crate::snapshot::style::is_set(l);
+    if ui
+        .add_enabled_ui(look, |ui| widgets::flat_button(ui, p, aurora_i18n::tr!("pcu-keep-look")))
+        .inner
+        .on_hover_text(aurora_i18n::tr!("pcu-keep-look-tip"))
+        .on_disabled_hover_text(aurora_i18n::tr!("pcu-keep-look-tip"))
+        .clicked()
+    {
+        out.push(Action::KeepStyle);
+    }
 }
 
 /// Width of a list's label in the Light section.
@@ -1910,6 +1924,7 @@ fn reset_label(part: crate::snapshot::saved::Part) -> &'static str {
         Part::Looks => aurora_i18n::tr!("b1-reset-looks"),
         Part::Isolation => aurora_i18n::tr!("b1-reset-isolation"),
         Part::Guide => aurora_i18n::tr!("b1-reset-guide"),
+        Part::Style => aurora_i18n::tr!("pcu-reset-style"),
     }
 }
 

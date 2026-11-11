@@ -9924,12 +9924,12 @@ impl App {
                 self.start.elapsed().as_secs_f32(),
             )
         {
-            gfx.renderer.apply_settings(self.settings.render_settings());
+            gfx.renderer.apply_settings(self.render_settings_now());
         }
         if let Some(mode) = crate::demo::aa_switch::due(&mut self.aa_switch_demo, self.frame_count) {
             log::info!("demo: anti-aliasing {mode} at frame {}", self.frame_count);
             self.settings.antialiasing = mode;
-            gfx.renderer.apply_settings(self.settings.render_settings());
+            gfx.renderer.apply_settings(self.render_settings_now());
         }
         if !gfx.renderer.vr_engaged()
             && self.vr_start_in == 0
@@ -11031,7 +11031,7 @@ impl App {
             // the photo's isolation, "show only" on an empty background
             cutout: self.world.photo_isolation.empty_background(),
             look: None,
-            grade: self.settings.render_extras.grade.render(),
+            grade: self.photo_grade().render(),
             deband: self.settings.render_extras.deband,
             // RenderDisablePostProcessing applies while building
             // (LLPipeline::tonemap: buildNoPost && gFloaterTools)
@@ -11666,7 +11666,7 @@ impl App {
             crate::autoreplace::set_enabled(self.settings.auto_replace);
             crate::link_trust::configure(&self.settings.trusted_sites);
             crate::link_preview::configure_sites(&self.settings.link_previews.picture_sites, crate::demo::picture_sites());
-            gfx.renderer.apply_settings(self.settings.render_settings());
+            gfx.renderer.apply_settings(self.render_settings_now());
             self.panels.time_of_day = self.settings.time_of_day;
             self.egui_ctx.set_zoom_factor(ui_scale(&self.settings));
             self.disk_cache.set_limit_mb(self.settings.cache_size_mb);
@@ -18650,7 +18650,7 @@ impl ApplicationHandler for App {
             apply_test_overrides(&mut self.settings);
             self.settings.save();
         }
-        renderer.apply_settings(self.settings.render_settings());
+        renderer.apply_settings(self.render_settings_now());
         self.note_gpus(&renderer);
         self.login_form.driver_notice = self.driver_notice(&renderer.info);
         self.safe_graphics_at_start();

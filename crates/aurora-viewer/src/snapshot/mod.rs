@@ -26,6 +26,7 @@ pub mod quality;
 pub mod reel;
 pub mod save;
 pub mod saved;
+pub mod style;
 pub mod viewfinder;
 
 use glam::{Mat4, Vec4};

@@ -14401,3 +14401,6 @@ rphoto-view-fullbright-help = Désactivée, les faces en pleine lumière de ce q
 
 # Photo camera controls (pcu)
 pcu-busy = La photo précédente s’enregistre encore
+pcu-reset-style = Réinitialiser le style et la balance des blancs
+pcu-keep-look = Garder ce rendu
+pcu-keep-look-tip = Fait du style d’image et de la balance des blancs de la photo votre propre courbe de tons et étalonnage (Préférences › Graphismes) dès maintenant : il reste après la fermeture du mode photo.

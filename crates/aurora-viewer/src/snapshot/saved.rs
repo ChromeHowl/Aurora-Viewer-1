@@ -4,9 +4,11 @@
 //! (`graphics_presets::saved`). A profile holds the photo's size and
 //! proportions, its file format, the supersampling and Photo quality, the
 //! window's lens, the photo's exposure and quick light switches, its looks,
-//! the isolation chosen and the guide. Nothing the graphics profiles hold
-//! (the Preferences' depth of field and exposure, the rendering levels) and
-//! nothing of the camera's place (the camera presets, `camera::presets`).
+//! the isolation chosen and the guide, and the photo's own tone curve and
+//! colour grade (its picture style and white balance, `style`). Nothing of
+//! the graphics profiles' own (the Preferences' depth of field, exposure,
+//! tone curve and grade, the rendering levels) and nothing of the camera's
+//! place (the camera presets, `camera::presets`).
 //!
 //! A profile is external data: each field is read on its own, one that
 //! does not parse (a later version's value) left at its default, and the
@@ -63,6 +65,8 @@ profile_fields! {
     isolation: isolate::Mode,
     transparent: bool,
     guide: Guide,
+    tonemapper: Option<u8>,
+    grade: Option<crate::settings::render_extras::Grade>,
 }
 
 impl Default for Profile {
@@ -93,6 +97,8 @@ impl Profile {
             isolation: iso.mode,
             transparent: iso.transparent,
             guide: s.guide,
+            tonemapper: light.tonemapper,
+            grade: light.grade,
         }
     }
 
@@ -123,6 +129,7 @@ impl Profile {
         iso.set_mode(self.isolation);
         iso.set_transparent(self.transparent);
         s.guide = self.guide;
+        (light.tonemapper, light.grade) = super::style::sanitize(self.tonemapper, self.grade);
     }
 }
 
@@ -146,10 +153,12 @@ pub enum Part {
     Isolation,
     /// The composition guide.
     Guide,
+    /// The photo's picture style and white balance.
+    Style,
 }
 
 impl Part {
-    pub const ALL: [Part; 8] = [
+    pub const ALL: [Part; 9] = [
         Part::Format,
         Part::File,
         Part::Quality,
@@ -158,6 +167,7 @@ impl Part {
         Part::Looks,
         Part::Isolation,
         Part::Guide,
+        Part::Style,
     ];
 }
 
@@ -194,6 +204,9 @@ pub fn reset(part: Option<Part>, s: &mut Settings, light: &mut PhotoLight, iso: 
     }
     if is(Part::Guide) {
         p.guide = d.guide;
+    }
+    if is(Part::Style) {
+        (p.tonemapper, p.grade) = (d.tonemapper, d.grade);
     }
     p.apply(s, light, iso);
 }
@@ -324,6 +337,44 @@ mod tests {
                 "{part:?} of the defaults changes nothing"
             );
         }
+    }
+
+    #[test]
+    fn the_photo_style_is_held_reset_and_old_profiles_load_without_it() {
+        use crate::settings::render_extras::Grade;
+        let style = Grade {
+            enabled: true,
+            temperature: 0.4,
+            gain: 0.25,
+            ..Grade::default()
+        };
+        let s = Settings::default();
+        let mut light = PhotoLight {
+            tonemapper: Some(5),
+            grade: Some(style),
+            ..PhotoLight::default()
+        };
+        let mut iso = Isolation::default();
+        let profile = Profile::capture(&s, &light, &iso);
+        assert_eq!((profile.tonemapper, profile.grade), (Some(5), Some(style)));
+        // applied over a photo without a style: the style comes back
+        let (mut l2, mut s2) = (PhotoLight::default(), Settings::default());
+        profile.apply(&mut s2, &mut l2, &mut iso);
+        assert_eq!((l2.tonemapper, l2.grade), (Some(5), Some(style)));
+        // a profile saved before the style: none (Preferences' look)
+        let old: Settings = serde_json::from_str(r#"{"profiles": {"Old": {"guide": "Center"}}}"#).expect("load");
+        assert_eq!((old.profiles["Old"].tonemapper, old.profiles["Old"].grade), (None, None));
+        // its part alone, or everything, back to Preferences' look
+        let mut s = Settings {
+            guide: Guide::Center,
+            ..Settings::default()
+        };
+        reset(Some(Part::Style), &mut s, &mut light, &mut iso);
+        assert_eq!((light.tonemapper, light.grade), (None, None));
+        assert_eq!(s.guide, Guide::Center, "the rest kept");
+        light.tonemapper = Some(2);
+        reset(None, &mut s, &mut light, &mut iso);
+        assert_eq!(light.tonemapper, None);
     }
 
     #[test]

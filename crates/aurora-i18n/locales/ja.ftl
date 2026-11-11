@@ -14372,3 +14372,6 @@ rphoto-view-fullbright-help = オフにすると、他人が所有するもの�
 
 # Photo camera controls (pcu)
 pcu-busy = 前の写真を保存中です
+pcu-reset-style = スタイルとホワイトバランスをリセット
+pcu-keep-look = この仕上がりを保持
+pcu-keep-look-tip = 写真のピクチャースタイルとホワイトバランスを自分のトーンカーブとカラーグレード（環境設定 › グラフィック）にし、写真モードを閉じた後も残します。

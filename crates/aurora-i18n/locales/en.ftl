@@ -14405,3 +14405,6 @@ rphoto-view-fullbright-help = Off, fullbright faces of what others own are lit l
 
 # Photo camera controls (pcu)
 pcu-busy = Still saving the last photo
+pcu-reset-style = Reset style and white balance
+pcu-keep-look = Keep this look
+pcu-keep-look-tip = Makes the photo's picture style and white balance your own tone curve and colour grade (Preferences › Graphics) now, so it stays after photo mode closes.

@@ -228,6 +228,9 @@ pub(super) struct Snapshots {
     /// "Photo quality" was switched on for the first time: held off until
     /// its warning is answered (`Settings::quality_warned`).
     quality_ask: bool,
+    /// The photo's tone curve the renderer last had (`photo_light`): a
+    /// new one is applied once.
+    tone_applied: Option<u8>,
     upload: Option<Upload>,
     /// The message tells of this item, saved to the inventory.
     message_item: Option<Uuid>,
@@ -472,6 +475,7 @@ impl Default for Snapshots {
             confirm: None,
             short: None,
             quality_ask: false,
+            tone_applied: None,
             upload: None,
             message_item: None,
             message_profile: false,
@@ -2178,6 +2182,14 @@ impl App {
                     self.snapshots.ui.light.env = Default::default();
                 }
             }
+            Action::KeepStyle => {
+                let s = &mut self.settings;
+                if snapshot::style::keep(&mut self.snapshots.ui.light, &mut s.tonemapper, &mut s.render_extras.grade) {
+                    log::info!("photo style kept: tone curve {}", s.tonemapper);
+                    s.save();
+                    self.snapshots.settings_changed = true;
+                }
+            }
             Action::Controls => {
                 if !self.panels.camera_controls && !self.panels.movement_controls {
                     self.panels.camera_controls = true;
@@ -2966,6 +2978,12 @@ LUT_3D_SIZE {n}
         }
         self.world.eep.set_photo(light.env);
         self.scene.attached_lights = light.attached_lights;
+        // the photo's tone curve set, changed or given back: the renderer
+        // takes it once (the grade goes with each frame)
+        if light.tonemapper != self.snapshots.tone_applied {
+            self.snapshots.tone_applied = light.tonemapper;
+            self.snapshots.settings_changed = true;
+        }
     }
 
     /// The lists of the Light section load like the environment window's.
@@ -2982,6 +3000,27 @@ LUT_3D_SIZE {n}
     /// The exposure the frame is drawn with: the photo's, else Preferences'.
     pub(super) fn photo_exposure(&self) -> f32 {
         self.snapshots.ui.light.exposure.unwrap_or(self.settings.exposure)
+    }
+
+    /// The colour grade the frame is drawn with: the photo's style and
+    /// white balance, else Preferences' (`snapshot::style`).
+    pub(super) fn photo_grade(&self) -> crate::settings::render_extras::Grade {
+        snapshot::style::grade(&self.snapshots.ui.light, &self.settings.render_extras.grade)
+    }
+
+    /// The tone curve the frame is drawn with: the photo's, else
+    /// Preferences'.
+    pub(super) fn photo_tonemapper(&self) -> u8 {
+        snapshot::style::tonemapper(&self.snapshots.ui.light, self.settings.tonemapper)
+    }
+
+    /// The renderer's settings with the photo's tone curve: what every
+    /// `apply_settings` takes, so that a change of settings or a GPU
+    /// recovery during the photo mode keeps the photo's curve.
+    pub(super) fn render_settings_now(&self) -> aurora_render::RenderSettings {
+        let mut r = self.settings.render_settings();
+        r.tonemapper = crate::settings::tonemapper_of(self.photo_tonemapper());
+        r
     }
 
     /// The photo's light holds the clouds still.

@@ -25,6 +25,12 @@ pub struct PhotoLight {
     /// The lights worn by avatars light the scene
     /// (LLPipeline::sRenderAttachedLights).
     pub attached_lights: bool,
+    /// The photo's tone curve (`Settings::tonemapper`'s numbers); None:
+    /// Preferences' one (`snapshot::style`).
+    pub tonemapper: Option<u8>,
+    /// The photo's colour grade, white balance included; None: Preferences'
+    /// one.
+    pub grade: Option<crate::settings::render_extras::Grade>,
 }
 
 impl Default for PhotoLight {
@@ -34,6 +40,8 @@ impl Default for PhotoLight {
             exposure: None,
             clouds_paused: false,
             attached_lights: true,
+            tonemapper: None,
+            grade: None,
         }
     }
 }
