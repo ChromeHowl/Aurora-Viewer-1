@@ -370,7 +370,8 @@ function Test-Msvc {
 
 function Install-Git {
     Set-Stage 'Installing Git...' 'Asking GitHub for the latest Git for Windows (MinGit, a private copy for this program only).' '' 'Check the internet connection, then run the Update shortcut again.'
-    $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/git-for-windows/git/releases/latest' -Headers @{ 'User-Agent' = $UserAgent; 'Accept' = 'application/vnd.github+json' } -UseBasicParsing
+    # -UserAgent: PowerShell 5.1 refuses that header in -Headers
+    $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/git-for-windows/git/releases/latest' -UserAgent $UserAgent -UseBasicParsing
     $pattern = '^MinGit-[0-9.]+-64-bit\.zip$'
     $asset = @($release.assets | Where-Object { $_.name -match $pattern }) | Select-Object -First 1
     if (-not $asset) { throw "No MinGit package in Git for Windows $($release.tag_name)." }
