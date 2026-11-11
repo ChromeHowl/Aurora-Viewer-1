@@ -480,6 +480,11 @@ pub struct OptionsUi {
     pub omnifilter_log_key: (u64, u64),
     pub omnifilter_clear_log: bool,
     omnifilter_open: Option<usize>,
+    /// A Legacy notecard being read (`omnifilter::legacy`): None when the
+    /// file was not chosen, Err when it is not one; and what the last
+    /// import or export came to.
+    pub(crate) omnifilter_import: Option<std::sync::mpsc::Receiver<Option<Result<Vec<crate::world::omnifilter::Rule>, ()>>>>,
+    pub(crate) omnifilter_note: Option<String>,
     /// The translation keys: their state (set by the app), a look at them
     /// asked, the key being typed and the keys typed or forgotten here
     /// (taken by the app, never kept in the settings).

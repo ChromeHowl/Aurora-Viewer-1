@@ -1,6 +1,8 @@
 //! Nearby chat said from afar: the lines whose speaker stood beyond the
-//! near chat radius when they spoke (LLAgent::getNearChatRadius, half of
-//! CHAT_NORMAL_RADIUS), drawn with their colour diminished
+//! region's say range when they spoke (LFSimFeatureHandler::sayRange, 20 m
+//! unless an OpenSim region says otherwise; the older
+//! LLAgent::getNearChatRadius of 10 m is no longer what the Legacy Viewer
+//! reads there), drawn with their colour diminished
 //! (FSBeyondNearbyChatColorDiminishFactor in LLViewerChat::getChatColor,
 //! indra/newview/llviewerchat.cpp, originally LGPL 2.1). The line keeps no
 //! position: the far ones are remembered here by their moment and speaker.
@@ -9,9 +11,6 @@ use super::{ChatKind, ChatLine, World};
 use std::collections::VecDeque;
 use std::time::SystemTime;
 use uuid::Uuid;
-
-/// LLAgent's mNearChatRadius: CHAT_NORMAL_RADIUS / 2.
-pub const NEAR_CHAT_RADIUS: f32 = super::radar::CHAT_RANGE / 2.0;
 
 /// The far lines remembered (more than the nearby chat keeps is useless).
 const MAX_FAR: usize = 2000;
@@ -24,7 +23,7 @@ impl World {
     /// A line said now by `source` at `position` (region coordinates; zero
     /// when unknown, never far, as `isExactlyZero` decides).
     pub(super) fn note_chat_range(&mut self, time: SystemTime, source: Uuid, position: glam::Vec3) {
-        if far(self.agent.position, position) {
+        if far(self.agent.position, position, super::radar::chat_ranges().say) {
             let list = &mut self.far_chat.0;
             list.push_back((time, source));
             while list.len() > MAX_FAR {
@@ -33,7 +32,7 @@ impl World {
         }
     }
 
-    /// The line was said from beyond the near chat radius.
+    /// The line was said from beyond the say range.
     pub fn said_far(&self, line: &ChatLine) -> bool {
         if !matches!(line.kind, ChatKind::Local(_) | ChatKind::Object(_)) {
             return false;
@@ -48,9 +47,9 @@ impl World {
     }
 }
 
-/// Beyond the near chat radius of `agent`.
-fn far(agent: glam::Vec3, speaker: glam::Vec3) -> bool {
-    speaker != glam::Vec3::ZERO && agent.distance_squared(speaker) > NEAR_CHAT_RADIUS * NEAR_CHAT_RADIUS
+/// Beyond the say range `say` of `agent`.
+fn far(agent: glam::Vec3, speaker: glam::Vec3, say: f32) -> bool {
+    speaker != glam::Vec3::ZERO && agent.distance_squared(speaker) > say * say
 }
 
 #[cfg(test)]
@@ -61,9 +60,13 @@ mod tests {
     #[test]
     fn only_a_known_position_beyond_the_radius_is_far() {
         let me = Vec3::new(128.0, 128.0, 20.0);
-        assert!(!far(me, Vec3::new(130.0, 128.0, 20.0)));
-        assert!(far(me, Vec3::new(128.0, 140.0, 20.0)));
-        assert!(!far(me, Vec3::ZERO), "unknown");
+        let say = crate::world::radar::CHAT_RANGE;
+        assert!(!far(me, Vec3::new(130.0, 128.0, 20.0), say));
+        // 12 m: within the say range of 20 m (not the old 10 m radius)
+        assert!(!far(me, Vec3::new(128.0, 140.0, 20.0), say));
+        assert!(far(me, Vec3::new(128.0, 150.0, 20.0), say));
+        assert!(far(me, Vec3::new(128.0, 140.0, 20.0), 10.0), "a region's own range");
+        assert!(!far(me, Vec3::ZERO, say), "unknown");
     }
 
     #[test]

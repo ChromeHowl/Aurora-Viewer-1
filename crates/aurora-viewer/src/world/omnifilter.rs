@@ -27,9 +27,14 @@
 //! - the regular expressions are linear-time (no backtracking) and bounded
 //!   in size, so a pattern can never stall the viewer on a message; a
 //!   pattern that does not compile disables its rule, shown as such;
-//! - only messages are filtered here: the Legacy Viewer's rules over group
-//!   notices, invitations, offers, teleport requests and script dialogs (and
-//!   the automatic dialog replies) are not ported.
+//! - group notices, group invitations, inventory, friendship and teleport
+//!   offers, teleport requests and script dialogs are filtered too: a rule
+//!   that matches one hides it (no answer is sent, as in the Legacy Viewer),
+//!   or replaces its text; a script dialog's text holds its buttons
+//!   ("button_name=…", FIRE-36647). The Legacy automatic dialog replies and
+//!   web page requests are not ported;
+//! - the rules can be read from and written to a Legacy Omnifilter notecard
+//!   saved as a file (`legacy.rs`).
 
 use super::World;
 use crate::settings::Rgba;
@@ -94,16 +99,56 @@ pub enum Source {
     GroupChat,
     /// An object's instant message (llInstantMessage).
     ObjectIm,
+    /// A group notice (IM_GROUP_NOTICE): its sender and its subject and text.
+    GroupNotice,
+    /// An invitation to join a group (IM_GROUP_INVITATION).
+    GroupInvite,
+    /// Items offered by a resident or an object (IM_INVENTORY_OFFERED,
+    /// IM_TASK_INVENTORY_OFFERED): the text is the item's name.
+    InventoryOffer,
+    /// A friendship offered (IM_FRIENDSHIP_OFFERED).
+    FriendshipOffer,
+    /// A teleport offered (IM_LURE_USER).
+    Lure,
+    /// A teleport asked of us (IM_TELEPORT_REQUEST).
+    TeleportRequest,
+    /// An object's dialog or text box (llDialog, llTextBox).
+    ScriptDialog,
 }
 
 impl Source {
-    pub const ALL: [Source; 5] = [
+    pub const ALL: [Source; 12] = [
         Source::NearbyChat,
         Source::ObjectChat,
         Source::Im,
         Source::GroupChat,
         Source::ObjectIm,
+        Source::GroupNotice,
+        Source::GroupInvite,
+        Source::InventoryOffer,
+        Source::FriendshipOffer,
+        Source::Lure,
+        Source::TeleportRequest,
+        Source::ScriptDialog,
     ];
+
+    /// The kind of an instant message by its dialog
+    /// (LLIMProcessing::processNewMessage); None for those never filtered.
+    pub fn of_im(dialog: u8, from_resident: bool) -> Option<Source> {
+        use super::groups::dialog as d;
+        Some(match dialog {
+            0 if from_resident => Source::Im,
+            d::SESSION_SEND | d::SESSION_INVITE => Source::GroupChat,
+            19 => Source::ObjectIm,
+            3 => Source::GroupInvite,
+            4 | 9 => Source::InventoryOffer,
+            22 => Source::Lure,
+            26 => Source::TeleportRequest,
+            32 => Source::GroupNotice,
+            38 => Source::FriendshipOffer,
+            _ => return None,
+        })
+    }
 }
 
 /// How a nearby line was said (its chat type).
@@ -608,16 +653,18 @@ impl World {
     /// and the block list: true when a rule hides it or sets it aside (its
     /// text may be replaced). Notices, offers and our own are left alone.
     pub(super) fn omnifilter_im(&mut self, im: &mut InstantMessage) -> bool {
-        use super::groups::dialog;
-        if im.message.is_empty() || im.from_agent_id == self.agent_id {
+        if im.from_agent_id == self.agent_id {
             return false;
         }
-        let source = match im.dialog {
-            0 if !im.from_agent_id.is_nil() => Source::Im,
-            dialog::SESSION_SEND | dialog::SESSION_INVITE => Source::GroupChat,
-            19 => Source::ObjectIm,
-            _ => return false,
+        let Some(source) = Source::of_im(im.dialog, !im.from_agent_id.is_nil()) else {
+            return false;
         };
+        // a message needs a text; an offer or an invitation is matched on
+        // its sender alone when it has none
+        let message = matches!(source, Source::Im | Source::GroupChat | Source::ObjectIm);
+        if message && im.message.is_empty() {
+            return false;
+        }
         let h = Haystack {
             source,
             channel: None,
@@ -630,6 +677,27 @@ impl World {
         if !shown && source == Source::Im {
             self.social.set_typing(im.from_agent_id, false);
         }
+        !shown
+    }
+
+    /// A script dialog or text box: true when a rule hides it or sets it
+    /// aside (LLScriptFloaterManager::onAddNotification). Its text holds
+    /// its buttons; a rule replacing it rewrites the dialog's message.
+    pub(super) fn omnifilter_dialog(&mut self, object_name: &str, message: &mut String, buttons: &[String]) -> bool {
+        let mut content = message.clone();
+        for b in buttons {
+            content.push_str("\nbutton_name=");
+            content.push_str(b);
+        }
+        let h = Haystack {
+            source: Source::ScriptDialog,
+            channel: None,
+            sender: object_name,
+            text: &content,
+        };
+        let mut text = message.clone();
+        let shown = self.omnifilter.apply(h, &mut text).is_some();
+        *message = text;
         !shown
     }
 
@@ -663,6 +731,8 @@ impl World {
         }
     }
 }
+
+pub mod legacy;
 
 #[cfg(test)]
 mod tests;

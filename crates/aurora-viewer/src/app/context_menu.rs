@@ -492,6 +492,7 @@ impl App {
             CtxAction::EstateKick(ids) => self.ask_estate(people_actions::EstateAction::Kick, ids),
             CtxAction::EstateTeleportHome(ids) => self.ask_estate(people_actions::EstateAction::Home, ids),
             CtxAction::EstateBan(ids) => self.ask_estate(people_actions::EstateAction::Ban, ids),
+            CtxAction::GroupBanAll(id, ban) => self.ask_group_ban_all(id, ban),
             CtxAction::EditWorn(item) => {
                 if self.world.inventory.items.get(&item).is_some_and(crate::wearable_editor::supported) {
                     self.open_wearable_editor(item);

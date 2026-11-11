@@ -63,7 +63,7 @@ pub struct ChatDisplay {
     /// FSMarkObjects (off): an object without a name reads "(No name)".
     pub mark_unnamed_objects: bool,
     /// FSBeyondNearbyChatColorDiminishFactor (0.8): the colour of nearby
-    /// chat said from beyond the near chat radius (10 m,
+    /// chat said from beyond the region's say range (20 m,
     /// `world/chat_range.rs`) is diminished by this factor; 1 changes
     /// nothing.
     pub beyond_range_dim: f32,
@@ -91,6 +91,8 @@ pub struct ChatDisplay {
     /// FSSecondsinChatTimestamps (off): seconds in the times of the chat
     /// and of the transcripts.
     pub seconds_in_timestamps: bool,
+    /// More options (`settings/chat_more.rs`).
+    pub more: super::chat_more::ChatMore,
 }
 
 impl Default for ChatDisplay {
@@ -125,6 +127,7 @@ impl Default for ChatDisplay {
             show_im_send_button: true,
             show_muted_chat: false,
             seconds_in_timestamps: false,
+            more: Default::default(),
         }
     }
 }

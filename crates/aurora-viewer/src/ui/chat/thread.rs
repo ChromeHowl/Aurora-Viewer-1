@@ -306,17 +306,20 @@ pub(super) fn tag(ui: &mut egui::Ui, text: &str, fill: Option<Color32>, color: C
 
 /// The styles of a moderator's name and text in a group chat or a
 /// conference (FSHighlightGroupMods, FSModNameStyle, FSModTextStyle,
-/// LLChatHistory::appendMessage); None for the others or with the option off.
-fn moderator_styles(th: &Thread, line: &ChatLine) -> Option<(TextStyle, TextStyle)> {
+/// LLChatHistory::appendMessage); None for the others or with the option
+/// off. Shared by every style of the conversations.
+pub(super) fn moderator_styles(moderators: Option<&HashSet<uuid::Uuid>>, line: &ChatLine) -> Option<(TextStyle, TextStyle)> {
     let d = super::display::get();
-    (d.highlight_moderators && th.moderators.is_some_and(|m| m.contains(&line.source)))
+    (d.highlight_moderators && moderators.is_some_and(|m| m.contains(&line.source)))
         .then_some((d.moderator_name_style, d.moderator_text_style))
 }
 
-/// A message's emphasis, a moderator's text style added.
-fn text_emphasis(th: &Thread, line: &ChatLine, italics: bool) -> crate::ui::fonts::TextEmphasis {
-    let mut e = super::message_emphasis(line.kind, italics);
-    if let Some((_, style)) = moderator_styles(th, line) {
+/// An emphasis with a moderator's text style added.
+pub(super) fn with_text_style(
+    mut e: crate::ui::fonts::TextEmphasis,
+    style: Option<(TextStyle, TextStyle)>,
+) -> crate::ui::fonts::TextEmphasis {
+    if let Some((_, style)) = style {
         e.strong |= style.bold();
         e.italics |= style.italic();
         e.underline = style.underline();
@@ -324,32 +327,40 @@ fn text_emphasis(th: &Thread, line: &ChatLine, italics: bool) -> crate::ui::font
     e
 }
 
+/// A name at `size` in `color`: semi-bold, else as a moderator's name style
+/// says (FSModNameStyle).
+pub(super) fn styled_name(ctx: &egui::Context, name: &str, size: f32, color: Color32, style: Option<(TextStyle, TextStyle)>) -> RichText {
+    let Some((style, _)) = style else {
+        return RichText::new(name)
+            .font(egui::FontId::new(size, crate::ui::fonts::semibold(ctx)))
+            .color(color);
+    };
+    let family = if style.bold() {
+        crate::ui::fonts::semibold(ctx)
+    } else {
+        egui::FontFamily::Proportional
+    };
+    let mut text = RichText::new(name).font(egui::FontId::new(size, family)).color(color);
+    if style.italic() {
+        text = text.italics();
+    }
+    if style.underline() {
+        text = text.underline();
+    }
+    text
+}
+
+/// A message's emphasis, a moderator's text style added.
+fn text_emphasis(th: &Thread, line: &ChatLine, italics: bool) -> crate::ui::fonts::TextEmphasis {
+    with_text_style(super::message_emphasis(line.kind, italics), moderator_styles(th.moderators, line))
+}
+
 /// The name of a head or a compact row: clickable to the profile, with the
 /// author's menu on a right click.
 #[allow(clippy::too_many_arguments)]
 fn name_label(ui: &mut egui::Ui, env: &LineEnv, th: &Thread, line: &ChatLine, name: &str, color: Color32, who: &Who, max: f32) {
     let size = chat_size(ui.ctx(), 13.5);
-    let text = match moderator_styles(th, line) {
-        // FSModNameStyle: the name as the moderators' style says
-        Some((style, _)) => {
-            let family = if style.bold() {
-                crate::ui::fonts::semibold(ui.ctx())
-            } else {
-                egui::FontFamily::Proportional
-            };
-            let mut text = RichText::new(name).font(egui::FontId::new(size, family)).color(color);
-            if style.italic() {
-                text = text.italics();
-            }
-            if style.underline() {
-                text = text.underline();
-            }
-            text
-        }
-        None => RichText::new(name)
-            .font(egui::FontId::new(size, crate::ui::fonts::semibold(ui.ctx())))
-            .color(color),
-    };
+    let text = styled_name(ui.ctx(), name, size, color, moderator_styles(th.moderators, line));
     let r = ui.add(crate::ui::widgets::elided_label(ui, text, max).sense(egui::Sense::click()));
     if who.avatar.is_nil() {
         return;

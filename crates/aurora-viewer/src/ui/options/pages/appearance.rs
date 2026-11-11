@@ -315,6 +315,16 @@ fn colors(cx: &mut Cx) {
         cx.color(tr!("common-system"), "", &field!(colors.chat_system));
         cx.color(tr!("ui-options-errors"), "", &field!(colors.chat_errors));
         cx.color(tr!("ui-options-object-ims"), "", &field!(colors.chat_object_im));
+        // FSColorIMsDistinctly and AgentIMColor
+        cx.toggle(
+            tr!("l2s-color-ims"),
+            tr!("l2s-color-ims-hint"),
+            &field!(chat_display.more.color_ims),
+        );
+        let off = !cx.s.chat_display.more.color_ims;
+        cx.subs(off, |cx| {
+            cx.color(tr!("l2s-color-ims-color"), "", &field!(colors.chat_im));
+        });
         cx.color(tr!("common-owner"), "", &field!(colors.chat_owner));
         cx.color(tr!("status-urls"), "", &field!(colors.chat_urls));
         cx.color(tr!("ui-options-url-path"), "", &field!(colors.chat_slurl));

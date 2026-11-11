@@ -335,6 +335,23 @@ impl GroupMgr {
         self.eject(group, members, me);
     }
 
+    /// A ban made elsewhere (createBanEntry): in our copy of the list
+    /// when we have it.
+    pub fn note_ban(&mut self, group: Uuid, id: Uuid) {
+        if let Some(bans) = self.groups.get_mut(&group).and_then(|g| g.bans.as_mut())
+            && !bans.iter().any(|(b, _)| *b == id)
+        {
+            bans.push((id, 0.0));
+        }
+    }
+
+    /// A ban lifted elsewhere (removeBanEntry).
+    pub fn forget_ban(&mut self, group: Uuid, id: Uuid) {
+        if let Some(bans) = self.groups.get_mut(&group).and_then(|g| g.bans.as_mut()) {
+            bans.retain(|(b, _)| *b != id);
+        }
+    }
+
     /// The ban list (getGroupBanRequestCoro).
     pub fn request_bans(&mut self, group: Uuid) {
         self.out.push(NetCommand::GroupBans {

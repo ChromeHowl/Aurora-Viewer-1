@@ -210,6 +210,8 @@ pub(super) fn draw(ui: &mut egui::Ui, env: &mut LineEnv, line: &crate::world::Ch
     let lead = if own { inset } else { inset + PIC + PIC_GAP };
     let max_bubble = ((w - lead) * MAX_SHARE).max(80.0);
 
+    // FSHighlightGroupMods: a moderator's name and text in their styles
+    let moderator = super::thread::moderator_styles(env.moderators, line);
     if (names || object) && look.header && !own {
         // at the top of the list, the name keeps off its edge by the same
         // inset as the bubbles off the sides (as far as a day's text)
@@ -229,7 +231,11 @@ pub(super) fn draw(ui: &mut egui::Ui, env: &mut LineEnv, line: &crate::world::Ch
             let r = ui.add(
                 super::super::widgets::elided_label(
                     ui,
-                    RichText::new(&name).size(chat_size(ui.ctx(), 11.5)).strong().color(col),
+                    match moderator {
+                        // FSModNameStyle
+                        Some(_) => super::thread::styled_name(ui.ctx(), &name, chat_size(ui.ctx(), 11.5), col, moderator),
+                        None => RichText::new(&name).size(chat_size(ui.ctx(), 11.5)).strong().color(col),
+                    },
                     max_bubble,
                 )
                 .sense(egui::Sense::click()),
@@ -299,7 +305,7 @@ pub(super) fn draw(ui: &mut egui::Ui, env: &mut LineEnv, line: &crate::world::Ch
                         &visible,
                         size,
                         text_color,
-                        super::message_emphasis(line.kind, italics),
+                        super::thread::with_text_style(super::message_emphasis(line.kind, italics), moderator),
                         mark,
                     );
                 }
@@ -503,6 +509,7 @@ mod tests {
                     menu: None,
                     bubbles: Some(true),
                     previews: None,
+                    moderators: None,
                 };
                 draw(ui, &mut env, &line, look, None, true);
             },

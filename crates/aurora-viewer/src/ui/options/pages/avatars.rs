@@ -180,6 +180,16 @@ pub fn page(cx: &mut Cx, tab: usize) {
                     cx.color(tr!("ui-options-ignored"), "", &field!(colors.tag_muted));
                     cx.color("Linden Lab", "", &field!(colors.tag_linden));
                 });
+                // FSColorUsername and NameTagUsername
+                cx.toggle(
+                    tr!("l2s-color-username"),
+                    tr!("l2s-color-username-hint"),
+                    &field!(chat_display.more.color_username),
+                );
+                let off = !cx.s.chat_display.more.color_username;
+                cx.subs(off, |cx| {
+                    cx.color(tr!("l2s-color-username-color"), "", &field!(colors.tag_username));
+                });
                 let p = cx.p;
                 let only = if classic { "" } else { tr!("ui-options-tag-colors-classic-only") };
                 for (label, f) in [

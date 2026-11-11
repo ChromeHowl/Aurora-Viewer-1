@@ -163,6 +163,12 @@ pub struct Feed {
     left: HashMap<Uuid, (Vec<Row>, SystemTime)>,
     /// RLVa hides who they are (RlvActions::canShowName).
     hidden: HashSet<Uuid>,
+    /// In a region we are connected to, beyond what the simulator sends us
+    /// (the map places them, their avatar is not in view).
+    out_of_view: HashSet<Uuid>,
+    /// The objects whose full properties were asked (select, then
+    /// deselect), once each while a tab shows.
+    asked: HashSet<Uuid>,
     at: Option<Instant>,
 }
 
@@ -173,6 +179,9 @@ pub enum Seen<'a> {
     Here(&'a [Row]),
     /// Gone since this time: what they wore then.
     Left(&'a [Row], SystemTime),
+    /// In a region we are connected to, out of view: what they wore when
+    /// last in view, if they were.
+    OutOfView(Option<(&'a [Row], SystemTime)>),
     /// RLVa hides who they are.
     Hidden,
     /// Never seen while the tab showed.
@@ -186,7 +195,15 @@ impl Feed {
 
     /// The lists of this round; an avatar listed before and missing now
     /// left at `when` (unless RLVa hides it now).
-    pub fn set(&mut self, lists: HashMap<Uuid, Vec<Row>>, hidden: HashSet<Uuid>, now: Instant, when: SystemTime) {
+    pub fn set(
+        &mut self,
+        lists: HashMap<Uuid, Vec<Row>>,
+        hidden: HashSet<Uuid>,
+        out_of_view: HashSet<Uuid>,
+        now: Instant,
+        when: SystemTime,
+    ) {
+        self.out_of_view = out_of_view;
         for (avatar, rows) in self.lists.drain() {
             if !lists.contains_key(&avatar) && !hidden.contains(&avatar) {
                 self.left.insert(avatar, (rows, when));
@@ -207,11 +224,19 @@ impl Feed {
         if self.hidden.contains(avatar) {
             return Seen::Hidden;
         }
-        match (self.lists.get(avatar), self.left.get(avatar)) {
+        let last = self.left.get(avatar).map(|(rows, when)| (rows.as_slice(), *when));
+        match (self.lists.get(avatar), last) {
             (Some(rows), _) => Seen::Here(rows),
-            (None, Some((rows, when))) => Seen::Left(rows, *when),
+            (None, last) if self.out_of_view.contains(avatar) => Seen::OutOfView(last),
+            (None, Some((rows, when))) => Seen::Left(rows, when),
             (None, None) => Seen::Away,
         }
+    }
+
+    /// The full properties of `object` are to be asked: true the first
+    /// time while the tab shows.
+    pub fn ask_once(&mut self, object: Uuid) -> bool {
+        self.asked.insert(object)
     }
 
     /// Nothing shows a Worn tab any more.
@@ -219,6 +244,8 @@ impl Feed {
         self.lists.clear();
         self.left.clear();
         self.hidden.clear();
+        self.out_of_view.clear();
+        self.asked.clear();
         self.at = None;
     }
 }
@@ -514,18 +541,22 @@ fn buttons(ui: &mut egui::Ui, p: &Palette, rows: &[&Row], state: &mut State, act
 /// Draw the tab. `seen` says where the avatar is; `name` is the
 /// resident's, for the messages.
 pub fn show(ui: &mut egui::Ui, p: &Palette, state: &mut State, seen: Seen<'_>, own: bool, name: &str, actions: &mut Vec<Action>) {
-    let (rows, left) = match seen {
-        Seen::Here(rows) => (rows, None),
-        Seen::Left(rows, when) => (rows, Some(when)),
-        Seen::Hidden | Seen::Away => {
+    let (rows, left, out_of_view) = match seen {
+        Seen::Here(rows) => (rows, None, false),
+        Seen::Left(rows, when) => (rows, Some(when), false),
+        Seen::OutOfView(Some((rows, when))) => (rows, Some(when), true),
+        Seen::Hidden | Seen::Away | Seen::OutOfView(None) => {
             state.lit.clear();
-            let (line, hint) = if seen == Seen::Hidden {
-                (aurora_i18n::tr!("b6-worn-rlva").to_owned(), "")
-            } else {
-                (
+            let (line, hint) = match seen {
+                Seen::Hidden => (aurora_i18n::tr!("b6-worn-rlva").to_owned(), ""),
+                Seen::OutOfView(_) => (
+                    aurora_i18n::tr!("l2s-worn-out-of-view", name = name),
+                    aurora_i18n::tr!("l2s-worn-out-of-view-hint"),
+                ),
+                _ => (
                     aurora_i18n::tr!("wornposer-not-nearby", name = name),
                     aurora_i18n::tr!("wornposer-not-nearby-hint"),
-                )
+                ),
             };
             ui.add_space(18.0);
             ui.vertical_centered(|ui| {
@@ -557,12 +588,15 @@ pub fn show(ui: &mut egui::Ui, p: &Palette, state: &mut State, seen: Seen<'_>, o
     state.lit.retain(|id| listed.iter().any(|row| row.id == *id && !row.derendered));
     ui.spacing_mut().item_spacing.y = 4.0;
     if let Some(when) = left {
-        // gone: the last list, greyed (FD's "left at")
-        ui.label(
-            RichText::new(aurora_i18n::tr!("b6-worn-left", name = name, time = crate::ui::chat::hhmm_24(when)))
-                .size(12.5)
-                .color(p.amber),
-        );
+        // gone, or out of view in a region of ours: the last list, greyed
+        // (FD's "left at" and "out of view")
+        let time = crate::ui::chat::hhmm_24(when);
+        let text = if out_of_view {
+            aurora_i18n::tr!("l2s-worn-out-of-view-since", name = name, time = time)
+        } else {
+            aurora_i18n::tr!("b6-worn-left", name = name, time = time)
+        };
+        ui.label(RichText::new(text).size(12.5).color(p.amber));
     }
     let shown = listed.iter().filter(|row| !row.derendered);
     let complexity: u64 = shown.clone().map(|row| u64::from(row.complexity)).sum();
@@ -762,7 +796,13 @@ mod tests {
         assert!(feed.due(start));
         let avatar = Uuid::from_u128(9);
         let when = SystemTime::UNIX_EPOCH;
-        feed.set(HashMap::from([(avatar, vec![row(1, "Hair", 2)])]), HashSet::new(), start, when);
+        feed.set(
+            HashMap::from([(avatar, vec![row(1, "Hair", 2)])]),
+            HashSet::new(),
+            HashSet::new(),
+            start,
+            when,
+        );
         assert!(!feed.due(start + Duration::from_millis(100)));
         assert!(feed.due(start + EVERY));
         assert_eq!(feed.get(&avatar).map(<[Row]>::len), Some(1));
@@ -781,23 +821,65 @@ mod tests {
         let (avatar, other) = (Uuid::from_u128(9), Uuid::from_u128(8));
         let at = |s: u64| SystemTime::UNIX_EPOCH + Duration::from_secs(s);
         let list = vec![row(1, "Hair", 2)];
-        feed.set(HashMap::from([(avatar, list.clone())]), HashSet::new(), start, at(1));
+        feed.set(
+            HashMap::from([(avatar, list.clone())]),
+            HashSet::new(),
+            HashSet::new(),
+            start,
+            at(1),
+        );
         assert_eq!(feed.seen(&avatar), Seen::Here(&list));
         // gone at the next round
-        feed.set(HashMap::new(), HashSet::new(), start, at(2));
+        feed.set(HashMap::new(), HashSet::new(), HashSet::new(), start, at(2));
         assert_eq!(feed.seen(&avatar), Seen::Left(&list, at(2)));
         // the time stays the one they left at
-        feed.set(HashMap::new(), HashSet::new(), start, at(3));
+        feed.set(HashMap::new(), HashSet::new(), HashSet::new(), start, at(3));
         assert_eq!(feed.seen(&avatar), Seen::Left(&list, at(2)));
         // back again
-        feed.set(HashMap::from([(avatar, list.clone())]), HashSet::new(), start, at(4));
+        feed.set(
+            HashMap::from([(avatar, list.clone())]),
+            HashSet::new(),
+            HashSet::new(),
+            start,
+            at(4),
+        );
         assert_eq!(feed.seen(&avatar), Seen::Here(&list));
         // RLVa hiding who they are: nothing, not even the last list
-        feed.set(HashMap::new(), HashSet::from([avatar]), start, at(5));
+        feed.set(HashMap::new(), HashSet::from([avatar]), HashSet::new(), start, at(5));
         assert_eq!(feed.seen(&avatar), Seen::Hidden);
-        feed.set(HashMap::new(), HashSet::new(), start, at(6));
+        feed.set(HashMap::new(), HashSet::new(), HashSet::new(), start, at(6));
         assert_eq!(feed.seen(&avatar), Seen::Away);
         assert_eq!(feed.seen(&other), Seen::Away);
+    }
+
+    #[test]
+    fn an_avatar_out_of_view_in_our_region_says_so() {
+        let mut feed = Feed::default();
+        let start = Instant::now();
+        let avatar = Uuid::from_u128(9);
+        let at = |s: u64| SystemTime::UNIX_EPOCH + Duration::from_secs(s);
+        let list = vec![row(1, "Hair", 2)];
+        let here = HashSet::from([avatar]);
+        // never in view, but on the map of a region of ours
+        feed.set(HashMap::new(), HashSet::new(), here.clone(), start, at(1));
+        assert_eq!(feed.seen(&avatar), Seen::OutOfView(None));
+        feed.set(
+            HashMap::from([(avatar, list.clone())]),
+            HashSet::new(),
+            HashSet::new(),
+            start,
+            at(2),
+        );
+        // walked out of view: the last list, with the time
+        feed.set(HashMap::new(), HashSet::new(), here, start, at(3));
+        assert_eq!(feed.seen(&avatar), Seen::OutOfView(Some((&list, at(3)))));
+        // and out of the region: gone since then
+        feed.set(HashMap::new(), HashSet::new(), HashSet::new(), start, at(4));
+        assert_eq!(feed.seen(&avatar), Seen::Left(&list, at(3)));
+        // the properties are asked once
+        assert!(feed.ask_once(avatar) && !feed.ask_once(avatar));
+        feed.clear();
+        assert!(feed.ask_once(avatar));
     }
 
     #[test]

@@ -185,3 +185,31 @@ fn keys_go_to_their_own_store_entries() {
         ]
     );
 }
+
+#[test]
+fn deepl_codes_are_those_its_reference_names() {
+    let target = |lang: &str| {
+        let r = request(&cfg(Service::DeepL), KEY, lang, "Hello").expect("request");
+        let body: serde_json::Value = serde_json::from_str(&r.body).expect("json");
+        body["target_lang"].as_str().unwrap_or_default().to_owned()
+    };
+    assert_eq!(target("pt"), "PT-BR");
+    assert_eq!(target("en"), "EN-US");
+    assert_eq!(target("zh"), "ZH", "no Traditional Chinese variant named: the base code");
+    assert_eq!(target("ja"), "JA");
+}
+
+#[test]
+fn azure_leaves_the_links_as_they_are() {
+    let text = "see https://example.com/a?b=1 and secondlife:///app/agent/x/about now";
+    let sent = protect_links(Service::Azure, text);
+    assert_eq!(
+        sent,
+        "see <div translate=\"no\">https://example.com/a?b=1</div> and <div translate=\"no\">secondlife:///app/agent/x/about</div> now"
+    );
+    assert_eq!(protect_links(Service::DeepL, text), text);
+    assert_eq!(protect_links(Service::Google, text), text);
+    let back = "voir <div translate=\"no\">https://example.com/a?b=1</div> et <div translate=\"no\">www.x.org</div>";
+    assert_eq!(unprotect_links(Service::Azure, back), "voir https://example.com/a?b=1 et www.x.org");
+    assert_eq!(unprotect_links(Service::DeepL, back), back);
+}
