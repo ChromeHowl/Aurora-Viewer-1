@@ -118,7 +118,9 @@ impl World {
         // (follow, friend join, portals, the teleport screen's fade).
         self.cancel_friend_join_flight();
         self.cancel_friend_join();
-        self.tp_history.failed();
+        // (LLAgent::teleportCancel keeps the request: a TeleportFinish that
+        // comes anyway brings the history's place back, `World::apply`)
+        self.tp_history.cancelled();
         self.teleporting = false;
         self.tp_failed = true;
         self.local_teleport = false;

@@ -3307,6 +3307,8 @@ impl World {
                 if restored {
                     log::info!("Restoring canceled teleport request");
                     self.tp_failed = false;
+                    // the place travelled to with back / forward comes back too
+                    self.tp_history.restore_cancelled();
                 }
                 self.teleporting = true;
                 let remote = Some(handle) != self.main_region;
