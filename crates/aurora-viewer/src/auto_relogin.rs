@@ -66,6 +66,9 @@ pub enum End {
         bad_credentials: bool,
         previous_session: bool,
         network: bool,
+        /// The login server sends the login on to another server, which
+        /// the user agrees to first (`NetEvent::LoginFailed::next_server`).
+        next_server: bool,
     },
 }
 
@@ -100,6 +103,9 @@ pub enum Never {
     /// The grid still holds a session of the account after the login's own
     /// waits (reason "presence", `app/relogin.rs`).
     PreviousSession,
+    /// The login server sends the login on to another server: the login
+    /// form asks the user, never the automatic login.
+    NextServer,
     /// Any other refusal of the login server (a suspended account, a closed
     /// grid, a required update): it answered, and said no.
     Refused,
@@ -125,6 +131,7 @@ pub fn classify(end: End) -> Result<Cause, Never> {
         End::LoginFailed {
             previous_session: true, ..
         } => Err(Never::PreviousSession),
+        End::LoginFailed { next_server: true, .. } => Err(Never::NextServer),
         End::LoginFailed { network: true, .. } => Ok(Cause::NoAnswer),
         End::LoginFailed { .. } => Err(Never::Refused),
     }
@@ -310,11 +317,11 @@ mod tests {
         }
     }
 
-    fn failed() -> [bool; 6] {
-        [false; 6]
+    fn failed() -> [bool; 7] {
+        [false; 7]
     }
 
-    fn login_failed(f: [bool; 6]) -> End {
+    fn login_failed(f: [bool; 7]) -> End {
         End::LoginFailed {
             mfa_required: f[0],
             tos_required: f[1],
@@ -322,6 +329,7 @@ mod tests {
             bad_credentials: f[3],
             previous_session: f[4],
             network: f[5],
+            next_server: f[6],
         }
     }
 
@@ -363,6 +371,8 @@ mod tests {
         assert_eq!(classify(with(3)), Err(Never::BadCredentials));
         assert_eq!(classify(with(4)), Err(Never::PreviousSession));
         assert_eq!(classify(with(5)), Ok(Cause::NoAnswer));
+        // another login server: the login form asks the user first
+        assert_eq!(classify(with(6)), Err(Never::NextServer));
         // answered, with a reason the viewer does not know: a suspension,
         // a closed grid
         assert_eq!(classify(login_failed(failed())), Err(Never::Refused));

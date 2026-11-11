@@ -1460,6 +1460,9 @@ pub struct FrameParams {
     /// what is drawn keeps its coverage, in the snapshot's alpha or over a
     /// checkerboard on the live view.
     pub cutout: bool,
+    /// The sky's rendering type is hidden (the viewer's Advanced ›
+    /// Rendering types): the view starts from `clear_color` instead.
+    pub hide_sky: bool,
     /// The photo's look (looks.rs), over the image once tone mapped; None:
     /// none, at no cost.
     pub look: Option<crate::looks::PhotoLook>,
@@ -1470,9 +1473,6 @@ pub struct FrameParams {
     /// No post-processing (RenderDisablePostProcessing): neither exposure
     /// nor tone curve, as on a sky without probe ambiance.
     pub no_post: bool,
-    /// The sky is not drawn (the rendering type of the Legacy Viewer's
-    /// Develop menu): the clear colour shows behind the world.
-    pub hide_sky: bool,
     /// Opaque water (RenderTransparentWater off): the water's deep fog in
     /// place of what lies under it, as waterF.glsl draws it without
     /// TRANSPARENT_WATER (common.wgsl FEATURE_OPAQUE_WATER).

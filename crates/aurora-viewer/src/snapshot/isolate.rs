@@ -7,7 +7,7 @@
 //! and the photo keeps its alpha: a PNG with nothing around the subject.
 //!
 //! The scene flags what is left out for the GPU lists
-//! (`object_flags::PHOTO_HIDDEN`); the particles, name plates and water
+//! (`object_flags::HIDDEN`); the particles, name plates and water
 //! effects read [`object_visible`]. While choosing in the scene everything
 //! is drawn, the chosen ones outlined, so that anything can be clicked.
 //!
@@ -34,6 +34,9 @@ pub enum Mode {
     /// Every avatar in the shot with what it wears, nothing else (the
     /// reverse of `Background`).
     Avatars,
+    /// Everything but the other avatars (and what they wear): the outfit
+    /// portrait in its region (`snapshot::portrait`).
+    OthersHidden,
 }
 
 /// The isolation of the photo session.
@@ -96,6 +99,7 @@ impl Isolation {
             Mode::Chosen => self.chosen.contains(root),
             Mode::Background => !avatar,
             Mode::Avatars => avatar,
+            Mode::OthersHidden => !avatar || *root == self.own,
         }
     }
 
@@ -151,7 +155,7 @@ impl Isolation {
     pub fn set_own(&mut self, own: Uuid) {
         if self.own != own {
             self.own = own;
-            if self.applied() && self.mode == Mode::Own {
+            if self.applied() && matches!(self.mode, Mode::Own | Mode::OthersHidden) {
                 self.bump();
             }
         }
@@ -234,7 +238,10 @@ pub fn by_distance<T>(mut avatars: Vec<(T, f32)>) -> Vec<(T, f32)> {
 pub fn object_visible(world: &crate::world::World, index: usize) -> bool {
     let iso = &world.photo_isolation;
     !iso.applied()
-        || root_of(world, index).is_none_or(|(i, root)| iso.root_visible(&root, world.objects.get(i).is_some_and(|o| o.is_avatar())))
+        || root_of(world, index).is_none_or(|(at, root)| {
+            let avatar = world.objects.get(at).is_some_and(|o| o.is_avatar());
+            iso.root_visible(&root, avatar)
+        })
 }
 
 #[cfg(test)]
@@ -311,6 +318,17 @@ mod tests {
         let list = by_distance(vec![("far", 40.0), ("unknown", f32::NAN), ("near", 2.5), ("mid", 12.0)]);
         let names: Vec<_> = list.iter().map(|(n, _)| *n).collect();
         assert_eq!(names, ["near", "mid", "far", "unknown"]);
+    }
+
+    #[test]
+    fn others_hidden_keeps_the_scene_and_our_avatar() {
+        let mut iso = opened();
+        iso.set_transparent(false);
+        iso.set_mode(Mode::OthersHidden);
+        assert!(iso.root_visible(&id(9), true), "our avatar");
+        assert!(!iso.root_visible(&id(1), true), "another avatar");
+        assert!(iso.root_visible(&id(2), false), "a linkset of the region");
+        assert!(!iso.empty_background());
     }
 
     #[test]

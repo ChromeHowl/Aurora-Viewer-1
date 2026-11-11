@@ -222,7 +222,7 @@ impl App {
                 f.voice_volume = crate::ui::context::voice_volume_of(w, *id);
                 f.worn = !super::inspect::worn_roots(w, id).is_empty();
                 f.moderation = self.moderation_rights(*id);
-                f.estate = w.estate_moderation_region(*id).is_some();
+                f.god = w.god_level > 0;
             }
             _ => {}
         }
@@ -484,15 +484,17 @@ impl App {
             }
             CtxAction::NewPhysics => self.new_physics(),
             CtxAction::Freeze(id) => self.ask_moderation(id, false),
+            CtxAction::ModerationParcel(id) => self.moderation_menu_opened(id),
             CtxAction::Eject(id) => self.ask_moderation(id, true),
             CtxAction::TrackAvatar(id) => self.track_avatar(id),
             CtxAction::Share(id) => self.share_with(id),
             CtxAction::MarkAvatars(ids, color) => self.world.avatar_marks.set(&ids, color),
             CtxAction::ClearAllMarks => self.world.avatar_marks.clear_all(),
-            CtxAction::EstateKick(ids) => self.ask_estate(people_actions::EstateAction::Kick, ids),
-            CtxAction::EstateTeleportHome(ids) => self.ask_estate(people_actions::EstateAction::Home, ids),
-            CtxAction::EstateBan(ids) => self.ask_estate(people_actions::EstateAction::Ban, ids),
             CtxAction::GroupBanAll(id, ban) => self.ask_group_ban_all(id, ban),
+            CtxAction::EstateKick(id) => self.ask_estate(id, land_moderation::EstateAct::Kick),
+            CtxAction::EstateTeleportHome(id) => self.ask_estate(id, land_moderation::EstateAct::TeleportHome),
+            CtxAction::EstateBan(id) => self.ask_estate(id, land_moderation::EstateAct::Ban),
+            CtxAction::GodKick(id, flags) => self.ask_god_kick(id, flags),
             CtxAction::EditWorn(item) => {
                 if self.world.inventory.items.get(&item).is_some_and(crate::wearable_editor::supported) {
                     self.open_wearable_editor(item);
@@ -592,7 +594,13 @@ impl App {
             CtxAction::CreateLandmark => self.open_create_landmark(None),
             CtxAction::OpenAppearance { tab, editing } => {
                 self.panels.appearance = true;
-                self.appearance_ui.open(tab, editing);
+                // "Change outfit" (tab 0) opens the outfit view in use,
+                // the gallery or the list, rather than always the gallery
+                if tab == 0 && !editing {
+                    self.appearance_ui.open_outfits();
+                } else {
+                    self.appearance_ui.open(tab, editing);
+                }
             }
             CtxAction::StandUp => self.send(NetCommand::OneShotControl(control::STAND_UP)),
             CtxAction::SitGround => self.send(NetCommand::OneShotControl(control::SIT_ON_GROUND)),

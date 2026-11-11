@@ -66,7 +66,7 @@ pub(super) fn show(
     .show(ctx, p, &mut open, |ui| {
         ui.horizontal(|ui| {
             let width = ui.available_width() - 90.0;
-            search_field(ui, &mut state.filter, aurora_i18n::tr!("l3-protected-filter"), width.max(80.0));
+            search_field(ui, p, &mut state.filter, aurora_i18n::tr!("l3-protected-filter"), width.max(80.0));
             if ui
                 .add_enabled_ui(!state.selected.is_empty(), |ui| {
                     flat_button(ui, p, aurora_i18n::tr!("l3-protected-remove"))

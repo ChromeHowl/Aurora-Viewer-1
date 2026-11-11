@@ -22,11 +22,34 @@ mod scale_gizmo;
 pub(crate) mod stand;
 mod storage;
 mod subjects;
+mod together;
 mod trackball;
 mod ui;
 pub(crate) use data::Pose as SubjectPose;
 #[cfg(test)]
 mod tests;
+
+/// The outfit portrait's standing pose (`snapshot::portrait`): the
+/// skeleton's T, as the poser's T-pose sets it
+/// (FSPoserAnimator::setAllAvatarStartingRotationsToZero), with both
+/// shoulders lowered by `lowered` radians; the shape's own joint positions
+/// and scales are kept. A poser layer like the others: drawn on our screen
+/// only, nothing is sent.
+pub(crate) fn standing_pose(world: &World, subject: Uuid, lowered: f32) -> Option<Arc<SubjectPose>> {
+    let rig = &world.avatar_lib.rig;
+    let frame = Frame::subject(world, subject)?;
+    let mut pose = SubjectPose::capture(rig, &frame)?;
+    pose.rotations.clone_from(&rig.local_rot);
+    pose.origin.clone_from(&rig.local_rot);
+    // the arms reach along ±Y in the T, the avatar facing +X: a turn about
+    // X brings them down on both sides
+    for (name, sign) in [("mShoulderLeft", -1.0), ("mShoulderRight", 1.0)] {
+        if let Some(&joint) = rig.names.get(name) {
+            pose.rotations[joint] = Quat::from_rotation_x(sign * lowered) * pose.rotations[joint];
+        }
+    }
+    pose.valid(rig).then(|| Arc::new(pose))
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -104,6 +127,9 @@ pub(super) struct State {
     camera: Option<crate::build::geom::Cam>,
     scale_gizmo: scale_gizmo::Gizmo,
     side: Side,
+    /// The joints added to the selected one with Shift + click: they follow
+    /// its changes (`together`).
+    together: Vec<usize>,
     requests: Vec<Request>,
     /// The consent requests travel through the worn bridge's query service
     /// (query.lsl): Ask waits for `Ready`, and the menu says why it waits.
@@ -369,6 +395,17 @@ impl Editor {
                 self.poser.group = 1;
                 if let Some(&bone) = rig.names.get("mFaceLipUpperCenter") {
                     self.select(bone, rig, &pose);
+                }
+            } else if mode == "poser-together" {
+                // both eyes selected (the right one with Shift + click), the
+                // left one turned: the right one takes the same turn
+                self.poser.group = 1;
+                if let (Some(&left), Some(&right)) = (rig.names.get("mEyeLeft"), rig.names.get("mEyeRight")) {
+                    self.click_pose_bone(left, rig, &pose, false);
+                    self.click_pose_bone(right, rig, &pose, true);
+                    if let Some((local, _)) = authoring::local_pose(rig, &pose) {
+                        self.poser_transform(rig, &pose, local.positions[left], Quat::from_rotation_z(0.45), true);
+                    }
                 }
             } else if mode == "poser-physics" {
                 self.poser.group = 4;

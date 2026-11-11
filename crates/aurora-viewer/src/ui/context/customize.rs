@@ -259,6 +259,13 @@ fn action_key(action: &CtxAction) -> String {
         CtxAction::SitStand => "SitStand",
         CtxAction::Freeze(..) => "Freeze",
         CtxAction::Eject(..) => "Eject",
+        CtxAction::ModerationParcel(..) => "ModerationParcel",
+        CtxAction::EstateKick(..) => "EstateKick",
+        CtxAction::EstateTeleportHome(..) => "EstateTeleportHome",
+        CtxAction::EstateBan(..) => "EstateBan",
+        CtxAction::GodKick(_, aurora_net::god::KICK_DEFAULT) => "GodKick",
+        CtxAction::GodKick(_, aurora_net::god::KICK_FREEZE) => "GodFreeze",
+        CtxAction::GodKick(..) => "GodUnfreeze",
         CtxAction::LookAtAvatar(..) => "LookAtAvatar",
         CtxAction::EditPbr(..) => "EditPbr",
         CtxAction::ObjectProfile(..) => "ObjectProfile",
@@ -390,9 +397,6 @@ fn action_key(action: &CtxAction) -> String {
         CtxAction::Share(..) => "Share",
         CtxAction::MarkAvatars(..) => "MarkAvatars",
         CtxAction::ClearAllMarks => "ClearAllMarks",
-        CtxAction::EstateKick(..) => "EstateKick",
-        CtxAction::EstateTeleportHome(..) => "EstateTeleportHome",
-        CtxAction::EstateBan(..) => "EstateBan",
         CtxAction::GroupBanAll(..) => "GroupBanAll",
     };
     match action {

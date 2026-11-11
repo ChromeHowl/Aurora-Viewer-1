@@ -82,7 +82,6 @@ pub fn avatars_menu(ui: &mut egui::Ui, p: &Palette, world: &World, ids: &[Uuid])
         act(CtxAction::OfferTeleports(ids.to_vec()));
     }
     menu::separator(ui, p);
-    super::estate_items(ui, p, world, ids);
     // Render Settings (Nearby.People.SetRenderMode) for each
     menu::submenu(
         ui,

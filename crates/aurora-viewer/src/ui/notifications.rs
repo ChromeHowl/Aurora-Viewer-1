@@ -302,8 +302,9 @@ pub(super) fn person_card(
                         ui.label(RichText::new(time).size(10.5).color(p.muted_dim));
                     });
                 });
-                if !n.body.is_empty() {
-                    let text = message_excerpt(world, &n.body);
+                let shown = world.notification_body(n);
+                if !shown.is_empty() {
+                    let text = message_excerpt(world, &shown);
                     name_hover = name_hover.or(text::person_body(ui, p, env.emoji, &text, &n.name_links));
                 }
             });
@@ -469,7 +470,8 @@ pub(super) fn card(
                     ui.label(RichText::new(time).size(10.5).color(p.muted_dim));
                 });
             });
-            if !n.body.is_empty() {
+            let shown = world.notification_body(n);
+            if !shown.is_empty() {
                 ui.add_space(2.0);
                 // selectable: Firestorm shows the body in a read-only
                 // LLTextEditor (lltoastnotifypanel.cpp, "text_editor_box")
@@ -478,12 +480,12 @@ pub(super) fn card(
                     let rows = options(ui.ctx()).script_dialog_rows as f32;
                     let row = ui.fonts_mut(|f| f.row_height(&egui::FontId::proportional(12.0)));
                     egui::ScrollArea::vertical().max_height(rows * row).show(ui, |ui| {
-                        super::chat::text_with_links(ui, p, world, &n.body, &n.name_links, 12.0, p.ink);
+                        super::chat::text_with_links(ui, p, world, &shown, &n.name_links, 12.0, p.ink);
                     });
                 } else {
                     ui.horizontal(|ui| {
                         ui.add_space(indent);
-                        super::chat::text_with_links(ui, p, world, &n.body, &n.name_links, 12.0, p.muted);
+                        super::chat::text_with_links(ui, p, world, &shown, &n.name_links, 12.0, p.muted);
                     });
                 }
             }

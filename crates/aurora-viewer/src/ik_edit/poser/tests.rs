@@ -733,6 +733,16 @@ fn poser_window_stays_steady_at_scaled_fonts_and_keeps_the_upload_footer_visible
                     let (world, mut editor) = selected_fixture();
                     editor.poser.library_open = library;
                     editor.poser.settings_open = settings;
+                    editor.poser.storage.message = Some(
+                        aurora_i18n::tr!(
+                            "poser-saved-to",
+                            path = format!(
+                                "/a-long-local-profile-directory/{}/Portrait.aurora-pose.json",
+                                "nested-directory/".repeat(12)
+                            )
+                        )
+                        .to_string(),
+                    );
                     (world, editor)
                 },
                 |(world, editor), ctx, p| {
@@ -817,6 +827,100 @@ fn poser_bone_rows_and_xyz_controls_are_painted_inside_their_scroll_clips() {
     }
 }
 #[test]
+fn poser_name_can_be_replaced_and_survives_idle_frames() {
+    use crate::ui::widgets::elide_tests::{Frames, painted};
+    let (world, mut editor) = selected_fixture();
+    let frame = editor.editor_frame(&world).unwrap();
+    let p = crate::theme::Theme::default().palette();
+    let mut frames = Frames::new();
+    let mut texts = Vec::new();
+    for _ in 0..5 {
+        texts = frames.run(Vec::new(), |ui| editor.poser_ui(ui.ctx(), &p, &world, &frame));
+    }
+    let pointer = painted(&texts, &editor.poser.name).rect.center();
+    for pressed in [true, false] {
+        frames.run(
+            vec![
+                egui::Event::PointerMoved(pointer),
+                egui::Event::PointerButton {
+                    pos: pointer,
+                    pressed,
+                    button: egui::PointerButton::Primary,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+            |ui| editor.poser_ui(ui.ctx(), &p, &world, &frame),
+        );
+    }
+    let modifiers = egui::Modifiers {
+        ctrl: true,
+        command: true,
+        ..Default::default()
+    };
+    frames.run(
+        vec![egui::Event::Key {
+            key: egui::Key::A,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        }],
+        |ui| editor.poser_ui(ui.ctx(), &p, &world, &frame),
+    );
+    frames.run(
+        vec![
+            egui::Event::Text("Portrait".into()),
+            egui::Event::Ime(egui::ImeEvent::Preedit {
+                text: String::new(),
+                active_range_chars: None,
+            }),
+        ],
+        |ui| editor.poser_ui(ui.ctx(), &p, &world, &frame),
+    );
+    assert_eq!(editor.poser.name, "Portrait");
+    for _ in 0..30 {
+        frames.run(Vec::new(), |ui| editor.poser_ui(ui.ctx(), &p, &world, &frame));
+        assert_eq!(editor.poser.name, "Portrait");
+    }
+}
+#[test]
+fn poser_load_menu_opens_the_existing_library_without_a_file_picker() {
+    use crate::ui::widgets::elide_tests::{Frames, painted};
+    let (world, mut editor) = selected_fixture();
+    let frame = editor.editor_frame(&world).unwrap();
+    let p = crate::theme::Theme::default().palette();
+    editor.poser.storage.ready = true;
+    let mut frames = Frames::new();
+    let mut texts = Vec::new();
+    for _ in 0..5 {
+        texts = frames.run(Vec::new(), |ui| editor.poser_ui(ui.ctx(), &p, &world, &frame));
+    }
+    for label in ["poser-load-menu", "poser-library"] {
+        let pointer = painted(&texts, aurora_i18n::text(label)).rect.center();
+        for pressed in [true, false] {
+            frames.run(
+                vec![
+                    egui::Event::PointerMoved(pointer),
+                    egui::Event::PointerButton {
+                        pos: pointer,
+                        pressed,
+                        button: egui::PointerButton::Primary,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+                |ui| editor.poser_ui(ui.ctx(), &p, &world, &frame),
+            );
+        }
+        texts = frames.run(Vec::new(), |ui| editor.poser_ui(ui.ctx(), &p, &world, &frame));
+    }
+    assert!(editor.poser.library_open);
+    assert!(!editor.poser.storage.ready);
+    assert!(
+        editor.poser.storage.job.is_none(),
+        "opening the library must not launch a file picker"
+    );
+}
+#[test]
 fn poser_library_saves_bvh_confirms_overwrite_and_correlates_loads_to_the_original_subject() {
     let (world, editor) = fixture();
     let owner = Uuid::new_v4();
@@ -834,21 +938,77 @@ fn poser_library_saves_bvh_confirms_overwrite_and_correlates_loads_to_the_origin
     let mut posed = (*session.pose).clone();
     let head = rig.names["mHead"];
     posed.rotations[head] = (posed.rotations[head] * Quat::from_rotation_x(0.4)).normalize();
-    service.job = Some(storage::Job::Save(
-        document.clone(),
-        Arc::new(posed),
-        storage::Copies {
-            bvh: true,
-            unlock_pelvis: true,
-            black_dragon: true,
-        },
-        false,
-    ));
+    let posed = Arc::new(posed);
+    let copies = storage::Copies {
+        bvh: true,
+        unlock_pelvis: true,
+        black_dragon: true,
+    };
+    service.filter = "does not match Portrait".into();
+    service.job = Some(storage::Job::Save(storage::Save {
+        document: document.clone(),
+        pose: posed.clone(),
+        copies,
+        confirm: false,
+        pick: false,
+    }));
     for _ in 0..3 {
         tick(&mut service);
     }
     assert_eq!(service.entries.len(), 1);
     let path = service.entries[0].path.clone();
+    assert_eq!(service.saved_path, None);
+    assert_eq!(service.selected, Some(0));
+    assert!(service.filter.is_empty(), "a search that hides the saved pose is cleared");
+    assert!(service.scroll_to_selected, "the list scrolls to the saved pose once");
+    assert!(service.message.as_ref().unwrap().contains(path.to_string_lossy().as_ref()));
+
+    // A search the saved pose matches stays.
+    service.filter = "PORT".into();
+    service.scroll_to_selected = false;
+    service.job = Some(storage::Job::Save(storage::Save {
+        document: document.clone(),
+        pose: posed,
+        copies,
+        confirm: false,
+        pick: false,
+    }));
+    for _ in 0..3 {
+        tick(&mut service);
+    }
+    if let Some((document, pose, copies)) = service.overwrite.take() {
+        // saving the same name again asks to overwrite: confirm it
+        service.job = Some(storage::Job::Save(storage::Save {
+            document,
+            pose,
+            copies,
+            confirm: true,
+            pick: false,
+        }));
+        for _ in 0..3 {
+            tick(&mut service);
+        }
+    }
+    assert_eq!(service.selected, Some(0));
+    assert_eq!(service.filter, "PORT", "a search the saved pose matches is kept");
+    assert!(service.scroll_to_selected);
+    service.scroll_to_selected = false;
+
+    // A user can select an existing row while the post-save refresh is pending.
+    service.saved_path = Some(path.clone());
+    service.ready = false;
+    for _ in 0..3 {
+        tick(&mut service);
+    }
+    assert_eq!(service.selected, Some(0));
+    assert_eq!(service.saved_path, None, "a current selection must consume the pending saved path");
+
+    service.selected = None;
+    service.ready = false;
+    for _ in 0..3 {
+        tick(&mut service);
+    }
+    assert_eq!(service.selected, None, "a later library refresh must not reuse the saved path");
     let bvh = std::fs::read(root.join("poses/Portrait.bvh")).unwrap();
     let imported = aurora_assets::import_animation::parse_bvh_pose(&bvh, world.avatar_lib.skeleton.as_ref().unwrap()).unwrap();
     assert!(
@@ -867,7 +1027,13 @@ fn poser_library_saves_bvh_confirms_overwrite_and_correlates_loads_to_the_origin
         loaded.as_slice(),
         [(_, storage::Loaded::Pose(_, document::LoadMode::Rotations))]
     ));
-    service.job = Some(storage::Job::Save(document, session.pose.clone(), storage::Copies::default(), true));
+    service.job = Some(storage::Job::Save(storage::Save {
+        document,
+        pose: session.pose.clone(),
+        copies: storage::Copies::default(),
+        confirm: true,
+        pick: false,
+    }));
     tick(&mut service);
     tick(&mut service);
     assert!(service.overwrite.is_some());

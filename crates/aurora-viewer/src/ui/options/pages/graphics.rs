@@ -3,7 +3,7 @@
 //! reflections and Aurora's water, the image (anti-aliasing, tone mapping,
 //! depth of field), smoothness and parcel visibility.
 
-use super::super::cx::{Cx, Nothing, field};
+use super::super::cx::{Custom, Cx, Nothing, field};
 use super::super::{COMBO_W, preset_choice, stepped, toggle};
 use egui::RichText;
 
@@ -95,11 +95,19 @@ pub fn page(cx: &mut Cx, tab: usize) {
 /// The GPU the viewer draws with (#894): automatic (discrete first) or one
 /// by name; the renderer opens it at startup, so the choice applies at the
 /// next start. `AURORA_GPU` overrides it.
-/// The real sky's rows (world/night_sky.rs): where it is seen from, its
-/// latitude (set by a preset, typed for Custom; moving it makes the place
-/// Custom) and the stars' brightness.
+/// The real sky's rows (world/night_sky.rs): what sets its hour (first: it
+/// decides whether the longitude below counts), where it is seen from, its
+/// latitude and longitude (set by a preset, typed for Custom; moving one
+/// makes the place Custom) and the stars' brightness.
 fn night_sky_rows(cx: &mut Cx) {
-    use crate::world::night_sky::{GAIN_RANGE, SkyPlace};
+    use crate::world::night_sky::{GAIN_RANGE, SkyPlace, StarHour};
+    let hours: Vec<(StarHour, &str)> = StarHour::ALL.iter().map(|h| (*h, h.label())).collect();
+    cx.combo(
+        aurora_i18n::tr!("ui-options-night-sky-hour"),
+        aurora_i18n::tr!("ui-options-night-sky-hour-help"),
+        &field!(night_sky_hour),
+        &hours,
+    );
     let places: Vec<(SkyPlace, &str)> = SkyPlace::ALL.iter().map(|p| (*p, p.label())).collect();
     if cx.combo(
         aurora_i18n::tr!("ui-options-night-sky-place"),
@@ -115,6 +123,18 @@ fn night_sky_rows(cx: &mut Cx) {
         aurora_i18n::tr!("ui-options-night-sky-latitude-help"),
         &field!(night_sky_latitude),
         -90.0..=90.0,
+        "°",
+    ) {
+        cx.s.night_sky_place = SkyPlace::Custom;
+        cx.s.sync_night_sky();
+    }
+    // the longitude counts with the real time only
+    cx.greyed(cx.s.night_sky_place != SkyPlace::Custom || cx.s.night_sky_hour != StarHour::RealTime);
+    if cx.slider(
+        aurora_i18n::tr!("ui-options-night-sky-longitude"),
+        aurora_i18n::tr!("ui-options-night-sky-longitude-help"),
+        &field!(night_sky_longitude),
+        -180.0..=180.0,
         "°",
     ) {
         cx.s.night_sky_place = SkyPlace::Custom;
@@ -182,14 +202,34 @@ fn overlays(cx: &mut Cx) {
 fn frames_per_second(cx: &mut Cx) {
     use aurora_i18n::tr;
     cx.group(tr!("ui-options-frames-per-second"), |cx| {
-        // FSR's mode sets the world's size in its place
-        cx.greyed(cx.s.antialiasing == 7);
-        cx.slider(
+        // FSR's mode sets the world's size in their place
+        let fsr = cx.s.antialiasing == 7;
+        cx.greyed(fsr);
+        cx.toggle(
+            tr!("ui-options-render-scale-auto"),
+            tr!("ui-options-render-scale-auto-help"),
+            &field!(render_scale_auto),
+        );
+        // While the world matches the display, the slider shows the
+        // percentage the display gives, greyed: not a choice of the user,
+        // so neither modified nor reset by this row.
+        let scale = Custom {
+            path: "render_scale_percent",
+            modified: |s: &crate::settings::Settings, d: &crate::settings::Settings| {
+                !s.render_scale_auto && s.render_scale_percent != d.render_scale_percent
+            },
+            reset: |s: &mut crate::settings::Settings, d: &crate::settings::Settings| {
+                if !s.render_scale_auto {
+                    s.render_scale_percent = d.render_scale_percent;
+                }
+            },
+        };
+        cx.greyed(fsr || cx.s.render_scale_auto);
+        cx.row(
             tr!("ui-options-render-scale"),
             tr!("ui-options-render-scale-help"),
-            &field!(render_scale_percent),
-            50..=100,
-            "%",
+            &scale,
+            |ui, s| super::super::slider(ui, &mut s.render_scale_percent, 50..=100, "%"),
         );
         cx.greyed(false);
         // across, its switch in line with those of the limits below
@@ -1308,23 +1348,13 @@ fn decimal_slider(ui: &mut egui::Ui, v: &mut f32, range: std::ops::RangeInclusiv
     .changed()
 }
 
-/// The Legacy Viewer's rendering types (Develop › Rendering Types) and
-/// No Post-processing, for the session; the water an environment hides.
+/// What is drawn: the view-only transparency and fullbright switches, the
+/// water's transparency, No Post-processing while building (session only)
+/// and the water an environment hides. The Legacy Viewer's rendering types
+/// are in Advanced › Rendering types (`scene::render_types`).
 fn rendering_types(cx: &mut Cx) {
     use aurora_i18n::tr;
     cx.group(tr!("gfx-extras-types"), |cx| {
-        let session = tr!("gfx-extras-session-hint");
-        for (label, f) in [
-            (tr!("gfx-extras-sky"), field!(render_extras.types.sky)),
-            (tr!("gfx-extras-clouds"), field!(render_extras.types.clouds)),
-            (tr!("gfx-extras-water"), field!(render_extras.types.water)),
-            (tr!("gfx-extras-terrain"), field!(render_extras.types.terrain)),
-            (tr!("gfx-extras-trees"), field!(render_extras.types.trees)),
-            (tr!("gfx-extras-grass"), field!(render_extras.types.grass)),
-            (tr!("gfx-extras-avatars"), field!(render_extras.types.avatars)),
-        ] {
-            cx.keywords("Rendering Types").toggle(label, session, &f);
-        }
         cx.keywords("RenderEnableAlpha transparency").toggle(
             tr!("rphoto-view-transparency"),
             tr!("rphoto-view-transparency-help"),
@@ -1343,7 +1373,7 @@ fn rendering_types(cx: &mut Cx) {
         cx.keywords("RenderDisablePostProcessing").toggle(
             tr!("gfx-extras-post-processing"),
             tr!("gfx-extras-post-processing-help"),
-            &field!(render_extras.types.post_processing),
+            &field!(render_extras.post_processing),
         );
         cx.keywords("FSAllowEEPWaterDerender").toggle(
             tr!("gfx-extras-eep-water"),

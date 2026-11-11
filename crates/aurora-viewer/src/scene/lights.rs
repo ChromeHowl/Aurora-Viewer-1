@@ -249,10 +249,10 @@ impl Scene {
             let Some(l) = o.extra.light else {
                 continue;
             };
-            let Some((center, hud, photo_hidden)) = self.gpu.get(idx).map(|g| (g.center, g.hud, g.photo_hidden)) else {
+            let Some((center, hud, hidden)) = self.gpu.get(idx).map(|g| (g.center, g.hud, g.hidden)) else {
                 continue;
             };
-            if hud || !gives_light(l.color, l.radius) || isolated_out(world, idx, photo_hidden) {
+            if hud || !gives_light(l.color, l.radius) || isolated_out(world, idx, hidden) {
                 continue;
             }
             // the wearer is looked up only while a switch drops worn lights

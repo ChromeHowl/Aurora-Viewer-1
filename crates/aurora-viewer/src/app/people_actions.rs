@@ -1,18 +1,14 @@
 //! What the radar's and the residents' menus do beyond the shared ones:
 //! "Track" (the tracking beacon follows a resident the radar sees),
-//! "Share", "Mark", and the estate's "Kick", "Teleport Home" and "Ban",
-//! asked first.
+//! "Share", "Mark", and "Ban / Unban from all my groups", asked first (the
+//! estate's "Kick", "Teleport Home" and "Ban" are in app/land_moderation.rs).
 //!
 //! Port of FSRadar::startTracking, checkTracking and updateTracking
 //! (indra/newview/fsradar.cpp), LLTracker::render3D's close-in stop
-//! (lltracker.cpp), LLAvatarActions::share, estateKickMultiple,
-//! callbackEstateKick, estateTeleportHomeMultiple,
-//! callbackEstateTeleportHome, estateBanMultiple and callbackEstateBan
-//! (llavataractions.cpp), LLNetMap::setAvatarMarkColors and
-//! clearAvatarMarkColors (llnetmap.cpp), originally LGPL 2.1, with their
-//! TrackAvatarNotPossible, EstateKickUser, EstateKickMultiple,
-//! EstateTeleportHomeUser, EstateTeleportHomeMultiple, EstateBanUser and
-//! EstateBanUserMultiple questions (notifications.xml); "Ban / Unban from
+//! (lltracker.cpp), LLAvatarActions::share (llavataractions.cpp),
+//! LLNetMap::setAvatarMarkColors and clearAvatarMarkColors (llnetmap.cpp),
+//! originally LGPL 2.1, with their TrackAvatarNotPossible question
+//! (notifications.xml); "Ban / Unban from
 //! all my groups" asked with FSBanFromAllGroups and FSUnbanFromAllGroups
 //! (LLGroupActions::confirmBanFromAllGroups), the run itself in
 //! world/group_ban_all.rs.
@@ -20,17 +16,8 @@ use super::land_moderation::Ask;
 use super::*;
 use crate::ui::widgets::ActionKind;
 use crate::world::radar::{self, TrackStep, Tracked};
-use aurora_net::estate::EstateCommand;
 use glam::DVec3;
 use uuid::Uuid;
-
-/// An estate action of the residents' menus.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum EstateAction {
-    Kick,
-    Home,
-    Ban,
-}
 
 impl App {
     /// Where the radar sees a resident now, in global meters.
@@ -133,23 +120,13 @@ impl App {
         }
     }
 
-    /// The names of the questions: complete, anonymous under RLVa's
-    /// shownames (as `ask_moderation`).
-    fn resident_name(&self, id: Uuid) -> String {
-        self.world
-            .social
-            .avatar_names
-            .complete(&id)
-            .unwrap_or_else(|| self.world.social.name_of(&id))
-    }
-
     /// "Ban from all my groups" / "Unban from all my groups": asked first,
     /// with the groups listed (confirmBanFromAllGroups).
     pub(super) fn ask_group_ban_all(&mut self, target: Uuid, ban: bool) {
         if self.world.group_ban_targets(target).is_empty() || self.world.group_ban_all.is_some() {
             return;
         }
-        let name = self.resident_name(target);
+        let name = self.resident_full_name(target);
         self.moderation_ask = Some(Ask::GroupBanAll { target, name, ban });
     }
 
@@ -189,119 +166,6 @@ impl App {
                 groups.len()
             );
             self.world.start_group_ban_all(target, name, ban);
-        }
-    }
-
-    /// estateKickMultiple, estateTeleportHomeMultiple, estateBanMultiple:
-    /// asked for the residents we may act on (canEstateKickOrTeleportHome
-    /// filtering them).
-    pub(super) fn ask_estate(&mut self, action: EstateAction, ids: Vec<Uuid>) {
-        let targets: Vec<(Uuid, String)> = ids
-            .into_iter()
-            .filter(|id| self.world.estate_moderation_region(*id).is_some())
-            .map(|id| (id, self.resident_name(id)))
-            .collect();
-        if targets.is_empty() {
-            log::warn!("estate {action:?}: not allowed on these residents");
-            return;
-        }
-        self.moderation_ask = Some(Ask::Estate { action, targets });
-    }
-
-    /// The estate question each frame, then the messages: kick and teleport
-    /// home to the region each resident stands in, the ban to ours.
-    pub(super) fn estate_ask_ui(&mut self, ctx: &egui::Context, p: &crate::theme::Palette) {
-        let Some(Ask::Estate { action, targets }) = self.moderation_ask.as_ref() else {
-            return;
-        };
-        let action = *action;
-        let list = targets.iter().map(|(_, n)| n.as_str()).collect::<Vec<_>>().join("\n");
-        let one = targets.first().filter(|_| targets.len() == 1).map(|(_, n)| n.clone());
-        // RegionInfoAllEstatesYouOwn / RegionInfoAllEstatesYouManage
-        let region = self.world.main_region.and_then(|h| self.world.regions.get(&h)?.info.clone());
-        let all = region.as_ref().map(|info| {
-            if info.owner == self.world.agent_id {
-                aurora_i18n::tr!("b6-estate-all-own").to_owned()
-            } else {
-                aurora_i18n::tr!("b6-estate-all-managed", owner = self.world.social.name_of(&info.owner))
-            }
-        });
-        let (title, question, choices): (&str, String, Vec<ui::context::Choice>) = match action {
-            EstateAction::Kick => (
-                aurora_i18n::tr!("b6-estate-kick"),
-                match &one {
-                    Some(n) => aurora_i18n::tr!("b6-estate-kick-one", name = n.as_str()),
-                    None => aurora_i18n::tr!("b6-estate-kick-many").to_owned(),
-                },
-                vec![("door-exit", aurora_i18n::tr!("b6-estate-kick"), ActionKind::Danger)],
-            ),
-            EstateAction::Home => (
-                aurora_i18n::tr!("b6-estate-home"),
-                match &one {
-                    Some(n) => aurora_i18n::tr!("b6-estate-home-one", name = n.as_str()),
-                    None => aurora_i18n::tr!("b6-estate-home-many").to_owned(),
-                },
-                vec![("home-filled", aurora_i18n::tr!("b6-estate-home"), ActionKind::Primary)],
-            ),
-            EstateAction::Ban => {
-                let all = all.clone().unwrap_or_default();
-                let mut choices = vec![("ban", aurora_i18n::tr!("b6-estate-ban-this"), ActionKind::Danger)];
-                if !all.is_empty() {
-                    choices.push(("ban", aurora_i18n::tr!("b6-estate-ban-all"), ActionKind::Danger));
-                }
-                (
-                    aurora_i18n::tr!("b6-estate-ban"),
-                    match &one {
-                        Some(n) => aurora_i18n::tr!("b6-estate-ban-one", name = n.as_str(), all = all.as_str()),
-                        None => aurora_i18n::tr!("b6-estate-ban-many", all = all.as_str()),
-                    },
-                    choices,
-                )
-            }
-        };
-        let mut lines = vec![question.as_str()];
-        if one.is_none() {
-            lines.push(list.as_str());
-        }
-        let Some(choice) = ui::context::choose(ctx, p, "estate_resident_confirm", title, &lines, &choices) else {
-            return;
-        };
-        let Some(Ask::Estate { targets, .. }) = self.moderation_ask.take() else {
-            return;
-        };
-        let Some(choice) = choice else {
-            return;
-        };
-        match action {
-            EstateAction::Kick | EstateAction::Home => {
-                for (target, _) in targets {
-                    // where they stand when it is answered (getRegionFromAgentID)
-                    let Some(handle) = self.world.estate_moderation_region(target) else {
-                        log::warn!("estate {action:?}: {target} is no longer on an estate we manage");
-                        continue;
-                    };
-                    let c = if action == EstateAction::Kick {
-                        EstateCommand::KickResident { handle, target }
-                    } else {
-                        EstateCommand::TeleportResidentHome { handle, target }
-                    };
-                    log::info!("estate: {c:?}");
-                    self.send(NetCommand::Estate(c));
-                }
-            }
-            EstateAction::Ban => {
-                let (Some(handle), Some(info)) = (self.world.main_region, region) else {
-                    return;
-                };
-                // the owner cannot be banned
-                let ids: Vec<Uuid> = targets.into_iter().map(|(id, _)| id).filter(|id| *id != info.owner).collect();
-                if ids.is_empty() {
-                    return;
-                }
-                let flags = aurora_net::estate::ban_resident_flags(choice == 1, info.owner == self.world.agent_id);
-                log::info!("estate: ban {} resident(s), flags {flags}", ids.len());
-                self.send(NetCommand::Estate(EstateCommand::BanResidents { handle, flags, ids }));
-            }
         }
     }
 }

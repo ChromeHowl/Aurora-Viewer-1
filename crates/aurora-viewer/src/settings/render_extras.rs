@@ -1,5 +1,5 @@
-//! Rendering extras of Preferences › Graphics: the Legacy Viewer's
-//! rendering types (Develop › Rendering Types, session only), mirror
+//! Rendering extras of Preferences › Graphics: No Post-processing while
+//! building (RenderDisablePostProcessing, session only), mirror
 //! resolution and update rate (RenderHeroProbeResolution,
 //! RenderHeroProbeUpdateRate), shadow resolution scale
 //! (RenderShadowResolutionScale), terrain texture scale
@@ -24,85 +24,15 @@ pub const LIGHT_STRENGTH_RANGE: std::ops::RangeInclusive<f32> = 0.0..=4.0;
 /// Bokeh dispersion's bounds.
 pub const DISPERSION_RANGE: std::ops::RangeInclusive<f32> = 0.0..=1.0;
 
-/// The kinds of things drawn, each of which can be hidden for the session
-/// (LLPipeline's render type controls: RENDER_TYPE_SKY / WL_SKY, WATER,
-/// TERRAIN, TREE, GRASS, CLOUDS, AVATAR, and RenderDisablePostProcessing).
-/// Not saved: every session starts with everything drawn, as in the Legacy
-/// Viewer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RenderTypes {
-    pub sky: bool,
-    pub water: bool,
-    pub terrain: bool,
-    pub trees: bool,
-    pub grass: bool,
-    pub clouds: bool,
-    pub avatars: bool,
-    /// Off: no exposure nor tone curve while the build tools are open
-    /// (RenderDisablePostProcessing, for those making materials).
-    pub post_processing: bool,
-}
-
-impl Default for RenderTypes {
-    fn default() -> Self {
-        RenderTypes {
-            sky: true,
-            water: true,
-            terrain: true,
-            trees: true,
-            grass: true,
-            clouds: true,
-            avatars: true,
-            post_processing: true,
-        }
-    }
-}
-
-impl RenderTypes {
-    /// Whether an object of this kind is drawn: `pcode` its own (trees and
-    /// grass are objects of their own), `avatar` whether it is an avatar or
-    /// what one wears.
-    pub fn object_drawn(&self, pcode: u8, avatar: bool) -> bool {
-        use aurora_prim::params::{LL_PCODE_LEGACY_GRASS, LL_PCODE_LEGACY_TREE, LL_PCODE_TREE_NEW};
-        if avatar {
-            return self.avatars;
-        }
-        match pcode {
-            LL_PCODE_LEGACY_TREE | LL_PCODE_TREE_NEW => self.trees,
-            LL_PCODE_LEGACY_GRASS => self.grass,
-            _ => true,
-        }
-    }
-
-    /// Whether every kind of object is drawn (nothing to look up).
-    pub fn all_objects(&self) -> bool {
-        self.trees && self.grass && self.avatars
-    }
-
-    /// Leaves the hidden terrain and water out of a frame's lists (water
-    /// also when the environment hides it): their reflections, shadows and
-    /// the water's events with them.
-    pub fn strip(&self, lists: &mut aurora_render::DrawLists, water: bool) {
-        if !self.terrain {
-            for list in [
-                &mut lists.terrain,
-                &mut lists.terrain_pbr,
-                &mut lists.terrain_mask,
-                &mut lists.reflection_terrain,
-                &mut lists.reflection_terrain_pbr,
-                &mut lists.land_overlay,
-            ] {
-                list.clear();
-            }
-            lists.terrain_shadow_casters.clear();
-        }
-        if !water {
-            lists.water.clear();
-            lists.water_exclusion.clear();
-            lists.water_events.clear();
-            lists.water_contacts.clear();
-        }
-    }
+/// Leaves the water out of a frame's lists, with its reflection, its
+/// shadows and its events, when the environment hides it
+/// (`eep_hides_water`). The Advanced › Rendering types switches are
+/// `scene::render_types`.
+pub fn strip_water(lists: &mut aurora_render::DrawLists) {
+    lists.water.clear();
+    lists.water_exclusion.clear();
+    lists.water_events.clear();
+    lists.water_contacts.clear();
 }
 
 /// Aurora's colour grade (Preferences › Graphics › Colour grade); every
@@ -182,9 +112,11 @@ pub struct RenderExtras {
     pub dof_front_blur: bool,
     /// Depth of field: the bokeh's red and blue spread apart (0 none).
     pub dof_dispersion: f32,
-    /// Session only (`RenderTypes`).
+    /// Off: no exposure nor tone curve while the build tools are open
+    /// (RenderDisablePostProcessing, for those making materials). Session
+    /// only: every session starts with it on.
     #[serde(skip)]
-    pub types: RenderTypes,
+    pub post_processing: bool,
 }
 
 impl Default for RenderExtras {
@@ -201,7 +133,7 @@ impl Default for RenderExtras {
             deband: 0.0,
             dof_front_blur: true,
             dof_dispersion: 0.0,
-            types: RenderTypes::default(),
+            post_processing: true,
         }
     }
 }
@@ -280,12 +212,12 @@ mod tests {
         assert!(d.scene_lights && d.dof_front_blur && !d.eep_water_derender);
         assert_eq!((d.light_strength, d.deband, d.dof_dispersion), (1.0, 0.0, 0.0));
         assert_eq!(d.grade.render(), aurora_render::grade::Grade::default());
-        assert_eq!(d.types, RenderTypes::default());
-        // the session's choices are never written
+        assert!(d.post_processing);
+        // the session's choice is never written
         let mut s = d.clone();
-        s.types.sky = false;
+        s.post_processing = false;
         let text = serde_json::to_string(&s).expect("serialised");
-        assert!(!text.contains("types"));
+        assert!(!text.contains("post_processing"));
     }
 
     #[test]
@@ -330,29 +262,7 @@ mod tests {
     }
 
     #[test]
-    fn rendering_types_hide_their_objects_only() {
-        use aurora_prim::params::{LL_PCODE_LEGACY_GRASS, LL_PCODE_LEGACY_TREE, LL_PCODE_TREE_NEW, LL_PCODE_VOLUME};
-        let all = RenderTypes::default();
-        assert!(all.all_objects());
-        for p in [LL_PCODE_VOLUME, LL_PCODE_LEGACY_TREE, LL_PCODE_LEGACY_GRASS] {
-            assert!(all.object_drawn(p, false));
-        }
-        let no_trees = RenderTypes { trees: false, ..all };
-        assert!(!no_trees.object_drawn(LL_PCODE_LEGACY_TREE, false));
-        assert!(!no_trees.object_drawn(LL_PCODE_TREE_NEW, false));
-        assert!(no_trees.object_drawn(LL_PCODE_LEGACY_GRASS, false));
-        assert!(no_trees.object_drawn(LL_PCODE_VOLUME, false));
-        let no_grass = RenderTypes { grass: false, ..all };
-        assert!(!no_grass.object_drawn(LL_PCODE_LEGACY_GRASS, false));
-        assert!(no_grass.object_drawn(LL_PCODE_LEGACY_TREE, false));
-        let no_avatars = RenderTypes { avatars: false, ..all };
-        assert!(!no_avatars.all_objects());
-        assert!(!no_avatars.object_drawn(LL_PCODE_VOLUME, true), "what an avatar wears goes with it");
-        assert!(no_avatars.object_drawn(LL_PCODE_VOLUME, false));
-    }
-
-    #[test]
-    fn hidden_terrain_and_water_leave_the_lists() {
+    fn a_water_the_environment_hides_leaves_the_lists() {
         let cmd = aurora_render::DrawCmd {
             index_count: 3,
             first_index: 0,
@@ -360,25 +270,11 @@ mod tests {
             record: 1,
             bounds: [0.0; 4],
         };
-        let full = || {
-            let mut l = aurora_render::DrawLists::default();
-            l.terrain.push(cmd);
-            l.terrain_pbr.push(cmd);
-            l.reflection_terrain.push(cmd);
-            l.water.push(cmd);
-            l.opaque.push(cmd);
-            l
-        };
-        let all = RenderTypes::default();
-        let mut l = full();
-        all.strip(&mut l, true);
-        assert_eq!((l.terrain.len(), l.water.len(), l.opaque.len()), (1, 1, 1), "everything drawn");
-        let mut l = full();
-        RenderTypes { terrain: false, ..all }.strip(&mut l, true);
-        assert!(l.terrain.is_empty() && l.terrain_pbr.is_empty() && l.reflection_terrain.is_empty());
-        assert_eq!((l.water.len(), l.opaque.len()), (1, 1));
-        let mut l = full();
-        all.strip(&mut l, false);
+        let mut l = aurora_render::DrawLists::default();
+        l.terrain.push(cmd);
+        l.water.push(cmd);
+        l.opaque.push(cmd);
+        strip_water(&mut l);
         assert!(l.water.is_empty());
         assert_eq!((l.terrain.len(), l.opaque.len()), (1, 1));
     }

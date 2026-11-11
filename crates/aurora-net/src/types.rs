@@ -429,6 +429,9 @@ impl OpenSimExtras {
 
 #[derive(Debug, Clone)]
 pub enum NetEvent {
+    /// GrantGodlikePowers: the god level the region gives us (0: none,
+    /// 200 and more: an administrator of the grid or of the region).
+    GodLevel(u8),
     /// OpenRegionInfo's MaxLinkCount, in children (LLWorld::setMaxLinkedPrims).
     RegionLinkLimit {
         handle: RegionHandle,
@@ -527,6 +530,8 @@ pub enum NetEvent {
     /// its own flag in the next request; `error` is then the server's text.
     /// `network`: the login server gave no answer to read (no connection, a
     /// timeout, a page that is not a login reply): nothing was refused.
+    /// `next_server`: the login server sends the login on to this other
+    /// server (`LoginError::NextServer`), which the user agrees to first.
     LoginFailed {
         error: String,
         mfa_required: bool,
@@ -535,6 +540,7 @@ pub enum NetEvent {
         bad_credentials: bool,
         previous_session: bool,
         network: bool,
+        next_server: Option<String>,
     },
     LoggedIn(Arc<LoginResponse>),
     /// A simulator circuit was established (main or neighbor).
@@ -2012,6 +2018,13 @@ pub enum NetCommand {
     Land(crate::land::LandCommand),
     /// Region / Estate window (estate.rs).
     Estate(crate::estate::EstateCommand),
+    /// Request / Leave Admin Status (RequestGodlikePowers): `godlike` asks
+    /// the region for its god level, false gives it back.
+    RequestGodlikePowers {
+        godlike: bool,
+    },
+    /// Advanced › Admin (god.rs), with the god level the region granted.
+    God(crate::god::GodCommand),
     /// GrantUserRights: rights we give a friend (1 online, 2 map, 4 modify).
     GrantUserRights {
         friend: Uuid,

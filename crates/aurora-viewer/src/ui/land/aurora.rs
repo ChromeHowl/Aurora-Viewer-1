@@ -472,6 +472,7 @@ mod tests {
             handle: 0,
             region: None,
             agent: me,
+            god: false,
             groups: vec![aurora_net::GroupMembership {
                 id: group,
                 name: String::new(),

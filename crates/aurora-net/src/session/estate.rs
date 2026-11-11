@@ -144,33 +144,6 @@ impl Session<'_> {
                 let invoice = self.estate_invoice;
                 self.send_estate_owner_message(addr, "kickestate", invoice, &[target.hyphenated().to_string()], true);
             }
-            EstateCommand::KickResident { handle, target } => {
-                let Some(addr) = self.sim_for_handle(handle) else {
-                    return;
-                };
-                let strings = [target.hyphenated().to_string()];
-                self.send_estate_owner_message(addr, "kickestate", Uuid::new_v4(), &strings, true);
-            }
-            EstateCommand::TeleportResidentHome { handle, target } => {
-                let Some(addr) = self.sim_for_handle(handle) else {
-                    return;
-                };
-                let strings = [self.agent_id().hyphenated().to_string(), target.hyphenated().to_string()];
-                self.send_estate_owner_message(addr, "teleporthomeuser", Uuid::new_v4(), &strings, true);
-            }
-            EstateCommand::BanResidents { handle, flags, ids } => {
-                let Some(addr) = self.sim_for_handle(handle) else {
-                    return;
-                };
-                let agent = self.agent_id();
-                for (id, f) in ids.iter().zip(estate::access_delta_flags(flags, ids.len(), true)) {
-                    // nextInvoice, then sendEstateAccessDelta with it
-                    let invoice = Uuid::new_v4();
-                    self.estate_invoice = invoice;
-                    let strings = estate::access_delta_strings(agent, f, *id);
-                    self.send_estate_owner_message(addr, "estateaccessdelta", invoice, &strings, true);
-                }
-            }
             EstateCommand::ReturnObjects {
                 handle,
                 target,
