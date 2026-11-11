@@ -55,13 +55,28 @@ impl super::World {
         self.teleport_cancel_over();
         self.cancel_friend_join_flight();
         self.cancel_friend_join();
-        self.tp_history.failed();
+        // (LLAgent::teleportCancel keeps the request: see `restore_cancelled_teleport`)
+        self.tp_history.cancelled();
         self.teleporting = false;
         self.tp_cancelled = true;
         self.tp_failed = true;
         self.arrival_wait_since = None;
         self.system_notice(aurora_i18n::tr!("l3-tp-cancelled"), super::notice_topics::Topic::Teleport);
         Some(NetCommand::TeleportCancel)
+    }
+
+    /// TeleportFinish after Cancel: the region ignored the cancel or got it
+    /// too late, and the teleport is done on its side
+    /// (process_teleport_finish → LLAgent::restoreCanceledTeleportRequest):
+    /// it goes on as if it had never been cancelled.
+    pub(super) fn restore_cancelled_teleport(&mut self) {
+        if !self.tp_cancelled || self.teleporting {
+            return;
+        }
+        log::info!("TeleportFinish after a cancel: the teleport goes on");
+        self.tp_cancelled = false;
+        self.tp_failed = false;
+        self.tp_history.restore_cancelled();
     }
 }
 

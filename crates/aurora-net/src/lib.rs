@@ -49,6 +49,7 @@ pub mod social;
 pub mod socks5;
 pub mod stats;
 pub mod task_inventory;
+mod teleport_cancel;
 pub mod terrain;
 #[cfg(test)]
 mod test_http;

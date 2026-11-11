@@ -399,7 +399,7 @@ FSAllowDoubleClickOnScriptedObjects,Boolean,in-aurora,,double_click_scripted,"If
 FSAllowEEPWaterDerender,Boolean,in-aurora,,"ported (2026-11), `settings/render_extras.rs`",Allow EEP assets to disable water rendering to increase FPS
 FSAlwaysFly,Boolean,in-aurora,,"a session toggle (fly override), not saved, as in the Legacy Viewer","Fly Override, for no-fly zones. Must be activated each time."
 FSAlwaysShowInboxButton,Boolean,to-add,low,,"If enabled, the Received Items folder aka Inbox is always shown at the bottom of the inventory, even if it is shown as folder in the invento"
-FSAlwaysShowTPCancel,Boolean,in-aurora,,"ported (2026-11), `settings/teleport_extras.rs`",Always show the TP cancel button even if the sim says it cant be canceled. The sim will always know if it can and will ignore cancel request
+FSAlwaysShowTPCancel,Boolean,in-aurora,,"ported (2026-11), `settings/teleport_extras.rs`; the Cancel of the teleport screen and of the small progress bar, `world/teleport_cancel.rs`",Always show the TP cancel button even if the sim says it cant be canceled. The sim will always know if it can and will ignore cancel request
 FSAlwaysTrackPayments,Boolean,in-aurora,,always_track_payments,Always track payments even if the money tracker is closed
 FSAnimatedScriptDialogs,Boolean,to-add,low,,Animates script dialogs V1 style. Only effective when dialogs in top right are activated.
 FSAnimationPreviewExpanded,Boolean,not-applicable,,a window's last state; Aurora keeps its own window state,Expand or collapse the advanced animation information in the animation preview floater by default
@@ -543,7 +543,7 @@ FSDisableMouseWheelCameraZoom,Boolean,in-aurora,,camera.disable_wheel_zoom,"If t
 FSDisableNeighbourRegionConnections,Boolean,in-aurora,,no_neighbour_regions,"Do not connect to neighbouring regions, only to the current region (limits region crossing) - experimental"
 FSDisableReturnObjectNotification,Boolean,in-aurora,,"ported (2026-11), `settings/notification_options.rs`",Disable 'Object has been returned to your inventory Lost and Found folder' notifications
 FSDisableRiggedMeshMatrixCaching,Boolean,not-applicable,,read nowhere in the Legacy sources,Disable the caching of Rigged mesh matrix pallettes.Non-persistant.
-FSDisableTeleportScreens,Boolean,in-aurora,,"ported (2026-11), `settings/teleport.rs`",Disable teleport screens
+FSDisableTeleportScreens,Boolean,in-aurora,,"ported (2026-11), `settings/teleport.rs`; the small progress bar with its Cancel (LLProgressViewMini), `ui::loading::mini_progress`",Disable teleport screens
 FSDisableTurningAroundWhenWalkingBackwards,Boolean,in-aurora,,walk_backwards_without_turning,Disables your avatar turning around locally when moving backwards.
 FSDisableWMIProbing,Boolean,not-applicable,,Windows video memory probing through WMI; Aurora reads it from the graphics API,Disables VRAM detection via WMI probing on Windows systems
 FSDiskCacheHighWaterPercent,F32,check,,Aurora's cache has its own housekeeping,Trigger point above which we should start to clear out older cache entries

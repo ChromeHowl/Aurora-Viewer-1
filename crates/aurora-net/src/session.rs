@@ -1777,10 +1777,8 @@ impl Session<'_> {
             }
             NetCommand::TeleportCancel => {
                 // LLAgent::teleportCancel (indra/newview/llagent.cpp)
-                let mut m = TeleportCancel::default();
-                m.info.agent_id = self.agent_id();
-                m.info.session_id = self.session_id();
-                self.send_main(&m, true);
+                let m = crate::teleport_cancel::packet(self.agent_id(), self.session_id());
+                self.send_main(&m, crate::teleport_cancel::RELIABLE);
                 transition::end(Some(transition::Kind::Teleport), "cancelled (TeleportCancel sent)", &self.sh.stats);
             }
             NetCommand::TeleportHome => {

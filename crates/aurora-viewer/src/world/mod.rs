@@ -3295,6 +3295,7 @@ impl World {
                 None
             }
             NetEvent::TeleportFinished { handle, flying } => {
+                self.restore_cancelled_teleport();
                 self.teleporting = true;
                 self.teleport_cancel_over();
                 let remote = Some(handle) != self.main_region;
@@ -7027,6 +7028,23 @@ mod motion_tests {
         world.apply(NetEvent::TeleportStarted { flags: 0 });
         world.apply(NetEvent::TeleportFinished { handle, flying: false });
         assert!(!world.teleport_cancel_shown(true), "finished: no cancel");
+    }
+
+    #[test]
+    fn a_cancelled_teleport_the_region_finishes_anyway_arrives() {
+        let (mut world, handle) = teleport_fixture();
+        world.begin_teleport(true);
+        world.apply(NetEvent::TeleportStarted { flags: 0 });
+        assert!(world.cancel_teleport(false).is_some());
+        assert!(!world.teleporting && world.tp_failed);
+        // process_teleport_finish: restoreCanceledTeleportRequest
+        world.apply(NetEvent::TeleportFinished { handle, flying: false });
+        assert!(world.teleporting && !world.tp_failed, "the arrival is a teleport's, not a failure");
+        world.apply(NetEvent::TeleportProgress {
+            message: "arriving".into(),
+            flags: 0,
+        });
+        assert!(world.teleporting, "its progress counts again");
     }
 
     #[test]
