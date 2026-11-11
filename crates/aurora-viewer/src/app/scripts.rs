@@ -519,6 +519,7 @@ impl App {
             return;
         }
         let Some(info) = self.script_info(target) else { return };
+        self.script_editors.inventory_mono = self.settings.build.extras.inventory_scripts_mono;
         if let Some(request) = self.script_editors.open(target, info.name, info.can_read, info.can_edit) {
             self.send(NetCommand::LoadScript {
                 request,
@@ -610,7 +611,11 @@ impl App {
                 agent_id,
                 agent_name,
                 syntax_id: crate::lsl_keywords::current_id().unwrap_or_default(),
-                temp_dir: std::env::temp_dir().to_string_lossy().into_owned(),
+                // where the external editors' files are (script.list)
+                temp_dir: crate::ui::scripts::files::session_dir()
+                    .unwrap_or_else(|_| std::env::temp_dir())
+                    .to_string_lossy()
+                    .into_owned(),
             },
             &edited,
         );

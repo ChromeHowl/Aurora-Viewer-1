@@ -16,6 +16,21 @@ use glam::{Vec2, Vec3};
 const PARCEL_GRID: f32 = 4.0;
 /// LLViewerParcelMgr PARCEL_POST_HEIGHT.
 const POST_HEIGHT: f32 = 0.666;
+/// SL_MAX_OBJECT_Z (llmath/xform.h): LLWorld::getMaxPrimZPos on Second Life.
+const MAX_OBJECT_Z: f32 = 4096.0;
+
+/// The top of a wall of the land selection standing on `ground`: the post
+/// height above the ground, or, for a selected parcel with
+/// FSRenderParcelSelectionToMaxBuildHeight, the post height above the
+/// highest build level (LLViewerParcelMgr::renderHighlightSegments /
+/// renderOneSegment, FIRE-10546).
+pub fn wall_top(ground: f32, to_max_height: bool) -> f32 {
+    if to_max_height {
+        MAX_OBJECT_Z + POST_HEIGHT
+    } else {
+        ground + POST_HEIGHT
+    }
+}
 
 /// Labels of the land radio (floater_tools.xml, French skin).
 pub fn action_names() -> [&'static str; 6] {
@@ -473,6 +488,8 @@ impl LandTool {
             .dragging
             .map(|(a, b)| parcel_rect(a, b))
             .or(self.selection.filter(|_| s.parcel_selection_outline));
+        // the rectangle being dragged keeps its low walls (renderRect)
+        let to_max = self.dragging.is_none() && s.extras.parcel_walls_to_max;
         if let Some((a, b)) = rect {
             let (lo, hi) = (a.min(b), a.max(b));
             let yellow = rgba(1.0, 1.0, 0.0, 1.0);
@@ -487,11 +504,11 @@ impl LandTool {
                     let (q0, q1) = (c0.lerp(c1, i as f32 / n as f32), c0.lerp(c1, (i + 1) as f32 / n as f32));
                     let (z0, z1) = (ground(q0.x, q0.y), ground(q1.x, q1.y));
                     let (b0, b1) = (q0.extend(z0), q1.extend(z1));
-                    let up = Vec3::Z * POST_HEIGHT;
-                    p.quad([b0, b1, b1 + up, b0 + up], wall);
+                    let (t0, t1) = (q0.extend(wall_top(z0, to_max)), q1.extend(wall_top(z1, to_max)));
+                    p.quad([b0, b1, t1, t0], wall);
                 }
                 let z = ground(c0.x, c0.y);
-                p.line(c0.extend(z), c0.extend(z + POST_HEIGHT), yellow, 2.0);
+                p.line(c0.extend(z), c0.extend(wall_top(z, to_max)), yellow, 2.0);
             }
             p.flush();
         }
@@ -593,6 +610,12 @@ mod tests {
         assert!(tool.parcel.is_none());
         tool.on_selected_parcel(handle, tool.parcel_seq, parcel);
         assert!(tool.can_join(&world));
+    }
+
+    #[test]
+    fn walls_rise_to_the_highest_build_level_when_asked() {
+        assert_eq!(wall_top(20.0, false), 20.0 + POST_HEIGHT);
+        assert_eq!(wall_top(20.0, true), 4096.0 + POST_HEIGHT);
     }
 
     #[test]

@@ -202,6 +202,7 @@ fn status(classic: bool) -> StatusInfo<'static> {
         interface_keys: String::new(),
         ik_keys: String::new(),
         edit_particles: false,
+        save_back: false,
         health: Default::default(),
         hover_tips: Default::default(),
         world_overlays: Default::default(),

@@ -14,7 +14,7 @@ mod debug;
 mod dialogs;
 mod editing;
 mod experiences;
-mod files;
+pub(crate) mod files;
 mod focus;
 mod folding;
 mod indent;
@@ -163,6 +163,9 @@ pub struct Editors {
     pub agent_name: String,
     /// The script editor link's state, shown in the preferences.
     pub link_status: Option<String>,
+    /// FSSaveInventoryScriptsAsMono: a script opened from the inventory
+    /// starts on Mono, else on LSL2 (set by the app before `open`).
+    pub inventory_mono: bool,
 }
 
 struct PendingInclude {
@@ -473,8 +476,9 @@ impl Editors {
             can_read,
             can_edit,
             can_reset: !target.object.is_nil(),
-            mono: true,
-            baseline_mono: true,
+            // an object's script reports its own (GetScriptRunning)
+            mono: !target.object.is_nil() || self.inventory_mono,
+            baseline_mono: !target.object.is_nil() || self.inventory_mono,
             experience: experiences::State::default(),
             running: None,
             status: if can_read {

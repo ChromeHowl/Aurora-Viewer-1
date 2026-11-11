@@ -7444,6 +7444,7 @@ impl App {
             mods,
         );
         self.flush_build();
+        self.turn_to_selection();
         if used {
             self.left_down = true;
         }
@@ -10347,6 +10348,7 @@ impl App {
                 ctrl: self.ctrl,
                 alt: self.alt,
             };
+            self.build.caps_lock_held = self.down.contains(&Input::key(KeyCode::CapsLock));
             self.build.update(
                 &mut self.world,
                 &self.settings.build,
@@ -14259,6 +14261,11 @@ impl App {
                 ui::widgets::open_floater(&self.egui_ctx, "blender_live", &mut self.blender_live.open);
             }
             BarAction::EditParticles => self.open_particle_editor(),
+            BarAction::SaveBackToContents => {
+                if self.build.save_back_to_contents(&self.world) {
+                    self.flush_build();
+                }
+            }
             BarAction::ToggleNameTags => {
                 self.settings.show_name_tags = !self.settings.show_name_tags;
                 self.settings.save();
@@ -15544,6 +15551,7 @@ impl App {
         self.options_ui.login_favorites = self.login_favorites.key().map(|key| self.login_form.favorites.shown(key));
         self.options_ui.friends_only = (!self.world.agent_id.is_nil()).then_some(self.world.friends_only());
         self.options_ui.friends_only_keep = (!self.world.agent_id.is_nil()).then_some(self.world.friends_only.keep_after_teleport);
+        self.refresh_new_objects_view();
         self.options_ui.restart_landmarks = if self.panels.settings && self.world.login.is_some() {
             let mut list: Vec<_> = self.restart_landmarks().into_iter().map(|l| (l.item, l.name)).collect();
             list.sort_by_key(|(_, name)| crate::natural_order::key(name));
@@ -16358,6 +16366,7 @@ impl App {
                         .map(|b| b.label())
                         .unwrap_or_default(),
                     edit_particles: self.particle_editor_target().is_some(),
+                    save_back: self.build.save_back_target(&self.world).is_some(),
                     health: self.health_menu(),
                     hover_tips: ui::bars::HoverTipsMenu {
                         enabled: self.settings.hover_tips.enabled,

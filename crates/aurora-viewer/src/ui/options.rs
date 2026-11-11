@@ -431,6 +431,11 @@ pub struct OptionsUi {
     pub login_favorites: Option<bool>,
     /// The account's "Show Friends Only", while logged in (set by the app).
     pub friends_only: Option<bool>,
+    /// The new prims' texture, item and script template as the inventory
+    /// names them, while logged in (set by the app; settings/new_objects.rs),
+    /// with the inventory generation and choices it was read for.
+    pub new_objects: Option<crate::settings::new_objects::View>,
+    pub new_objects_key: Option<(u64, crate::settings::new_objects::NewObjects, Option<Vec<uuid::Uuid>>)>,
     /// The account's "Keep Show Friends Only after teleporting", while
     /// logged in (set by the app).
     pub friends_only_keep: Option<bool>,
