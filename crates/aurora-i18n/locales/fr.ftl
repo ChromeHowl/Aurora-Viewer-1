@@ -14386,3 +14386,4 @@ l5-inventory-mono = Enregistrer en Mono les scripts modifiés depuis l'inventair
 l5-inventory-mono-hint = Un script ouvert depuis l'inventaire commence avec Mono coché ; désactivé, il est enregistré en LSL2.
 l5-turn-to-selection = Tourner l'avatar vers l'objet sélectionné
 l5-turn-to-selection-hint = Quand vous sélectionnez un objet alors que la caméra n'est pas sur votre avatar, celui-ci se tourne vers l'objet.
+l5-save-back = Réenregistrer dans le contenu de l'objet

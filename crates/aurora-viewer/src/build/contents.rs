@@ -349,9 +349,71 @@ impl BuildTool {
     }
 }
 
+/// LLSelectMgr's first root node, for "Save back to object contents"
+/// (enable_save_into_task_inventory, indra/newview/llviewermenu.cpp,
+/// originally LGPL 2.1): its properties known, rezzed from an object's
+/// contents, and not worn. Whether it may go back there is the region's
+/// decision, as in the Legacy Viewer.
+pub fn save_back_source(props: Option<&aurora_net::build::ObjectProps>, attachment: bool) -> Option<Uuid> {
+    let p = props.filter(|p| p.full)?;
+    (!attachment && !p.from_task_id.is_nil()).then_some(p.from_task_id)
+}
+
+impl BuildTool {
+    /// The selection's first root, its region and local id, and the object
+    /// it came from, while "Save back to object contents" applies.
+    pub fn save_back_target(&self, world: &World) -> Option<(aurora_net::RegionHandle, u32, Uuid)> {
+        let root = *self.roots(world).first()?;
+        let o = world.objects.get(root)?;
+        let task = save_back_source(self.props.get(&o.full_id), self.attachment_selected(world))?;
+        Some((o.key.region, o.key.local_id, task))
+    }
+
+    /// Tools.SaveToObjectInventory: save_object_back_to_contents, a DeRez of
+    /// the first root to DRD_SAVE_INTO_TASK_INVENTORY with the object it came
+    /// from, in the agent's active group (derez_objects).
+    pub fn save_back_to_contents(&mut self, world: &World) -> bool {
+        let Some((handle, local_id, task)) = self.save_back_target(world) else {
+            return false;
+        };
+        self.send(BuildCmd::DeRez {
+            handle,
+            local_ids: vec![local_id],
+            destination: aurora_net::build::derez::SAVE_INTO_TASK_INVENTORY,
+            destination_id: task,
+            group_id: world.groups.active,
+        });
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_an_object_rezzed_from_contents_saves_back() {
+        use aurora_net::build::ObjectProps;
+        let task = Uuid::from_u128(5);
+        let rezzed = ObjectProps {
+            full: true,
+            from_task_id: task,
+            ..Default::default()
+        };
+        assert_eq!(save_back_source(Some(&rezzed), false), Some(task));
+        assert_eq!(save_back_source(Some(&rezzed), true), None, "worn");
+        assert_eq!(save_back_source(None, false), None, "properties unknown");
+        let family = ObjectProps {
+            full: false,
+            ..rezzed.clone()
+        };
+        assert_eq!(save_back_source(Some(&family), false), None);
+        let from_inventory = ObjectProps {
+            from_task_id: Uuid::nil(),
+            ..rezzed
+        };
+        assert_eq!(save_back_source(Some(&from_inventory), false), None);
+    }
 
     #[test]
     fn script_description_date() {

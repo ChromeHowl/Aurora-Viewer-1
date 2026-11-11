@@ -14357,3 +14357,4 @@ l5-inventory-mono = インベントリから編集したスクリプトを Mono 
 l5-inventory-mono-hint = インベントリから開いたスクリプトは Mono にチェックが入った状態で始まります。オフにすると LSL2 で保存されます。
 l5-turn-to-selection = 選択したオブジェクトにアバターを向ける
 l5-turn-to-selection-hint = カメラがアバターに向いていないときにオブジェクトを選択すると、アバターがそのオブジェクトの方を向きます。
+l5-save-back = オブジェクトのコンテンツに保存し直す

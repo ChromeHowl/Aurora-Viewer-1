@@ -14390,3 +14390,4 @@ l5-inventory-mono = Save scripts edited from the inventory as Mono
 l5-inventory-mono-hint = A script opened from the inventory starts with Mono ticked; off, it is saved as LSL2.
 l5-turn-to-selection = Turn the avatar toward a selected object
 l5-turn-to-selection-hint = When you select an object while the camera is not on your avatar, your avatar turns to face it.
+l5-save-back = Save back to object contents
