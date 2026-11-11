@@ -7167,7 +7167,7 @@ impl Backend {
             } else {
                 0.0
             },
-            // classic skies are not tone mapped (Firestorm: no_post + legacy
+            // classic skies are not tone mapped (Legacy Viewer: no_post + legacy
             // gamma), nor anything without post-processing
             tonemapper: if f.sky.no_post || !hdr || f.no_post {
                 crate::types::TONEMAPPER_NONE
