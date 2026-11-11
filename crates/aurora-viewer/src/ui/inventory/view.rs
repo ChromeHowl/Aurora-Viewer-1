@@ -7,6 +7,7 @@
 use super::smart::{Field as SmartField, Matcher, Subject};
 use super::{Facts, Inventory, folder_name, rules};
 use crate::natural_order::cmp_folded;
+use crate::world::inventory::FetchState;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -62,6 +63,75 @@ fn my_suitcase_sorts_with_the_system_folders() {
     tree.prepare(&view, inv.root, 0, false);
     let order: Vec<u128> = tree.rows.iter().map(|r| r.id.as_u128()).filter(|id| (2..=4).contains(id)).collect();
     assert_eq!(order, [4, 3, 2], "My Suitcase and Objects above an ordinary folder");
+}
+
+#[test]
+fn empty_system_folders_hide_only_when_asked_and_loaded() {
+    use aurora_net::inventory::{InvFolder, InvItem};
+    let mut inv = Inventory {
+        root: Uuid::from_u128(1),
+        ..Default::default()
+    };
+    let folder = |id: u128, name: &str, type_default: i32| InvFolder {
+        id: Uuid::from_u128(id),
+        parent: Uuid::from_u128(1),
+        name: name.into(),
+        type_default,
+        ..Default::default()
+    };
+    inv.created_folders(vec![InvFolder {
+        id: inv.root,
+        name: "Inventory".into(),
+        type_default: 8,
+        ..Default::default()
+    }]);
+    inv.created_folders(vec![
+        folder(2, "Empty", -1),
+        folder(3, "Objects", 6),
+        folder(4, "Sounds", 1),
+        folder(5, "Trash", 14),
+        folder(6, "Notecards", 7),
+    ]);
+    inv.add_items(vec![InvItem {
+        id: Uuid::from_u128(40),
+        parent: Uuid::from_u128(4),
+        name: "Ding".into(),
+        asset_type: 1,
+        ..Default::default()
+    }]);
+    for id in [2, 3, 4, 5] {
+        if let Some(f) = inv.folders.get_mut(&Uuid::from_u128(id)) {
+            f.state = FetchState::Fetched;
+        }
+    }
+    // 6 (Notecards) is not loaded yet: it stays
+    if let Some(f) = inv.folders.get_mut(&Uuid::from_u128(6)) {
+        f.state = FetchState::Unknown;
+    }
+    let shown = |hide: bool| {
+        let prefs = InventoryPreferences {
+            hide_empty_system_folders: hide,
+            ..Default::default()
+        };
+        let mut view = ViewCache::default();
+        view.search(
+            &inv,
+            inv.root,
+            "",
+            &prefs,
+            &Filters::default(),
+            0,
+            None,
+            &Facts::default(),
+            Uuid::from_u128(9),
+            now(),
+        );
+        let mut ids: Vec<u128> = view.children_iter(inv.root, true, inv.lib_root).map(|id| id.as_u128()).collect();
+        ids.sort_unstable();
+        ids
+    };
+    assert_eq!(shown(false), [2, 3, 4, 5, 6]);
+    assert_eq!(shown(true), [2, 4, 5, 6], "the empty Objects folder alone is hidden");
 }
 
 #[test]
@@ -377,6 +447,9 @@ pub struct InventoryPreferences {
     /// Folder icon colors (`folder_colors.rs`): this viewer only, on by default.
     pub folder_colors_enabled: bool,
     pub folder_colors: std::collections::BTreeMap<Uuid, [u8; 3]>,
+    /// DebugHideEmptySystemFolders: system folders holding nothing are left
+    /// out of the tree. Off by default, as in the Legacy Viewer.
+    pub hide_empty_system_folders: bool,
 }
 impl Default for InventoryPreferences {
     fn default() -> Self {
@@ -422,6 +495,7 @@ impl Default for InventoryPreferences {
             show_details: true,
             folder_colors_enabled: true,
             folder_colors: Default::default(),
+            hide_empty_system_folders: false,
         }
     }
 }
@@ -549,7 +623,9 @@ struct Query {
 
 #[derive(Default)]
 pub struct ViewCache {
-    version: Option<(Uuid, Uuid, u64, Sort)>,
+    version: Option<(Uuid, Uuid, u64, Sort, bool)>,
+    /// `InventoryPreferences::hide_empty_system_folders` for the next build.
+    hide_empty_system: bool,
     entries: Vec<Entry>,
     children: IdMap<Vec<Uuid>>,
     result_children: IdMap<Vec<Uuid>>,
@@ -567,8 +643,13 @@ pub struct ViewCache {
 }
 
 impl ViewCache {
+    /// Whether the next `prepare` leaves out the empty system folders.
+    pub fn set_hide_empty_system(&mut self, hide: bool) {
+        self.hide_empty_system = hide;
+    }
+
     pub fn prepare(&mut self, inv: &Inventory, sort: Sort) {
-        let version = (inv.root, inv.lib_root, inv.generation, sort);
+        let version = (inv.root, inv.lib_root, inv.generation, sort, self.hide_empty_system);
         if self.version == Some(version) {
             return;
         }
@@ -669,6 +750,9 @@ impl ViewCache {
         // Keep the lists' memory: a folder gone keeps an empty list.
         self.children.values_mut().for_each(Vec::clear);
         for entry in &self.entries {
+            if self.hide_empty_system && entry.folder && hidden_when_empty(inv, entry.id) {
+                continue;
+            }
             self.children.entry(entry.parent).or_default().push(entry.id);
         }
         // The library stays last, without modifying its server parent or
@@ -722,6 +806,7 @@ impl ViewCache {
         agent: Uuid,
         time: i64,
     ) {
+        self.set_hide_empty_system(prefs.hide_empty_system_folders);
         self.prepare(inv, prefs.sort_for(tab));
         let age = if tab == 2 && filters.age == Age::Any {
             Age::SinceLogout
@@ -1210,6 +1295,24 @@ pub(super) fn within(inv: &Inventory, roots: &[Uuid]) -> IdSet {
         .filter_map(|(id, found)| found.then_some(id))
         .chain(roots.iter().copied())
         .collect()
+}
+
+/// LLViewerFolderType::lookupIsHiddenIfEmpty (indra/newview/
+/// llviewerfoldertype.cpp) with LLInventoryFilter's FILTERTYPE_EMPTYFOLDERS
+/// (llinventoryfilter.cpp): a system folder of a kind that hides when empty,
+/// once loaded with no folder and no item in it. A folder not yet loaded
+/// stays shown. Never the root, the Trash, the Current Outfit nor an outfit.
+pub(super) fn hidden_when_empty(inv: &Inventory, id: Uuid) -> bool {
+    inv.folders.get(&id).is_some_and(|f| {
+        matches!(
+            f.info.type_default,
+            0..=3 | 5..=7 | 10 | 13 | 15 | 16 | 20 | 21 | 23 | 48..=53 | 56 | 57 | 100
+        ) && id != inv.root
+            && id != inv.lib_root
+            && f.state == FetchState::Fetched
+            && f.children.is_empty()
+            && f.items.is_empty()
+    })
 }
 
 fn compare(a: &Entry, b: &Entry, sort: Sort) -> Ordering {

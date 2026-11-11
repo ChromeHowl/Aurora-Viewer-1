@@ -50,6 +50,7 @@ pub use document::document_demo_events;
 pub(crate) mod permissions;
 mod progress;
 pub(crate) mod properties;
+mod protected_folders;
 mod received;
 mod replace_links;
 mod rows;
@@ -59,6 +60,7 @@ pub(crate) mod smart_store;
 pub(crate) mod task_drop;
 pub(crate) mod task_selection;
 pub mod thumbnail;
+mod thumbnails_helper;
 pub(crate) mod tree;
 pub(crate) mod view;
 pub use aurora::{DEMO_FOLDER_WINDOW as AURORA_DEMO_FOLDER_WINDOW, demo_place as aurora_demo};
@@ -471,6 +473,10 @@ pub struct InventoryUi {
     was_open: bool,
     focus_search: bool,
     bulk_permissions: bulk_permissions::State,
+    /// The protected folders manager (`protected_folders.rs`).
+    protected_folders: protected_folders::State,
+    /// The bulk item image helper (`thumbnails_helper.rs`).
+    thumbnails_helper: thumbnails_helper::State,
     menu_editor: context_customize::State,
     menu_notecards: context_notecards::State,
     /// Library wearables being copied to be worn: copy request → replace.
@@ -634,6 +640,16 @@ impl InventoryUi {
 
     pub(crate) fn open_bulk_permissions(&mut self, roots: Vec<Uuid>) {
         self.bulk_permissions.open(roots);
+    }
+
+    /// Opens the protected folders manager (FSFloaterProtectedFolders).
+    pub(crate) fn open_protected_folders(&mut self) {
+        self.protected_folders.open = true;
+    }
+
+    /// Opens the inventory thumbnails helper.
+    pub(crate) fn open_thumbnails_helper(&mut self) {
+        self.thumbnails_helper.open = true;
     }
 
     pub(crate) fn load_received(&mut self, path: std::path::PathBuf, root: Uuid) {
@@ -2184,9 +2200,12 @@ pub fn show(
             facts.names.insert(*id, world.social.name_of(id));
         }
     }
+    let show_inv = !world.rlva.has("showinv");
     let inv = &mut world.inventory;
     context_catalog::process_deferred(inv, st, prefs, &facts);
     bulk_permissions::show(ctx, p, inv, st, world.agent_id, &mut actions);
+    protected_folders::show(ctx, p, inv, st, prefs, show_inv);
+    thumbnails_helper::show(ctx, p, inv, st, &mut actions);
     st.visible.clear();
     fetch_whole_inventory(inv, st);
     // Copied folders load their whole tree for the paste; once loaded, they
@@ -2376,6 +2395,8 @@ pub fn show(
             w.state.view = Default::default();
         }
         bulk_permissions::show(ctx, p, &mut world.inventory, &mut w.state, world.agent_id, &mut actions);
+        protected_folders::show(ctx, p, &world.inventory, &mut w.state, prefs, !world.rlva.has("showinv"));
+        thumbnails_helper::show(ctx, p, &world.inventory, &mut w.state, &mut actions);
         if w.id != listings::PANEL {
             finish_hidden_rename(&world.inventory, &mut w.state, &mut actions);
         }
@@ -2436,6 +2457,8 @@ pub fn show(
             || w.state.move_to.is_some()
             || w.state.thumbnail.item.is_some()
             || w.state.bulk_permissions.active()
+            || w.state.protected_folders.open
+            || w.state.thumbnails_helper.open
     });
     windows.append(&mut spawned);
     st.windows = windows;
