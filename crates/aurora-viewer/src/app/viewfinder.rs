@@ -51,6 +51,7 @@ impl App {
     /// the AF point, the hunt, the lens in AF-C and MF, the histogram.
     pub(super) fn viewfinder_frame(&mut self, renderer: &mut Renderer) {
         self.camera_presets_demo(renderer.size());
+        self.photo_camera_demo();
         // the focal length is the photo's: the view's own comes back when
         // the viewfinder closes
         // the depth of field on, once, for the profiles that saved it off

@@ -9,7 +9,8 @@ use crate::snapshot::extras::Corner;
 use crate::theme::Palette;
 use crate::ui::snapshot::Action;
 use crate::ui::widgets;
-use egui::{Align2, Id, Order, Pos2, Rect};
+use egui::layers::ShapeIdx;
+use egui::{Align2, Id, Order, Pos2, Rect, Stroke, StrokeKind, Vec2};
 
 /// The guide's widths offered (points): Fine (the default), Medium, Bold.
 pub const GUIDE_WIDTHS: [f32; 3] = [1.0, 2.0, 4.0];
@@ -26,6 +27,48 @@ pub fn preset_of(v: f32, offered: &[f32]) -> Option<usize> {
 /// The next of `offered` after `v` (a value of no preset: the first).
 pub fn next_preset(v: f32, offered: &[f32]) -> f32 {
     preset_of(v, offered).map_or(offered[0], |i| offered[(i + 1) % offered.len()])
+}
+
+/// Where a sheet's row starts: the arrows' mark is painted there, under
+/// the row's controls.
+pub(super) fn row_slot(ui: &egui::Ui) -> ShapeIdx {
+    ui.painter().add(egui::Shape::Noop)
+}
+
+/// The row the arrows are on (`lit`): the mode list's cursor, a faint face
+/// and a teal edge across the sheet, under the controls of `row`.
+pub(super) fn mark_row(ui: &egui::Ui, p: &Palette, slot: ShapeIdx, row: Rect, lit: bool) {
+    if !lit {
+        return;
+    }
+    let rect = Rect::from_x_y_ranges(ui.max_rect().x_range(), row.y_range()).expand2(Vec2::new(6.0, 3.0));
+    let radius = widgets::inner_radius(ui.visuals());
+    ui.painter().set(
+        slot,
+        egui::Shape::Vec(vec![
+            egui::Shape::rect_filled(rect, radius, p.ink.gamma_multiply(0.07)),
+            egui::Shape::rect_stroke(rect, radius, Stroke::new(1.0, p.teal.gamma_multiply(0.7)), StrokeKind::Inside),
+        ]),
+    );
+}
+
+/// The Guide sheet's rows in the order the arrows go through them: the
+/// spiral's corner, shown under the guides, only for the spiral.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuideRow {
+    Guide,
+    Corner,
+    Color,
+    Width,
+}
+
+pub fn guide_rows(spiral: bool) -> &'static [GuideRow] {
+    use GuideRow::*;
+    if spiral {
+        &[Guide, Corner, Color, Width]
+    } else {
+        &[Guide, Color, Width]
+    }
 }
 
 /// What the lens options ask of the app (Preferences' global settings).
@@ -128,11 +171,16 @@ impl Viewfinder {
                 (None, _) => aurora_i18n::tr!("pcu-bank-empty").to_owned(),
             };
             ui.label(egui::RichText::new(now).color(if bank.exists { p.ink } else { p.muted }));
-            if widgets::flat_button(ui, p, aurora_i18n::tr!("pcu-bank-save-here")).clicked() {
+            let mark = row_slot(ui);
+            let r = widgets::flat_button(ui, p, aurora_i18n::tr!("pcu-bank-save-here"));
+            if r.clicked() {
                 edits.push(BankEdit::SaveHere);
             }
+            mark_row(ui, p, mark, r.rect, row == 0);
+            let mark = row_slot(ui);
+            let top = ui.cursor().top();
             ui.label(egui::RichText::new(aurora_i18n::tr!("pcu-bank-choose")).size(12.0).color(p.muted));
-            ui.horizontal_wrapped(|ui| {
+            let r = ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::Vec2::splat(4.0);
                 for name in s.profiles.keys() {
                     let on = bank.name.as_deref() == Some(name.as_str());
@@ -144,6 +192,7 @@ impl Viewfinder {
                     ui.label(egui::RichText::new(aurora_i18n::tr!("p16-profiles-empty")).color(p.muted));
                 }
             });
+            mark_row(ui, p, mark, r.response.rect.with_min_y(top), row == 1);
             if bank.exists {
                 ui.horizontal(|ui| {
                     ui.add(
@@ -159,7 +208,8 @@ impl Viewfinder {
                     }
                 });
             }
-            ui.horizontal(|ui| {
+            let mark = row_slot(ui);
+            let r = ui.horizontal(|ui| {
                 widgets::icon_menu(ui, p, "restore", aurora_i18n::tr!("pcu-bank-reset-part"), |ui| {
                     for part in crate::snapshot::saved::Part::ALL {
                         if crate::ui::menu::item(ui, p, "arrow-back-up", crate::ui::snapshot::reset_label(part)) {
@@ -171,6 +221,7 @@ impl Viewfinder {
                     edits.push(BankEdit::Unpin);
                 }
             });
+            mark_row(ui, p, mark, r.response.rect, row == 2);
         });
         out.extend(edits.into_iter().map(|e| Out::Bank(slot, e)));
         if !open {
@@ -183,17 +234,19 @@ impl Viewfinder {
     pub(super) fn guide_sheet(&mut self, ctx: &egui::Context, p: &Palette, screen: Rect, s: &mut Settings) {
         // the keys: the guide, its colour (the theme's or its own), the
         // width, the spiral's corner
-        let (row, turn) = self.sheet_nav(if s.guide == Guide::Spiral { 4 } else { 3 });
+        let rows = guide_rows(s.guide == Guide::Spiral);
+        let (row, turn) = self.sheet_nav(rows.len());
+        let row = rows[row.min(rows.len() - 1)];
         if turn != 0 {
             match row {
-                0 => {
+                GuideRow::Guide => {
                     let all: Vec<Guide> = std::iter::once(Guide::None).chain(Guide::ALL).collect();
                     let at = all.iter().position(|g| *g == s.guide).map_or(0, |i| i as i32 + turn);
                     s.guide = all[at.rem_euclid(all.len() as i32) as usize];
                 }
-                1 => s.extras.guide_color = s.extras.guide_color.xor(Some([255, 255, 0, 128])),
-                2 => s.extras.guide_width = next_preset(s.extras.guide_width, &GUIDE_WIDTHS),
-                _ => {
+                GuideRow::Color => s.extras.guide_color = s.extras.guide_color.xor(Some([255, 255, 0, 128])),
+                GuideRow::Width => s.extras.guide_width = next_preset(s.extras.guide_width, &GUIDE_WIDTHS),
+                GuideRow::Corner => {
                     let at = Corner::ALL
                         .iter()
                         .position(|c| *c == s.extras.guide_corner)
@@ -211,7 +264,8 @@ impl Viewfinder {
             aurora_i18n::tr!("b1-guide-section"),
             |ui| {
                 ui.spacing_mut().item_spacing.y = 6.0;
-                ui.horizontal_wrapped(|ui| {
+                let mark = row_slot(ui);
+                let r = ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing = egui::Vec2::splat(4.0);
                     for g in std::iter::once(Guide::None).chain(Guide::ALL) {
                         let (icon, tip) = crate::ui::snapshot::guide_face(g);
@@ -220,8 +274,10 @@ impl Viewfinder {
                         }
                     }
                 });
+                mark_row(ui, p, mark, r.response.rect, row == GuideRow::Guide);
                 if s.guide == Guide::Spiral {
-                    ui.horizontal(|ui| {
+                    let mark = row_slot(ui);
+                    let r = ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 4.0;
                         for (c, arrow) in Corner::ALL.into_iter().zip(["↖", "↗", "↙", "↘"]) {
                             if crate::ui::snapshot::chip(ui, p, arrow, None, s.extras.guide_corner == c, true).clicked() {
@@ -229,9 +285,11 @@ impl Viewfinder {
                             }
                         }
                     });
+                    mark_row(ui, p, mark, r.response.rect, row == GuideRow::Corner);
                 }
                 let e = &mut s.extras;
-                ui.horizontal(|ui| {
+                let mark = row_slot(ui);
+                let r = ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
                     if crate::ui::snapshot::chip(ui, p, aurora_i18n::tr!("pcu-guide-theme"), None, e.guide_color.is_none(), true).clicked()
                     {
@@ -245,7 +303,9 @@ impl Viewfinder {
                         e.guide_color = Some(c);
                     }
                 });
-                ui.horizontal(|ui| {
+                mark_row(ui, p, mark, r.response.rect, row == GuideRow::Color);
+                let mark = row_slot(ui);
+                let r = ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
                     let now = preset_of(e.guide_width, &GUIDE_WIDTHS);
                     let names = [
@@ -262,6 +322,7 @@ impl Viewfinder {
                         crate::ui::snapshot::chip(ui, p, aurora_i18n::tr!("pcu-custom"), None, true, false);
                     }
                 });
+                mark_row(ui, p, mark, r.response.rect, row == GuideRow::Width);
             },
         );
         if !open {
@@ -292,11 +353,16 @@ impl Viewfinder {
             |ui| {
                 ui.spacing_mut().item_spacing.y = 6.0;
                 let mut on = front;
-                if widgets::switch_labeled(ui, p, &mut on, aurora_i18n::tr!("pcu-lens-front")).changed() {
+                let mark = row_slot(ui);
+                let r = widgets::switch_labeled(ui, p, &mut on, aurora_i18n::tr!("pcu-lens-front"));
+                if r.changed() {
                     out.push(Out::Lens(LensEdit::FrontBlur(on)));
                 }
+                mark_row(ui, p, mark, r.rect, row == 0);
+                let mark = row_slot(ui);
+                let top = ui.cursor().top();
                 ui.label(egui::RichText::new(aurora_i18n::tr!("pcu-lens-fringe")).color(p.ink));
-                ui.horizontal(|ui| {
+                let r = ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
                     let now = preset_of(fringe, &FRINGES);
                     let names = [
@@ -313,6 +379,7 @@ impl Viewfinder {
                         crate::ui::snapshot::chip(ui, p, aurora_i18n::tr!("pcu-custom"), None, true, false);
                     }
                 });
+                mark_row(ui, p, mark, r.response.rect.with_min_y(top), row == 1);
                 ui.label(egui::RichText::new(aurora_i18n::tr!("pcu-lens-global")).size(11.0).color(p.muted));
             },
         );
@@ -341,5 +408,12 @@ mod tests {
         assert_eq!(next_preset(1.0, &DEBANDS), 0.0, "round");
         assert_eq!(next_preset(1.7, &DEBANDS), 0.0, "custom: from the first");
         assert_eq!(next_preset(0.0, &DEBANDS), 0.5);
+    }
+
+    #[test]
+    fn the_guide_rows_go_down_in_the_order_they_are_shown() {
+        use GuideRow::*;
+        assert_eq!(guide_rows(false), &[Guide, Color, Width]);
+        assert_eq!(guide_rows(true), &[Guide, Corner, Color, Width], "the corner under the guides");
     }
 }

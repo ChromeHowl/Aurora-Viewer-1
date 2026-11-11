@@ -236,16 +236,12 @@ pub fn style_rows(
     if let Some((row, turn)) = keys {
         style_key(light, cx, row, turn);
     }
-    let lit = |ui: &egui::Ui, r: egui::Rect, row: usize| {
-        if keys.is_some_and(|(k, _)| k == row) {
-            let bar = egui::Rect::from_min_max(
-                egui::Pos2::new(r.left() - 8.0, r.top()),
-                egui::Pos2::new(r.left() - 5.0, r.bottom()),
-            );
-            ui.painter().rect_filled(bar, 0.0, p.teal);
-        }
+    // (the sheets' mark, `sheets::mark_row`)
+    let lit = |ui: &egui::Ui, mark, r: egui::Rect, row: usize| {
+        super::sheets::mark_row(ui, p, mark, r, keys.is_some_and(|(k, _)| k == row));
     };
     let now = style::matching(light, prefs);
+    let mark = super::sheets::row_slot(ui);
     let r = ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = egui::Vec2::splat(4.0);
         let all = std::iter::once(style::Style::AsViewer).chain(style::STYLES.iter().map(|(s, _, _)| *s));
@@ -265,7 +261,8 @@ pub fn style_rows(
             crate::ui::snapshot::chip(ui, p, style_label(style::Style::Custom), None, true, false);
         }
     });
-    lit(ui, r.response.rect, 0);
+    lit(ui, mark, r.response.rect, 0);
+    let mark = super::sheets::row_slot(ui);
     let r = ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = egui::Vec2::splat(4.0);
         let wb = style::wb_of(light, prefs);
@@ -278,18 +275,20 @@ pub fn style_rows(
             }
         }
     });
-    lit(ui, r.response.rect, 1);
+    lit(ui, mark, r.response.rect, 1);
     if fine {
         for (k, row) in style::Fine::ALL.into_iter().enumerate() {
+            let mark = super::sheets::row_slot(ui);
             let (dir, rect) = stepper(ui, p, fine_label(row), signed(row.steps(light, prefs)));
-            lit(ui, rect, 2 + k);
+            lit(ui, mark, rect, 2 + k);
             if dir != 0 {
                 style::fine_step(light, prefs, row, dir);
             }
         }
         let g = style::grade(light, prefs);
+        let mark = super::sheets::row_slot(ui);
         let (dir, rect) = stepper(ui, p, aurora_i18n::tr!("pcu-fine-tint"), signed(-style::steps(g.tint)));
-        lit(ui, rect, 6);
+        lit(ui, mark, rect, 6);
         if dir != 0 {
             // (the row counts green: more green, less tint)
             style::set_tint(light, prefs, style::step(g.tint, -dir));

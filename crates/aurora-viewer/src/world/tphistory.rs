@@ -53,11 +53,15 @@ pub struct TeleportHistory {
     current: usize,
     /// Index being travelled to with back / forward.
     pending: Option<usize>,
+    /// That index while its teleport is cancelled: a TeleportFinish that
+    /// comes anyway brings it back (LLAgent::mTeleportCanceled).
+    parked: Option<usize>,
 }
 
 impl TeleportHistory {
     /// Arrival at a new location (login or teleport).
     pub fn arrived(&mut self, entry: TpEntry) {
+        self.parked = None;
         if let Some(i) = self.pending.take()
             && i < self.items.len()
         {
@@ -78,6 +82,22 @@ impl TeleportHistory {
     /// The teleport did not happen.
     pub fn failed(&mut self) {
         self.pending = None;
+        self.parked = None;
+    }
+
+    /// The teleport was cancelled: its place is kept aside in case the
+    /// region finishes it anyway.
+    pub fn cancelled(&mut self) {
+        self.parked = self.pending.take();
+    }
+
+    /// The region finished a cancelled teleport
+    /// (LLAgent::restoreCanceledTeleportRequest): its place is the one
+    /// travelled to again.
+    pub fn restore_cancelled(&mut self) {
+        if let Some(i) = self.parked.take() {
+            self.pending = Some(i);
+        }
     }
 
     /// The demo's earlier places, oldest first: the next arrival comes after
@@ -88,6 +108,7 @@ impl TeleportHistory {
             items,
             current,
             pending: None,
+            parked: None,
         }
     }
 
@@ -163,6 +184,7 @@ impl TeleportHistory {
         }
         let e = self.items.get(i).cloned()?;
         self.pending = Some(i);
+        self.parked = None;
         Some(e)
     }
 
@@ -173,6 +195,7 @@ impl TeleportHistory {
         }
         self.current = 0;
         self.pending = None;
+        self.parked = None;
     }
 }
 
@@ -537,6 +560,28 @@ pub fn history_matches(title: &str, filter: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_cancelled_back_that_the_region_finishes_lands_on_its_place() {
+        let mut h = TeleportHistory::default();
+        for place in ["Home", "Plaza", "Store"] {
+            h.arrived(e(place));
+        }
+        assert_eq!(h.go_back().map(|e| e.region), Some("Plaza".into()));
+        h.cancelled();
+        h.restore_cancelled();
+        h.arrived(e("Plaza"));
+        let s = h.session();
+        assert_eq!((s.items.len(), s.current), (3, 1), "the forward place is kept");
+        // a cancel that holds: the next teleport is a new place
+        assert!(h.go_back().is_some());
+        h.cancelled();
+        h.arrived(e("Elsewhere"));
+        h.restore_cancelled();
+        let s = h.session();
+        assert_eq!(s.items.last().map(|e| e.region.as_str()), Some("Elsewhere"));
+        assert_eq!(s.current, s.items.len() - 1);
+    }
 
     fn e(n: &str) -> TpEntry {
         TpEntry {
