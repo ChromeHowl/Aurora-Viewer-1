@@ -286,7 +286,7 @@ impl World {
             }
         }
         if self.rlva.has("shownames") || clear_nearby {
-            for sighting in super::super::radar::sightings(self) {
+            for sighting in super::super::radar::sightings_all(self) {
                 let id = sighting.id;
                 if id == self.agent_id || (!clear_nearby && self.rlva_can_name(id)) {
                     continue;

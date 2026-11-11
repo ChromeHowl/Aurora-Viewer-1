@@ -492,6 +492,12 @@ impl App {
                 if !regions.contains(&o.key.region) || (!neighbors && Some(o.key.region) != region) {
                     return None;
                 }
+                // what the Shadow Realm hides now is listed nowhere: worn by
+                // a hidden resident or theirs (the update's owner, or the
+                // properties' below)
+                if world.shadow_hides_index(index) {
+                    return None;
+                }
                 let place = placement(store, o)?;
                 if (!children && place.child)
                     || (!filters.include_attachments && place.attachment)
@@ -548,6 +554,9 @@ impl App {
                         row.owner_id = row.group_id;
                     }
                     row.price = (p.sale_type != 0).then_some(p.sale_price);
+                    if world.shadow_hides(&p.owner_id) {
+                        return None;
+                    }
                 }
                 Some((row, o.key))
             })

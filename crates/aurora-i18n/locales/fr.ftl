@@ -15074,3 +15074,21 @@ pcu-help-t = Feuille du style d’image
 pcu-help-arrows = Flèches, Entrée
 pcu-help-arrows-text = Dans le menu rapide, la liste des modes ou une feuille : se déplacer, changer (Entrée fait avancer la tuile ou choisit le mode)
 pcu-cheat-pbt = mode de prise de vue · balance des blancs · style
+
+# Shadow Realm (Monde › Royaume des ombres…)
+sr-title = Royaume des ombres
+sr-menu-enabled = Royaume des ombres activé
+sr-menu-window = Royaume des ombres…
+sr-menu-add = Ajouter au Royaume des ombres
+sr-menu-remove = Retirer du Royaume des ombres
+sr-enabled = Activé
+sr-enabled-tip = Les résidents de cette liste n'apparaissent nulle part tant qu'ils sont plus loin que la distance : ni affichés, ni listés, ni entendus à proximité, leurs objets muets. Leurs messages privés et leurs appels passent toujours.
+sr-distance = Visible jusqu'à
+sr-distance-tip = À cette distance, un résident de la liste réapparaît, son nom en rouge. Il disparaît de nouveau un mètre plus loin.
+sr-metres-suffix = { " " }m
+sr-filter = Filtrer les résidents
+sr-empty = Personne n'est dans le Royaume des ombres. Ajoutez des résidents ici ou depuis leur menu.
+sr-state-off = Visible (désactivé)
+sr-state-shown = À portée : visible
+sr-state-hidden = Masqué
+sr-remove = Retirer

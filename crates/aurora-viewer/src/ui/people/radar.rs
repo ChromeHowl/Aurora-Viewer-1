@@ -372,6 +372,11 @@ pub(super) fn rows(world: &World, data: &RadarData, filter: &str) -> Vec<Row> {
         .radar
         .entries()
         .filter_map(|e| {
+            // gone at once when the Shadow Realm hides them, not at the
+            // next sweep
+            if world.shadow_hides(&e.id) {
+                return None;
+            }
             let muted = world.mutes.is_muted_id(&e.id);
             if muted && !settings.show_muted {
                 return None;

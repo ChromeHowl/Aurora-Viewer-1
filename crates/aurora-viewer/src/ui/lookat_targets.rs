@@ -97,7 +97,8 @@ pub fn sources(world: &World, s: &Settings) -> Vec<(Uuid, Target)> {
         .look_at
         .remote
         .iter()
-        .filter(|(id, _)| **id != me)
+        // (nobody the Shadow Realm hides looks at anything)
+        .filter(|(id, _)| **id != me && !world.shadow_hides(id))
         .map(|(id, t)| (*id, *t))
         .collect();
     if !(s.hide_own || s.private) {

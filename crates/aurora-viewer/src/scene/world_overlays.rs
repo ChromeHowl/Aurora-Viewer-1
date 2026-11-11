@@ -81,6 +81,7 @@ impl Scene {
                         if !kinds.is_empty()
                             && let Some(idx) = world.objects.index_of(&o.key)
                             && world.parcel_object_visible(idx)
+                            && !world.shadow_hides_index(idx)
                             && let Some((pos, _, false)) = Scene::object_transform(world, idx, now, 0)
                         {
                             let radius = o.scale.length() * 0.5;
@@ -101,7 +102,7 @@ impl Scene {
             }
             if s.sound {
                 for (idx, pos) in self.sounds.beacon_sources(world, now) {
-                    if idx.is_some_and(|idx| !world.parcel_object_visible(idx)) {
+                    if idx.is_some_and(|idx| !world.parcel_object_visible(idx) || world.shadow_hides_index(idx)) {
                         continue;
                     }
                     if s.highlights

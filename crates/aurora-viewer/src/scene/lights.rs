@@ -240,7 +240,8 @@ impl Scene {
         } = std::mem::take(&mut self.light_scratch);
         objects.extend(self.light_objects.iter().copied());
         for idx in objects.drain(..) {
-            if !world.parcel_object_visible(idx) {
+            // (the lights of a resident the Shadow Realm hides go with them)
+            if !world.parcel_object_visible(idx) || world.shadow_hides_index(idx) {
                 continue;
             }
             let Some(o) = world.objects.get(idx) else {

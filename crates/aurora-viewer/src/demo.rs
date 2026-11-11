@@ -6303,6 +6303,7 @@ fn notification_samples(notifications: bool, inventory_offer: bool, menu: Option
         ev.push(NetEvent::LoadUrl {
             object_name: aurora_i18n::tr!("demo-shop").into(),
             object_id: Uuid::from_u128(0xF5),
+            owner_id: Uuid::nil(),
             message: aurora_i18n::tr!("demo-scripted-url").into(),
             url: "https://example.invalid/shop".into(),
         });

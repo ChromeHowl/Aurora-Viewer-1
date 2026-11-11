@@ -1105,6 +1105,71 @@ mod tests {
         assert_eq!(requests[0].1.len(), 3);
     }
 
+    /// A temporary derender always reverses: the
+    /// avatar is kept with its last update, follows its moves while away
+    /// and comes back where it is now, with what it wears, without waiting
+    /// for the simulator to send it again; and a relog, which keeps only
+    /// the permanent entries, never leaves it out.
+    #[test]
+    fn a_temporary_derender_always_brings_the_avatar_back() {
+        use aurora_net::NetEvent;
+        let (mut world, handle) = demo_world();
+        let wolf = crate::demo::DEMO_LOUP;
+        let hat = crate::demo::wolf_hat();
+        let key = world
+            .objects
+            .get(world.objects.index_of_uuid(&wolf).expect("wolf"))
+            .expect("wolf")
+            .key;
+        assert!(!world.derender(wolf, entry(Kind::Resident, false)));
+        assert!(world.objects.index_of_uuid(&wolf).is_none());
+        // it walks while away
+        let moved = glam::Vec3::new(140.0, 120.0, 25.0);
+        let _ = world.apply(NetEvent::TerseUpdates {
+            handle,
+            updates: vec![aurora_net::objects::TerseUpdate {
+                local_id: key.local_id,
+                state: 0,
+                is_avatar: true,
+                foot_plane: None,
+                position: moved,
+                velocity: glam::Vec3::ZERO,
+                acceleration: glam::Vec3::ZERO,
+                rotation: glam::Quat::IDENTITY,
+                angular_velocity: glam::Vec3::ZERO,
+                texture_entry: None,
+            }],
+        });
+        // un-derendered: back at once, where it is now, hat on, and asked for
+        world.underender(&[wolf]);
+        let back = world
+            .objects
+            .get(world.objects.index_of_uuid(&wolf).expect("back at once"))
+            .expect("wolf");
+        assert_eq!(back.position, moved);
+        assert!(world.objects.index_of_uuid(&hat).is_some(), "with what it wears");
+        assert_eq!(world.derender.take_requests().len(), 1, "and the simulator is asked for it");
+        // derendered again, the hat for good, then a relog from the same
+        // account file: only the permanent entry comes back, and the
+        // simulator's first update of the avatar shows it
+        let wolf_update = crate::build::replace::demo_update(back);
+        let dir = std::env::temp_dir().join(format!("aurora-derender-relog-{}", Uuid::new_v4()));
+        let path = dir.join(FILE);
+        world.derender = Derender::load(path.clone());
+        assert!(!world.derender(wolf, entry(Kind::Resident, false)));
+        assert!(!world.derender(hat, entry(Kind::Object, true)));
+        assert!(path.exists(), "the permanent entry is saved");
+        world.derender = Derender::load(path);
+        assert!(!world.derender.contains(&wolf), "a temporary entry never survives a relog");
+        assert!(world.derender.contains(&hat), "a permanent one does");
+        let _ = world.apply(NetEvent::ObjectUpdates {
+            handle,
+            objects: vec![wolf_update],
+        });
+        assert!(world.objects.index_of_uuid(&wolf).is_some(), "shown after the relog");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn a_worn_object_alone_can_be_derendered_and_a_relog_keeps_it_out() {
         use aurora_net::NetEvent;

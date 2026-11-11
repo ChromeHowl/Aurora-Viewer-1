@@ -851,6 +851,8 @@ fn avatar_groups(ui: &mut Builder, f: &Facts, id: Uuid, attachment: Option<Uuid>
         } else {
             derender_items(ui, id, aurora_i18n::tr!("ui-context-derender-temporarily"), true);
         }
+        // the wearer's, even from a clicked attachment
+        shadow_realm_item(ui, f, id);
         ui.check(
             "sparkles-filled",
             aurora_i18n::tr!("common-block-particles"),
@@ -951,6 +953,19 @@ fn derender_items(ui: &mut Builder, id: Uuid, temporary: &str, enabled: bool) {
         enabled,
         CtxAction::Derender { id, permanent: true },
     );
+}
+
+/// "Add to / Remove from Shadow Realm" of the resident (`world/shadow_realm.rs`).
+fn shadow_realm_item(ui: &mut Builder, f: &Facts, id: Uuid) {
+    if id == f.me {
+        return;
+    }
+    let (label, add) = if f.shadow_realm {
+        (aurora_i18n::tr!("sr-menu-remove"), false)
+    } else {
+        (aurora_i18n::tr!("sr-menu-add"), true)
+    };
+    ui.item(super::SHADOW_REALM_ICON, label, CtxAction::ShadowRealm { id, add });
 }
 
 /// "Save as" (Export Menu, menu_object.xml / menu_attachment_self.xml):

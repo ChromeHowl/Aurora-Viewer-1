@@ -212,6 +212,8 @@ pub struct Facts {
     pub blocked: bool,
     /// Voice chat is muted for this resident (`LLMute::flagVoiceChat` only).
     pub voice_blocked: bool,
+    /// In the Shadow Realm's list (`world/shadow_realm.rs`).
+    pub shadow_realm: bool,
     /// Lindens cannot have their voice muted (`LLInspectAvatar`).
     pub can_block_voice: bool,
     /// The independent owner particle filter is enabled.
@@ -570,6 +572,13 @@ pub enum CtxAction {
     /// (`world/hidden_friends.rs`).
     HideFriend(Uuid),
     UnhideFriend(Uuid),
+    /// "Add to / Remove from Shadow Realm": the resident appears nowhere
+    /// out of range, in red in range; nothing is sent
+    /// (`world/shadow_realm.rs`).
+    ShadowRealm {
+        id: Uuid,
+        add: bool,
+    },
     /// Several friends removed, after one confirmation (removeFriendsDialog).
     RemoveFriends(Vec<Uuid>),
     /// A text conference with these residents (startConference).
@@ -1132,6 +1141,7 @@ fn avatar_menu_reporting(
                     act(CtxAction::Derender { id, permanent });
                 }
             }
+            shadow_realm_item(ui, p, world, id);
         }
         AvatarList::Friend => {
             profile(ui);
@@ -1151,6 +1161,7 @@ fn avatar_menu_reporting(
             navigation(ui);
             remove_friend(ui);
             hide_friend(ui);
+            shadow_realm_item(ui, p, world, id);
             menu::separator(ui, p);
             copy(ui);
             if let Some(f) = &friend {
@@ -1192,6 +1203,7 @@ fn avatar_menu_reporting(
                 ));
             }
             block(ui);
+            shadow_realm_item(ui, p, world, id);
             // menu_url_agent.xml BanFromAllGroups
             group_ban_items(ui, p, world, id, false);
             menu::separator(ui, p);
@@ -1200,6 +1212,26 @@ fn avatar_menu_reporting(
     }
     admin_submenu(ui, p, world, id, act);
 }
+
+/// "Add to / Remove from Shadow Realm", next to Derender in every menu of
+/// a resident (`world/shadow_realm.rs`); never on ourselves.
+pub fn shadow_realm_item(ui: &mut egui::Ui, p: &Palette, world: &World, id: Uuid) {
+    if id.is_nil() || id == world.agent_id {
+        return;
+    }
+    let listed = world.shadow_realm.is_listed(&id);
+    let label = if listed {
+        aurora_i18n::tr!("sr-menu-remove")
+    } else {
+        aurora_i18n::tr!("sr-menu-add")
+    };
+    if menu::item(ui, p, SHADOW_REALM_ICON, label) {
+        request(ui.ctx(), CtxAction::ShadowRealm { id, add: !listed });
+    }
+}
+
+/// The Shadow Realm's icon, the same in every menu and its window.
+pub const SHADOW_REALM_ICON: &str = "ghost-2-filled";
 
 /// Admin, while the region keeps our god level, outside the world menus: the
 /// profile's Kick / Freeze / Unfreeze (menu_fs_profile_overflow.xml,

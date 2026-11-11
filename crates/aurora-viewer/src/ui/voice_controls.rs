@@ -324,9 +324,11 @@ fn gather(world: &World, levels: &HashMap<Uuid, (f32, bool)>) -> Gathered {
             own: own_level(levels.get(&me), call.members.iter().find(|m| m.id == me).map(level)),
         };
     }
+    // (the nearby channel without those the Shadow Realm hides; calls list
+    // everyone)
     let mut in_voice: Vec<(Uuid, Level)> = levels
         .iter()
-        .filter(|(id, _)| **id != me)
+        .filter(|(id, _)| **id != me && !world.shadow_hides(id))
         .map(|(id, &(level, speaking))| {
             // shown to everyone; only the moderation actions are gated
             let muted = world
@@ -619,6 +621,18 @@ mod tests {
 
     fn id(n: u128) -> Uuid {
         Uuid::from_u128(n)
+    }
+
+    /// The nearby channel leaves out who the Shadow Realm hides.
+    #[test]
+    fn the_nearby_list_leaves_out_the_shadow_realm() {
+        let mut world = World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
+        world.agent_id = id(99);
+        let levels = HashMap::from([(id(1), (0.5, true)), (id(2), (0.1, false))]);
+        let listed = |w: &World| gather(w, &levels).in_voice.iter().map(|(i, _)| *i).collect::<Vec<_>>();
+        assert_eq!(listed(&world), vec![id(1), id(2)]);
+        world.shadow_realm_add(id(1));
+        assert_eq!(listed(&world), vec![id(2)]);
     }
 
     fn voice(speaking: bool) -> Level {

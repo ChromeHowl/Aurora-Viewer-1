@@ -11,6 +11,7 @@ pub mod body;
 pub mod bubble_chat;
 pub mod calling_cards;
 
+pub mod account_ids;
 mod arrival_wait;
 pub mod beacons;
 pub mod bridge;
@@ -105,6 +106,7 @@ pub mod rlva;
 pub mod script_debug;
 pub mod script_dialog_limit;
 pub mod search;
+pub mod shadow_realm;
 pub mod sim_console;
 pub mod social;
 pub mod sound_parcels;
@@ -597,6 +599,8 @@ pub struct World {
     pub derender: derender::Derender,
     /// "Show Friends Only" beside it (`friends_only.rs`).
     pub friends_only: friends_only::State,
+    /// The residents who appear nowhere out of range (`shadow_realm.rs`).
+    pub shadow_realm: shadow_realm::ShadowRealm,
     /// Our groups and the group / conference chat sessions.
     pub groups: groups::GroupChats,
     /// Voice calls with residents, groups and conferences.
@@ -1003,6 +1007,7 @@ impl World {
             parcel_name: String::new(),
             parcel_visibility: Default::default(),
             photo_isolation: Default::default(),
+            shadow_realm: Default::default(),
             parcel: None,
             land: land::Land::default(),
             estate: estate::Estate::default(),
@@ -1177,7 +1182,9 @@ impl World {
     /// Viewer reads only the former (LLVOAvatar::isTyping), which a viewer
     /// sends even with its typing animation turned off.
     pub fn is_typing_nearby(&self, avatar: &Uuid) -> bool {
-        self.nearby_typing.contains(avatar) || self.animations_of(avatar).iter().any(|a| a.id == radar::ANIM_AGENT_TYPE)
+        // (nobody types where they appear nowhere: `shadow_realm.rs`)
+        !self.shadow_hides(avatar)
+            && (self.nearby_typing.contains(avatar) || self.animations_of(avatar).iter().any(|a| a.id == radar::ANIM_AGENT_TYPE))
     }
 
     /// What is stored by object key follows the objects that changed key
@@ -2676,6 +2683,9 @@ impl World {
                 self.social = social::Social::from_login(&l.raw);
                 let account = crate::settings::account_dir(&l.agent_id);
                 self.social.hidden = hidden_friends::HiddenFriends::load(account.join(hidden_friends::FILE));
+                // before the first object or coarse location: a listed
+                // resident arrives hidden
+                self.load_shadow_realm(&account);
                 self.region_tracker_path = Some(account.join(region_tracker::FILE));
                 self.region_tracker = region_tracker::RegionTracker::load(&account.join(region_tracker::FILE));
                 self.contact_sets = contact_sets::ContactSets::load(account.join(contact_sets::CONTACT_SETS_FILE));
@@ -3410,6 +3420,11 @@ impl World {
                 owner_id,
                 ..
             } if self.script_dialog_blocked(&object_id, &object_name, &owner_id) => None,
+            // the objects of a resident the Shadow Realm hides: no dialog,
+            // question or URL (`shadow_realm.rs`)
+            NetEvent::ScriptDialog { object_id, owner_id, .. } if self.shadow_hides_source(&object_id, &owner_id) => None,
+            NetEvent::ScriptQuestion { task_id, .. } if self.shadow_hides_source(&task_id, &Uuid::nil()) => None,
+            NetEvent::LoadUrl { object_id, owner_id, .. } if self.shadow_hides_source(&object_id, &owner_id) => None,
             // RLVa @sendchat (LLScriptHandler::processNotification,
             // llnotificationscripthandler.cpp): a dialog or text box whose
             // answer would be said on public chat is not shown at all.
@@ -3604,6 +3619,7 @@ impl World {
                 object_id,
                 message,
                 url,
+                ..
             } => {
                 let body = format!("{message}\n{url}");
                 let object_name = dialog_names::shown(&object_name).into_owned();
@@ -3662,7 +3678,8 @@ impl World {
                 let notice = self.social.avatar_names.on_update(&name, &old_display_name);
                 self.refresh_task_inventory_offers();
                 log::info!("display name update: {notice}");
-                if self.social.avatar_names.notify_changes {
+                // (not for someone the Shadow Realm hides now)
+                if self.social.avatar_names.notify_changes && !self.shadow_hides(&name.id) {
                     self.system_message(notice);
                 }
                 None
@@ -4442,6 +4459,10 @@ impl World {
         if c.message.is_empty() || self.lsl_bridge.hides(&c) || self.object_chat_filtered(&c) {
             return;
         }
+        // a resident the Shadow Realm hides, or their object: not a trace
+        if self.shadow_hides_chat(&c) {
+            return;
+        }
         if self.chat_blocked(&c) {
             // dropped, or kept greyed (FSShowMutedChatHistory)
             self.keep_muted_chat(c);
@@ -4558,7 +4579,7 @@ impl World {
             }
             return;
         }
-        if self.im_blocked(&im) {
+        if self.im_blocked(&im) || self.shadow_drops_im(&im) {
             return;
         }
         if self.anti_spam_im(&im) {

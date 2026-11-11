@@ -968,6 +968,8 @@ pub enum NetEvent {
     LoadUrl {
         object_name: String,
         object_id: Uuid,
+        /// The object's owner (a group when the object is group-owned).
+        owner_id: Uuid,
         message: String,
         url: String,
     },

@@ -1027,6 +1027,7 @@ fn more_menu(resp: &Response, env: &Env, w: &Window, f: &Facts, compact: bool) {
         if f.hidden && menu::item(ui, p, "user-check", aurora_i18n::tr!("hidefriend-unhide")) {
             act(CtxAction::UnhideFriend(id));
         }
+        context::shadow_realm_item(ui, p, world, id);
         menu::separator(ui, p);
         if menu::item_if(
             ui,

@@ -454,7 +454,7 @@ fn region_gap(me: glam::Vec2, main: glam::Vec2, offset: glam::Vec2, size: glam::
 
 /// Resolve the complete parent chain, as LLWorld::getAvatars excludes orphaned
 /// avatars. A seat-relative position is never a usable region position.
-fn native_position<'a>(world: &'a World, mut object: &'a super::objects::Object) -> Option<Vec3> {
+pub(super) fn native_position<'a>(world: &'a World, mut object: &'a super::objects::Object) -> Option<Vec3> {
     let mut position = object.position;
     for _ in 0..64 {
         if !position.is_finite() {
@@ -486,10 +486,22 @@ pub fn coarse_in(world: &World, region: RegionHandle) -> impl Iterator<Item = (U
         .map(move |(id, position)| (*id, offset + *position, position.z != 0.0 && position.z != 1020.0))
 }
 
+/// The avatars around us that may be shown (`sightings_all` without those
+/// the Shadow Realm hides, `shadow_realm.rs`): the radar and its alerts,
+/// the nearby lists, the picker's "near me", the crosshair's name.
+pub fn sightings(world: &World) -> Vec<Sighting> {
+    let mut out = sightings_all(world);
+    if world.shadow_realm.active() {
+        out.retain(|s| !world.shadow_hides(&s.id));
+    }
+    out
+}
+
 /// The avatars around us: the loaded ones first (exact position), then the
 /// coarse locations of every region we see, neighbors included
-/// (`coarse_in`).
-pub fn sightings(world: &World) -> Vec<Sighting> {
+/// (`coarse_in`). Everyone, for what must know them all (RLVa's name
+/// filter hides the names of those the Shadow Realm hides too).
+pub fn sightings_all(world: &World) -> Vec<Sighting> {
     let mut out = Vec::new();
     let mut seen = HashSet::new();
     for (_, o) in world.objects.avatars() {

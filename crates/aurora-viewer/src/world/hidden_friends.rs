@@ -10,93 +10,12 @@
 //! goes through the real friendship (`Social::is_friend`) and arrives as
 //! before.
 
-use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 pub const FILE: &str = "hidden_friends.json";
 
-#[derive(Debug, Default)]
-pub struct HiddenFriends {
-    ids: BTreeSet<Uuid>,
-    /// Where the list is saved; `None` before the login (and in tests).
-    path: Option<PathBuf>,
-}
-
-/// The ids of a saved list. An entry that is not an id costs that entry
-/// only; anything that is not a list gives none.
-fn parse(bytes: &[u8]) -> Option<BTreeSet<Uuid>> {
-    let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
-    let entries = value.as_array()?;
-    Some(
-        entries
-            .iter()
-            .filter_map(|entry| Uuid::parse_str(entry.as_str()?).ok())
-            .filter(|id| !id.is_nil())
-            .collect(),
-    )
-}
-
-impl HiddenFriends {
-    /// The saved list; empty when there is none yet or it cannot be read.
-    pub fn load(path: PathBuf) -> Self {
-        let ids = match std::fs::read(&path) {
-            Ok(bytes) => parse(&bytes).unwrap_or_else(|| {
-                log::warn!("hidden friends: {} unreadable, starting empty", path.display());
-                BTreeSet::new()
-            }),
-            Err(_) => BTreeSet::new(),
-        };
-        Self { ids, path: Some(path) }
-    }
-
-    fn save(&self) {
-        let Some(path) = &self.path else { return };
-        if let Err(error) = self.write(path) {
-            log::warn!("hidden friends: could not save {}: {error}", path.display());
-        }
-    }
-
-    fn write(&self, path: &Path) -> std::io::Result<()> {
-        let ids: Vec<String> = self.ids.iter().map(Uuid::to_string).collect();
-        let bytes = serde_json::to_vec_pretty(&ids).map_err(std::io::Error::other)?;
-        crate::atomic_file::write(path, &bytes)
-    }
-
-    pub fn contains(&self, id: &Uuid) -> bool {
-        self.ids.contains(id)
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.ids.is_empty()
-    }
-
-    pub fn len(&self) -> usize {
-        self.ids.len()
-    }
-
-    pub fn ids(&self) -> impl Iterator<Item = &Uuid> {
-        self.ids.iter()
-    }
-
-    /// Saved at once; false when the id was already there.
-    pub(super) fn insert(&mut self, id: Uuid) -> bool {
-        let added = !id.is_nil() && self.ids.insert(id);
-        if added {
-            self.save();
-        }
-        added
-    }
-
-    /// Saved at once; false when the id was not there.
-    pub(super) fn remove(&mut self, id: &Uuid) -> bool {
-        let removed = self.ids.remove(id);
-        if removed {
-            self.save();
-        }
-        removed
-    }
-}
+/// The list itself: the account's local id list (`account_ids.rs`).
+pub type HiddenFriends = super::account_ids::AccountIds;
 
 impl super::World {
     /// Hides a friend in this viewer: nothing is sent and the friendship
@@ -146,57 +65,6 @@ mod tests {
 
     fn id(n: u128) -> Uuid {
         Uuid::from_u128(n)
-    }
-
-    fn temp_dir() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("aurora-hidden-friends-{}", Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).expect("a temporary folder");
-        dir
-    }
-
-    #[test]
-    fn the_list_survives_a_save_and_a_load() {
-        let dir = temp_dir();
-        let path = dir.join(FILE);
-        let mut list = HiddenFriends::load(path.clone());
-        assert!(list.is_empty(), "no file yet: nobody is hidden");
-        assert!(list.insert(id(1)));
-        assert!(list.insert(id(2)));
-        assert!(!list.insert(id(2)), "hidden once only");
-        assert!(list.remove(&id(1)));
-        assert!(!list.remove(&id(1)));
-        let loaded = HiddenFriends::load(path);
-        assert_eq!(loaded.ids().copied().collect::<Vec<_>>(), vec![id(2)]);
-        assert_eq!(loaded.len(), 1);
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn a_damaged_file_keeps_the_entries_that_can_be_read() {
-        let good = id(7);
-        let text = format!(r#"["{good}", "not an id", 12, null, {{"id": "x"}}, "{}"]"#, Uuid::nil());
-        let ids = parse(text.as_bytes()).expect("a list");
-        assert_eq!(ids.into_iter().collect::<Vec<_>>(), vec![good]);
-    }
-
-    #[test]
-    fn a_file_that_is_not_a_list_hides_nobody() {
-        let dir = temp_dir();
-        for text in ["", "{", r#"{"a": 1}"#, "42", "\u{0}\u{1}"] {
-            assert!(parse(text.as_bytes()).is_none(), "{text:?}");
-            let path = dir.join(FILE);
-            std::fs::write(&path, text).expect("the test file is written");
-            assert!(HiddenFriends::load(path).is_empty(), "{text:?}");
-        }
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn nothing_is_written_before_the_account_is_known() {
-        let mut list = HiddenFriends::default();
-        assert!(list.insert(id(3)));
-        assert!(list.contains(&id(3)));
-        assert!(!list.insert(Uuid::nil()));
     }
 
     use crate::world::World;
