@@ -220,18 +220,28 @@ impl App {
         // the names not known yet, a few each time, as a hover asks for one
         // (RequestObjectPropertiesFamily, which selects nothing)
         let mut asks = 4;
+        // the creators: the full properties of two objects a round at most,
+        // selected then deselected as Area Search does
+        // (FSAreaSearch::requestObjectProperties)
+        let mut creator_asks = 2;
+        let mut out_of_view = HashSet::new();
         for avatar in wanted {
-            if let Some(rows) = self.worn_rows(avatar, &mut asks) {
+            if let Some(rows) = self.worn_rows(avatar, &mut asks, &mut creator_asks) {
                 lists.insert(avatar, rows);
+            } else if !hidden.contains(&avatar) && self.world.resident_place(avatar).is_some() {
+                // in a region of ours, beyond what we are sent
+                out_of_view.insert(avatar);
             }
         }
-        self.profile_ui.worn.set(lists, hidden, now, std::time::SystemTime::now());
+        self.profile_ui
+            .worn
+            .set(lists, hidden, out_of_view, now, std::time::SystemTime::now());
     }
 
     /// One row per object avatar `id` wears, with the figures of Inspect
     /// (prim_stats, linkset_complexity), then what the derender list keeps
     /// out of the world. No texture or other asset id leaves here.
-    fn worn_rows(&mut self, id: Uuid, asks: &mut usize) -> Option<Vec<WornRow>> {
+    fn worn_rows(&mut self, id: Uuid, asks: &mut usize, creator_asks: &mut usize) -> Option<Vec<WornRow>> {
         let w = &self.world;
         // the profile itself is not shown either (RlvActions::canShowName)
         if !w.rlva_can_name(id) {
@@ -258,6 +268,7 @@ impl App {
         let mut rows = Vec::new();
         let mut unnamed = Vec::new();
         let mut creators = Vec::new();
+        let mut no_creator = Vec::new();
         for root in worn_roots(w, &id) {
             let Some((idx, o)) = w.objects.index_of_uuid(&root).and_then(|i| Some((i, w.objects.get(i)?))) else {
                 continue;
@@ -282,6 +293,9 @@ impl App {
             };
             if name.is_none() {
                 unnamed.push((o.key.region, root));
+            }
+            if creator.is_none() {
+                no_creator.push((o.key, root));
             }
             let (point_name, hud) = point_of(o.attachment_point());
             rows.push(WornRow {
@@ -311,6 +325,17 @@ impl App {
         }
         for creator in creators {
             self.world.social.want_name(creator);
+        }
+        for (key, root) in no_creator {
+            if *creator_asks == 0 {
+                break;
+            }
+            if self.profile_ui.worn.ask_once(root) {
+                *creator_asks -= 1;
+                for cmd in self.build.prim_properties_query(&self.world, key) {
+                    self.send(cmd);
+                }
+            }
         }
         for (handle, root) in unnamed {
             if *asks == 0 {
