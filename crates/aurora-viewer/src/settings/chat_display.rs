@@ -294,7 +294,9 @@ mod tests {
         assert_eq!(TabNameFormat::UserThenDisplay.name(d, u), "jane.doe (Jane)");
         // a name not known yet, or the same twice
         assert_eq!(TabNameFormat::DisplayThenUser.name("", u), "jane.doe");
-        assert_eq!(TabNameFormat::UserThenDisplay.name("janedoe", "JaneDoe"), "janedoe");
+        // (a display name that only differs by case counts as the default
+        // one: FSFloaterIM::onAvatarNameCache shows the user name alone)
+        assert_eq!(TabNameFormat::UserThenDisplay.name("JaneDoe", "janedoe"), "janedoe");
         assert_eq!(TabNameFormat::UserName.name(d, ""), "Jane");
     }
 }
