@@ -361,6 +361,12 @@ pub struct World {
     pub hud_area: Option<[f32; 4]>,
     /// HUD zoom is local to the current session (LLAgentCamera).
     pub hud_zoom: f32,
+    /// HUDScaleFactor (Preferences › Interface, 1 to 2): every HUD's size,
+    /// on top of the edit zoom (LLAgentCamera::getAgentHUDTargetZoom).
+    pub hud_scale_factor: f32,
+    /// ScriptsCanShowUI (on): llMapDestination tracks the place and opens
+    /// the map; off, it is ignored (process_script_teleport_request).
+    pub scripts_can_show_ui: bool,
     pub hud_scales: hud_scale::HudScales,
     pub hud_locks: hud_lock::HudLocks,
     /// Names of our temporary attachments (temp_attachments.rs).
@@ -828,6 +834,8 @@ impl World {
             hud_aspect: 1.0,
             hud_area: None,
             hud_zoom: 1.0,
+            hud_scale_factor: 1.0,
+            scripts_can_show_ui: true,
             hud_scales: Default::default(),
             hud_locks: Default::default(),
             temp_attachment_names: Default::default(),
@@ -3525,6 +3533,9 @@ impl World {
                 flags,
             } => {
                 log::info!("llMapDestination from {object_name:?}: {region} {position:.0?}, flags {flags:#x}");
+                if !self.scripts_can_show_ui {
+                    return None;
+                }
                 // the app opens the map (LLFloaterWorldMap::openFloater)
                 self.map
                     .map_destination(&region, position, flags)
@@ -9127,5 +9138,24 @@ mod region_size_order_tests {
         assert_eq!(edges.east[256], Some(5.0));
         assert!(world.regions[&here].dirty_chunks.contains(&56));
         assert!(world.regions[&here].dirty_chunks.contains(&63));
+    }
+}
+
+#[cfg(test)]
+mod scripts_show_ui_tests {
+    use super::*;
+
+    #[test]
+    fn map_destination_is_ignored_when_scripts_may_not_show_ui() {
+        let mut world = World::new(Arc::new(AvatarLibrary::load()));
+        world.scripts_can_show_ui = false;
+        let ev = NetEvent::ScriptTeleportRequest {
+            object_name: "door".into(),
+            region: "Somewhere".into(),
+            position: glam::Vec3::new(10.0, 20.0, 30.0),
+            flags: aurora_net::beacon::SHOW_MAP,
+        };
+        assert!(world.apply(ev).is_none());
+        assert!(world.map.track.is_none(), "nothing tracked");
     }
 }

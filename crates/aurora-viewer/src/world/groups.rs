@@ -767,7 +767,7 @@ impl World {
             return;
         }
         if !in_group && !self.rlva_allows_im("recvim", inv.from) {
-            inv.message = aurora_i18n::tr!("rlva-im-blocked-receive").into();
+            inv.message = self.rlva.text("blocked_recvim").into_owned();
         }
         // VoiceCallsFriendsOnly: a conference started by a non-friend
         // (LLIMMgr::addMessage, IM_SESSION_INVITE outside our groups)

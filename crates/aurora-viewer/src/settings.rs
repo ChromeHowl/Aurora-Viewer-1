@@ -10,6 +10,7 @@ pub mod backup;
 pub mod chat_display;
 pub mod draw_stepping;
 mod hover_height;
+pub mod legacy_prefs;
 pub mod people;
 pub mod registry;
 pub mod render_extras;
@@ -939,6 +940,10 @@ pub struct Settings {
     /// The Legacy Viewer's other chat display options (Preferences › Chat,
     /// `settings/chat_display.rs`).
     pub chat_display: chat_display::ChatDisplay,
+    /// Small preferences of the Legacy Viewer: tooltip delay, HUD size,
+    /// proxy and UDP port, web and microphone options, simulator version,
+    /// music fade (`settings/legacy_prefs.rs`).
+    pub legacy_prefs: legacy_prefs::LegacyPrefs,
     /// Toast when a friend comes online or goes offline (ChatOnlineNotification, on).
     pub toast_friends_online: bool,
     /// The same notices as a line of nearby chat (OnlineOfflinetoNearbyChat;
@@ -2145,6 +2150,7 @@ impl Default for Settings {
             chat_toast_seconds: 20.0,
             chat_console_max_lines: 40,
             chat_display: Default::default(),
+            legacy_prefs: Default::default(),
             toast_friends_online: true,
             friends_online_in_chat: false,
             presence_position: PresencePosition::TopRight,
@@ -3079,6 +3085,8 @@ impl Settings {
         self.chat_toast_seconds = self.chat_toast_seconds.clamp(0.0, 60.0);
         self.chat_console_max_lines = self.chat_console_max_lines.min(50);
         self.chat_display.sanitize();
+        self.legacy_prefs.sanitize();
+        crate::world::rlva::strings::sanitize(&mut self.rlva.strings);
         self.chat_bubble_opacity = if self.chat_bubble_opacity.is_finite() {
             self.chat_bubble_opacity.clamp(0.0, 1.0)
         } else {

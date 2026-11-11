@@ -298,6 +298,7 @@ mod tests {
             bandwidth_kbps: Default::default(),
             viewer_stats: Default::default(),
             viewer_stats_posts: Default::default(),
+            udp_port: None,
         };
         let login = Arc::new(LoginResponse {
             agent_id: Uuid::from_u128(1),

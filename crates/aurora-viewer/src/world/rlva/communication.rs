@@ -54,12 +54,9 @@ impl World {
                 && !crate::world::mutes::is_linden(&message.from_name)
                 && !self.rlva_allows_im("recvim", message.from_agent_id) =>
             {
-                self.rlva_busy_reply(
-                    message.from_agent_id,
-                    message.session_id,
-                    aurora_i18n::tr!("rlva-im-blocked-receive-remote"),
-                );
-                message.message = aurora_i18n::tr!("rlva-im-blocked-receive").into();
+                let reply = self.rlva.text("blocked_recvim_remote");
+                self.rlva_busy_reply(message.from_agent_id, message.session_id, &reply);
+                message.message = self.rlva.text("blocked_recvim").into_owned();
                 Received::Masked
             }
             // IM_SESSION_SEND in processNewMessage does not filter existing
@@ -94,7 +91,7 @@ impl World {
         if allowed {
             Cow::Borrowed(message)
         } else {
-            Cow::Borrowed(aurora_i18n::tr!("rlva-im-blocked-send"))
+            self.rlva.text("blocked_sendim")
         }
     }
 
@@ -112,7 +109,7 @@ impl World {
             self.rlva_allows_im("sendim", to)
         };
         if !allowed {
-            *message = aurora_i18n::tr!("rlva-im-blocked-send").into();
+            *message = self.rlva.text("blocked_sendim").into_owned();
         }
         !allowed
     }

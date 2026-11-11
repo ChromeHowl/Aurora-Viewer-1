@@ -38,9 +38,15 @@ pub(crate) fn noise_choice(ui: &mut egui::Ui, id: &str, value: &mut u8, width: f
 
 pub fn page(cx: &mut Cx, tab: usize) {
     match tab {
-        0 => volumes(cx),
+        0 => {
+            volumes(cx);
+            super::legacy_prefs::music_fade(cx);
+        }
         1 => interface_sounds(cx),
-        _ => voice(cx),
+        _ => {
+            voice(cx);
+            super::legacy_prefs::microphone(cx);
+        }
     }
     // the streams the music menu remembers: the page's reset clears them,
     // as the reset of the former Sound and voice page did

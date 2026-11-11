@@ -534,9 +534,47 @@ pub fn browser_cache(cache_dir: &std::path::Path) -> std::path::PathBuf {
     cache_dir.join("cef")
 }
 
+/// The preferences every new browser takes (Preferences › Network:
+/// BrowserJavascriptEnabled, BrowserProxyEnabled with its address and port),
+/// set by the app when they change; a browser already open keeps those it
+/// was made with, as in the Legacy Viewer.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WebPrefs {
+    pub javascript: bool,
+    /// The proxy's host (empty: none) and port.
+    pub proxy: (String, u16),
+}
+
+static WEB_PREFS: parking_lot::RwLock<WebPrefs> = parking_lot::RwLock::new(WebPrefs {
+    javascript: true,
+    proxy: (String::new(), 0),
+});
+
+/// The web preferences of the settings (see [`WebPrefs`]).
+pub fn web_prefs(prefs: &crate::settings::legacy_prefs::LegacyPrefs) -> WebPrefs {
+    let proxy = if prefs.web_proxy_address().is_some() {
+        (prefs.web_proxy_host.trim().to_owned(), prefs.web_proxy_port)
+    } else {
+        (String::new(), 0)
+    };
+    WebPrefs {
+        javascript: prefs.browser_javascript,
+        proxy,
+    }
+}
+
+/// Sets the preferences of the browsers made from now on.
+pub fn set_web_prefs(prefs: WebPrefs) {
+    let mut current = WEB_PREFS.write();
+    if *current != prefs {
+        *current = prefs;
+    }
+}
+
 /// Settings of our CEF browsers (newSourceFromMediaType): cache, log,
-/// language and the viewer's user agent.
+/// language and the viewer's user agent, JavaScript and the proxy.
 pub fn browser_settings(cache_dir: &std::path::Path, language: &str) -> BrowserSettings {
+    let web = WEB_PREFS.read().clone();
     BrowserSettings {
         // the system's own separator, as the plugin appends `cef_cache`
         // (LLPluginClassMedia::init gets getCacheDir + getDirDelimiter): a
@@ -547,8 +585,10 @@ pub fn browser_settings(cache_dir: &std::path::Path, language: &str) -> BrowserS
         language: language.to_string(),
         user_agent: user_agent(),
         cookies_enabled: true,
-        javascript_enabled: true,
+        javascript_enabled: web.javascript,
         zoom_factor: 1.0,
+        proxy_host: web.proxy.0,
+        proxy_port: web.proxy.1,
     }
 }
 
@@ -1072,5 +1112,34 @@ mod click_tests {
         assert!(!m.parcel_playing());
         w.parcel = None;
         assert!(m.click_open_media(&w, idx, 0, &settings).is_none());
+    }
+}
+
+#[cfg(test)]
+mod web_prefs_tests {
+    use super::*;
+    use crate::settings::legacy_prefs::LegacyPrefs;
+
+    #[test]
+    fn the_browsers_take_javascript_and_the_proxy_from_the_preferences() {
+        let mut prefs = LegacyPrefs::default();
+        assert_eq!(
+            web_prefs(&prefs),
+            WebPrefs {
+                javascript: true,
+                proxy: (String::new(), 0)
+            }
+        );
+        prefs.browser_javascript = false;
+        prefs.web_proxy_host = "proxy.lan".into();
+        assert_eq!(web_prefs(&prefs).proxy, (String::new(), 0), "the switch is off");
+        prefs.web_proxy = true;
+        assert_eq!(
+            web_prefs(&prefs),
+            WebPrefs {
+                javascript: false,
+                proxy: ("proxy.lan".into(), 3128)
+            }
+        );
     }
 }

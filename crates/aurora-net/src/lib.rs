@@ -171,8 +171,46 @@ fn asset_limits(mode: AssetConnections, fixed: Option<usize>) -> (Option<usize>,
     }
 }
 
+/// The network preferences read at start (Preferences › Network, the Legacy
+/// Viewer's proxy settings and ConnectionPort, LLStartUp::startLLProxy and
+/// start_messaging_system).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct NetOptions {
+    /// `host:port` of the HTTP proxy of the login, the capabilities and the
+    /// assets (HttpProxyType "Web"); None: no proxy set by the viewer (the
+    /// system's proxy variables still apply, as before).
+    pub http_proxy: Option<String>,
+    /// The UDP port of the circuits (ConnectionPort); None: the system's.
+    pub udp_port: Option<u16>,
+}
+
+/// The proxy of `NetOptions::http_proxy` (LLProxy::enableHTTPProxy with
+/// LLPROXY_HTTP): every scheme through it. An address reqwest refuses is
+/// logged and left out, as the Legacy Viewer's PROXY_INVALID_HTTP_HOST.
+fn http_proxy(address: Option<&str>) -> Option<reqwest::Proxy> {
+    let address = address?;
+    match reqwest::Proxy::all(format!("http://{address}")) {
+        Ok(proxy) => {
+            log::info!("HTTP proxy: {address}");
+            Some(proxy)
+        }
+        Err(e) => {
+            log::warn!("HTTP proxy {address} refused ({e}): not used");
+            None
+        }
+    }
+}
+
+fn with_proxy(builder: reqwest::ClientBuilder, proxy: &Option<reqwest::Proxy>) -> reqwest::ClientBuilder {
+    match proxy {
+        Some(proxy) => builder.proxy(proxy.clone()),
+        None => builder,
+    }
+}
+
 impl NetClient {
-    pub fn new(asset_connections: AssetConnections) -> Result<NetClient, NetError> {
+    pub fn new(asset_connections: AssetConnections, options: NetOptions) -> Result<NetClient, NetError> {
+        let proxy = http_proxy(options.http_proxy.as_deref());
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(3)
             .thread_name("aurora-net")
@@ -180,7 +218,7 @@ impl NetClient {
             .build()?;
         // Login (public host): standard verification, plus Linden Lab's own CA.
         let ll_ca = reqwest::Certificate::from_pem_bundle(include_bytes!("../lindenlab.pem")).unwrap_or_default();
-        let http = reqwest::Client::builder()
+        let http = with_proxy(reqwest::Client::builder(), &proxy)
             .user_agent(aurora_version::user_agent())
             .connect_timeout(std::time::Duration::from_secs(15))
             .tls_certs_merge(ll_ca)
@@ -189,7 +227,7 @@ impl NetClient {
         // Capabilities / assets: Linden Lab's CA for any simulator name (as
         // llcorehttp, mVerifyHost = false), public authorities only for the
         // host's own name (sim_tls.rs).
-        let caps_http = reqwest::Client::builder()
+        let caps_http = with_proxy(reqwest::Client::builder(), &proxy)
             .user_agent(aurora_version::user_agent())
             .pool_max_idle_per_host(32)
             .connect_timeout(std::time::Duration::from_secs(15))
@@ -216,7 +254,7 @@ impl NetClient {
             None => log::info!("asset fetch: adaptive (24 to {} requests at once)", fetch_pace::MAX),
             Some(n) => log::info!("asset fetch: limited to {n} requests at once, {idle_per_host} kept connections per host"),
         }
-        let asset_http = reqwest::Client::builder()
+        let asset_http = with_proxy(reqwest::Client::builder(), &proxy)
             .user_agent(aurora_version::user_agent())
             .pool_max_idle_per_host(idle_per_host)
             .connect_timeout(std::time::Duration::from_secs(30))
@@ -239,6 +277,7 @@ impl NetClient {
             bandwidth_kbps: bandwidth_kbps.clone(),
             viewer_stats: viewer_stats.clone(),
             viewer_stats_posts: viewer_stats_posts.clone(),
+            udp_port: options.udp_port,
         };
         rt.spawn(async move {
             while let Some(cmd) = cmd_rx.recv().await {
@@ -351,6 +390,14 @@ impl NetClient {
 #[cfg(test)]
 mod asset_limit_tests {
     use super::*;
+
+    #[test]
+    fn the_http_proxy_is_used_only_when_set_and_valid() {
+        assert!(http_proxy(None).is_none());
+        assert!(http_proxy(Some("10.0.0.2:3128")).is_some());
+        assert!(http_proxy(Some("[::1]:8080")).is_some());
+        assert!(http_proxy(Some("bad host:1")).is_none());
+    }
 
     #[test]
     fn adaptive_follows_the_link_and_limited_is_bounded() {

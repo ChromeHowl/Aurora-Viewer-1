@@ -31,6 +31,16 @@ impl HudView {
         }
     }
 
+    /// The HUDs `factor` times larger (HUDScaleFactor, 1 to 2), on top of
+    /// the edit zoom (LLAgentCamera::getAgentHUDTargetZoom multiplies
+    /// both).
+    pub fn scaled(mut self, factor: f32) -> Self {
+        if factor.is_finite() {
+            self.zoom = (self.zoom * factor.clamp(1.0, 2.0)).clamp(0.1, 2.0);
+        }
+        self
+    }
+
     /// HUDs laid out in `area` (left, top, right, bottom pixels), kept in
     /// the window and at least a pixel wide; the whole window when it is
     /// not a usable rectangle.
@@ -104,6 +114,19 @@ impl HudView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_hud_size_factor_multiplies_the_zoom() {
+        let base = HudView::new([1600, 900], 0.5, -1.0, 1.0);
+        assert_eq!(base.scaled(1.5).zoom, 0.75);
+        assert_eq!(HudView::new([1600, 900], 1.0, -1.0, 1.0).scaled(2.0).zoom, 2.0);
+        assert_eq!(base.scaled(9.0).zoom, 1.0, "at most twice");
+        assert_eq!(base.scaled(0.2).zoom, 0.5, "never smaller");
+        assert_eq!(base.scaled(f32::NAN).zoom, 0.5);
+        // a HUD unit spans twice the pixels
+        let full = HudView::new([1600, 900], 1.0, -1.0, 1.0);
+        assert_eq!(full.scaled(2.0).unit(), full.unit() * 2.0);
+    }
 
     #[test]
     fn screen_bounds_follow_the_projected_normal_screen_after_resize_and_zoom() {

@@ -132,6 +132,7 @@ pub fn page(cx: &mut Cx, tab: usize) {
                     &field!(standalone_place_details),
                 );
             });
+            super::legacy_prefs::interface(cx);
         }
         1 => {
             cx.group(tr!("ui-options-hover-tips"), |cx| {

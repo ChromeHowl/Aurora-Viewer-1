@@ -2187,6 +2187,9 @@ pub enum NetCommand {
     /// Release a fee offer after its draft changes or is removed.
     DiscardMeshQuote(Uuid),
     RequestBalance,
+    /// ForceScriptControlRelease (LLAgent::forceReleaseControls): the
+    /// scripts that took our controls (llTakeControls) let them go.
+    ForceScriptControlRelease,
     /// Estimate for buying `amount` L$ (XML-RPC getCurrencyQuote on the
     /// grid's helper page, `currency::helper_uri`).
     CurrencyQuote {

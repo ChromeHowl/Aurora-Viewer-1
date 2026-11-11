@@ -253,6 +253,7 @@ pub(super) fn page(cx: &mut Cx) {
     });
     cx.group(tr!("ui-options-scripts-and-content"), |cx| {
         cx.toggle(tr!("language-share"), tr!("language-share-help"), &field!(language_is_public));
+        super::legacy_prefs::scripts(cx);
         // the account's ceiling, while logged in
         if let Some(access) = cx.st.maturity {
             let p = cx.p;

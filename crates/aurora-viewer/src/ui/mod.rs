@@ -146,6 +146,7 @@ pub mod viewfinder;
 pub mod voice_tag;
 pub mod wearable;
 pub mod web_browser;
+pub mod web_guides;
 pub mod web_view;
 pub mod widgets;
 

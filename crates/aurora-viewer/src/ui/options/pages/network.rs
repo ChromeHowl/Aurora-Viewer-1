@@ -164,6 +164,7 @@ pub fn page(cx: &mut Cx) {
             },
         );
     });
+    super::legacy_prefs::network(cx);
     cx.group(tr!("ui-options-logs-and-tools"), |cx| {
         cx.row(
             tr!("ui-options-session-log"),

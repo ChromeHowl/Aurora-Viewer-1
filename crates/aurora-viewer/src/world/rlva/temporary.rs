@@ -20,6 +20,17 @@ impl World {
             })
     }
 
+    /// RlvAttachmentLocks::hasLockedAttachmentPoint(RLV_LOCK_REMOVE): an
+    /// attachment we wear cannot come off; Advanced › Release Keys does
+    /// nothing then (LLToolsReleaseKeys).
+    pub fn rlva_has_remove_locked_attachment(&self) -> bool {
+        self.rlva.enabled()
+            && self
+                .rlva_worn_attachment_points()
+                .into_iter()
+                .any(|(item, point)| !self.rlva_attachment_remove_at(item, point, Uuid::nil()))
+    }
+
     /// Resolve only a real linkset worn by this agent, including child prims.
     pub(crate) fn rlva_own_attachment_root(&self, source: Uuid) -> Option<Uuid> {
         let mut index = self.objects.index_of_uuid(&source)?;

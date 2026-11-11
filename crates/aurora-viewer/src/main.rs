@@ -91,6 +91,7 @@ mod slurl;
 mod slurl_handoff;
 mod snapshot;
 mod spelling;
+mod stream_fade;
 mod stream_title;
 mod sys_probe;
 mod system_info;
