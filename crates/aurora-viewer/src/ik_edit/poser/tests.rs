@@ -2386,3 +2386,253 @@ fn ctrl_over_the_subject_stays_the_subjects_with_a_partner_close_behind() {
     }
     assert_eq!(editor.poser.subject, me, "the partner behind is not picked through us");
 }
+
+/// The demo peer standing posed like us, who accepted to be posed.
+fn accepted_peer(world: &mut World) -> Uuid {
+    let peer = demo::poser::PEER;
+    let own = world.avatar_poses[&world.agent_id].clone();
+    world.avatar_poses.insert(peer, own);
+    let mut consent = std::mem::take(&mut world.poser_consent);
+    consent.request(world, peer, Instant::now());
+    consent.demo_accept(world, peer, std::time::Duration::ZERO);
+    world.poser_consent = consent;
+    peer
+}
+
+#[test]
+fn a_marker_click_selects_its_joint_right_after_switching_avatars_even_with_none_selected() {
+    use crate::ui::widgets::elide_tests::Frames;
+    let (mut world, mut editor) = selected_fixture();
+    let peer = accepted_peer(&mut world);
+    let rig = &world.avatar_lib.rig;
+    let frame = editor.editor_frame(&world).unwrap();
+    let proj = projector(frame.joints[rig.pelvis].w_axis.truncate());
+    let peer_frame = Frame::subject(&world, peer).expect("the peer's skeleton");
+    let knee = rig.names["mKneeLeft"];
+    let ankle = rig.names["mAnkleRight"];
+    let on = |bone: usize| proj.project(peer_frame.joints[bone].w_axis.truncate()).expect("on screen").0;
+    let mut frames = Frames::new();
+    crate::ui::widgets::minimize_floater(&frames.ctx, "poser");
+    crate::ui::widgets::minimize_floater(&frames.ctx, "poser-compact");
+    let p = crate::theme::Theme::default().palette();
+    let mut click = |editor: &mut Editor, at: egui::Pos2| -> bool {
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        // the pointer rests on the marker a moment before the press, as a hand does
+        for _ in 0..2 {
+            frames.run(vec![egui::Event::PointerMoved(at)], |ui| editor.show(ui.ctx(), &p, &world, &proj));
+        }
+        let on_marker = editor.poser.marker_hover;
+        for events in [vec![button(true)], vec![button(false)], vec![]] {
+            frames.run(events, |ui| editor.show(ui.ctx(), &p, &world, &proj));
+        }
+        on_marker
+    };
+    // the poser has been showing our own avatar for a while
+    for _ in 0..3 {
+        frames.run(vec![egui::Event::PointerMoved(egui::pos2(10.0, 10.0))], |ui| {
+            editor.show(ui.ctx(), &p, &world, &proj)
+        });
+    }
+    // the switch leaves no joint selected until the next frame; the first
+    // click goes to an ankle, clear of the new pelvis' handles
+    editor.pick_subject(&world, peer);
+    assert_eq!((editor.poser.subject, editor.selected), (peer, None));
+    assert!(click(&mut editor, on(ankle)), "the pointer is on the new avatar's marker");
+    assert_eq!(editor.poser.subject, peer);
+    assert_eq!(
+        editor.selected,
+        Some(ankle),
+        "the first click on the new avatar's marker selects it"
+    );
+    // none selected at all (a click beside), still on the new avatar
+    click(&mut editor, egui::pos2(790.0, 890.0));
+    assert_eq!(editor.selected, None);
+    assert!(editor.poser.unselected);
+    assert!(click(&mut editor, on(knee)));
+    assert_eq!(editor.selected, Some(knee), "a marker selects its joint with none selected");
+    assert!(!editor.poser.unselected);
+}
+
+#[test]
+fn switching_avatars_keeps_the_open_tab_and_picks_a_joint_of_it() {
+    use crate::ui::widgets::elide_tests::Frames;
+    let (mut world, mut editor) = selected_fixture();
+    let peer = accepted_peer(&mut world);
+    let rig = &world.avatar_lib.rig;
+    let frame = editor.editor_frame(&world).unwrap();
+    let proj = projector(frame.joints[rig.pelvis].w_axis.truncate());
+    let mut frames = Frames::new();
+    crate::ui::widgets::minimize_floater(&frames.ctx, "poser");
+    crate::ui::widgets::minimize_floater(&frames.ctx, "poser-compact");
+    let p = crate::theme::Theme::default().palette();
+    // Hands: the tab stays and one of its joints is chosen (it went back
+    // to Body with the pelvis, and the hand markers vanished)
+    editor.select_pose_group(2, rig, &frame);
+    editor.pick_subject(&world, peer);
+    for _ in 0..3 {
+        frames.run(Vec::new(), |ui| editor.show(ui.ctx(), &p, &world, &proj));
+    }
+    assert_eq!(editor.poser.subject, peer);
+    assert_eq!(editor.poser.group, 2);
+    let chosen = editor.selected.expect("a hand joint chosen");
+    assert_eq!(group(&rig.canonical_names[chosen]), 2);
+    // Body still starts on the pelvis
+    editor.select_pose_group(0, rig, &frame);
+    editor.pick_subject(&world, world.agent_id);
+    frames.run(Vec::new(), |ui| editor.show(ui.ctx(), &p, &world, &proj));
+    assert_eq!((editor.poser.group, editor.selected), (0, Some(rig.pelvis)));
+}
+
+#[test]
+fn a_click_after_a_mode_switch_is_judged_on_the_new_handles() {
+    let (world, mut editor, wrist, proj, mut frames) = wrist_fixture();
+    let rig = &world.avatar_lib.rig;
+    let center = proj.project(Frame::new(&world).unwrap().joints[wrist].w_axis.truncate()).unwrap().0;
+    let none = egui::Modifiers::NONE;
+    // a point of the rotation rings far past the move arrows, with no
+    // marker or shaft under it
+    editor.set_pose_transform(0);
+    let mut ring = None;
+    'search: for radius in (84..=120).step_by(4) {
+        for k in 0..24 {
+            let angle = k as f32 * std::f32::consts::TAU / 24.0;
+            let at = center + egui::vec2(angle.cos(), angle.sin()) * radius as f32;
+            pose_frame(&mut frames, &mut editor, &world, &proj, none, at, None);
+            pose_frame(&mut frames, &mut editor, &world, &proj, none, at, None);
+            if editor.poser.gizmo_hover && bare(&editor, &world, &proj, at) {
+                ring = Some(at);
+                break 'search;
+            }
+        }
+    }
+    let ring = ring.expect("a point of the rings alone");
+    let pose = |editor: &Editor| editor.poser.sessions[&world.agent_id].pose.clone();
+    let before = pose(&editor);
+    // Position: the old ring is no handle any more; the press there is a
+    // click beside, which unselects, and nothing moves
+    editor.set_pose_transform(1);
+    for button in [None, Some(true), None, Some(false), None] {
+        pose_frame(&mut frames, &mut editor, &world, &proj, none, ring, button);
+    }
+    assert!(!editor.gizmo.dragging());
+    assert_eq!(pose(&editor).rotations, before.rotations);
+    assert_eq!(pose(&editor).positions, before.positions);
+    assert_eq!(editor.selected, None, "judged on the move handles: nothing there");
+    // Scale: the same, the cubes are nearer still
+    editor.click_pose_bone(wrist, rig, &Frame::new(&world).unwrap(), false);
+    editor.set_pose_transform(2);
+    for button in [None, Some(true), None, Some(false), None] {
+        pose_frame(&mut frames, &mut editor, &world, &proj, none, ring, button);
+    }
+    assert!(!editor.poser.scale_gizmo.dragging());
+    assert_eq!(pose(&editor).scales, before.scales);
+    assert_eq!(editor.selected, None);
+    // back to Rotation: the ring takes the press again, and turns the wrist
+    editor.click_pose_bone(wrist, rig, &Frame::new(&world).unwrap(), false);
+    editor.set_pose_transform(0);
+    let far = ring + (ring - center).normalized().rot90() * 30.0;
+    pose_frame(&mut frames, &mut editor, &world, &proj, none, ring, None);
+    pose_frame(&mut frames, &mut editor, &world, &proj, none, ring, Some(true));
+    pose_frame(&mut frames, &mut editor, &world, &proj, none, far, None);
+    pose_frame(&mut frames, &mut editor, &world, &proj, none, far, Some(false));
+    assert_eq!(editor.selected, Some(wrist));
+    assert_ne!(
+        pose(&editor).rotations[wrist],
+        before.rotations[wrist],
+        "the rotation ring turned the wrist"
+    );
+}
+
+#[test]
+fn closing_with_stop_posing_off_keeps_others_history_animations_and_the_subject() {
+    use aurora_assets::{Animation, JointMotion, anim::RotKey};
+    let (mut world, mut editor) = fixture();
+    let peer = accepted_peer(&mut world);
+    let rig = world.avatar_lib.rig.clone();
+    let head = rig.names["mHead"];
+    editor.pick_subject(&world, peer);
+    assert!(editor.pose_layers(&world).contains_key(&peer));
+    // an edit with its undo step
+    {
+        let session = editor.poser.sessions.get_mut(&peer).unwrap();
+        session.checkpoint();
+        Arc::make_mut(&mut session.pose).rotations[rig.names["mNeck"]] = Quat::from_rotation_x(0.3);
+    }
+    // an inventory animation playing on them, still loading
+    let mut inv = crate::world::inventory::Inventory::default();
+    let (item, asset) = (Uuid::from_u128(0x5001), Uuid::from_u128(0xa5001));
+    inv.items.insert(
+        item,
+        aurora_net::inventory::InvItem {
+            id: item,
+            asset_type: 20,
+            asset_id: asset,
+            name: "Wave".into(),
+            ..Default::default()
+        },
+    );
+    editor.animations.add(&inv, item);
+    editor.poser.playback = playback::Transport::Stopped.play(Instant::now() - std::time::Duration::from_millis(500));
+    // the window's close, the option off
+    editor.poser.stop_on_close = false;
+    editor.ask_close();
+    assert!(!editor.open && editor.poser.active, "closed, still posing");
+    assert_eq!(editor.poser.subject, peer);
+    assert_eq!(editor.poser.sessions[&peer].undo.len(), 1, "the undo history stays");
+    assert!(matches!(editor.poser.playback, playback::Transport::Playing { .. }));
+    // the animation arrives while the window is closed, and plays
+    let dir = std::env::temp_dir().join(format!("aurora-poser-closed-{}", Uuid::new_v4()));
+    let mut streamer = crate::scene::anim::AnimStreamer::new(dir.clone());
+    let key = |time: f32| RotKey {
+        time,
+        rotation: Quat::from_rotation_z(0.9),
+    };
+    let clip = Animation {
+        base_priority: 4,
+        duration: 1.0,
+        emote_name: String::new(),
+        loop_in: 0.0,
+        loop_out: 1.0,
+        looping: true,
+        ends_after: None,
+        ease_in: 0.0,
+        ease_out: 0.0,
+        hand_pose: 0,
+        joints: vec![JointMotion {
+            joint_name: "mHead".into(),
+            priority: -1,
+            rot_keys: vec![key(0.0), key(1.0)],
+            pos_keys: Vec::new(),
+        }],
+    };
+    streamer.insert(asset, Arc::new(crate::scene::anim::BoundAnim::bind(clip, &rig)));
+    editor.tick_animations(&mut streamer, &mut inv);
+    assert_eq!(editor.animations.samples().len(), 1, "loaded with the window closed");
+    let layers = editor.pose_layers(&world);
+    let played = layers.get(&peer).expect("the other avatar stays posed");
+    assert!(
+        played.rotations[head].angle_between(Quat::from_rotation_z(0.9)) < 1e-3,
+        "the animation plays"
+    );
+    assert!(played.rotations[rig.names["mNeck"]].angle_between(Quat::from_rotation_x(0.3)) < 1e-3);
+    // reopened: the same avatar, its history and the playback
+    editor.open_poser();
+    assert!(editor.open);
+    assert_eq!(editor.poser.subject, peer);
+    assert_eq!(editor.poser.sessions[&peer].undo.len(), 1);
+    assert!(matches!(editor.poser.playback, playback::Transport::Playing { .. }));
+    assert_eq!(editor.animations.samples().len(), 1);
+    // with the option on (the Legacy Viewer's default), closing stops every pose
+    editor.poser.stop_on_close = true;
+    editor.ask_close();
+    assert!(!editor.poser.active);
+    assert!(editor.pose_layers(&world).is_empty());
+    assert!(Config::default().stop_on_close);
+    drop(streamer);
+    let _ = std::fs::remove_dir_all(&dir);
+}

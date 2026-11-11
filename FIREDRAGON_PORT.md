@@ -126,6 +126,8 @@ The same for all groups unless a row says otherwise:
 | 12 Shadow Realm, derender that reverses | `feat/shadow-realm` | (not merged yet) | Per-account Shadow Realm list (local file): listed residents appear nowhere beyond a distance (10 m), red names within it, never removed from the world; World menu, window and every resident menu. Temporary derender confirmed to always reverse (test). Owner's updates of 2026-11-11, items 1 and 2. |
 | L3 Inventory leftovers | `feat/l3-inventory` | `81ec56f` | Thumbnails helper, protected folders manager, hide empty system folders, Windlight bulk import, teleport cancel, logout screen, Collada sculpts and backup particles. |
 
+| Follow-ups 3 + 6 (owner's updates of 2026-11-11) | `feat/fd-fixes` | not merged | Poser: a subject switch keeps the open tab, marker clicks with no joint selected, one Rotation / Position / Scale switch, animations keep loading with the window closed (stop on close off); tests for the rest, which Aurora already did. People in region: block and item request lanes (4 at once, then 1 a second each) instead of one shared request every 2 s, rows drawn now first, no count for an unnamed region; the world map's labels ask on their own, as the Legacy Viewer's map. |
+
 Housekeeping after the merges (formatting, one unused constant removed) and the documentation (TASKS.md, ARCHITECTURE.md, README.md, `docs/legacy-settings.csv`) were done on `chore/maintenance`.
 
 ### Open follow-ups

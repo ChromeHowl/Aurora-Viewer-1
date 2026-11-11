@@ -423,7 +423,12 @@ impl WorldMapUi {
                 );
             }
         }
-        if info && opts.world_people {
+        // the map's own requests, apart from the People-in-region lanes:
+        // the visible regions, each once a minute, for the people layer and
+        // for the region info under the names (LLWorldMapView::draw,
+        // LLSimInfo::updateAgentCount)
+        let labels_count = self.teleport.map_region_info && scale >= DRAW_TEXT_THRESHOLD && !world.rlva.has("showloc");
+        if info && (opts.world_people || labels_count) {
             for key in &visible {
                 if !world.map.sims.get(key).is_some_and(|s| s.is_down()) {
                     world.map.want_agents(*key);
@@ -1149,10 +1154,11 @@ impl WorldMapUi {
 }
 
 /// The people of a region on the map's labels (its own avatar included),
-/// through the People-in-region figures: the same answers as the map's
-/// people layer, the requests paced with the other places on screen.
+/// the Region Tracker's figure as everywhere; the map asks its visible
+/// regions itself, so it never takes the turn of a list's rows
+/// (`World::people_on_map`).
 fn region_people(world: &World, key: (u32, u32)) -> i32 {
-    match world.people_at_global(f64::from(key.0) * 256.0, f64::from(key.1) * 256.0) {
+    match world.people_on_map(key) {
         Some(crate::world::region_people::People::Count(n)) => i32::try_from(n).unwrap_or(i32::MAX),
         _ => 0,
     }

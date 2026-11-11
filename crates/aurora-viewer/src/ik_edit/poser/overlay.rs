@@ -20,6 +20,19 @@ impl Editor {
         self.poser.group = group(&rig.canonical_names[bone]);
         self.sync_pose_bone(bone, frame);
     }
+    /// Rotation, Position or Scale chosen, in either window. The handles
+    /// are measured again on every frame from the joint and the transform
+    /// shown (`Editor::show_gizmo`, `show_pose_scale`) and a press takes
+    /// them as they are then, so a click right after the switch is judged
+    /// on the new handles, never on the old mode's; a drag begun in the old
+    /// mode ends here.
+    pub(super) fn set_pose_transform(&mut self, transform: usize) {
+        self.poser.transform = transform.min(2);
+        self.tool = if self.poser.transform == 0 { Tool::Rotate } else { Tool::Move };
+        self.drag = None;
+        self.gizmo.cancel();
+        self.poser.scale_gizmo.cancel();
+    }
     pub(super) fn select_pose_group(&mut self, group: usize, rig: &Rig, frame: &Frame) {
         self.poser.group = group;
         // a follower the new tab hides would still move unseen: only the
@@ -79,8 +92,20 @@ impl Editor {
         self.refresh_other_bones(rig);
         self.poser.camera = gizmo::camera(proj);
         if (self.selected.is_none() && !self.poser.unselected) || self.refresh {
-            if let Some(bone) = self.selected.or((!self.poser.unselected).then_some(rig.pelvis)) {
-                self.select_pose_bone(bone, rig, &frame);
+            match self.selected {
+                Some(bone) => self.select_pose_bone(bone, rig, &frame),
+                // nothing chosen yet (a new subject, or the last one lost):
+                // a joint of the open tab, the pelvis in Body. Picking the
+                // pelvis whatever the tab sent it back to Body, and the
+                // markers of the tab in use vanished under the pointer
+                None if !self.poser.unselected => {
+                    if self.bone_visible(&rig.canonical_names[rig.pelvis]) {
+                        self.select_pose_bone(rig.pelvis, rig, &frame);
+                    } else {
+                        self.select_pose_group(self.poser.group, rig, &frame);
+                    }
+                }
+                None => {}
             }
             self.refresh = false;
         } else if let Some(bone) = self.selected

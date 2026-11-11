@@ -406,9 +406,7 @@ impl Editor {
                 ],
             );
             if changed {
-                self.tool = if self.poser.transform == 0 { Tool::Rotate } else { Tool::Move };
-                self.gizmo.cancel();
-                self.poser.scale_gizmo.cancel();
+                self.set_pose_transform(self.poser.transform);
             }
             ui.label(
                 egui::RichText::new(aurora_i18n::text(

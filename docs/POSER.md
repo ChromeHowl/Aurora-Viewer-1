@@ -141,6 +141,11 @@ selection makes it lead the others. Changing tabs keeps only the joints
 the new tab shows, and the Side selector swaps a selected pair's lead.
 Only the active tab's joints and shafts are visible and selectable. Changing
 tabs selects a joint in that group and replaces the previous group's gizmo.
+Choosing another subject keeps the open tab and selects a joint of it (the
+pelvis in Body); a click on any of its markers selects that joint at once,
+also while no joint is selected. Rotation, Position and Scale change the
+handles at once: they are measured again every frame, and a press is judged
+on the handles of the mode shown then, never on the previous mode's.
 
 Use the Rotation / Position / Scale inspector, rotation trackball, axis
 sliders or in-world movement/rotation/scale gizmos. The trackball's axes and
@@ -184,9 +189,16 @@ Undo then). Gestures bound to these keys wait while the poser is open. Reset joi
 the captured initial channels. T-pose restores the rig's neutral rotations.
 
 Stop releases a subject's pose while retaining its edits for Start. Closing
-stops posing by default; disable that setting to keep poses with the window
-closed. Switching to IK editing, teleporting or logging out releases the
-poser. Poses affect only this viewer, including poses of other residents.
+stops posing by default, as the Legacy Viewer's `FSPoserStopPosingWhenClosed`
+(on); disable that setting to keep poses with the window closed. Closed that
+way, nothing stops: the other avatars posed with their consent stay posed,
+the undo history of every subject stays, and the inventory animations of the
+Animations panel keep playing on the wall clock (one still loading arrives
+and plays). Reopening shows the same subject, joint and history; the Legacy
+Viewer's window goes back to your own avatar on opening
+(`FSFloaterPoser::onOpen`, `startPosingSelf`). Switching to IK editing,
+teleporting or logging out releases the poser. Poses affect only this viewer,
+including poses of other residents.
 
 ## Library and files
 

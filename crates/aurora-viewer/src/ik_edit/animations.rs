@@ -456,8 +456,10 @@ fn frame_controls(ui: &mut egui::Ui, frame: &mut u32, last: u32) {
 
 impl Editor {
     pub fn tick_animations(&mut self, streamer: &mut AnimStreamer, inv: &mut Inventory) {
-        // the poser's Animations panel plays the same stack
-        if self.open {
+        // the poser's Animations panel plays the same stack, also while its
+        // window is closed and the pose kept ("stop posing when closed"
+        // off): an animation still loading then arrives and plays
+        if self.open || self.poser.active {
             if !self.poser.active
                 && self.project.picking_notecard()
                 && let Some(root) = actions::system(inv, 7)
