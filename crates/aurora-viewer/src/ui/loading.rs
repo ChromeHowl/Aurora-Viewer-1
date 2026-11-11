@@ -535,6 +535,65 @@ pub fn teleport_overlay(
     ctx.request_repaint();
 }
 
+/// The Cancel button of the teleport screen (LLProgressView's cancel_btn),
+/// over the screen at its foot, above the line of progress. True when
+/// pressed.
+pub fn progress_cancel(ctx: &egui::Context, p: &Palette, alpha: f32) -> bool {
+    if alpha < 0.5 {
+        return false;
+    }
+    let id = egui::Id::unique("teleport_cancel");
+    let response = egui::Area::new(id)
+        .order(egui::Order::Foreground)
+        .anchor(egui::Align2::CENTER_BOTTOM, Vec2::new(0.0, -36.0))
+        .show(ctx, |ui| {
+            super::widgets::action_button(
+                ui,
+                p,
+                "x",
+                aurora_i18n::tr!("common-cancel"),
+                super::widgets::ActionKind::Flat,
+                Vec2::new(120.0, 32.0),
+            )
+            .clicked()
+        });
+    ctx.move_to_top(response.response.layer_id);
+    response.inner
+}
+
+/// The small progress bar of the Legacy Viewer's "no teleport screen" and
+/// "no logout screen" (LLProgressViewMini, panel_progress_mini.xml): the
+/// step, its progress and, for a teleport that allows it, Cancel, at the
+/// foot of the world. True when Cancel is pressed.
+pub fn mini_progress(ctx: &egui::Context, p: &Palette, text: &str, fraction: f32, cancel: bool) -> bool {
+    let mut pressed = false;
+    egui::Area::new(egui::Id::unique("progress_mini"))
+        .order(egui::Order::Foreground)
+        .anchor(egui::Align2::CENTER_BOTTOM, Vec2::new(0.0, -96.0))
+        .show(ctx, |ui| {
+            super::widgets::overlay(ui, p, egui::Margin::symmetric(12, 8), |ui| {
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label(egui::RichText::new(text).size(12.5).color(p.ink));
+                        super::widgets::progress(ui, p, "progress_mini_bar", fraction, 220.0, "", None);
+                    });
+                    if cancel {
+                        pressed = super::widgets::action_button(
+                            ui,
+                            p,
+                            "x",
+                            aurora_i18n::tr!("common-cancel"),
+                            super::widgets::ActionKind::Flat,
+                            Vec2::new(0.0, 28.0),
+                        )
+                        .clicked();
+                    }
+                });
+            });
+        });
+    pressed
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

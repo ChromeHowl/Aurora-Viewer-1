@@ -259,6 +259,8 @@ impl World {
         }
         self.set_invite_notification(invite, id);
         if rating == Rating::Allowed && self.rlva.auto_accept("accepttp", im.from_agent_id) {
+            // RlvHandler::setCanCancelTp(false) for an auto-accepted lure
+            self.tp_cancel_locked = true;
             self.rlva_teleport_dnd(im.from_agent_id);
             let commands = self.answer_teleport_invite(invite, true);
             self.teleport_invites.out.extend(commands);

@@ -14457,3 +14457,55 @@ l2s-omnifilter-imported =
        *[other] { $count } règles importées
     }
 l2s-omnifilter-not-notecard = Ce fichier n'est pas une note de l'Omnifilter.
+
+# Inventory helpers, Windlight import, teleport cancel and logout screen, export additions (L3)
+l3-thumbs-open = Assistant de vignettes…
+l3-thumbs-title = Assistant de vignettes de l'inventaire
+l3-thumbs-help = Copiez des objets, des habits ou des parties du corps dans l'inventaire et cliquez sur « Coller les articles », puis copiez des textures et cliquez sur « Coller les textures ». Un article reçoit comme image la texture du même nom.
+l3-thumbs-col-item = Article
+l3-thumbs-col-current = Image actuelle
+l3-thumbs-col-new = Nouvelle image
+l3-thumbs-has-image = Définie
+l3-thumbs-missing = manquante
+l3-thumbs-paste-items = Coller les articles
+l3-thumbs-paste-textures = Coller les textures
+l3-thumbs-write = Écrire les vignettes
+l3-thumbs-log-missing = Lister les articles sans image
+l3-thumbs-clear = Effacer les vignettes
+l3-thumbs-reset = Vider les listes
+l3-thumbs-write-warning = Les images des articles listés vont être remplacées par les textures du même nom. Cette action est irréversible. Continuer ?
+l3-thumbs-clear-warning = Les images de tous les articles listés vont être supprimées. Cette action est irréversible. Continuer ?
+l3-thumbs-log-paste-items = ==== Articles collés depuis l'inventaire ====
+l3-thumbs-log-paste-textures = ==== Textures collées depuis l'inventaire ====
+l3-thumbs-log-item = ARTICLE { $n }> { $name }
+l3-thumbs-log-texture = TEXTURE { $n }> { $name }
+l3-thumbs-log-loading = { $n } dossiers étaient encore en chargement : copiez et collez de nouveau une fois qu'ils sont ouverts.
+l3-thumbs-log-missing-line = Sans image : { $name }
+l3-thumbs-log-refused = Non modifié (texture sans copie ni transfert, ou article non modifiable) : { $name }
+l3-thumbs-log-writing = Écriture de { $n } images…
+l3-thumbs-log-clearing = Suppression de { $n } images…
+l3-protected-open = Dossiers protégés…
+l3-protected-title = Dossiers protégés
+l3-protected-filter = Filtrer les dossiers protégés
+l3-protected-remove = Retirer
+l3-protected-remove-tip = Retirer les dossiers sélectionnés des dossiers protégés
+l3-protected-unknown = (Dossier inconnu)
+l3-protected-empty = Aucun dossier n'est protégé. Verrouillez un dossier depuis son menu dans l'inventaire.
+l3-hide-empty-system = Masquer les dossiers système vides
+l3-hide-empty-system-help = Les dossiers système comme Sons ou Gestes ne s'affichent pas dans l'inventaire tant qu'ils sont vides.
+l3-env-bulk-menu = Importer Windlight
+l3-env-bulk-days = Cycles du jour…
+l3-env-bulk-skies = Ciels…
+l3-env-bulk-water = Eau…
+l3-env-bulk-pick = Choisir les fichiers Windlight à importer
+l3-env-bulk-title = Import Windlight
+l3-env-bulk-failed-file = { $file } n'a pas pu être converti.
+l3-env-bulk-finished = Import Windlight terminé : { $created } réglages créés dans le dossier Réglages, { $failed } en échec.
+l3-tp-cancelled = Téléportation annulée.
+l3-opt-always-cancel = Toujours permettre d'annuler une téléportation
+l3-opt-always-cancel-help = Affiche Annuler même quand la région indique que la téléportation ne peut pas être annulée (la région l'ignore alors). Les restrictions RLVa le masquent toujours.
+l3-opt-no-logout-screen = Pas d'écran de déconnexion
+l3-opt-no-logout-screen-help = Le monde reste visible pendant la déconnexion, avec une petite barre de progression.
+l3-logout-title = Déconnexion
+l3-logging-out = Déconnexion…
+l3-export-why-geometry = sa forme, ou sa carte de sculpture, n'est pas chargée

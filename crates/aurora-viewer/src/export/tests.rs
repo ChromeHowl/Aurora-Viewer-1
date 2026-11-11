@@ -79,6 +79,7 @@ fn prim(n: u128, creator: Uuid, mask: u32, textures: &[Uuid]) -> PrimInput {
         faces: 6,
         te,
         extra: Default::default(),
+        particles: None,
     }
 }
 
@@ -153,7 +154,7 @@ fn a_refused_root_refuses_the_whole_linkset() {
 }
 
 #[test]
-fn collada_leaves_out_sculpts_and_meshes_without_geometry() {
+fn collada_keeps_sculpts_with_their_map_and_leaves_out_missing_geometry() {
     let inv = inventory();
     let mut sculpt = prim(501, ME, FULL, &[]);
     sculpt.volume.sculpt = Some(SculptParams {
@@ -162,9 +163,27 @@ fn collada_leaves_out_sculpts_and_meshes_without_geometry() {
     });
     let prims = vec![prim(500, ME, FULL, &[]), sculpt, mesh(502, Some(ME))];
     let result = plan(&inv, prims.clone(), ExportFormat::Collada, |p| p.id != Uuid::from_u128(502));
+    assert_eq!(result.prims.len(), 2, "the sculpt with its map loaded is written");
+    assert_eq!(result.left_out.len(), 1);
+    assert!(result.left_out.iter().all(|(_, why)| *why == LeftOut::Geometry));
+    // its map not loaded: left out for its geometry
+    let result = plan(&inv, prims.clone(), ExportFormat::Collada, |p| p.id == Uuid::from_u128(500));
     assert_eq!(result.prims.len(), 1);
     assert_eq!(result.left_out.len(), 2);
-    assert!(result.left_out.iter().all(|(_, why)| *why == LeftOut::Geometry));
+    // someone else's sculpt map: refused by the rule, never asked for its geometry
+    let mut theirs = prim(503, ME, FULL, &[]);
+    theirs.volume.sculpt = Some(SculptParams {
+        texture: THEIR_TEXTURE,
+        sculpt_type: 1,
+    });
+    let result = plan(&inv, vec![prim(500, ME, FULL, &[]), theirs], ExportFormat::Collada, |p| {
+        assert_ne!(p.id, Uuid::from_u128(503), "geometry asked for a refused sculpt");
+        true
+    });
+    assert_eq!(
+        result.left_out,
+        vec![("prim 503".to_owned(), LeftOut::Rights(ExportRefusal::SculptCreator))]
+    );
     // a backup keeps our own sculpt and its map
     let backup = plan(&inv, prims, ExportFormat::Backup, |_| false);
     assert_eq!(backup.prims.len(), 2);
@@ -257,4 +276,42 @@ fn collada_places_children_from_the_root_and_writes_no_texture() {
 fn file_names_are_scrubbed() {
     assert_eq!(file_name("My: chair/1?", ExportFormat::Backup), "My_ chair_1_.oxp");
     assert_eq!(file_name("  ", ExportFormat::Collada), "object.dae");
+}
+
+#[test]
+fn particles_keep_only_allowed_textures_in_the_backup() {
+    use aurora_prim::particles::{LL_PART_EMISSIVE_MASK, LL_PART_SRC_PATTERN_EXPLODE, PartSysData};
+    let inv = inventory();
+    let mut mine = prim(500, ME, FULL, &[]);
+    let mut ps = PartSysData {
+        pattern: LL_PART_SRC_PATTERN_EXPLODE,
+        part_image_id: MY_TEXTURE,
+        burst_part_count: 7,
+        ..Default::default()
+    };
+    ps.part.flags = LL_PART_EMISSIVE_MASK;
+    mine.particles = Some(ps);
+    let mut child = prim(501, ME, FULL, &[]);
+    child.particles = Some(PartSysData {
+        part_image_id: THEIR_TEXTURE,
+        ..Default::default()
+    });
+    let plan = plan(&inv, vec![mine, child], ExportFormat::Backup, |_| true);
+    assert_eq!(plan.textures, [MY_TEXTURE]);
+    assert_eq!(plan.prims[1].particles.map(|p| p.part_image_id), Some(Uuid::nil()));
+    let meta = oxp::Meta {
+        client: "test".into(),
+        date: "2026-11-11".into(),
+        author: "me".into(),
+        grid: "test".into(),
+    };
+    let manifest = oxp::manifest(&plan, &[], &meta);
+    let root = &manifest["prim"][ROOT.to_string().as_str()]["particle"];
+    assert_eq!(root["PartImageID"].to_string_value(), MY_TEXTURE.to_string());
+    assert_eq!(root["LL_PART_EMISSIVE_MASK"].as_i32(), 1);
+    assert_eq!(root["LL_PART_SRC_PATTERN_EXPLODE"].as_i32(), 1);
+    assert_eq!(root["LL_PART_SRC_PATTERN_DROP"].as_i32(), 0);
+    assert_eq!(root["BurstPartCount"].as_i32(), 7);
+    let child = &manifest["prim"][Uuid::from_u128(501).to_string().as_str()]["particle"];
+    assert_eq!(child["PartImageID"].to_string_value(), Uuid::nil().to_string());
 }

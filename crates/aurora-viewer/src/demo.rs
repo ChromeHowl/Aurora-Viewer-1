@@ -2855,7 +2855,7 @@ pub fn demo_reply(cmd: &aurora_net::NetCommand) -> Vec<NetEvent> {
     match cmd {
         // a lure accepted offline: the teleport starts, then has nowhere to go
         aurora_net::NetCommand::AcceptLure { .. } => vec![
-            NetEvent::TeleportStarted,
+            NetEvent::TeleportStarted { flags: 0 },
             NetEvent::TeleportFailed {
                 reason: aurora_i18n::tr!("demo-no-teleport-offline").into(),
             },

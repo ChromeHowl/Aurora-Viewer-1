@@ -85,9 +85,27 @@ pub fn done(mode: Mode, shown: f32, target: f32) -> bool {
         }
 }
 
+/// The logout bar: the Legacy Viewer's follows its shutdown steps; the
+/// logout reply has no steps, so it eases towards 95 % and the login screen
+/// replaces it whenever the simulator answers.
+pub fn logout_fraction(elapsed: f32) -> f32 {
+    if !elapsed.is_finite() || elapsed <= 0.0 {
+        return 0.0;
+    }
+    0.95 * (1.0 - (-elapsed / 1.5).exp())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_logout_bar_rises_and_never_completes_on_its_own() {
+        assert_eq!(logout_fraction(0.0), 0.0);
+        assert_eq!(logout_fraction(f32::NAN), 0.0);
+        assert!(logout_fraction(1.0) < logout_fraction(2.0));
+        assert!(logout_fraction(600.0) <= 0.95);
+    }
 
     /// Frames of `dt` from `shown` to the end, ready from the first frame.
     fn seconds_to_finish(mode: Mode, mut shown: f32, dt: f32) -> f32 {

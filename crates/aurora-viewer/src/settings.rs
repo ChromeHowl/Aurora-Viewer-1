@@ -23,6 +23,7 @@ pub mod render_photo;
 mod saver;
 pub mod stream_list;
 pub mod teleport;
+pub mod teleport_extras;
 
 /// Where a contact-set marker stands on an avatar (`ui/contact_markers.rs`).
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -523,6 +524,8 @@ pub struct Settings {
     /// Teleport history columns, world map extras and teleport options
     /// (settings/teleport.rs).
     pub teleport: teleport::Teleport,
+    /// Teleport cancel and logout screen options (settings/teleport_extras.rs).
+    pub teleport_extras: teleport_extras::TeleportExtras,
     pub inventory: crate::ui::inventory::InventoryPreferences,
     pub texture_library: crate::ui::texture_library::Preferences,
     /// Default texture save format (settings/inventory_extras.rs).
@@ -2008,6 +2011,7 @@ impl Default for Settings {
             people: Default::default(),
             friends_list: Default::default(),
             teleport: Default::default(),
+            teleport_extras: Default::default(),
             inventory: Default::default(),
             texture_library: Default::default(),
             inventory_extras: Default::default(),

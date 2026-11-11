@@ -128,6 +128,18 @@ fn teleport_group(cx: &mut Cx) {
             tr!("tpmap-opt-no-login-screen-help"),
             &field!(teleport.no_login_screen),
         );
+        // FSDisableLogoutScreens (panel_preferences_firestorm.xml) and
+        // FSAlwaysShowTPCancel
+        cx.toggle(
+            tr!("l3-opt-no-logout-screen"),
+            tr!("l3-opt-no-logout-screen-help"),
+            &field!(teleport_extras.no_logout_screen),
+        );
+        cx.toggle(
+            tr!("l3-opt-always-cancel"),
+            tr!("l3-opt-always-cancel-help"),
+            &field!(teleport_extras.always_cancel),
+        );
         cx.toggle(
             tr!("tpmap-opt-unmute-sounds"),
             tr!("tpmap-opt-unmute-sounds-help"),

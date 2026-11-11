@@ -75,6 +75,7 @@ mod double_click;
 mod driver_check;
 mod egui_shadow;
 mod env_apply;
+mod env_bulk;
 mod env_day_editor;
 mod env_editor;
 mod external_links;
@@ -751,6 +752,9 @@ pub struct App {
     scene_capture_place: Option<(crate::login_accounts::Account, String)>,
     /// Teleport screen: start, end (fade out), destination.
     tp_overlay: Option<TpOverlay>,
+    /// When the logout began, for its screen or its small progress bar
+    /// (FSDisableLogoutScreens).
+    logging_out: Option<Instant>,
     was_teleporting: bool,
     /// Offline demo teleport: started at.
     demo_tp_start: Option<Instant>,
@@ -1075,6 +1079,8 @@ pub struct App {
     day_fetch: Option<(uuid::Uuid, env_day_editor::DayFetch)>,
     /// A Windlight day being read for the day editor's "Import".
     day_import: Option<std::sync::mpsc::Receiver<env_apply::DayImport>>,
+    /// World › Environment › Import Windlight (`app/env_bulk.rs`).
+    env_bulk: env_bulk::EnvBulk,
     /// The ExtEnvironment update an editor sent and waits for.
     env_applying: Option<env_apply::Applying>,
     /// The sun and moon beacons when the first environment editor opened.
@@ -1758,6 +1764,7 @@ impl App {
             scene_capture_pending: false,
             scene_capture_place: None,
             tp_overlay: None,
+            logging_out: None,
             was_teleporting: false,
             demo_tp_start: None,
             demo_tp_triggered: false,
@@ -1961,6 +1968,7 @@ impl App {
             day_editor: Default::default(),
             day_fetch: None,
             day_import: None,
+            env_bulk: Default::default(),
             env_applying: None,
             env_beacons_saved: None,
             demo: false,
@@ -3191,6 +3199,7 @@ impl App {
         self.day_editor.close();
         self.day_fetch = None;
         self.day_import = None;
+        self.env_bulk = Default::default();
         self.env_applying = None;
         self.env_beacons_frame();
         self.world.eep.clear_edit();
@@ -3435,6 +3444,9 @@ impl App {
             }
             if self.texture_library.material_save_pending(request) {
                 self.resource_material_saved(request, result);
+                return;
+            }
+            if self.env_bulk_saved(request, &result) {
                 return;
             }
             if self.env_editor.saving == Some(request) {
@@ -6229,6 +6241,7 @@ impl App {
             self.release_bridge();
             self.note_user_logout();
             self.net.send(NetCommand::Logout);
+            self.logging_out = Some(Instant::now());
         }
     }
 
@@ -7630,6 +7643,37 @@ impl App {
     fn send_animation_stops(&mut self) {
         for anim in std::mem::take(&mut self.world.animation_stops) {
             self.send(NetCommand::AgentAnimation { anim, start: false });
+        }
+    }
+
+    /// The logout screen (LLAppViewer::requestLogout shows the progress
+    /// view), or with FSDisableLogoutScreens its small progress bar, until
+    /// the login screen comes back.
+    fn draw_logout_progress(&mut self, ctx: &egui::Context, p: &crate::theme::Palette) {
+        let Some(since) = self.logging_out else { return };
+        if !matches!(self.screen, Screen::World) {
+            self.logging_out = None;
+            return;
+        }
+        let elapsed = since.elapsed().as_secs_f32();
+        let fraction = teleport_screen::logout_fraction(elapsed);
+        let text = aurora_i18n::tr!("l3-logging-out");
+        if self.settings.teleport_extras.no_logout_screen {
+            ui::loading::mini_progress(ctx, p, text, fraction, false);
+        } else {
+            let region = self.world.region_name();
+            ui::loading::teleport_overlay(
+                ctx,
+                p,
+                self.logo.as_ref(),
+                self.settings.loading_backdrop.then_some(&self.backdrop),
+                aurora_i18n::tr!("l3-logout-title"),
+                &region,
+                text,
+                Some(fraction),
+                (elapsed / 0.25).clamp(0.0, 1.0),
+                &ui::loading::Place::default(),
+            );
         }
     }
 
@@ -14142,6 +14186,7 @@ impl App {
                 self.release_bridge();
                 self.note_user_logout();
                 self.net.send(NetCommand::Logout);
+                self.logging_out = Some(Instant::now());
                 self.world.system_message(aurora_i18n::tr!("app-logging-out"));
             }
             BarAction::Quit => {
@@ -14267,6 +14312,7 @@ impl App {
                 self.world.group_money.request_owned_land();
             }
             BarAction::SharedEnvironment => self.world.eep.clear_local(),
+            BarAction::ImportWindlight(kind) => self.env_bulk_import(kind),
             BarAction::NewEnvironment(kind) => match kind {
                 crate::world::env_select::SettingsKind::Day => self.open_new_day_editor(),
                 kind => self.open_env_editor_snapshot(kind),
@@ -17477,6 +17523,7 @@ impl App {
                         world: &self.world,
                         build: &self.build,
                         meshes: &mut self.scene.meshes,
+                        textures: &mut self.scene.textures,
                         texture_cache: &texture_cache,
                         grid,
                     },
@@ -18369,6 +18416,9 @@ impl App {
                 }
                 t = self.ui_parts.lap(Part::UiOptions, t);
                 // teleport screen (and the login loading screen fading out)
+                let always_cancel = self.settings.teleport_extras.always_cancel;
+                let cancel_shown = self.world.teleport_cancel_shown(always_cancel) && matches!(self.screen, Screen::World);
+                let mut tp_cancel = false;
                 if let Some(o) = self.tp_overlay.as_mut() {
                     // quick fade in, fade out at the end
                     let fade_in = if o.loading_end {
@@ -18423,10 +18473,27 @@ impl App {
                         alpha,
                         &text.facts.place(),
                     );
+                    // LLProgressView's Cancel, until TeleportFinish
+                    if cancel_shown && !o.loading_end && o.arrived.is_none() && o.end.is_none() {
+                        tp_cancel = ui::loading::progress_cancel(&ctx, &p, alpha);
+                    }
                     if o.end.is_some() {
                         o.leaving = Some(text);
                     }
+                } else if self.settings.teleport.no_teleport_screen
+                    && self.world.teleporting
+                    && self.world.tp_show_progress
+                    && matches!(self.screen, Screen::World)
+                {
+                    // FSDisableTeleportScreens: the small progress bar
+                    tp_cancel = ui::loading::mini_progress(&ctx, &p, &self.world.tp_status, self.world.tp_progress, cancel_shown);
                 }
+                if tp_cancel && let Some(command) = self.world.cancel_teleport(always_cancel) {
+                    // the offline demo's teleport stops with it
+                    self.demo_tp_start = None;
+                    self.send(command);
+                }
+                self.draw_logout_progress(&ctx, &p);
             }
         }
         // Bug report form (disabled, see main.rs):

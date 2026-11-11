@@ -302,6 +302,12 @@ fn sort_menu(ui: &mut egui::Ui, p: &Palette, st: &mut InventoryUi, prefs: &mut I
     ) {
         st.enter_advanced(prefs.search_field);
     }
+    if menu::item(ui, p, "lock-filled", aurora_i18n::tr!("l3-protected-open")) {
+        st.open_protected_folders();
+    }
+    if menu::item(ui, p, "photo-filled", aurora_i18n::tr!("l3-thumbs-open")) {
+        st.open_thumbnails_helper();
+    }
     if menu::item(
         ui,
         p,

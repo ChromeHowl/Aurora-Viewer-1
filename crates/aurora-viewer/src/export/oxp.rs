@@ -3,8 +3,9 @@
 //! FSFloaterObjectExport::exportSelection / addPrim / saveFormattedImage
 //! write it: `linkset` (the ids of each linkset, root first), `prim` (each
 //! prim's shape, faces, extra parameters and properties) and `asset` (the
-//! JPEG 2000 data of the textures the export rule allows). Contents,
-//! particles and materials are not written.
+//! JPEG 2000 data of the textures the export rule allows). A particle
+//! source is written as LLPartSysData::asLLSD (indra/llmessage/
+//! llpartdata.cpp) writes it. Contents and materials are not written.
 
 use super::plan::{Plan, PrimInput};
 use aurora_llsd::{Llsd, Map, llsd_map};
@@ -66,6 +67,48 @@ fn face(f: &TextureFace) -> Llsd {
         "fullbright" => i32::from(f.fullbright()),
         "media_flags" => i32::from(f.media_flags),
         "glow" => f.glow,
+    }
+}
+
+/// LLPartSysData::asLLSD: the flags one by one, the colours, scales and
+/// vectors as arrays.
+fn particles(ps: &aurora_prim::particles::PartSysData) -> Llsd {
+    use aurora_prim::particles::*;
+    let flag = |mask: u32| i32::from(ps.part.flags & mask != 0);
+    let pattern = |mask: u8| i32::from(ps.pattern & mask != 0);
+    llsd_map! {
+        "LL_PART_INTERP_COLOR_MASK" => flag(LL_PART_INTERP_COLOR_MASK),
+        "LL_PART_INTERP_SCALE_MASK" => flag(LL_PART_INTERP_SCALE_MASK),
+        "LL_PART_BOUNCE_MASK" => flag(LL_PART_BOUNCE_MASK),
+        "LL_PART_WIND_MASK" => flag(LL_PART_WIND_MASK),
+        "LL_PART_FOLLOW_SRC_MASK" => flag(LL_PART_FOLLOW_SRC_MASK),
+        "LL_PART_FOLLOW_VELOCITY_MASK" => flag(LL_PART_FOLLOW_VELOCITY_MASK),
+        "LL_PART_TARGET_POS_MASK" => flag(LL_PART_TARGET_POS_MASK),
+        "LL_PART_TARGET_LINEAR_MASK" => flag(LL_PART_TARGET_LINEAR_MASK),
+        "LL_PART_EMISSIVE_MASK" => flag(LL_PART_EMISSIVE_MASK),
+        "LL_PART_BEAM_MASK" => flag(LL_PART_BEAM_MASK),
+        "ParticleMaxAge" => ps.part.max_age,
+        "StartColor" => reals(&ps.part.start_color),
+        "EndColor" => reals(&ps.part.end_color),
+        "StartScale" => reals(&ps.part.start_scale.to_array()),
+        "EndScale" => reals(&ps.part.end_scale.to_array()),
+        "SourceMaxAge" => ps.max_age,
+        "SourceStartAge" => ps.start_age,
+        "LL_PART_SRC_PATTERN_DROP" => pattern(LL_PART_SRC_PATTERN_DROP),
+        "LL_PART_SRC_PATTERN_EXPLODE" => pattern(LL_PART_SRC_PATTERN_EXPLODE),
+        "LL_PART_SRC_PATTERN_ANGLE" => pattern(LL_PART_SRC_PATTERN_ANGLE),
+        "LL_PART_SRC_PATTERN_ANGLE_CONE" => pattern(LL_PART_SRC_PATTERN_ANGLE_CONE),
+        "LL_PART_SRC_PATTERN_ANGLE_CONE_EMPTY" => pattern(LL_PART_SRC_PATTERN_ANGLE_CONE_EMPTY),
+        "InnerAngle" => ps.inner_angle,
+        "OuterAngle" => ps.outer_angle,
+        "AngularVelocity" => reals(&ps.angular_velocity.to_array()),
+        "BurstRate" => ps.burst_rate,
+        "BurstPartCount" => i32::from(ps.burst_part_count),
+        "BurstSpeedMin" => ps.burst_speed_min,
+        "BurstSpeedMax" => ps.burst_speed_max,
+        "BurstRadius" => ps.burst_radius,
+        "PartImageID" => ps.part_image_id.to_string(),
+        "TargetId" => ps.target_id.to_string(),
     }
 }
 
@@ -163,6 +206,9 @@ fn prim(p: &PrimInput) -> Llsd {
             "light_texture",
             llsd_map! { "texture" => l.texture, "params" => reals(&l.params.to_array()) },
         );
+    }
+    if let Some(ps) = &p.particles {
+        set("particle", particles(ps));
     }
     set("texture", Llsd::Array(p.te.faces.iter().take(p.faces.max(1)).map(face).collect()));
     if let Some(props) = &p.props {
