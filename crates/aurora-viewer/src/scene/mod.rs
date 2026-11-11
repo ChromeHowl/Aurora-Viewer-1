@@ -859,6 +859,10 @@ pub struct Scene {
     /// The rendering types of the session (Preferences › Graphics): trees,
     /// grass and avatars hidden join what the photo's isolation leaves out.
     pub render_types: crate::settings::render_extras::RenderTypes,
+    /// The objects HideSelectedObjects leaves out (sorted indices), and as
+    /// last applied.
+    pub hidden_selected: Vec<usize>,
+    hidden_selected_synced: Vec<usize>,
     render_types_synced: crate::settings::render_extras::RenderTypes,
     /// RenderTerrainScale: metres per repeat of the classic terrain's
     /// detail textures (terrain_surface.rs).
@@ -1576,6 +1580,8 @@ impl Scene {
             parcel_visibility_version: 0,
             photo_isolation_version: 0,
             render_types: Default::default(),
+            hidden_selected: Vec::new(),
+            hidden_selected_synced: Vec::new(),
             render_types_synced: Default::default(),
             terrain_scale: crate::settings::render_extras::TERRAIN_SCALE,
             held_at: None,
@@ -2677,10 +2683,15 @@ impl Scene {
         use crate::snapshot::isolate;
         let iso = &world.photo_isolation;
         let types = self.render_types;
-        let hidden_of = |idx: usize| !isolate::object_visible(world, idx) || !render_type_drawn(world, idx, &types);
-        if self.photo_isolation_version != iso.version || self.render_types_synced != types {
+        // and the selection HideSelectedObjects hides (LLPipeline::markVisible)
+        let selected = std::mem::take(&mut self.hidden_selected);
+        let hidden_of = |idx: usize| {
+            !isolate::object_visible(world, idx) || !render_type_drawn(world, idx, &types) || selected.binary_search(&idx).is_ok()
+        };
+        if self.photo_isolation_version != iso.version || self.render_types_synced != types || self.hidden_selected_synced != selected {
             self.photo_isolation_version = iso.version;
             self.render_types_synced = types;
+            self.hidden_selected_synced.clone_from(&selected);
             for idx in 0..self.gpu.len() {
                 let hidden = hidden_of(idx);
                 let g = &mut self.gpu[idx];
@@ -2689,7 +2700,7 @@ impl Scene {
                     renderer.cull.objects.set(idx, g.cull_object(idx));
                 }
             }
-        } else if iso.applied() || !types.all_objects() {
+        } else if iso.applied() || !types.all_objects() || !selected.is_empty() {
             for &idx in synced {
                 let hidden = hidden_of(idx);
                 if let Some(g) = self.gpu.get_mut(idx) {
@@ -2697,6 +2708,7 @@ impl Scene {
                 }
             }
         }
+        self.hidden_selected = selected;
         self.photo_marks.clear();
         if iso.picking {
             let mut stack: Vec<usize> = iso.chosen().iter().filter_map(|id| world.objects.index_of_uuid(id)).collect();

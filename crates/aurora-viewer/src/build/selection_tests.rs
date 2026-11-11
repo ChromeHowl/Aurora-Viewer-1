@@ -1177,6 +1177,35 @@ fn select_only_movable_objects_follows_root_rights_and_permanent_objects() {
 }
 
 #[test]
+fn select_only_copyable_locked_and_group_owned_follow_the_root() {
+    use crate::ui::context::flags::{OBJECT_COPY, OBJECT_GROUP_OWNED, OBJECT_MOVE};
+    let (mut world, _, mut settings) = seated_fixture(false);
+    let root = world.objects.iter().find(|(_, o)| o.key.local_id == 950).unwrap().0;
+    let child = world.objects.index_of_uuid(&Uuid::from_u128(951)).unwrap();
+    world.objects.get_mut(child).unwrap().update_flags = 0;
+    world.objects.get_mut(root).unwrap().update_flags = OBJECT_MOVE;
+    settings.tools.select_copyable = true;
+    assert!(!passes_select_filters(&world, &settings, child), "not copyable");
+    world.objects.get_mut(root).unwrap().update_flags = OBJECT_MOVE | OBJECT_COPY;
+    assert!(passes_select_filters(&world, &settings, child));
+    settings.tools.select_copyable = false;
+    settings.tools.select_locked = true;
+    assert!(!passes_select_filters(&world, &settings, child), "we may move it: not locked");
+    world.objects.get_mut(root).unwrap().update_flags = OBJECT_COPY;
+    assert!(passes_select_filters(&world, &settings, child));
+    settings.tools.select_locked = false;
+    world.objects.get_mut(root).unwrap().update_flags = OBJECT_GROUP_OWNED;
+    assert!(
+        passes_rect_group_filter(&world, &settings, child),
+        "group-owned included by default"
+    );
+    settings.tools.select_group_owned = false;
+    assert!(!passes_rect_group_filter(&world, &settings, child));
+    world.objects.get_mut(root).unwrap().update_flags = 0;
+    assert!(passes_rect_group_filter(&world, &settings, child));
+}
+
+#[test]
 fn selection_filters_persist_and_sit_under_the_reflection_probes() {
     use layout::{Item, Layout, Panel};
     let mut settings = BuildSettings::default();

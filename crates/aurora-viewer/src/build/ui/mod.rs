@@ -201,6 +201,8 @@ pub struct FloaterState {
     pub media_settings: Option<MediaSettingsState>,
     pub confirm: Option<Confirm>,
     pub link_error: Option<String>,
+    /// The prims of an unlink waiting for its confirmation.
+    pub unlink_ask: Option<Vec<crate::world::objects::ObjKey>>,
     pub picker: TexturePicker,
     pub pick_target: Option<PickTarget>,
     /// A texture or material dropped on a Texture tab slot, applied next
@@ -355,6 +357,8 @@ pub fn show(
     env: &mut Env,
 ) -> bool {
     floaters::link_error(ctx, p, tool);
+    tool.options.clone_from(&s.tools);
+    floaters::unlink_confirm(ctx, p, tool, world);
     contents_selection::finish_if_hidden_or_blurred(ctx, tool, world);
     if !tool.open {
         tool.dismiss_texture_picker();

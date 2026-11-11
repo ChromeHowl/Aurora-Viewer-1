@@ -555,6 +555,54 @@ impl App {
             self.apply_script_action(action);
         }
         self.script_editors.show_debug(ctx, p, &mut self.world.script_debug);
+        self.poll_script_link();
+    }
+
+    /// The script editor link follows its preferences and offers the
+    /// scripts open in an external editor (script_ws.rs).
+    fn poll_script_link(&mut self) {
+        let prefs = &self.settings.script_editor;
+        self.script_link.sync(prefs.websocket_sync, prefs.websocket_port);
+        self.script_editors.link_status = match self.script_link.status() {
+            crate::script_ws::Status::Off => None,
+            crate::script_ws::Status::Listening(port) => Some(aurora_i18n::tr!("b7-link-listening", port = i64::from(port)).into()),
+            crate::script_ws::Status::Failed(port, reason) => {
+                Some(aurora_i18n::tr!("b7-link-failed", port = i64::from(port), reason = reason).into())
+            }
+        };
+        let world = &self.world;
+        let edited: Vec<_> = self
+            .script_editors
+            .externally_edited()
+            .into_iter()
+            .map(|(target, name)| {
+                let root = world
+                    .objects
+                    .index_of_uuid(&target.object)
+                    .and_then(|idx| world.objects.get(crate::build::root_of(world, idx)))
+                    .map_or(target.object, |o| o.full_id);
+                crate::script_ws::Edited {
+                    id: crate::script_ws::protocol::script_id(target.object, target.item),
+                    object: target.object,
+                    item: target.item,
+                    root,
+                    name,
+                }
+            })
+            .collect();
+        let agent_id = world.agent_id;
+        let agent_name = self.script_editors.agent_name.clone();
+        self.script_link.poll(
+            || crate::script_ws::Viewer {
+                name: "Aurora Viewer".into(),
+                version: aurora_version::version().into(),
+                agent_id,
+                agent_name,
+                syntax_id: crate::lsl_keywords::current_id().unwrap_or_default(),
+                temp_dir: std::env::temp_dir().to_string_lossy().into_owned(),
+            },
+            &edited,
+        );
     }
 
     pub(super) fn apply_script_action(&mut self, action: Action) {
@@ -721,6 +769,11 @@ impl App {
     pub(super) fn script_saved(&mut self, request: Uuid, target: ScriptTarget, result: Result<ScriptSaved, String>) {
         if !self.script_editors.saved(request, target, &result) {
             return;
+        }
+        if let Ok(saved) = &result {
+            let running = self.build.contents.running.get(&(target.object, target.item)).is_some_and(|r| r.0);
+            self.script_link
+                .compiled(target.object, target.item, saved.compiled, running, &saved.errors);
         }
         if let Ok(saved) = result {
             if target.object.is_nil() {

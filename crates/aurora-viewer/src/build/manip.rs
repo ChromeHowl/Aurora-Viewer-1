@@ -244,20 +244,25 @@ pub(super) fn frame(
     // LLManip::getPivotPoint's actual-root option anchors whole-object selections
     // on the primary linkset's root. Linked editing deliberately follows the primary
     // prim instead, even if another selected prim is a root.
-    let pivot = if s.actual_root {
+    let anchor = if s.actual_root {
         sel.first()
             .and_then(|k| world.objects.index_of(k))
             .map(|i| if linked { i } else { super::root_of(world, i) })
-            .and_then(|r| Scene::object_edit_pivot(world, r, now))
-            .unwrap_or(bounds.center)
     } else if prims == 1 {
-        sel.first()
-            .and_then(|k| world.objects.index_of(k))
-            .and_then(|i| Scene::object_edit_pivot(world, i, now))
-            .unwrap_or(bounds.center)
+        sel.first().and_then(|k| world.objects.index_of(k))
     } else {
-        bounds.center
+        None
     };
+    // ... then FSBuildPrefs_Pivot*: an offset in the frame of the prim or
+    // of the selection's box, a percentage of its size or metres
+    // (settings/build_tools.rs).
+    let on_prim = anchor.and_then(|i| {
+        let pivot = Scene::object_edit_pivot(world, i, now)?;
+        let (_, rotation, _) = Scene::object_transform(world, i, now, 0)?;
+        Some((pivot, world.visual_scale(i), rotation))
+    });
+    let (pivot, size, rotation) = on_prim.unwrap_or((bounds.center, bounds.half * 2.0, bounds.rotation));
+    let pivot = pivot + s.tools.pivot_offset(size, rotation);
     Some(Frame {
         pivot,
         bounds,

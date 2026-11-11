@@ -85,6 +85,7 @@ mod raw_mouse;
 mod report_abuse;
 mod scene;
 mod screen_rate;
+mod script_ws;
 mod settings;
 mod shape_editor;
 mod slapp;

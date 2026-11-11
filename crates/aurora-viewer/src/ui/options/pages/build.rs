@@ -81,4 +81,57 @@ pub fn page(cx: &mut Cx) {
             &field!(build.auto_material_tab),
         );
     });
+    // the Legacy Viewer's Build 1 and Build 2 tabs and Build menu options
+    // (settings/build_tools.rs)
+    cx.group(tr!("b7-options-group"), |cx| {
+        cx.keywords("FSUnlinkConfirmEnabled")
+            .toggle(tr!("b7-options-unlink-confirm"), "", &field!(build.tools.unlink_confirm));
+        cx.keywords("MinObjectsForUnlinkConfirm").slider(
+            tr!("b7-options-unlink-min"),
+            tr!("b7-options-unlink-min-hint"),
+            &field!(build.tools.unlink_confirm_min),
+            0..=256,
+            "",
+        );
+        cx.keywords("FSBuildPrefs_PivotX FSBuildPrefs_PivotY FSBuildPrefs_PivotZ pivot")
+            .row(
+                tr!("b7-options-pivot"),
+                tr!("b7-options-pivot-hint"),
+                &field!(build.tools.pivot),
+                |ui, s| {
+                    let mut changed = false;
+                    let range = crate::settings::build_tools::PIVOT_RANGE;
+                    for v in &mut s.build.tools.pivot {
+                        changed |= ui
+                            .add(
+                                egui::DragValue::new(v)
+                                    .range(range.clone())
+                                    .speed(0.1)
+                                    .max_decimals(3)
+                                    .custom_parser(aurora_i18n::parse_number),
+                            )
+                            .changed();
+                    }
+                    changed
+                },
+            );
+        cx.keywords("FSBuildPrefs_PivotIsPercent")
+            .toggle(tr!("b7-options-pivot-percent"), "", &field!(build.tools.pivot_percent));
+        cx.keywords("FSSelectLockedOnly")
+            .toggle(tr!("b7-select-locked"), "", &field!(build.tools.select_locked));
+        cx.keywords("FSSelectCopyableOnly")
+            .toggle(tr!("b7-select-copyable"), "", &field!(build.tools.select_copyable));
+        cx.keywords("FSSelectIncludeGroupOwned").toggle(
+            tr!("b7-select-group-owned"),
+            tr!("b7-select-group-owned-hint"),
+            &field!(build.tools.select_group_owned),
+        );
+        cx.keywords("RenderLightRadius")
+            .toggle(tr!("b7-light-radius"), "", &field!(build.tools.light_radius));
+        cx.keywords("HideSelectedObjects").toggle(
+            tr!("b7-hide-selected"),
+            tr!("b7-hide-selected-hint"),
+            &field!(build.tools.hide_selected),
+        );
+    });
 }
