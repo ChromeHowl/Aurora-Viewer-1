@@ -15137,3 +15137,4 @@ nb-omnifilter-save-help = The rule set in use is written to a new notecard of yo
 nb-omnifilter-no-notecards = Your inventory has no Notecards folder.
 nb-omnifilter-notecard-exists = A notecard named “{ $name }” is already in your Notecards folder.
 nb-omnifilter-saved = Rule set saved to the notecard “{ $name }”.
+update-personal-build = { $label } is a personal build, made on this PC from its source code. It does not follow the official Aurora Viewer releases: to update it, use "Update { $label }" in the Start menu.

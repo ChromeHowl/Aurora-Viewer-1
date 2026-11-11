@@ -48,3 +48,6 @@ Thumbs.db
 
 # Per-task scratch files (agents)
 /.scratch/
+
+# The Windows installer compiled by hand (docs/INSTALLER.md)
+/installer/output/

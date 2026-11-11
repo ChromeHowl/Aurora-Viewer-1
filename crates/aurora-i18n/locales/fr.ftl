@@ -15136,3 +15136,4 @@ nb-omnifilter-save-help = Le jeu de règles utilisé est écrit dans une nouvell
 nb-omnifilter-no-notecards = Votre inventaire n’a pas de dossier Notes.
 nb-omnifilter-notecard-exists = Une note nommée « { $name } » se trouve déjà dans votre dossier Notes.
 nb-omnifilter-saved = Jeu de règles enregistré dans la note « { $name } ».
+update-personal-build = { $label } est une version personnelle, construite sur ce PC à partir de son code source. Elle ne suit pas les versions officielles d’Aurora Viewer : pour la mettre à jour, utilisez « Update { $label } » dans le menu Démarrer.

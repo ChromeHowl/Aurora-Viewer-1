@@ -15072,3 +15072,4 @@ nb-omnifilter-save-help = 使用中のルールセットを「ノートカード
 nb-omnifilter-no-notecards = インベントリに「ノートカード」フォルダーがありません。
 nb-omnifilter-notecard-exists = 「{ $name }」という名前のノートカードはすでに「ノートカード」フォルダーにあります。
 nb-omnifilter-saved = ルールセットをノートカード「{ $name }」に保存しました。
+update-personal-build = { $label }は、このＰＣでソースコードからビルドされた個人ビルドです。Auroraビューアの公式リリースには従いません。更新するには、スタートメニューの「Update { $label }」を使ってください。

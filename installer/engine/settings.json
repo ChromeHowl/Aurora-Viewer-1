@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "productName": "Aurora Viewer +",
+  "folderName": "AuroraViewerPlus",
+  "buildLabel": "Aurora Viewer +",
+  "repository": "https://github.com/ChromeHowl/Aurora-Viewer-1.git",
+  "branch": "main",
+  "versionTags": "https://github.com/Aurora-Viewer/Aurora-Viewer.git",
+  "minimumRust": "1.95.0",
+  "minimumGit": "2.30.0",
+  "diskNeededGB": 20
+}

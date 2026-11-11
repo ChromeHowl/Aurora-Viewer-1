@@ -86,7 +86,7 @@ pub fn get() -> &'static Cli {
             std::process::exit(0);
         }
         if cli.version {
-            println!("{}", aurora_i18n::tr!("common-aurora-viewer", value0 = aurora_version::version()));
+            println!("{}", version_line());
             std::process::exit(0);
         }
         cli
@@ -202,7 +202,32 @@ fn parse_fps_limit(value: &str) -> Option<u32> {
 /// The window title, ending with the build profile ("(Dev)", "(Release)",
 /// "(Debug)"): test windows of different builds can be told apart.
 pub fn window_title() -> String {
-    title_with(get().title.as_deref(), env!("AURORA_BUILD_PROFILE"), aurora_version::version())
+    let (title, profile, version) = (get().title.as_deref(), env!("AURORA_BUILD_PROFILE"), aurora_version::version());
+    match crate::updater::personal_build() {
+        Some(name) => personal_title(name, title, profile, version),
+        None => title_with(title, profile, version),
+    }
+}
+
+/// `--version`: "Aurora Viewer <version>" in every language and every
+/// build, read by scripts (verify-version.ps1, package.ps1, the Windows
+/// installer's engine) that must not depend on the system's language.
+fn version_line() -> String {
+    format!("Aurora Viewer {}", aurora_version::version())
+}
+
+/// A personal build (`AURORA_PERSONAL_BUILD`) names the window with its own
+/// product name, so that it is never taken for an official Aurora Viewer.
+/// A product name, not translated.
+fn personal_title(name: &str, title: Option<&str>, profile_dir: &str, version: &str) -> String {
+    let mut text = format!("{name} {version}");
+    if let Some(t) = title {
+        text = format!("{text} - {t}");
+    }
+    match profile_label(profile_dir) {
+        Some(p) => format!("{text} ({p})"),
+        None => text,
+    }
 }
 
 /// The viewer's identity on the Linux desktop: Wayland app_id, X11
@@ -317,6 +342,25 @@ mod tests {
             title_with(None, "debug", "0.2.0+7.gabcdef123"),
             aurora_i18n::tr!("cli-aurora-viewer", version = "0.2.0+7.gabcdef123 (Dev)").as_str()
         );
+    }
+
+    #[test]
+    fn a_personal_build_names_itself_in_the_title() {
+        assert_eq!(
+            personal_title("Aurora Viewer +", None, "release", "0.2.0+7.gabcdef123"),
+            "Aurora Viewer + 0.2.0+7.gabcdef123 (Release)"
+        );
+        assert_eq!(
+            personal_title("Aurora Viewer +", Some("X"), "unknown", "0.2.0"),
+            "Aurora Viewer + 0.2.0 - X"
+        );
+    }
+
+    #[test]
+    fn the_version_line_is_not_translated() {
+        // the scripts read it whatever the system's language (ja.ftl says
+        // "Auroraビューア" in the title)
+        assert_eq!(version_line(), format!("Aurora Viewer {}", aurora_version::version()));
     }
 
     #[test]
