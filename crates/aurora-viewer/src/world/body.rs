@@ -319,11 +319,13 @@ mod tests {
         let own = Thresholds { mouselook: 120.0, ..t };
         assert_eq!(own.at(0.0, true), 120.0);
         assert_eq!(own.at(0.0, false), 60.0);
-        // standing, a 70° camera turn: the default turns the body, 90° keeps it
+        // standing, a 60° camera turn: the default turns the body, 90° keeps
+        // it (the turn starts past three quarters of the threshold, as in
+        // LLVOAvatar::updateOrientation: 45° and 67.5°)
         let held = |thresholds: Thresholds| {
             let mut b = Body::new(Vec3::X);
             let still = Input {
-                prim_dir: Quat::from_rotation_z(70f32.to_radians()) * Vec3::X,
+                prim_dir: Quat::from_rotation_z(60f32.to_radians()) * Vec3::X,
                 velocity: Vec3::ZERO,
                 in_air: false,
                 mouselook_at: None,
