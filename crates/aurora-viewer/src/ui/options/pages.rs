@@ -18,6 +18,7 @@ pub mod joystick;
 pub mod layout;
 pub mod media;
 pub mod network;
+pub mod notification_options;
 pub mod privacy;
 pub mod protections;
 pub mod rlva;

@@ -571,11 +571,31 @@ pub struct Notifications {
     outcomes: HashMap<u64, Outcome>,
     /// The listed notifications last time `take_departures` looked.
     seen: Vec<(u64, Entry)>,
+    /// Preferences › Chat › Notifications' options, from the settings
+    /// (`world/notification_options.rs`); they travel with the list while
+    /// the cards are drawn.
+    pub options: crate::settings::notification_options::NotificationOptions,
+    /// check_offer_throttle's count (`World::offer_throttle_passes`).
+    pub(super) offer_throttle: super::notification_options::OfferThrottle,
+    /// A message kept while we were offline arrived and the option opens
+    /// the Conversations window (FSOpenIMContainerOnOfflineMessage).
+    open_conversations: bool,
 }
 
 const MAX: usize = 100;
 
 impl Notifications {
+    /// A resident's message arrived (`offline`: kept while we were away).
+    pub fn offline_message(&mut self, offline: bool) {
+        self.open_conversations |= offline && self.options.open_conversations_on_offline_message;
+    }
+
+    /// Whether the Conversations window should open for an offline message
+    /// (asked once).
+    pub fn take_open_conversations(&mut self) -> bool {
+        std::mem::take(&mut self.open_conversations)
+    }
+
     /// The id of the last notification pushed (0 before the first).
     pub fn last_id(&self) -> u64 {
         self.next

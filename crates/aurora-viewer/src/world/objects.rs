@@ -1712,20 +1712,22 @@ impl ObjectStore {
 
     /// A prim of a linkset worn on a HUD point (31–38). The simulator only
     /// sends the HUDs of our own avatar.
-    pub fn worn_on_hud(&self, mut idx: usize) -> bool {
+    pub fn worn_on_hud(&self, idx: usize) -> bool {
+        self.worn_point(idx).is_some_and(|point| (31..=38).contains(&point))
+    }
+
+    /// The attachment point of the linkset a prim belongs to, when an
+    /// avatar wears it.
+    pub fn worn_point(&self, mut idx: usize) -> Option<u8> {
         for _ in 0..16 {
-            let Some(o) = self.get(idx) else {
-                return false;
-            };
-            let Some(parent) = self.parent_of(o) else {
-                return false;
-            };
+            let o = self.get(idx)?;
+            let parent = self.parent_of(o)?;
             if self.get(parent).is_some_and(Object::is_avatar) {
-                return (31..=38).contains(&o.attachment_point());
+                return Some(o.attachment_point());
             }
             idx = parent;
         }
-        false
+        None
     }
 }
 

@@ -3323,6 +3323,7 @@ impl App {
             };
             let gesture = item.asset_type == 21;
             let id = item.id;
+            self.world.landmark_created_notice(&item);
             if self.create_landmark_ui.created(id, item.parent, item.asset_type) {
                 // the Create Landmark window edits it: no rename in the inventory
                 self.world.inventory.add_items(vec![item]);
@@ -5577,6 +5578,10 @@ impl App {
             im_in_bell: self.settings.ims_in_notification_center
                 || (self.demo && crate::demo::toasts::mode().is_some_and(|m| matches!(m.as_str(), "bell" | "click" | "minimized"))),
         };
+        w.notifications.options = self.settings.notification_options;
+        if w.notifications.take_open_conversations() {
+            ui::notifications::open_conversations(&self.egui_ctx, &mut self.panels.chat);
+        }
         // a conversation in sight: its tab shown in the Conversations window
         // or its own window (FSFloaterIM visible), whether or not the viewer
         // has the focus

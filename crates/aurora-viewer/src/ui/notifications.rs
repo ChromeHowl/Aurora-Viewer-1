@@ -6,6 +6,7 @@
 
 use super::icons::Icons;
 use super::presence::Status;
+use crate::settings::notification_options::NotificationOptions;
 use crate::theme::Palette;
 use crate::world::World;
 use crate::world::notifications::{Data, Kind, Notification, Notifications, Response};
@@ -15,11 +16,6 @@ use uuid::Uuid;
 
 pub(crate) mod text;
 
-/// Seconds a toast stays: information / waiting for an answer.
-const TOAST_INFO: f64 = 7.0;
-const TOAST_OFFER: f64 = 25.0;
-/// A friend online / offline (NotificationTipToastLifeTime).
-const TOAST_TIP: f64 = 10.0;
 const MAX_TOASTS: usize = 3;
 const WIDTH: f32 = 320.0;
 /// Side of the picture of a friend's or a message's card.
@@ -82,14 +78,38 @@ pub fn open_conversations(ctx: &egui::Context, open: &mut bool) {
     ctx.move_to_top(egui::LayerId::new(egui::Order::Middle, egui::Id::unique("conversations")));
 }
 
-/// How long the toast of `n` stays.
-fn toast_seconds(n: &Notification, message_seconds: f64) -> f64 {
+/// How long the toast of `n` stays: a friend online / offline
+/// (NotificationTipToastLifeTime), a message, an offer waiting for an
+/// answer, information (NotificationToastLifeTime), as the preferences say.
+fn toast_seconds(n: &Notification, message_seconds: f64, o: &NotificationOptions) -> f64 {
     match n.data {
-        Data::Presence { .. } => TOAST_TIP,
+        Data::Presence { .. } => f64::from(o.tip_toast_seconds),
         Data::Message { .. } => message_seconds,
-        _ if n.interactive() => TOAST_OFFER,
-        _ => TOAST_INFO,
+        _ if n.interactive() => f64::from(o.offer_toast_seconds),
+        _ => f64::from(o.info_toast_seconds),
     }
+}
+
+/// Where the cards find the notification options this frame (they travel
+/// with the list, drawn apart from the world: `share_options`).
+fn options_id() -> egui::Id {
+    egui::Id::unique("notification_options")
+}
+
+/// Makes the list's options readable by the cards drawn this frame.
+pub(super) fn share_options(ctx: &egui::Context, o: NotificationOptions) {
+    ctx.data_mut(|d| d.insert_temp(options_id(), o));
+}
+
+/// The options the cards follow (the defaults until shared).
+fn options(ctx: &egui::Context) -> NotificationOptions {
+    ctx.data(|d| d.get_temp(options_id())).unwrap_or_default()
+}
+
+/// A script menu or text box drawn apart, in a corner of the screen
+/// (ScriptDialogsPosition), rather than with the other notifications.
+pub(super) fn dialog_apart(n: &Notification, o: &NotificationOptions) -> bool {
+    o.script_dialog_position.corner().is_some() && super::notification_center::dnd_shows(n)
 }
 
 /// Bell button with the unread count, in an island of the Aurora bars
@@ -454,7 +474,10 @@ pub(super) fn card(
                 // selectable: Firestorm shows the body in a read-only
                 // LLTextEditor (lltoastnotifypanel.cpp, "text_editor_box")
                 if script {
-                    egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                    // FSRowsPerScriptDialog: so many lines, then it scrolls
+                    let rows = options(ui.ctx()).script_dialog_rows as f32;
+                    let row = ui.fonts_mut(|f| f.row_height(&egui::FontId::proportional(12.0)));
+                    egui::ScrollArea::vertical().max_height(rows * row).show(ui, |ui| {
                         super::chat::text_with_links(ui, p, world, &n.body, &n.name_links, 12.0, p.ink);
                     });
                 } else {
@@ -644,9 +667,18 @@ pub(super) fn card(
                 }
                 // ScriptQuestionCaution: Deny is the default, Allow access
                 // a plain choice beside it
+                // (FSPermissionDebitDefaultDeny off: Allow access first, the
+                // expected answer, as the form's order gives it)
                 Data::Permissions { caution: Some(_), .. } => {
-                    buttons.push((aurora_i18n::tr!("ui-notifications-deny").into(), Response::Decline, true));
-                    buttons.push((aurora_i18n::tr!("ui-notifications-allow-access").into(), Response::Accept, false));
+                    let deny = (aurora_i18n::tr!("ui-notifications-deny").to_owned(), Response::Decline);
+                    let allow = (aurora_i18n::tr!("ui-notifications-allow-access").to_owned(), Response::Accept);
+                    let (first, second) = if options(ui.ctx()).debit_default_deny {
+                        (deny, allow)
+                    } else {
+                        (allow, deny)
+                    };
+                    buttons.push((first.0, first.1, true));
+                    buttons.push((second.0, second.1, false));
                 }
                 Data::Permissions { .. } => {
                     buttons.push((aurora_i18n::tr!("ui-notifications-allow").into(), Response::Accept, true));
@@ -692,7 +724,9 @@ pub(super) fn card(
                             if button_sized(ui, p, aurora_i18n::tr!("common-ignore"), false, Some(Vec2::new(72.0, 22.0))).clicked() {
                                 out = Some(Response::Dismiss);
                             }
+                            // FSRemoveScriptBlockButton; never for our own object
                             if !own_object
+                                && !options(ui.ctx()).hide_script_block_button
                                 && button_sized(ui, p, aurora_i18n::tr!("common-block"), false, Some(Vec2::new(72.0, 22.0))).clicked()
                             {
                                 out = Some(Response::Block);
@@ -874,7 +908,7 @@ fn update_toasts(list: &mut Notifications, nui: &mut NotifUi, now: f64, message_
     // the conversation in sight)
     for n in list.list.iter().filter(|n| n.id > nui.last_seen && !n.stays_until_answered()) {
         if !nui.open && !hidden && !n.read && !n.quiet && (!dnd || super::notification_center::dnd_shows(n)) {
-            nui.toasts.push((n.id, now + toast_seconds(n, message_seconds)));
+            nui.toasts.push((n.id, now + toast_seconds(n, message_seconds, &list.options)));
         }
     }
     if let Some(last) = list.list.iter().map(|n| n.id).max() {
@@ -924,6 +958,8 @@ fn shown_toasts(list: &Notifications, nui: &NotifUi, dnd: bool) -> (Vec<u64>, us
         .iter()
         .filter_map(|(id, _)| list.list.iter().find(|n| n.id == *id))
         .filter(|n| !dnd || super::notification_center::dnd_shows(n))
+        // the script menus drawn in their corner (`dialogs_apart`)
+        .filter(|n| !dialog_apart(n, &list.options))
         .map(|n| (n.id, n.stays_until_answered()))
         .collect();
     let mut keep: Vec<u64> = drawn.iter().rev().filter(|t| t.1).take(MAX_TOASTS).map(|t| t.0).collect();
@@ -952,7 +988,9 @@ pub fn show(
     // Firestorm's toasts keep their own place: the islands' column is for
     // Aurora's center only (not kept for a later frame of it)
     nui.column = None;
+    share_options(ctx, list.options);
     update_toasts(list, nui, now, env.message_seconds, env.hidden, dnd);
+    dialogs_apart(ctx, p, icons, world, list, nui, env, false, &mut answers);
 
     let anchor = nui.anchor.unwrap_or(egui::pos2(8.0, 60.0));
     if nui.open {
@@ -1060,12 +1098,20 @@ pub fn show(
         }
     } else if !nui.toasts.is_empty() && !env.hidden {
         let screen = ctx.content_rect();
+        // FSShowToastsInFront: in front of the windows, or behind them
+        let order = if list.options.toasts_in_front {
+            egui::Order::Foreground
+        } else {
+            egui::Order::Background
+        };
+        let gap = list.options.toast_gap;
         egui::Area::new(egui::Id::unique("notification_toasts"))
             .fade_in(false)
-            .order(egui::Order::Foreground)
+            .order(order)
             .anchor(egui::Align2::RIGHT_TOP, Vec2::new(-10.0, anchor.y.min(screen.height()) + 6.0))
             .show(ctx, |ui| {
-                ui.spacing_mut().item_spacing.y = 6.0;
+                // ToastGap
+                ui.spacing_mut().item_spacing.y = gap;
                 let (ids, behind) = shown_toasts(list, nui, dnd);
                 for id in ids.into_iter().rev() {
                     if let Some(n) = list.list.iter_mut().find(|n| n.id == id) {
@@ -1112,6 +1158,99 @@ pub fn show(
         ctx.request_repaint_after(std::time::Duration::from_millis(500));
     }
     (answers, asks)
+}
+
+/// ScriptDialogsPosition: the script menus and text boxes waiting for an
+/// answer, in their corner of the room the bars leave, apart from the
+/// other notifications (both styles; `aurora`: Aurora's cards). The newest
+/// three show; the others wait behind "+ N more", which opens the list.
+/// Nothing while the list is open (it shows them) or the view stays clear.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn dialogs_apart(
+    ctx: &egui::Context,
+    p: &Palette,
+    icons: &Icons,
+    world: &World,
+    list: &mut Notifications,
+    nui: &mut NotifUi,
+    env: &mut ToastEnv<'_>,
+    aurora: bool,
+    answers: &mut Vec<(u64, Response)>,
+) {
+    let o = list.options;
+    let Some(corner) = o.script_dialog_position.corner() else {
+        return;
+    };
+    nui.hidden.retain(|id| list.list.iter().any(|n| n.id == *id));
+    if nui.open || env.hidden {
+        return;
+    }
+    let ids: Vec<u64> = list
+        .list
+        .iter()
+        .filter(|n| dialog_apart(n, &o) && !n.quiet && !nui.hidden.contains(&n.id))
+        .map(|n| n.id)
+        .collect();
+    if ids.is_empty() {
+        return;
+    }
+    let behind = ids.len().saturating_sub(MAX_TOASTS);
+    let room = super::notification_center::presence::room(super::layout::work_area(ctx), env.classic_bars);
+    let at = egui::pos2(
+        if corner.x() == egui::Align::Min {
+            room.left()
+        } else {
+            room.right()
+        },
+        if corner.y() == egui::Align::Min {
+            room.top()
+        } else {
+            room.bottom()
+        },
+    );
+    egui::Area::new(egui::Id::unique("notification_script_dialogs"))
+        .fade_in(false)
+        .order(egui::Order::Foreground)
+        .pivot(corner)
+        .fixed_pos(at)
+        .show(ctx, |ui| {
+            ui.set_max_width(WIDTH);
+            ui.spacing_mut().item_spacing.y = o.toast_gap;
+            // newest on top, as the toasts
+            for id in ids.iter().rev().take(MAX_TOASTS) {
+                let Some(n) = list.list.iter_mut().find(|n| n.id == *id) else {
+                    continue;
+                };
+                if close_script_prompt(ctx, n) {
+                    answers.push((*id, Response::Dismiss));
+                    continue;
+                }
+                match card(ui, p, icons, world, env.images, &mut nui.wanted_images, n, true, aurora) {
+                    // a text box's cross hides it in the list, as its toast's
+                    Some(Response::Dismiss) if !matches!(n.data, Data::Dialog { .. }) => {
+                        nui.hidden.insert(*id);
+                    }
+                    Some(r) => answers.push((*id, r)),
+                    None => {}
+                }
+            }
+            if behind > 0 {
+                let more = ui
+                    .add(
+                        egui::Label::new(
+                            RichText::new(aurora_i18n::tr!("ui-notifications-more", count = behind))
+                                .size(12.0)
+                                .strong()
+                                .color(p.violet_light),
+                        )
+                        .sense(egui::Sense::click()),
+                    )
+                    .on_hover_cursor(egui::CursorIcon::PointingHand);
+                if more.clicked() {
+                    nui.open = true;
+                }
+            }
+        });
 }
 
 fn script_rows(count: usize) -> impl Iterator<Item = std::ops::Range<usize>> {
@@ -1352,6 +1491,137 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The texts a card draws (with where), after a few frames, with the
+    /// options shared as `show` shares them.
+    fn card_texts(data: Data, o: NotificationOptions, aurora: bool) -> Vec<(String, egui::Pos2)> {
+        let ctx = egui::Context::default();
+        let theme = crate::theme::Theme::default();
+        theme.apply(&ctx, 1.0);
+        let p = theme.palette();
+        let icons = Icons::default();
+        let world = World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
+        let mut list = Notifications::default();
+        list.push(Kind::Script, "Box", "A question", data);
+        let mut texts = Vec::new();
+        for _ in 0..3 {
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 900.0))),
+                    ..Default::default()
+                },
+                |ui| {
+                    share_options(ui.ctx(), o);
+                    ui.set_width(390.0);
+                    card(
+                        ui,
+                        &p,
+                        &icons,
+                        &world,
+                        &HashMap::new(),
+                        &mut HashSet::new(),
+                        &mut list.list[0],
+                        !aurora,
+                        aurora,
+                    );
+                },
+            );
+            texts = output
+                .shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::Shape::Text(t) => Some((t.galley.text().to_owned(), t.pos)),
+                    _ => None,
+                })
+                .collect();
+        }
+        texts
+    }
+
+    #[test]
+    fn the_block_button_of_script_dialogs_can_be_removed_in_both_styles() {
+        let dialog = || Data::Dialog {
+            sender: ([127, 0, 0, 1], 13000).into(),
+            object: Uuid::from_u128(3),
+            object_name: "Box".into(),
+            own_object: false,
+            channel: 5,
+            buttons: vec!["Yes".into()],
+        };
+        let block = aurora_i18n::tr!("common-block");
+        for aurora in [false, true] {
+            let shown = card_texts(dialog(), NotificationOptions::default(), aurora);
+            assert!(shown.iter().any(|(t, _)| t == block), "aurora={aurora}");
+            let hidden = NotificationOptions {
+                hide_script_block_button: true,
+                ..NotificationOptions::default()
+            };
+            let shown = card_texts(dialog(), hidden, aurora);
+            assert!(!shown.iter().any(|(t, _)| t == block), "aurora={aurora}");
+            assert!(shown.iter().any(|(t, _)| t == "Yes"));
+        }
+    }
+
+    #[test]
+    fn the_debit_question_puts_deny_first_unless_asked_otherwise() {
+        let caution = || Data::Permissions {
+            task: Uuid::from_u128(3),
+            item: Uuid::from_u128(4),
+            questions: 0x2,
+            region: 0,
+            experience: None,
+            caution: Some(crate::world::notifications::CautionPrompt {
+                object_name: "Vendor".into(),
+                owner_name: "Jane".into(),
+            }),
+        };
+        let (deny, allow) = (
+            aurora_i18n::tr!("ui-notifications-deny"),
+            aurora_i18n::tr!("ui-notifications-allow-access"),
+        );
+        let x =
+            |texts: &[(String, egui::Pos2)], label: &str| texts.iter().find(|(t, _)| t == label).map(|(_, p)| p.x).expect("button shown");
+        for aurora in [false, true] {
+            let t = card_texts(caution(), NotificationOptions::default(), aurora);
+            assert!(x(&t, deny) < x(&t, allow), "aurora={aurora}");
+            let allow_first = NotificationOptions {
+                debit_default_deny: false,
+                ..NotificationOptions::default()
+            };
+            let t = card_texts(caution(), allow_first, aurora);
+            assert!(x(&t, allow) < x(&t, deny), "aurora={aurora}");
+        }
+    }
+
+    #[test]
+    fn toast_times_follow_the_options_and_corner_dialogs_leave_the_stack() {
+        let mut list = Notifications::default();
+        let info = list.push(Kind::Info, "Info", "", Data::None);
+        let menu = list.push(
+            Kind::Script,
+            "Box",
+            "Pick",
+            Data::Dialog {
+                sender: ([127, 0, 0, 1], 13000).into(),
+                object: Uuid::from_u128(3),
+                object_name: "Box".into(),
+                own_object: false,
+                channel: 5,
+                buttons: vec!["OK".into()],
+            },
+        );
+        list.options.info_toast_seconds = 2.0;
+        let n = list.list.iter().find(|n| n.id == info).expect("info");
+        assert_eq!(toast_seconds(n, 30.0, &list.options), 2.0);
+        let mut nui = NotifUi::default();
+        update_toasts(&mut list, &mut nui, 0.0, 30.0, false, false);
+        assert_eq!(shown_toasts(&list, &nui, false).0, vec![info, menu]);
+        list.options.script_dialog_position = crate::settings::notification_options::DialogPosition::BottomLeft;
+        assert_eq!(shown_toasts(&list, &nui, false).0, vec![info]);
+        // past its time the information leaves; the menu waits for its answer
+        update_toasts(&mut list, &mut nui, 2.5, 30.0, false, false);
+        assert!(nui.toasts.iter().all(|(id, _)| *id == menu));
     }
 
     const JANE: Uuid = Uuid::from_u128(2);
@@ -1663,8 +1933,9 @@ mod tests {
             vec![friend, message, toast_only]
         );
         assert_eq!(list.unread(), 1, "the toast alone is not counted");
-        // the friend's toast ends after TOAST_TIP, the messages' after 30 s
-        update_toasts(&mut list, &mut nui, TOAST_TIP + 1.0, 30.0, false, false);
+        // the friend's toast ends after its tip time, the messages' after 30 s
+        let tip = f64::from(list.options.tip_toast_seconds);
+        update_toasts(&mut list, &mut nui, tip + 1.0, 30.0, false, false);
         assert!(!list.list.iter().any(|n| n.id == friend));
         assert!(list.list.iter().any(|n| n.id == message));
         update_toasts(&mut list, &mut nui, 31.0, 30.0, false, false);
@@ -1732,7 +2003,8 @@ mod tests {
         // the newest three scripted windows drawn, the rest behind
         assert_eq!(shown_toasts(&list, &nui, false), (windows[1..].to_vec(), 4));
         // long after: only they are left
-        update_toasts(&mut list, &mut nui, TOAST_OFFER * 4.0, 30.0, false, false);
+        let offer = f64::from(list.options.offer_toast_seconds);
+        update_toasts(&mut list, &mut nui, offer * 4.0, 30.0, false, false);
         assert_eq!(ids(&nui), windows);
         // the list opened (everything read), then closed: back
         nui.toasts.clear();

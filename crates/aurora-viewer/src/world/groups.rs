@@ -775,6 +775,7 @@ impl World {
             }
             if self.group_chat_unwanted(&session) {
                 log::info!("group chat blocked: {}", self.session_title(&session));
+                self.report_muted_group_chat(session);
                 self.discard_restoring_group(session);
                 self.groups.im(inv.from, dialog::SESSION_LEAVE, session, String::new());
                 return;
