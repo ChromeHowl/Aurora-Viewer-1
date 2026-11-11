@@ -264,7 +264,9 @@ fn highlights_are_remembered_by_line() {
     assert_eq!(highlight(time, source), None);
     mark(time, source, [9, 9, 9, 255]);
     assert_eq!(highlight(time, source), Some([9, 9, 9, 255]));
-    assert_eq!(highlight(time + std::time::Duration::from_nanos(1), source), None);
+    // another line a microsecond later (Windows keeps a SystemTime in steps
+    // of 100 ns: a nanosecond later would be the same time there)
+    assert_eq!(highlight(time + std::time::Duration::from_micros(1), source), None);
 }
 
 #[test]
