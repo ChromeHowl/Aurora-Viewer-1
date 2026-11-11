@@ -2,8 +2,6 @@
 //! (`settings/notification_options.rs`), each where its Legacy Viewer
 //! source decides it:
 //!
-//! - how many script dialogs an object keeps (ScriptDialogLimitations,
-//!   LLScriptFloaterManager::onAddNotification, indra/newview/llscriptfloater.cpp);
 //! - a friend's online / offline line in an open conversation that makes
 //!   its tab flash (FSIMChatFlashOnFriendStatusChange,
 //!   FSFloaterIMContainer::onNewMessageReceived);
@@ -23,35 +21,8 @@
 use super::notice_topics::Topic;
 use super::notifications::{Data, Kind};
 use super::{ChatKind, ChatLine, Origin, World};
-use crate::settings::notification_options::DialogLimit;
 use std::time::{Duration, Instant, SystemTime};
 use uuid::Uuid;
-
-/// Where a script dialog's object stands, for ScriptDialogLimitations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Source {
-    /// In the world, or unknown (the Legacy Viewer's object not found).
-    World,
-    /// Worn on the body (getAttachmentItemID not null).
-    Attachment,
-    /// Worn on a HUD point (isHUDAttachment).
-    Hud,
-}
-
-/// Whether a new dialog of an object (from `source`, on `channel`) closes
-/// an older dialog of the same object on `old_channel`.
-pub fn replaces(limit: DialogLimit, source: Source, channel: i32, old_channel: i32) -> bool {
-    let per_channel = match limit {
-        DialogLimit::Unconstrained => return false,
-        DialogLimit::UnconstrainedHuds if source == Source::Hud => return false,
-        DialogLimit::PerChannel => true,
-        // a HUD is an attachment too
-        DialogLimit::PerChannelAttachments => source != Source::World,
-        DialogLimit::PerChannelHuds => source == Source::Hud,
-        DialogLimit::PerObject | DialogLimit::UnconstrainedHuds => false,
-    };
-    !per_channel || channel == old_channel
-}
 
 /// OFFER_THROTTLE_TIME: the throttle's window.
 pub const OFFER_THROTTLE_TIME: Duration = Duration::from_secs(10);
@@ -109,34 +80,6 @@ pub fn is_object_returned(dialog: u8, message: &str) -> bool {
 const AT_LANDMARK: i32 = 3;
 
 impl World {
-    /// Where a script dialog's object stands: the attachment point of its
-    /// linkset, if worn.
-    fn dialog_source(&self, object: &Uuid) -> Source {
-        let point = self.objects.index_of_uuid(object).and_then(|idx| self.objects.worn_point(idx));
-        match point {
-            Some(31..=38) => Source::Hud,
-            Some(_) => Source::Attachment,
-            None => Source::World,
-        }
-    }
-
-    /// Before a new script dialog of `object` on `channel` is listed: the
-    /// older ones it replaces leave, unanswered, as the Legacy Viewer
-    /// closes their floaters (removeNotification, no reply sent).
-    pub(super) fn limit_script_dialogs(&mut self, object: Uuid, channel: i32) {
-        let limit = self.notifications.options.script_dialog_limit;
-        if limit == DialogLimit::Unconstrained {
-            return;
-        }
-        let source = self.dialog_source(&object);
-        self.notifications.list.retain(|n| match n.data {
-            Data::Dialog { object: o, channel: c, .. } | Data::TextBox { object: o, channel: c, .. } => {
-                o != object || !replaces(limit, source, channel, c)
-            }
-            _ => true,
-        });
-    }
-
     /// A friend's online / offline line in their open conversation: unread
     /// (its tab flashes) only with the option, and never for a friend the
     /// user hides.
@@ -231,31 +174,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn each_limit_replaces_what_the_legacy_viewer_closes() {
-        use DialogLimit::*;
-        use Source::*;
-        let cases = [
-            // (limit, source, same channel, other channel)
-            (PerObject, World, true, true),
-            (PerObject, Hud, true, true),
-            (PerChannel, World, true, false),
-            (PerChannel, Hud, true, false),
-            (PerChannelAttachments, World, true, true),
-            (PerChannelAttachments, Attachment, true, false),
-            (PerChannelAttachments, Hud, true, false),
-            (PerChannelHuds, Attachment, true, true),
-            (PerChannelHuds, Hud, true, false),
-            (UnconstrainedHuds, Hud, false, false),
-            (UnconstrainedHuds, Attachment, true, true),
-            (Unconstrained, World, false, false),
-        ];
-        for (limit, source, same, other) in cases {
-            assert_eq!(replaces(limit, source, 5, 5), same, "{limit:?} {source:?} same channel");
-            assert_eq!(replaces(limit, source, 5, 7), other, "{limit:?} {source:?} other channel");
-        }
-    }
-
-    #[test]
     fn the_throttle_holds_past_the_count_and_says_it_once_per_window() {
         let mut t = OfferThrottle::default();
         let t0 = Instant::now();
@@ -279,35 +197,6 @@ mod tests {
 
     fn world() -> World {
         World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()))
-    }
-
-    fn dialog(object: u128, channel: i32) -> Data {
-        Data::Dialog {
-            sender: std::net::SocketAddr::from(([127, 0, 0, 1], 0)),
-            object: Uuid::from_u128(object),
-            object_name: "Box".into(),
-            own_object: false,
-            channel,
-            buttons: vec!["OK".into()],
-        }
-    }
-
-    #[test]
-    fn a_new_dialog_closes_the_older_one_of_its_object_and_channel() {
-        let mut w = world();
-        let a = w.notifications.push(Kind::Script, "Box", "a", dialog(7, 1));
-        let b = w.notifications.push(Kind::Script, "Box", "b", dialog(7, 2));
-        let c = w.notifications.push(Kind::Script, "Other", "c", dialog(8, 1));
-        w.limit_script_dialogs(Uuid::from_u128(7), 1);
-        let ids: Vec<u64> = w.notifications.list.iter().map(|n| n.id).collect();
-        assert_eq!(ids, [b, c], "{a} closed");
-        w.notifications.options.script_dialog_limit = DialogLimit::PerObject;
-        w.limit_script_dialogs(Uuid::from_u128(7), 9);
-        let ids: Vec<u64> = w.notifications.list.iter().map(|n| n.id).collect();
-        assert_eq!(ids, [c]);
-        w.notifications.options.script_dialog_limit = DialogLimit::Unconstrained;
-        w.limit_script_dialogs(Uuid::from_u128(8), 1);
-        assert_eq!(w.notifications.list.len(), 1);
     }
 
     #[test]

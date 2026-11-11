@@ -1,5 +1,5 @@
 //! Notification and dialog options of Preferences › Chat › Notifications:
-//! the script dialogs (ScriptDialogLimitations, ScriptDialogsPosition,
+//! the script dialogs (ScriptDialogsPosition,
 //! FSRowsPerScriptDialog, FSRemoveScriptBlockButton), the conversations
 //! (FSIMChatFlashOnFriendStatusChange, FSReportMutedGroupChat,
 //! FSOpenIMContainerOnOfflineMessage), the Legacy toasts' timing, gap and
@@ -17,44 +17,29 @@
 
 use serde::{Deserialize, Serialize};
 
-/// How many script dialogs an object may keep open at once
-/// (ScriptDialogLimitations, LLScriptFloaterManager::onAddNotification):
-/// a new dialog closes the older one it matches.
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub enum DialogLimit {
-    /// One per object (SCRIPT_PER_OBJECT, 0).
+/// The port's former "Script dialogs per object" choice, by its saved
+/// name: read once into `Settings::script_dialog_limit`
+/// (`world/script_dialog_limit.rs`), which has the same six choices.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub(crate) enum FormerDialogLimit {
     PerObject,
-    /// One per object and channel (SCRIPT_PER_CHANNEL, 1, the default).
-    #[default]
     PerChannel,
-    /// One per channel for attachments, one per object for the rest (2).
     PerChannelAttachments,
-    /// One per channel for HUDs, one per object for the rest (3).
     PerChannelHuds,
-    /// No limit for HUDs, one per object for the rest (4).
     UnconstrainedHuds,
-    /// No limit at all (5).
     Unconstrained,
 }
 
-impl DialogLimit {
-    pub const ALL: [DialogLimit; 6] = [
-        DialogLimit::PerObject,
-        DialogLimit::PerChannel,
-        DialogLimit::PerChannelAttachments,
-        DialogLimit::PerChannelHuds,
-        DialogLimit::UnconstrainedHuds,
-        DialogLimit::Unconstrained,
-    ];
-
-    pub fn label(self) -> &'static str {
+impl FormerDialogLimit {
+    pub(crate) fn limit(self) -> crate::world::script_dialog_limit::Limit {
+        use crate::world::script_dialog_limit::Limit;
         match self {
-            Self::PerObject => aurora_i18n::tr!("b5c-limit-per-object"),
-            Self::PerChannel => aurora_i18n::tr!("b5c-limit-per-channel"),
-            Self::PerChannelAttachments => aurora_i18n::tr!("b5c-limit-per-channel-attachments"),
-            Self::PerChannelHuds => aurora_i18n::tr!("b5c-limit-per-channel-huds"),
-            Self::UnconstrainedHuds => aurora_i18n::tr!("b5c-limit-unconstrained-huds"),
-            Self::Unconstrained => aurora_i18n::tr!("b5c-limit-unconstrained"),
+            Self::PerObject => Limit::PerObject,
+            Self::PerChannel => Limit::PerChannel,
+            Self::PerChannelAttachments => Limit::PerChannelForAttachments,
+            Self::PerChannelHuds => Limit::PerChannelForHuds,
+            Self::UnconstrainedHuds => Limit::UnlimitedForHuds,
+            Self::Unconstrained => Limit::Unlimited,
         }
     }
 }
@@ -130,8 +115,10 @@ pub const THROTTLE_COUNT: std::ops::RangeInclusive<u32> = 1..=50;
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct NotificationOptions {
-    /// ScriptDialogLimitations (one per channel).
-    pub script_dialog_limit: DialogLimit,
+    /// The former ScriptDialogLimitations of this group, read once
+    /// (`FormerDialogLimit`).
+    #[serde(rename = "script_dialog_limit", skip_serializing)]
+    pub(crate) former_script_dialog_limit: Option<FormerDialogLimit>,
     /// ScriptDialogsPosition.
     pub script_dialog_position: DialogPosition,
     /// Lines of a script dialog's text shown before it scrolls
@@ -206,7 +193,7 @@ pub struct NotificationOptions {
 impl Default for NotificationOptions {
     fn default() -> Self {
         NotificationOptions {
-            script_dialog_limit: DialogLimit::PerChannel,
+            former_script_dialog_limit: None,
             script_dialog_position: DialogPosition::WithNotifications,
             script_dialog_rows: 20,
             hide_script_block_button: false,
@@ -288,7 +275,7 @@ mod tests {
         assert_eq!(s.notification_options, NotificationOptions::default());
         let o: NotificationOptions = serde_json::from_str(r#"{"hide_script_block_button":true}"#).expect("partial");
         assert!(o.hide_script_block_button);
-        assert_eq!(o.script_dialog_limit, DialogLimit::PerChannel);
+        assert_eq!(o.former_script_dialog_limit, None);
         assert!(o.debit_default_deny);
     }
 
@@ -355,6 +342,5 @@ mod tests {
         assert_eq!(DialogPosition::WithNotifications.corner(), None);
         assert_eq!(DialogPosition::BottomLeft.corner(), Some(egui::Align2::LEFT_BOTTOM));
         assert_eq!(DialogPosition::ALL.len(), 5);
-        assert_eq!(DialogLimit::ALL.len(), 6);
     }
 }

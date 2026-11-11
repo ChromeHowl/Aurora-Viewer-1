@@ -855,6 +855,8 @@ fn notifications(cx: &mut Cx) {
             &field!(script_dialog_limit),
             &choices,
         );
+        // the Legacy Viewer's other script dialog options
+        super::notification_options::script_dialog_rows(cx);
     });
     cx.group(tr!("ui-options-attention"), |cx| {
         cx.toggle(

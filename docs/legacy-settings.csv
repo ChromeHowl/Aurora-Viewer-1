@@ -1961,7 +1961,7 @@ SceneLoadRearPixelThreshold,F32,unreviewed,,,"in pixels, all objects out of view
 SceneLoadingMonitorEnabled,Boolean,unreviewed,,,Enabled scene loading monitor if set
 SceneLoadingMonitorPixelDiffThreshold,F32,unreviewed,,,Amount of pixels changed required to consider the scene as still loading (square root of fraction of pixels on screen)
 SceneLoadingMonitorSampleTime,F32,unreviewed,,,Time between screen samples when monitor scene load (seconds)
-ScriptDialogLimitations,U32,in-aurora,,"ported (2026-11), `settings/notification_options.rs`","Limits amount of dialogs per script (0 - per object, 1 - per channel, 2 - per channel for attachments, 3 - per channel for HUDs, 4 - unconst"
+ScriptDialogLimitations,U32,in-aurora,,"`script_dialog_limit` (upstream #3332)","Limits amount of dialogs per script (0 - per object, 1 - per channel, 2 - per channel for attachments, 3 - per channel for HUDs, 4 - unconst"
 ScriptDialogsPosition,S32,in-aurora,,"ported (2026-11), `settings/notification_options.rs`","Holds the position where script llDialog floaters will show up. 1 = docked to chiclet, 2 = top left, 3 = top right, 4 = bottom left, 5 = bot"
 ScriptEditorDisableSyntaxHighlight,Boolean,unreviewed,,,Disable syntax highlighting in script editor for performance testing
 ScriptHelpFollowsCursor,Boolean,unreviewed,,,Scripting help window updates contents based on script editor contents under text cursor

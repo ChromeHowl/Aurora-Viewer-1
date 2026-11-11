@@ -5,72 +5,69 @@
 
 use super::super::cx::{Cx, field};
 use crate::settings::notification_options::{
-    BOTTOM_MARGIN, DIALOG_ROWS, DialogLimit, DialogPosition, FADE_SECONDS, GAP, INFO_SECONDS, OFFER_SECONDS, OVERFLOW_HEIGHT,
+    BOTTOM_MARGIN, DIALOG_ROWS, DialogPosition, FADE_SECONDS, GAP, INFO_SECONDS, OFFER_SECONDS, OVERFLOW_HEIGHT,
     THROTTLE_COUNT, TIP_SECONDS,
 };
 
+/// The script dialogs' rows after "Script dialogs per object", in the
+/// Script dialogs group of Preferences › Chat › Notifications.
+pub fn script_dialog_rows(cx: &mut Cx) {
+    use aurora_i18n::tr;
+    let places: Vec<(DialogPosition, &str)> = DialogPosition::ALL.iter().map(|at| (*at, at.label())).collect();
+    cx.combo(
+        tr!("b5c-dialog-position"),
+        tr!("b5c-dialog-position-hint"),
+        &field!(notification_options.script_dialog_position),
+        &places,
+    );
+    cx.slider(
+        tr!("b5c-dialog-rows"),
+        tr!("b5c-dialog-rows-hint"),
+        &field!(notification_options.script_dialog_rows),
+        DIALOG_ROWS,
+        "",
+    );
+    // FSAnimatedScriptDialogs: only in a top corner (LLFloaterPreference
+    // enables it for those positions alone)
+    let top =
+        cx.s.notification_options
+            .script_dialog_position
+            .corner()
+            .is_some_and(|c| c.y() == egui::Align::Min);
+    cx.greyed(!top);
+    cx.toggle(
+        tr!("l4-animated-dialogs"),
+        tr!("l4-animated-dialogs-hint"),
+        &field!(notification_options.animated_script_dialogs),
+    );
+    let bottom =
+        cx.s.notification_options
+            .script_dialog_position
+            .corner()
+            .is_some_and(|c| c.y() == egui::Align::Max);
+    cx.greyed(!bottom);
+    cx.slider(
+        tr!("l4-bottom-margin"),
+        tr!("l4-bottom-margin-hint"),
+        &field!(notification_options.toast_bottom_margin),
+        BOTTOM_MARGIN,
+        " px",
+    );
+    cx.greyed(false);
+    cx.toggle(
+        tr!("b5c-hide-block"),
+        tr!("b5c-hide-block-hint"),
+        &field!(notification_options.hide_script_block_button),
+    );
+    cx.toggle(
+        tr!("b5c-debit-deny"),
+        tr!("b5c-debit-deny-hint"),
+        &field!(notification_options.debit_default_deny),
+    );
+}
+
 pub fn groups(cx: &mut Cx) {
     use aurora_i18n::tr;
-    cx.group(tr!("b5c-script-dialogs"), |cx| {
-        let limits: Vec<(DialogLimit, &str)> = DialogLimit::ALL.iter().map(|l| (*l, l.label())).collect();
-        cx.combo(
-            tr!("b5c-dialog-limit"),
-            tr!("b5c-dialog-limit-hint"),
-            &field!(notification_options.script_dialog_limit),
-            &limits,
-        );
-        let places: Vec<(DialogPosition, &str)> = DialogPosition::ALL.iter().map(|at| (*at, at.label())).collect();
-        cx.combo(
-            tr!("b5c-dialog-position"),
-            tr!("b5c-dialog-position-hint"),
-            &field!(notification_options.script_dialog_position),
-            &places,
-        );
-        cx.slider(
-            tr!("b5c-dialog-rows"),
-            tr!("b5c-dialog-rows-hint"),
-            &field!(notification_options.script_dialog_rows),
-            DIALOG_ROWS,
-            "",
-        );
-        // FSAnimatedScriptDialogs: only in a top corner (LLFloaterPreference
-        // enables it for those positions alone)
-        let top =
-            cx.s.notification_options
-                .script_dialog_position
-                .corner()
-                .is_some_and(|c| c.y() == egui::Align::Min);
-        cx.greyed(!top);
-        cx.toggle(
-            tr!("l4-animated-dialogs"),
-            tr!("l4-animated-dialogs-hint"),
-            &field!(notification_options.animated_script_dialogs),
-        );
-        let bottom =
-            cx.s.notification_options
-                .script_dialog_position
-                .corner()
-                .is_some_and(|c| c.y() == egui::Align::Max);
-        cx.greyed(!bottom);
-        cx.slider(
-            tr!("l4-bottom-margin"),
-            tr!("l4-bottom-margin-hint"),
-            &field!(notification_options.toast_bottom_margin),
-            BOTTOM_MARGIN,
-            " px",
-        );
-        cx.greyed(false);
-        cx.toggle(
-            tr!("b5c-hide-block"),
-            tr!("b5c-hide-block-hint"),
-            &field!(notification_options.hide_script_block_button),
-        );
-        cx.toggle(
-            tr!("b5c-debit-deny"),
-            tr!("b5c-debit-deny-hint"),
-            &field!(notification_options.debit_default_deny),
-        );
-    });
     cx.group(tr!("b5c-notices"), |cx| {
         cx.toggle(
             tr!("b5c-flash-friend-status"),

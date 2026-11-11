@@ -2864,6 +2864,10 @@ impl Settings {
         if let Some(on) = self.chat_display.former_play_chat_anim.take() {
             self.play_chat_anim = on;
         }
+        // the port's script dialogs per object are upstream's, same choices
+        if let Some(former) = self.notification_options.former_script_dialog_limit.take() {
+            self.script_dialog_limit = former.limit();
+        }
         // the port's "Always allow cancelling a teleport" is upstream's
         // "Always show the teleport Cancel button" (FSAlwaysShowTPCancel)
         if self.teleport_extras.former_always_cancel.take() == Some(true) {
