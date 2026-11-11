@@ -14,7 +14,7 @@ mod debug;
 mod dialogs;
 mod editing;
 mod experiences;
-mod files;
+pub(crate) mod files;
 mod focus;
 mod folding;
 mod indent;

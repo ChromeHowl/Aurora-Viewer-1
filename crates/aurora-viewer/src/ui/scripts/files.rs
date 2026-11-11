@@ -3,12 +3,13 @@
 
 use aurora_net::scripts::MAX_SOURCE;
 use std::{
+    collections::HashMap,
     fs,
     io::{Read, Write},
-    path::Path,
+    path::{Path, PathBuf},
     sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc,
     },
     time::Duration,
@@ -157,17 +158,82 @@ fn command(text: &str, path: &Path) -> Result<(String, Vec<String>), String> {
 /// the umask's 0644) and renaming it over ours. Windows' temp folder is
 /// already per user.
 fn write_private(directory: &Path, path: &Path, source: &str) -> std::io::Result<()> {
-    let mut file = fs::OpenOptions::new();
-    file.write(true).create_new(true);
+    create_private_dir(directory)?;
+    write_private_file(path, source, true)
+}
+
+/// A new folder readable by its owner only; one already there (planted by
+/// another account) is refused.
+fn create_private_dir(directory: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
-        use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
-        fs::DirBuilder::new().mode(0o700).create(directory)?;
-        file.mode(0o600);
+        use std::os::unix::fs::DirBuilderExt;
+        fs::DirBuilder::new().mode(0o700).create(directory)
     }
     #[cfg(not(unix))]
-    fs::create_dir(directory)?;
+    fs::create_dir(directory)
+}
+
+/// The script written into a private folder, readable by its owner only:
+/// a new file, or (`new` false) the file of the same script again.
+fn write_private_file(path: &Path, source: &str, new: bool) -> std::io::Result<()> {
+    let mut file = fs::OpenOptions::new();
+    file.write(true);
+    if new {
+        file.create_new(true);
+    } else {
+        file.create(true).truncate(true);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        file.mode(0o600);
+    }
     file.open(path)?.write_all(source.as_bytes())
+}
+
+/// The session's private folder of the files given to external editors,
+/// made on the first use: the scripts lie in it directly, as in the Legacy
+/// Viewer's temp folder, so that the script editor link's `script.list`
+/// can name it (`temp_dir`) and an editor find a script by its id there.
+/// A fresh name each session, refused if it exists, keeps other accounts
+/// out of it.
+pub(crate) fn session_dir() -> std::io::Result<PathBuf> {
+    static DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
+    let mut dir = DIR.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(dir) = dir.as_ref() {
+        return Ok(dir.clone());
+    }
+    let made = std::env::temp_dir().join(format!("AuroraScripts-{}", uuid::Uuid::new_v4()));
+    create_private_dir(&made)?;
+    *dir = Some(made.clone());
+    Ok(made)
+}
+
+/// The external editing sessions of each file: the last one to start owns
+/// the file and removes it when it ends, so that a script opened again
+/// before the previous watch stops keeps its file.
+fn claim(path: &Path, owner: Option<u64>) -> u64 {
+    static OWNERS: Mutex<Option<HashMap<PathBuf, u64>>> = Mutex::new(None);
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    let mut owners = OWNERS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let owners = owners.get_or_insert_with(HashMap::new);
+    match owner {
+        None => {
+            let id = NEXT.fetch_add(1, Ordering::Relaxed);
+            owners.insert(path.to_path_buf(), id);
+            id
+        }
+        // releasing: still the owner? (1 yes, 0 no)
+        Some(id) => {
+            if owners.get(path) == Some(&id) {
+                owners.remove(path);
+                1
+            } else {
+                0
+            }
+        }
+    }
 }
 
 pub(super) struct Watch {
@@ -189,11 +255,18 @@ pub(super) fn external(
 ) -> Job {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let directory = std::env::temp_dir().join(format!("AuroraScript-{}", uuid::Uuid::new_v4()));
+        let directory = match session_dir() {
+            Ok(directory) => directory,
+            Err(e) => {
+                let _ = tx.send(failure(e.to_string()));
+                return;
+            }
+        };
         // The Legacy Viewer's name (getTmpFileName): the script id in it
         // tells an external editor which script the file is, for the script
         // editor link (script_ws.rs).
         let path = directory.join(crate::script_ws::protocol::file_name(&safe_name(&name), target.object, target.item));
+        let owner = claim(&path, None);
         let command_line = if command_line.trim().is_empty() {
             std::env::var("LL_SCRIPT_EDITOR").unwrap_or_default()
         } else {
@@ -201,7 +274,7 @@ pub(super) fn external(
         };
         let started = (|| -> Result<Option<std::time::SystemTime>, String> {
             let (executable, args) = command(&command_line, &path)?;
-            write_private(&directory, &path, &source).map_err(|e| e.to_string())?;
+            write_private_file(&path, &source, false).map_err(|e| e.to_string())?;
             // Capture our write before launching: even an editor that saves
             // immediately must trigger the first reload.
             let stamp = fs::metadata(&path).ok().and_then(|m| m.modified().ok());
@@ -212,8 +285,9 @@ pub(super) fn external(
             Ok(stamp) => stamp,
             Err(e) => {
                 let _ = tx.send(failure(e));
-                let _ = fs::remove_file(&path);
-                let _ = fs::remove_dir(&directory);
+                if claim(&path, Some(owner)) == 1 {
+                    let _ = fs::remove_file(&path);
+                }
                 return;
             }
         };
@@ -246,8 +320,9 @@ pub(super) fn external(
                 _ => {}
             }
         }
-        let _ = fs::remove_file(&path);
-        let _ = fs::remove_dir(&directory);
+        if claim(&path, Some(owner)) == 1 {
+            let _ = fs::remove_file(&path);
+        }
     });
     Job(rx)
 }
@@ -283,6 +358,27 @@ mod tests {
         fs::remove_dir(directory).unwrap();
     }
     #[test]
+    fn the_last_editing_session_of_a_file_removes_it() {
+        let path = Path::new("claim-test.lsl");
+        let first = claim(path, None);
+        let second = claim(path, None);
+        assert_eq!(claim(path, Some(first)), 0, "a newer session owns the file");
+        assert_eq!(claim(path, Some(second)), 1);
+        assert_eq!(claim(path, Some(second)), 0, "released once");
+    }
+
+    #[test]
+    fn the_session_folder_is_private_and_kept() {
+        let a = session_dir().unwrap();
+        assert_eq!(session_dir().unwrap(), a);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(fs::metadata(&a).unwrap().permissions().mode() & 0o777, 0o700);
+        }
+    }
+
+    #[test]
     fn external_export_is_private_and_never_reuses_a_path() {
         let directory = std::env::temp_dir().join(format!("aurora-script-export-test-{}", uuid::Uuid::new_v4()));
         let path = directory.join("source.lsl");
@@ -294,6 +390,14 @@ mod tests {
             let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
             assert_eq!(mode(&directory), 0o700);
             assert_eq!(mode(&path), 0o600);
+        }
+        // the file of the same script is written again in place
+        write_private_file(&path, "default { }", false).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "default { }");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
         }
         // A folder already there (planted by another account) is refused.
         assert!(write_private(&directory, &path, "x").is_err());

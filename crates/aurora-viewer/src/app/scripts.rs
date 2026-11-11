@@ -600,7 +600,11 @@ impl App {
                 agent_id,
                 agent_name,
                 syntax_id: crate::lsl_keywords::current_id().unwrap_or_default(),
-                temp_dir: std::env::temp_dir().to_string_lossy().into_owned(),
+                // where the external editors' files are (script.list)
+                temp_dir: crate::ui::scripts::files::session_dir()
+                    .unwrap_or_else(|_| std::env::temp_dir())
+                    .to_string_lossy()
+                    .into_owned(),
             },
             &edited,
         );
