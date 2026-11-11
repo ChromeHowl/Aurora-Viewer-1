@@ -874,15 +874,17 @@ fn toolbar_sanitize_keeps_each_command_once_over_the_three_toolbars() {
 /// once, with an embedded icon and localized labels;
 /// what Aurora runs does something, what it cannot run yet does nothing.
 #[test]
-fn toolbar_catalogue_holds_firestorm_commands_and_runs_the_ready_ones() {
+fn toolbar_catalogue_holds_legacy_commands_and_runs_the_ready_ones() {
+    // the Legacy Viewer's commands, and Aurora's Camera Path and Camera Lock
+    const COUNT: usize = 80;
     let skin = Layout::default();
     let all = catalogue(&skin);
-    assert_eq!(all.len(), 78);
-    assert_eq!(COMMANDS.len(), 78);
+    assert_eq!(all.len(), COUNT);
+    assert_eq!(COMMANDS.len(), COUNT);
     let mut ids: Vec<_> = COMMANDS.iter().map(|c| c.id).collect();
     ids.sort_unstable();
     ids.dedup();
-    assert_eq!(ids.len(), 78, "each command once");
+    assert_eq!(ids.len(), COUNT, "each command once");
     assert!(ready("texture_library"));
     assert!(ready("movelock") && ready("move_lock") && ready("movement") && ready("water_walk"));
     assert_eq!(catalogue::find("move_lock").map(|c| c.id), Some("movelock"));
