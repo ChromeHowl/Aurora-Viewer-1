@@ -346,6 +346,11 @@ impl Snapshots {
         self.job.is_some()
     }
 
+    /// A photo, not a preview, is being drawn.
+    pub(super) fn drawing_photo(&self) -> bool {
+        self.job.as_ref().is_some_and(|j| !j.purpose.quiet())
+    }
+
     /// After a GPU recovery (gpu_recovery.rs): a photo under way is given up,
     /// its frames asked of the lost renderer never come back.
     pub(super) fn gpu_lost(&mut self) {
@@ -833,6 +838,8 @@ impl App {
             let (output, factor) = (job.output, job.supersample);
             let looks = job.looks_reach.unwrap_or(0);
             let tiles = self.photo_tiles(renderer, output, factor, looks);
+            // (its parts and their band as they are now, for the honest list)
+            let guard = self.photo_kept_guard(renderer, output, factor, looks);
             log::warn!(
                 "photo: part {} of {} ({} x {}) came back black (a GPU reset, or a black part): drawn again in {} part(s)",
                 part.0,
@@ -842,6 +849,7 @@ impl App {
                 tiles.len()
             );
             if let Some(job) = self.snapshots.job.as_mut() {
+                job.effects = job.effects.replanned(tiles.len(), guard);
                 job.tiles = tiles;
                 job.next = 0;
                 job.pixels = Vec::new();
@@ -1330,14 +1338,7 @@ impl App {
         };
         let looks_asked = looks_wanted && !depth && self.settings.snapshot.looks.iter().any(|l| l.on);
         // how far they read, in the pixels drawn (None: across the photo)
-        let looks_reach = {
-            let scale = size.1 as f32 / full.1.max(1) as f32;
-            layers
-                .iter()
-                .flat_map(|(look, _)| look.ops.iter())
-                .try_fold(0.0f32, |most, op| Some(most.max(op.reach(full.1 as f32)?)))
-                .map(|r| (r * scale).ceil() as u32)
-        };
+        let looks_reach = Self::photo_looks_reach(&layers, full, size);
         let tiles = self.photo_tiles(renderer, output, supersample, looks_reach.unwrap_or(0));
         if !purpose.quiet() {
             log::info!(
@@ -1382,16 +1383,7 @@ impl App {
         let single = tiles.len() == 1;
         let effects = snapshot::effects::Inputs {
             parts: tiles.len(),
-            guard: snapshot::kept_guard_supersampled(
-                supersample,
-                self.photo_max_side(renderer),
-                self.photo_max_pixels(renderer),
-                (snapshot::TILE_GUARD * supersample)
-                    .max(reach.bloom.unwrap_or(0))
-                    .max(reach.dof.unwrap_or(0))
-                    .max(reach.contact.unwrap_or(0))
-                    .max(looks_reach.unwrap_or(0)),
-            ),
+            guard: self.photo_kept_guard(renderer, output, supersample, looks_reach.unwrap_or(0)),
             // (the window already says other proportions leave it out)
             interface: interface.then_some(single),
             huds: huds.then_some(single),
@@ -1482,19 +1474,59 @@ impl App {
     /// (`snapshot::plan_supersampled`), the band counted in the pixels drawn;
     /// `looks`: how far the photo's looks read, in those pixels.
     fn photo_tiles(&self, renderer: &Renderer, size: (u32, u32), factor: u32, looks: u32) -> Vec<snapshot::TilePass> {
+        let guard = self.photo_guard(renderer, size, factor, looks);
+        snapshot::plan_supersampled(size, factor, self.photo_max_side(renderer), self.photo_max_pixels(renderer), guard)
+    }
+
+    /// The band the effects of [`App::photo_tiles`]'s photo need around
+    /// each tile, in the pixels drawn.
+    fn photo_guard(&self, renderer: &Renderer, size: (u32, u32), factor: u32, looks: u32) -> u32 {
         let reach = self.photo_reach(renderer, size, factor);
-        let guard = (snapshot::TILE_GUARD * factor.max(1))
+        (snapshot::TILE_GUARD * factor.max(1))
             .max(reach.bloom.unwrap_or(0))
             .max(reach.dof.unwrap_or(0))
             .max(reach.contact.unwrap_or(0))
-            .max(looks);
-        snapshot::plan_supersampled(size, factor, self.photo_max_side(renderer), self.photo_max_pixels(renderer), guard)
+            .max(looks)
+    }
+
+    /// The band its tiles really draw (`snapshot::kept_guard_supersampled`).
+    fn photo_kept_guard(&self, renderer: &Renderer, size: (u32, u32), factor: u32, looks: u32) -> u32 {
+        snapshot::kept_guard_supersampled(
+            factor,
+            self.photo_max_side(renderer),
+            self.photo_max_pixels(renderer),
+            self.photo_guard(renderer, size, factor, looks),
+        )
+    }
+
+    /// How far the looks the screen shows read around a pixel of a photo
+    /// of `full` drawn at `drawn` (None: across the whole photo), in the
+    /// pixels drawn; 0 without a look.
+    fn photo_looks_reach(layers: &[(Resolved, u8)], full: (u32, u32), drawn: (u32, u32)) -> Option<u32> {
+        let scale = drawn.1 as f32 / full.1.max(1) as f32;
+        layers
+            .iter()
+            .flat_map(|(look, _)| look.ops.iter())
+            .try_fold(0.0f32, |most, op| Some(most.max(op.reach(full.1 as f32)?)))
+            .map(|r| (r * scale).ceil() as u32)
+    }
+
+    /// The parts the window says a photo of `photo` pixels is drawn in: as
+    /// `photo_job` plans it, the reach of the looks shown included.
+    fn photo_parts(&mut self, renderer: &Renderer, photo: (u32, u32)) -> usize {
+        let factor = self.photo_factor(photo);
+        let stack = self.photo_look_stack();
+        let settings = self.settings.snapshot.look_settings.clone();
+        let layers = looks::resolve_stack(&stack, &settings, self.photo_luts());
+        let drawn = (photo.0 * factor, photo.1 * factor);
+        let looks = Self::photo_looks_reach(&layers, photo, drawn).unwrap_or(0);
+        self.photo_tiles(renderer, photo, factor, looks).len()
     }
 
     /// How far around a pixel the effects that are on read the image of a
     /// photo of `size` drawn `factor` times larger, in the pixels drawn
     /// (None: off). The bloom's halo keeps its share of the image as on
-    /// screen (`aurora_render::bloom_photo_levels`), so it reaches farther
+    /// screen (aurora-render `bloom::photo_levels`), so it reaches farther
     /// in a photo larger than the screen.
     fn photo_reach(&self, renderer: &Renderer, size: (u32, u32), factor: u32) -> PhotoReach {
         let size = (size.0 * factor.max(1), size.1 * factor.max(1));
@@ -2198,7 +2230,12 @@ impl App {
                         // what the photo does not hold as the screen shows it
                         if let Some(first) = s.effects.first() {
                             let more = s.effects.len() - 1;
-                            s.vf.say(if more > 0 { format!("{first} (+{more})") } else { first.clone() }, false, now);
+                            let line = if more > 0 {
+                                aurora_i18n::tr!("ss-and-more", first = first.as_str(), count = more)
+                            } else {
+                                first.clone()
+                            };
+                            s.vf.say(line, false, now);
                         }
                     }
                     s.gallery.truncate(gallery::SHOWN);
@@ -2872,7 +2909,7 @@ LUT_3D_SIZE {n}
             let inventory = (self.snapshots.ui.destination == Destination::Inventory).then(|| self.photo_inventory_view(window));
             let profile = (self.snapshots.ui.destination == Destination::Profile).then(|| self.photo_profile_view(window));
             let email = (self.snapshots.ui.destination == Destination::Email).then(|| self.photo_email_view(window));
-            let tiles = self.photo_tiles(renderer, photo, self.photo_factor(photo), 0).len();
+            let tiles = self.photo_parts(renderer, photo);
             let busy = self.photo_busy_line();
             if let Some((_, what)) = &busy {
                 let now = ctx.input(|i| i.time);
@@ -2938,8 +2975,8 @@ LUT_3D_SIZE {n}
             let inventory = (self.snapshots.ui.destination == Destination::Inventory).then(|| self.photo_inventory_view(window));
             let profile = (self.snapshots.ui.destination == Destination::Profile).then(|| self.photo_profile_view(window));
             let email = (self.snapshots.ui.destination == Destination::Email).then(|| self.photo_email_view(window));
+            let tiles = self.photo_parts(renderer, photo);
             let mut state = std::mem::take(&mut self.snapshots.ui);
-            let tiles = self.photo_tiles(renderer, photo, self.photo_factor(photo), 0).len();
             let s = &self.snapshots;
             let busy = if let Some(t) = s.detail_wait {
                 let wait = snapshot::quality::DETAIL_WAIT.as_secs_f32();

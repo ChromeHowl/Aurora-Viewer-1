@@ -2,14 +2,15 @@
 //! photo is drawn in parts, one a frame, and can take minutes; the window
 //! keeps answering between its parts and the network runs on its own
 //! threads (aurora-net: pings answered and acks sent there), so the circuit
-//! never waits for the photo. The regions are still told, as the Legacy
-//! Viewer tells them around its long stalls (send_agent_pause /
-//! send_agent_resume, indra/newview/llworld.cpp; LLViewerWindow::rawSnapshot
-//! for its high resolution photos): AgentPause once the photo is expected
-//! or seen to take [`LONG`], AgentResume when it ends however it ends, and
-//! the paused time is left out of the circuit timeout without hiding a real
-//! loss (aurora-net agent_pause.rs). A photo running past [`WARN_AFTER`] is
-//! logged, with the longest the main thread went without a frame.
+//! never waits for the photo and its timeout keeps counting: a real loss
+//! during a photo ends the session as at any other time. The regions are
+//! still told, as the Legacy Viewer tells them around its long stalls
+//! (send_agent_pause / send_agent_resume, indra/newview/llworld.cpp):
+//! AgentPause once the photo is expected or seen to take [`LONG`],
+//! AgentResume when it ends however it ends. (LLViewerWindow::rawSnapshot
+//! keeps only the resume after its high resolution photos, its pause being
+//! commented out.) A photo running past [`WARN_AFTER`] is logged, with the
+//! longest the main thread went without a frame.
 
 use std::time::{Duration, Instant};
 

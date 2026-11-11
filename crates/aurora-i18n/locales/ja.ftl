@@ -14983,3 +14983,4 @@ ss-effect-contact = コンタクトシャドウ
 ss-not-applied-parts = { $effect }：未適用（写真を分割して描画したため）
 ss-not-applied-screen = { $effect }：未適用（画面に表示されていないため）
 ss-unverified = { $effect }：写真の分割部分のつなぎ目では未確認
+ss-and-more = { $first }（ほか{ $count }件）

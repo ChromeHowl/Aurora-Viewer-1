@@ -822,13 +822,6 @@ pub fn plan(size: (u32, u32), max_side: u32, max_pixels: u64, guard: u32) -> Vec
     tiles
 }
 
-/// How a photo of `size` drawn at `factor` times its size on each side is
-/// drawn ([`plan`]), in the photo's own pixels: each pass draws its part
-/// `factor` times larger (`Tile::scaled`) and is reduced as it is read back
-/// (`quality::reduce_into`), so every edge of a tile falls on a whole pixel
-/// of the photo. `max_side`, `max_pixels` and `guard` are what a pass may
-/// draw and the band its effects need, in drawn pixels: the band is as
-/// many photo pixels as cover it.
 /// The band of `guard` pixels a photo's tiles really draw around what they
 /// keep ([`plan`]): at most a quarter of the side a pass can draw, with its
 /// alignment, so that the tiles keep about half of what they draw (and
@@ -848,6 +841,13 @@ pub fn kept_guard_supersampled(factor: u32, max_side: u32, max_pixels: u64, guar
     kept_guard(max_side / f, max_pixels / (u64::from(f) * u64::from(f)), guard.div_ceil(f)) * f
 }
 
+/// How a photo of `size` drawn at `factor` times its size on each side is
+/// drawn ([`plan`]), in the photo's own pixels: each pass draws its part
+/// `factor` times larger (`Tile::scaled`) and is reduced as it is read back
+/// (`quality::reduce_into`), so every edge of a tile falls on a whole pixel
+/// of the photo. `max_side`, `max_pixels` and `guard` are what a pass may
+/// draw and the band its effects need, in drawn pixels: the band is as
+/// many photo pixels as cover it.
 pub fn plan_supersampled(size: (u32, u32), factor: u32, max_side: u32, max_pixels: u64, guard: u32) -> Vec<TilePass> {
     let f = factor.max(1);
     plan(size, max_side / f, max_pixels / (u64::from(f) * u64::from(f)), guard.div_ceil(f))

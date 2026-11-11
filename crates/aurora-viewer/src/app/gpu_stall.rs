@@ -118,7 +118,7 @@ impl App {
             }
             return;
         }
-        let after = notice_after(self.snapshots.drawing());
+        let after = notice_after(self.snapshots.drawing_photo());
         match renderer.stalled_for() {
             Some(stalled) => {
                 if !stall.noted && stalled >= after {

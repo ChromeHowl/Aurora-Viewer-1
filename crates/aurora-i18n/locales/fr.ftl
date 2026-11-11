@@ -15034,3 +15034,4 @@ ss-effect-contact = Ombres de contact
 ss-not-applied-parts = { $effect } : non appliqué (la photo a été rendue en plusieurs parties)
 ss-not-applied-screen = { $effect } : non appliqué (absent de l’écran)
 ss-unverified = { $effect } : non vérifié là où les parties de la photo se rejoignent
+ss-and-more = { $first } (et { $count } de plus)

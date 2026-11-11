@@ -1608,8 +1608,8 @@ pub enum NetCommand {
     Login(Box<LoginRequest>),
     Logout,
     /// The viewer is held up by a long task (a large photo): AgentPause to
-    /// every region, the paused time left out of the circuit timeout
-    /// (send_agent_pause, llworld.cpp).
+    /// every region (send_agent_pause, llworld.cpp). The circuit timeout
+    /// still counts: the network keeps running meanwhile.
     AgentPause,
     /// The task is over: AgentResume to every region (send_agent_resume).
     AgentResume,

@@ -319,7 +319,7 @@ struct Session<'a> {
     inventory_udp_tx: mpsc::UnboundedSender<inventory_udp::Request>,
     /// AgentSetAppearance messages sent this session (their SerialNum).
     appearance_serial: u32,
-    /// AgentPause / AgentResume and the paused time (agent_pause.rs).
+    /// AgentPause / AgentResume (agent_pause.rs).
     agent_pause: crate::agent_pause::AgentPause,
     /// UpdateAvatarAppearance requests: one at a time, the newest version.
     appearance_queue: Arc<Mutex<appearance_queue::AppearanceQueue>>,
@@ -780,7 +780,7 @@ impl Session<'_> {
         let serial = if pause {
             self.agent_pause.pause(now)
         } else {
-            self.agent_pause.resume(now)
+            self.agent_pause.resume()
         };
         let Some(serial) = serial else {
             return;
@@ -1598,8 +1598,9 @@ impl Session<'_> {
                 sim.last_ping = now;
                 ping_targets.push(*addr);
             }
-            // (the time the agent was paused for a long task is not silence)
-            if self.agent_pause.silence(sim.circuit.last_recv, now) > SIM_TIMEOUT {
+            // (a pause for a long task changes nothing here: the network
+            // keeps the circuits on its own threads, agent_pause.rs)
+            if now.duration_since(sim.circuit.last_recv) > SIM_TIMEOUT {
                 dead.push(*addr);
             }
         }
@@ -7022,7 +7023,7 @@ mod script_dialog_tests {
     }
 
     #[tokio::test]
-    async fn a_long_task_pauses_the_agent_without_losing_the_region() {
+    async fn a_long_task_pauses_the_agent_and_a_real_loss_still_ends_the_session() {
         let sock = Arc::new(UdpSocket::bind("127.0.0.1:0").await.expect("viewer socket"));
         let main = UdpSocket::bind("127.0.0.1:0").await.expect("main simulator");
         let main_addr = main.local_addr().expect("main address");
@@ -7057,21 +7058,15 @@ mod script_dialog_tests {
         let resume: AgentResume = packet.decode().expect("AgentResume");
         assert_eq!(resume.agent_data.serial_num, 2);
 
-        // silent 160 s, 150 of them paused: the region is kept
+        // the network runs during the pause: a region silent past the
+        // circuit timeout while the agent is paused is lost all the same
         let mut session = test_session(&sh, sock.clone(), one_sim(), main_addr);
         session.agent_pause.pause(ago(150));
         if let Some(sim) = session.sims.get_mut(&main_addr) {
-            sim.circuit.last_recv = ago(160);
+            sim.circuit.last_recv = ago(101);
         }
         session.tick();
-        assert!(!session.finished, "the paused time is not silence");
-        // the same silence without a pause: the link is lost
-        let mut session = test_session(&sh, sock.clone(), one_sim(), main_addr);
-        if let Some(sim) = session.sims.get_mut(&main_addr) {
-            sim.circuit.last_recv = ago(160);
-        }
-        session.tick();
-        assert!(session.finished);
+        assert!(session.finished, "a pause never hides a lost region");
         assert!(
             received
                 .try_iter()

@@ -15035,3 +15035,4 @@ ss-effect-contact = Contact shadows
 ss-not-applied-parts = { $effect }: not applied (the photo was drawn in parts)
 ss-not-applied-screen = { $effect }: not applied (not shown on screen)
 ss-unverified = { $effect }: unverified where the photo's parts meet
+ss-and-more = { $first } (and { $count } more)

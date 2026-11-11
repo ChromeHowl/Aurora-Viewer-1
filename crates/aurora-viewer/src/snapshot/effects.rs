@@ -66,6 +66,22 @@ pub struct Inputs {
     pub ao: Option<bool>,
 }
 
+impl Inputs {
+    /// The same photo drawn again in `parts` with a band of `guard` (a part
+    /// came back black and the rest is drawn smaller): the interface and the
+    /// HUDs, drawn in one pass only, are then left out.
+    pub fn replanned(self, parts: usize, guard: u32) -> Inputs {
+        let one = parts <= 1;
+        Inputs {
+            parts,
+            guard,
+            interface: self.interface.map(|drawn| drawn && one),
+            huds: self.huds.map(|drawn| drawn && one),
+            ..self
+        }
+    }
+}
+
 /// The effects switched on or asked, and what the photo holds of each.
 pub fn report(i: &Inputs) -> Vec<(Effect, Status)> {
     let parts = i.parts > 1;
@@ -259,6 +275,31 @@ mod tests {
                 .1,
             Status::Applied
         );
+    }
+
+    #[test]
+    fn a_photo_drawn_again_in_parts_is_told_as_it_is_drawn() {
+        let one = Inputs {
+            parts: 1,
+            guard: 0,
+            interface: Some(true),
+            huds: Some(true),
+            bloom: Some(1402),
+            ..Default::default()
+        };
+        assert!(report(&one).iter().all(|(_, s)| *s == Status::Applied));
+        // a part came back black: drawn again in 4 parts with a smaller band
+        let again = one.replanned(4, 512);
+        assert_eq!(
+            report(&again),
+            vec![
+                (Effect::Interface, Status::NotApplied(Left::Parts)),
+                (Effect::Huds, Status::NotApplied(Left::Parts)),
+                (Effect::Bloom, Status::Unverified),
+            ]
+        );
+        // never back to "drawn" by another plan in one pass
+        assert_eq!(again.replanned(1, 512).interface, Some(false));
     }
 
     #[test]
