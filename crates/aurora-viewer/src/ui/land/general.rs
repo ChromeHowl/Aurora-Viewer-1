@@ -64,7 +64,7 @@ pub(super) fn show(ui: &mut egui::Ui, p: &Palette, s: &mut LandUi, v: &View, wor
     // the Region Tracker's figure for the parcel's region; hidden under
     // RLVa @showloc
     if let Some(people) = v.region.as_ref().and_then(|r| world.people_in_region(&r.name)) {
-        row(ui, p, aurora_i18n::tr!("people-region-title"), |ui| text(ui, p, &people.figure()));
+        row(ui, p, aurora_i18n::tr!("people-region-title"), |ui| text(ui, p, people.figure()));
     }
     row(ui, p, aurora_i18n::tr!("common-owner-2"), |ui| {
         if is_public {

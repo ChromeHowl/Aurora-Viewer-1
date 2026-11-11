@@ -577,9 +577,9 @@ impl App {
         self.script_link.sync(prefs.websocket_sync, prefs.websocket_port);
         self.script_editors.link_status = match self.script_link.status() {
             crate::script_ws::Status::Off => None,
-            crate::script_ws::Status::Listening(port) => Some(aurora_i18n::tr!("b7-link-listening", port = i64::from(port)).into()),
+            crate::script_ws::Status::Listening(port) => Some(aurora_i18n::tr!("b7-link-listening", port = i64::from(port))),
             crate::script_ws::Status::Failed(port, reason) => {
-                Some(aurora_i18n::tr!("b7-link-failed", port = i64::from(port), reason = reason).into())
+                Some(aurora_i18n::tr!("b7-link-failed", port = i64::from(port), reason = reason))
             }
         };
         let world = &self.world;

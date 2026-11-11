@@ -109,7 +109,7 @@ pub(super) fn recent(
         .chain(world.console_copies.iter().rev().take(max))
         .collect();
     if !world.console_copies.is_empty() {
-        lines.sort_by(|a, b| b.time.cmp(&a.time));
+        lines.sort_by_key(|l| std::cmp::Reverse(l.time));
     }
     for line in lines
         .into_iter()

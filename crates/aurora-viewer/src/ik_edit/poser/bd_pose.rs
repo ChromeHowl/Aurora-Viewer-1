@@ -120,7 +120,7 @@ fn documents(text: &str) -> Vec<Llsd> {
         let Some(len) = rest[start..].find(END) else { break };
         let end = start + len + END.len();
         // one unreadable document does not refuse the others
-        if let Ok(value) = aurora_llsd::from_xml(rest[start..end].as_bytes()) {
+        if let Ok(value) = aurora_llsd::from_xml(&rest.as_bytes()[start..end]) {
             out.push(value);
         }
         rest = &rest[end..];
