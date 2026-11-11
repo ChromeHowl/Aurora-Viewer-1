@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-    Parses every PowerShell script of scripts/ with the parser of Windows
+    Parses every PowerShell script of scripts/ and installer/ with the parser of Windows
     PowerShell 5.1, the one aurora-tools.cmd and the humans run. A syntax
     error there stops every action of the Aurora tools, and PowerShell 7
     does not always see it (an unescaped apostrophe in a string, for example).
@@ -18,7 +18,10 @@ if ($PSVersionTable.PSEdition -ne 'Desktop') {
     Write-Host 'No Windows PowerShell here: parsing with PowerShell 7 (CI checks 5.1).' -ForegroundColor Yellow
 }
 $failed = 0
-foreach ($f in Get-ChildItem -LiteralPath (Join-Path $root 'scripts') -Recurse -Filter *.ps1) {
+# scripts/, and installer/ (the engine of the Windows installer, run by
+# Windows PowerShell 5.1 on the users' PCs, docs/INSTALLER.md)
+$folders = 'scripts', 'installer' | ForEach-Object { Join-Path $root $_ } | Where-Object { Test-Path -LiteralPath $_ }
+foreach ($f in Get-ChildItem -LiteralPath $folders -Recurse -Filter *.ps1) {
     $tokens = $null; $errors = $null
     [void][System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$tokens, [ref]$errors)
     foreach ($e in $errors) {
@@ -27,4 +30,4 @@ foreach ($f in Get-ChildItem -LiteralPath (Join-Path $root 'scripts') -Recurse -
     }
 }
 if ($failed) { Write-Host "$failed syntax error(s) for Windows PowerShell 5.1." -ForegroundColor Red; exit 1 }
-Write-Host 'Every script of scripts/ parses in Windows PowerShell 5.1.'
+Write-Host 'Every script of scripts/ and installer/ parses in Windows PowerShell 5.1.'
