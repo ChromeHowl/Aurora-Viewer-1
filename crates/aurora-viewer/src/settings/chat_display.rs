@@ -27,9 +27,10 @@ pub struct ChatDisplay {
     /// before a group line copied into the nearby chat: -1 all of it, 0
     /// none, else that many characters (at most 63).
     pub group_name_length: i32,
-    /// FSGroupNoticesToIMLog (on): a group notice also enters its group's
-    /// conversation and transcript.
-    pub group_notices_in_chat: bool,
+    /// The former FSGroupNoticesToIMLog switch of this group, read once:
+    /// it became `Settings::group_notices_in_chat`.
+    #[serde(rename = "group_notices_in_chat", skip_serializing)]
+    pub(crate) former_group_notices_in_chat: Option<bool>,
     /// FSDisableLabeledChatLinks (on): a labelled web link of an IM, a group
     /// chat or a conference shows its real address at once on hover, in a
     /// large hint.
@@ -105,7 +106,7 @@ impl Default for ChatDisplay {
             im_in_console: false,
             group_im_in_console: false,
             group_name_length: 0,
-            group_notices_in_chat: true,
+            former_group_notices_in_chat: None,
             link_hint_im: true,
             link_hint_nearby: true,
             highlight_moderators: true,
@@ -250,7 +251,7 @@ mod tests {
     fn an_old_settings_file_takes_the_legacy_defaults() {
         let s: crate::settings::Settings = serde_json::from_value(serde_json::json!({})).expect("old file");
         assert_eq!(s.chat_display, ChatDisplay::default());
-        assert!(s.chat_display.group_notices_in_chat);
+        assert_eq!(s.chat_display.former_group_notices_in_chat, None);
         assert_eq!(s.chat_display.moderator_name_style, TextStyle::BOLD);
         let partial: ChatDisplay = serde_json::from_value(serde_json::json!({ "show_you": true })).expect("partial");
         assert!(partial.show_you);

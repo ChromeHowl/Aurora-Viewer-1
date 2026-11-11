@@ -6,9 +6,6 @@
 //!   the message's toast), behind "IM:" or the group's name cut to
 //!   FSShowGroupNameLength (LLIMModel::addMessage and the v1-style console
 //!   of indra/newview/llimview.cpp);
-//! - a group notice copied into its group's conversation and transcript
-//!   (FSGroupNoticesToIMLog, LLHandlerUtil::logGroupNoticeToIMGroup in
-//!   indra/newview/llnotificationhandlerutil.cpp);
 //! - what a blocked resident or object says, kept greyed in the nearby chat
 //!   (FSShowMutedChatHistory, process_chat_from_simulator in
 //!   indra/newview/llviewermessage.cpp), all originally LGPL 2.1.
@@ -74,28 +71,6 @@ impl World {
         }
     }
 
-    /// A group notice received from `sender` (named `from`): a line of its
-    /// group's conversation when it is open, else of its transcript alone,
-    /// for one of our groups.
-    pub(super) fn copy_group_notice(&mut self, group: Uuid, sender: Uuid, from: &str, subject: &str, body: &str) {
-        if !self.chat_display.group_notices_in_chat || !self.groups.is_member(&group) {
-            return;
-        }
-        let line = ChatLine {
-            time: SystemTime::now(),
-            from: from.to_owned(),
-            text: notice_text(&aurora_i18n::tr!("chat-extras-group-notice", subject = subject), body),
-            kind: ChatKind::Im,
-            source: sender,
-            origin: Origin::Live,
-        };
-        if self.social.has_session(&group) {
-            self.conversation_push(group, line, false);
-        } else {
-            self.transcript_only(group, &line);
-        }
-    }
-
     /// A blocked resident's or object's nearby line (`chat_blocked`): kept
     /// greyed in the nearby chat when asked, else dropped as before. Nothing
     /// else follows it: no bubble, no sound, no alert, no unread count.
@@ -134,15 +109,6 @@ fn copy_sender(prefix: &str, name: &str, group: Option<&str>, length: i32) -> St
             format!("[{}] {name}", cut.trim_end())
         }
         _ => format!("{prefix} {name}"),
-    }
-}
-
-/// The text of a copied notice: its subject line, then its message.
-fn notice_text(head: &str, body: &str) -> String {
-    if body.trim().is_empty() {
-        head.to_owned()
-    } else {
-        format!("{head}\n{body}")
     }
 }
 
@@ -192,8 +158,6 @@ mod tests {
         assert_eq!(copy_sender("IM:", "Jane", Some("Builders Guild"), -1), "[Builders Guild] Jane");
         assert_eq!(copy_sender("IM:", "Jane", Some("Builders Guild"), 9), "[Builders] Jane");
         assert_eq!(copy_sender("IM:", "Jane", Some("Été"), 1), "[É] Jane", "characters, not bytes");
-        assert_eq!(notice_text("Group notice: Party", ""), "Group notice: Party");
-        assert_eq!(notice_text("Group notice: Party", "Tonight"), "Group notice: Party\nTonight");
     }
 
     #[test]
@@ -275,33 +239,5 @@ mod tests {
             ..said("error")
         });
         assert_eq!(w.chat.len(), 1);
-    }
-
-    #[test]
-    fn a_group_notice_enters_its_open_conversation() {
-        let mut w = world();
-        // not one of our groups: nothing
-        w.session_lines(GROUP);
-        w.copy_group_notice(GROUP, JANE, "Jane Doe", "Party", "Tonight");
-        assert!(w.social.ims.iter().find(|s| s.other == GROUP).is_some_and(|s| s.lines.is_empty()));
-        w.groups.groups.push(aurora_net::GroupMembership {
-            id: GROUP,
-            name: "Builders".into(),
-            insignia: Uuid::nil(),
-            powers: 0,
-            accept_notices: true,
-            list_in_profile: false,
-            contribution: 0,
-        });
-        w.copy_group_notice(GROUP, JANE, "Jane Doe", "Party", "Tonight");
-        let s = w.social.ims.iter().find(|s| s.other == GROUP).expect("the conversation");
-        let line = s.lines.back().expect("the notice");
-        assert_eq!((line.source, line.from.as_str()), (JANE, "Jane Doe"));
-        assert!(line.text.contains("Party") && line.text.ends_with("Tonight"));
-        assert_eq!(s.unread, 0, "its toast told it already");
-        // the option off: nothing more
-        w.chat_display.group_notices_in_chat = false;
-        w.copy_group_notice(GROUP, JANE, "Jane Doe", "Again", "");
-        assert_eq!(w.social.ims.iter().find(|s| s.other == GROUP).map(|s| s.lines.len()), Some(1));
     }
 }

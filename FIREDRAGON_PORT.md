@@ -111,7 +111,7 @@ The same for all groups unless a row says otherwise:
 | B3 Camera | `feat/b3-camera` | `b3f9ae5` | Follow a body part, head roll, third-person and mouselook options, Cameratools window, Look at last chatter; sharp textures during Camera Path playback; lock kept through a local teleport. |
 | B1 Photo | `feat/b1-photo` | `bc96052` | 360° photos, depth photos, cut-out of every avatar with a matte, settings reset, guide style, after-save options. |
 | B6 People | `feat/b6-people` | `227b73e` | Radar Track, Marks, estate kick / teleport home / ban from resident menus, Share, contact-set notices, name tag and floating text options, chat range spheres, Worn tab grouping and multi-select, hidden friends greyed. |
-| B5a Chat | `feat/b5a-chat` | `5a8a4bd` | The Legacy chat display options, the Conversation Log, group chat text moderation. |
+| B5a Chat | `feat/b5a-chat` | `5a8a4bd` | The Legacy chat display options, the Conversation Log, group chat text moderation. Talk animations (#3322) and group notices in group chat (#3334): now upstream, the port's copies removed. |
 | B4 Avatar | `feat/b4-avatar` | `249ca6a` | Pose stand, avatar alignment and Face nearest avatar, turn thresholds and look limits, reset skeleton on stand, Character Test resets, Appearance to XML; poser animation playback; timeline interpolation, `.anim` opening and autosaved draft. |
 | B10 Map | `feat/b10-map` | `b85c095` | Teleport options (map, beacon, back SLURL, screens, unmute), teleport history position / date / time zone, world map region info and landmark filter. |
 | B5b Translation | `feat/b5b-translate` | `8ed1c36` | Incoming chat translation (Azure, Google, DeepL; the user's own key in the credential store) and the Omnifilter's message rules. |

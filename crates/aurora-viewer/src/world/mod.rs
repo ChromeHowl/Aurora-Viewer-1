@@ -4933,9 +4933,6 @@ impl World {
             self.group_notice_to_chat(group, from, parts.map_or("", |p| p.0), body);
         }
         let id = self.notifications.push(Kind::Group, title, text, data);
-        if let Some(group) = group {
-            self.copy_group_notice(group, im.from_agent_id, from, subject, body);
-        }
         if let (Some(group), Some(name)) = (group, group_name) {
             self.notifications.link_name(id, name, NameTarget::Group(group));
         }

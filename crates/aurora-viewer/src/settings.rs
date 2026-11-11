@@ -2864,6 +2864,11 @@ impl Settings {
         if let Some(on) = self.chat_display.former_play_chat_anim.take() {
             self.play_chat_anim = on;
         }
+        // the chat display's group notices switch is upstream's
+        // (FSGroupNoticesToIMLog)
+        if let Some(on) = self.chat_display.former_group_notices_in_chat.take() {
+            self.group_notices_in_chat = on;
+        }
         // the port's script dialogs per object are upstream's, same choices
         if let Some(former) = self.notification_options.former_script_dialog_limit.take() {
             self.script_dialog_limit = former.limit();

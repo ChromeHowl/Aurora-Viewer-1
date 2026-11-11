@@ -442,7 +442,7 @@ FSAvatarTurnSpeed,F32,in-aurora,,avatar_turn_speed,Modify the speed at which the
 FSBeamColorFile,String,to-add,low,,Beam file for the shape of your beam
 FSBeamShape,String,to-add,low,,Beam file for the shape of your beam
 FSBeamShapeScale,F32,to-add,low,,How Big You Want to let the beam be
-FSBetterGroupNoticesToIMLog,Boolean,to-add,low,,Improved logging of group notices to group IM log.
+FSBetterGroupNoticesToIMLog,Boolean,in-aurora,,"`group_notice_subjects_in_chat` (upstream #3334)",Improved logging of group notices to group IM log.
 FSBeyondNearbyChatColorDiminishFactor,F32,in-aurora,,"ported (2026-11), `settings/chat_display.rs`",The factor the color for nearby chat diminishes if the sender is beyond chat range
 FSBlockClickSit,Boolean,in-aurora,,block_click_sit,Prevents sitting on left-click.
 FSBrowserHomePage,String,in-aurora,,browser_home_page,Home page for the built in web browser
@@ -605,7 +605,7 @@ FSFriendListColumnShowUserName,Boolean,in-aurora,,contacts.column_username,Enabl
 FSFriendListFullNameFormat,S32,in-aurora,,contacts.full_name_display_first,"Defines the order of how the full name in the contacts list is shown (0 = username (display name), 1 = display name (username))"
 FSFriendListSortOrder,S32,in-aurora,,contacts.sort_by_display_name,"Defines the sort order of the contacts list (0 = username, 1 = display name)"
 FSGridBuilderURL,String,to-add,low,,Fetch an html page of grids from this URL.
-FSGroupNoticesToIMLog,Boolean,in-aurora,,"ported (2026-11), `settings/chat_display.rs`","Show group notices in group chats, in addition to toasts."
+FSGroupNoticesToIMLog,Boolean,in-aurora,,"`group_notices_in_chat` (upstream #3334)","Show group notices in group chats, in addition to toasts."
 FSGroupNotifyNoTransparency,Boolean,not-applicable,,"a look of the Legacy interface (opacity, spacing, cursors); Aurora's interface has its own design (docs/BRANDING.md)","If true, group notices will be shown opaque and ignore the floater opacity settings."
 FSGrowlWhenActive,Boolean,in-aurora,,system_notifications_when_active,"If Growl notifications are active, show them even when the window is active."
 FSHideHelpButtons,Boolean,not-applicable,,"a look of the Legacy interface (opacity, spacing, cursors); Aurora's interface has its own design (docs/BRANDING.md)","When enabled, hides the help button from floaters (requires restart)"

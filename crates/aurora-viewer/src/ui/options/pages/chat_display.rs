@@ -146,12 +146,6 @@ pub fn groups(cx: &mut Cx) {
                 .changed()
             },
         );
-        // FSGroupNoticesToIMLog
-        cx.toggle(
-            tr!("chat-extras-notices-in-chat"),
-            tr!("chat-extras-notices-in-chat-hint"),
-            &field!(chat_display.group_notices_in_chat),
-        );
         // FSDisableLabeledChatLinks, FSDisableLabeledChatLinksNearbyChat
         cx.toggle(
             tr!("chat-extras-link-hint-im"),
