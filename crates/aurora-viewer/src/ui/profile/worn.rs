@@ -262,7 +262,9 @@ pub struct State {
 }
 
 /// A click on row `id` among `order` (the list as shown): alone, Ctrl
-/// adds or removes it, Shift takes the rows from the last one clicked.
+/// adds or removes it, Shift takes the rows from the last one selected.
+/// A row Ctrl removes is not the start of a later Shift range; the start
+/// is forgotten if it was that row (LLScrollListCtrl::deselectItem).
 pub fn pick(state: &mut State, order: &[Uuid], id: Uuid, ctrl: bool, shift: bool) {
     let position = |x: Uuid| order.iter().position(|o| *o == x);
     match (shift, state.anchor.and_then(position), position(id)) {
@@ -274,6 +276,10 @@ pub fn pick(state: &mut State, order: &[Uuid], id: Uuid, ctrl: bool, shift: bool
         _ if ctrl => {
             if let Some(i) = state.selected.iter().position(|s| *s == id) {
                 state.selected.remove(i);
+                if state.anchor == Some(id) {
+                    state.anchor = None;
+                }
+                return;
             } else {
                 state.selected.push(id);
             }
