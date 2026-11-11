@@ -14993,3 +14993,11 @@ sr-state-shown = 範囲内：表示中
 sr-state-hidden = 非表示
 sr-remove = 削除
 update-personal-build = これは個人ビルド（{ $label }）で、このＰＣでソースコードからビルドされています。Auroraビューアの公式リリースには従いません。更新するには、スタートメニューの「Update」ショートカットを使ってください。
+# スナップショットの安全性：直前の写真に画面の効果がどこまで入ったか
+ss-effect-bloom = ブルーム
+ss-effect-dof = 被写界深度
+ss-effect-ao = アンビエントオクルージョン
+ss-effect-contact = コンタクトシャドウ
+ss-not-applied-parts = { $effect }：未適用（写真を分割して描画したため）
+ss-not-applied-screen = { $effect }：未適用（画面に表示されていないため）
+ss-unverified = { $effect }：写真の分割部分のつなぎ目では未確認

@@ -7144,7 +7144,9 @@ impl Backend {
             let debug_view = f.debug_glow || f.debug.shadows || f.debug.ambient_occlusion;
             let (strength, keep) = crate::bloom::Override::from_env().strength(if debug_view { 0.0 } else { f.bloom }, secs);
             if keep && !debug_view {
-                self.bloom.ensure(&self.device, post_size);
+                // (a photo's halo keeps the share of the image it has on screen)
+                self.bloom
+                    .ensure(&self.device, post_size, crate::bloom::photo_levels(f.photo_scale));
             } else {
                 self.bloom.release();
             }

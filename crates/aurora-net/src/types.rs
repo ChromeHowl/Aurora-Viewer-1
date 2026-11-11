@@ -1609,6 +1609,12 @@ pub enum NetCommand {
     },
     Login(Box<LoginRequest>),
     Logout,
+    /// The viewer is held up by a long task (a large photo): AgentPause to
+    /// every region, the paused time left out of the circuit timeout
+    /// (send_agent_pause, llworld.cpp).
+    AgentPause,
+    /// The task is over: AgentResume to every region (send_agent_resume).
+    AgentResume,
     /// The viewer stopped waiting for a teleport or crossing to be confirmed:
     /// agent updates resume, as LLAgent's teleport state back at
     /// TELEPORT_NONE lets send_agent_update through.

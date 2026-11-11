@@ -223,6 +223,25 @@ pub enum LookOp {
 }
 
 impl LookOp {
+    /// How far around a pixel the operation reads the image, in pixels of
+    /// a photo `height` pixels tall (`shaders/looks.wgsl`): what a photo
+    /// drawn in tiles must draw around each tile for it. None when it can
+    /// read anywhere in the photo (lens distortion, chromatic aberration),
+    /// which no band covers.
+    pub fn reach(&self, height: f32) -> Option<f32> {
+        let h = height.max(0.0);
+        Some(match *self {
+            LookOp::Convolve { .. } => 1.0,
+            LookOp::Glow { radius, .. } | LookOp::Clarity { radius, .. } | LookOp::DepthBlur { radius, .. } => radius.abs() * h,
+            LookOp::Pixelate(block) => block.abs() * h,
+            // the tear and the channels' split
+            LookOp::Glitch { amount, .. } => amount.abs() * h * 1.35,
+            LookOp::Paint(radius) => (radius * h).round().clamp(1.0, 5.0),
+            LookOp::Chroma(k) | LookOp::Distort(k) if k != 0.0 => return None,
+            _ => 0.0,
+        })
+    }
+
     /// "blur": the 3 x 3 average.
     pub fn blur() -> LookOp {
         LookOp::Convolve {

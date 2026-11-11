@@ -319,6 +319,8 @@ struct Session<'a> {
     inventory_udp_tx: mpsc::UnboundedSender<inventory_udp::Request>,
     /// AgentSetAppearance messages sent this session (their SerialNum).
     appearance_serial: u32,
+    /// AgentPause / AgentResume and the paused time (agent_pause.rs).
+    agent_pause: crate::agent_pause::AgentPause,
     /// UpdateAvatarAppearance requests: one at a time, the newest version.
     appearance_queue: Arc<Mutex<appearance_queue::AppearanceQueue>>,
     /// Our profile as last received (AvatarPropertiesReply), which a grid
@@ -608,6 +610,7 @@ pub(crate) async fn run_session(sh: &Shared, req: LoginRequest, cmd_rx: &mut mps
         inventory_move_tx,
         inventory_udp_tx,
         appearance_serial: 0,
+        agent_pause: crate::agent_pause::AgentPause::default(),
         appearance_queue: Default::default(),
         own_profile: None,
         notecard_copies: HashMap::new(),
@@ -767,6 +770,42 @@ impl Session<'_> {
     fn send_main<M: Msg>(&mut self, msg: &M, reliable: bool) {
         if let Some(a) = self.main {
             self.send(a, msg, reliable);
+        }
+    }
+
+    /// send_agent_pause / send_agent_resume (llworld.cpp): AgentPause or
+    /// AgentResume, with the next serial number, reliably to every region.
+    fn send_agent_pause(&mut self, pause: bool) {
+        let now = Instant::now();
+        let serial = if pause {
+            self.agent_pause.pause(now)
+        } else {
+            self.agent_pause.resume(now)
+        };
+        let Some(serial) = serial else {
+            return;
+        };
+        let (agent, session) = (self.agent_id(), self.session_id());
+        let regions: Vec<SocketAddr> = self.sims.keys().copied().collect();
+        log::info!(
+            "agent {} (serial {serial}) to {} region(s)",
+            if pause { "paused" } else { "resumed" },
+            regions.len()
+        );
+        for addr in regions {
+            if pause {
+                let mut m = AgentPause::default();
+                m.agent_data.agent_id = agent;
+                m.agent_data.session_id = session;
+                m.agent_data.serial_num = serial;
+                self.send(addr, &m, true);
+            } else {
+                let mut m = AgentResume::default();
+                m.agent_data.agent_id = agent;
+                m.agent_data.session_id = session;
+                m.agent_data.serial_num = serial;
+                self.send(addr, &m, true);
+            }
         }
     }
 
@@ -1559,7 +1598,8 @@ impl Session<'_> {
                 sim.last_ping = now;
                 ping_targets.push(*addr);
             }
-            if now.duration_since(sim.circuit.last_recv) > SIM_TIMEOUT {
+            // (the time the agent was paused for a long task is not silence)
+            if self.agent_pause.silence(sim.circuit.last_recv, now) > SIM_TIMEOUT {
                 dead.push(*addr);
             }
         }
@@ -1716,6 +1756,8 @@ impl Session<'_> {
                     self.logout_started = Some(Instant::now());
                 }
             }
+            NetCommand::AgentPause => self.send_agent_pause(true),
+            NetCommand::AgentResume => self.send_agent_pause(false),
             NetCommand::ArrivalGivenUp => {
                 log::warn!("no AgentMovementComplete in time: agent updates resume, session kept");
                 self.agent_moved = true;
@@ -6452,6 +6494,7 @@ mod event_queue_tests {
             inventory_move_tx,
             inventory_udp_tx,
             appearance_serial: 0,
+            agent_pause: crate::agent_pause::AgentPause::default(),
             appearance_queue: Default::default(),
             own_profile: None,
             notecard_copies: HashMap::new(),
@@ -6804,6 +6847,7 @@ mod script_dialog_tests {
             inventory_move_tx,
             inventory_udp_tx,
             appearance_serial: 0,
+            agent_pause: crate::agent_pause::AgentPause::default(),
             appearance_queue: Default::default(),
             own_profile: None,
             notecard_copies: HashMap::new(),
@@ -6974,6 +7018,64 @@ mod script_dialog_tests {
                 return packet.decode().expect("LogoutRequest");
             }
         }
+    }
+
+    #[tokio::test]
+    async fn a_long_task_pauses_the_agent_without_losing_the_region() {
+        let sock = Arc::new(UdpSocket::bind("127.0.0.1:0").await.expect("viewer socket"));
+        let main = UdpSocket::bind("127.0.0.1:0").await.expect("main simulator");
+        let main_addr = main.local_addr().expect("main address");
+        let (events, received) = crossbeam_channel::unbounded();
+        let sh = test_shared(events);
+        let one_sim = || [(main_addr, Sim::new(main_addr, 10))].into();
+        let ago = |seconds| Instant::now().checked_sub(Duration::from_secs(seconds)).expect("uptime");
+        let next_from = |sim: &UdpSocket| {
+            let mut datagram = [0; 1500];
+            let (size, _) = sim.try_recv_from(&mut datagram).expect("a packet reaches the region");
+            datagram[..size].to_vec()
+        };
+        sock.writable().await.expect("socket ready");
+
+        // AgentPause then AgentResume, reliable, one growing serial
+        let mut session = test_session(&sh, sock.clone(), one_sim(), main_addr);
+        session.on_command(NetCommand::AgentPause);
+        main.readable().await.expect("pause sent");
+        let bytes = next_from(&main);
+        let packet = parse_packet(&bytes).expect("datagram");
+        assert_eq!(packet.id, AgentPause::ID);
+        assert!(packet.reliable());
+        let pause: AgentPause = packet.decode().expect("AgentPause");
+        assert_eq!((pause.agent_data.agent_id, pause.agent_data.serial_num), (Uuid::from_u128(1), 1));
+        session.on_command(NetCommand::AgentPause);
+        assert!(main.try_recv_from(&mut [0; 1500]).is_err(), "paused once");
+        session.on_command(NetCommand::AgentResume);
+        main.readable().await.expect("resume sent");
+        let bytes = next_from(&main);
+        let packet = parse_packet(&bytes).expect("datagram");
+        assert_eq!(packet.id, AgentResume::ID);
+        let resume: AgentResume = packet.decode().expect("AgentResume");
+        assert_eq!(resume.agent_data.serial_num, 2);
+
+        // silent 160 s, 150 of them paused: the region is kept
+        let mut session = test_session(&sh, sock.clone(), one_sim(), main_addr);
+        session.agent_pause.pause(ago(150));
+        if let Some(sim) = session.sims.get_mut(&main_addr) {
+            sim.circuit.last_recv = ago(160);
+        }
+        session.tick();
+        assert!(!session.finished, "the paused time is not silence");
+        // the same silence without a pause: the link is lost
+        let mut session = test_session(&sh, sock.clone(), one_sim(), main_addr);
+        if let Some(sim) = session.sims.get_mut(&main_addr) {
+            sim.circuit.last_recv = ago(160);
+        }
+        session.tick();
+        assert!(session.finished);
+        assert!(
+            received
+                .try_iter()
+                .any(|(_, event)| matches!(event, NetEvent::Disconnected { lost: true, .. }))
+        );
     }
 
     #[tokio::test]

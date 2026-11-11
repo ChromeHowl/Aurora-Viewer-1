@@ -15045,3 +15045,11 @@ sr-state-shown = In range: shown
 sr-state-hidden = Hidden
 sr-remove = Remove
 update-personal-build = This is a personal build ({ $label }), built on this PC from its source code. It does not follow the official Aurora Viewer releases: to update it, use the "Update" shortcut in the Start menu.
+# Snapshot safety: what the last photo holds of the effects on screen
+ss-effect-bloom = Bloom
+ss-effect-dof = Depth of field
+ss-effect-ao = Ambient occlusion
+ss-effect-contact = Contact shadows
+ss-not-applied-parts = { $effect }: not applied (the photo was drawn in parts)
+ss-not-applied-screen = { $effect }: not applied (not shown on screen)
+ss-unverified = { $effect }: unverified where the photo's parts meet
