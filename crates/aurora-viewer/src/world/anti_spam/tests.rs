@@ -19,6 +19,9 @@ fn world() -> World {
     let mut w = World::new(Arc::new(AvatarLibrary::load()));
     w.agent_id = ME;
     w.anti_spam = registry();
+    // every dialog let through stays listed: the default ScriptDialogLimitations
+    // (one per object and channel) would close each one with the next
+    w.notifications.options.script_dialog_limit = crate::settings::notification_options::DialogLimit::Unconstrained;
     w
 }
 
