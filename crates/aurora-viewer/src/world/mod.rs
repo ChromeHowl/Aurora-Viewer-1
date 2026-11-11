@@ -10,6 +10,7 @@ pub mod body;
 pub mod bubble_chat;
 pub mod calling_cards;
 
+pub mod account_ids;
 mod arrival_wait;
 pub mod beacons;
 pub mod bridge;
