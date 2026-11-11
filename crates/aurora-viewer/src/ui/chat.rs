@@ -2137,13 +2137,8 @@ const USERNAME_MIN_W: f32 = 36.0;
 /// `reserve` pixels stay free at the right of the row for the time, as the
 /// user_name text of panel_chat_header.xml is (use_ellipses="true", the time
 /// box keeps its place); what was cut shows on hover. Returns the response
-/// of the name, clickable.
-fn header_names(ui: &mut egui::Ui, p: &Palette, name: &str, username: Option<&str>, col: Color32, reserve: f32) -> egui::Response {
-    header_names_styled(ui, p, name, username, col, reserve, None)
-}
-
-/// `header_names` with a moderator's name style (FSModNameStyle) in place
-/// of the bold name.
+/// of the name, clickable. `moderator`: a moderator's name style
+/// (FSModNameStyle) in place of the bold name.
 fn header_names_styled(
     ui: &mut egui::Ui,
     p: &Palette,
@@ -6255,7 +6250,7 @@ mod tests {
             .allocate_ui_with_layout(egui::vec2(width, 22.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 let time = header_time(ui, &p, "23:59".into());
                 let reserve = time.size().x + ui.spacing().item_spacing.x;
-                rects.0 = header_names(ui, &p, name, username, p.ink, reserve).rect;
+                rects.0 = header_names_styled(ui, &p, name, username, p.ink, reserve, None).rect;
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     rects.1 = ui.label(time).rect;
                 });

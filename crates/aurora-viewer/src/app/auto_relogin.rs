@@ -43,6 +43,20 @@ impl App {
             restart,
             user_logout: self.auto_relogin.user_logout,
         };
+        self.auto_relogin_end(end)
+    }
+
+    /// `NetEvent::LoggedOut`, the grid's reply to the user's own logout:
+    /// decided by the same rule as every other end (never followed by an
+    /// automatic login), which also ends a run.
+    pub(super) fn auto_relogin_logged_out(&mut self) {
+        self.note_user_logout();
+        self.auto_relogin_end(End::LoggedOut);
+    }
+
+    /// The end of a session through `rules::classify`: the cause of the
+    /// automatic login to come, or None (and no run) when there is none.
+    fn auto_relogin_end(&mut self, end: End) -> Option<Cause> {
         let verdict = rules::classify(end);
         let cause = match verdict {
             Ok(cause) if self.auto_relogin_on_this_grid() => cause,

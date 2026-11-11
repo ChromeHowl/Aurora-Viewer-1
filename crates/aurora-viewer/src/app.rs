@@ -4247,7 +4247,7 @@ impl App {
                 }
             }
             NetEvent::LoggedOut => {
-                self.note_user_logout();
+                self.auto_relogin_logged_out();
                 self.session_ended();
                 self.back_to_login(None);
             }

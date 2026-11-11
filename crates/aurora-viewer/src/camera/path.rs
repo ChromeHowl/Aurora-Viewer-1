@@ -460,6 +460,7 @@ impl Player {
         }
     }
 
+    #[cfg(test)]
     pub fn holding(&self) -> bool {
         self.holding
     }

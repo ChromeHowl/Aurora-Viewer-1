@@ -103,7 +103,9 @@ impl TabOrder {
     }
 
     /// The Legacy setting's value: the priority of groups, conferences and
-    /// IMs, highest first in the list.
+    /// IMs, highest first in the list. Aurora stores the variant itself;
+    /// the table checks `kinds` against the Legacy values.
+    #[cfg(test)]
     pub fn legacy_value(self) -> &'static str {
         match self {
             TabOrder::ImsGroupsConferences => "102",

@@ -62,10 +62,12 @@ pub struct History {
 }
 
 impl History {
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.views.len()
     }
 
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.views.is_empty()
     }

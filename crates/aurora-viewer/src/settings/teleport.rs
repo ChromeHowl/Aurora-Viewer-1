@@ -117,8 +117,7 @@ mod tests {
     /// A choice the user saved stays as saved.
     #[test]
     fn saved_choices_win_over_the_defaults() {
-        let t: Teleport =
-            serde_json::from_str(r#"{"keep_map_open":false,"history":{"zone":"Slt"}}"#).expect("saved choices");
+        let t: Teleport = serde_json::from_str(r#"{"keep_map_open":false,"history":{"zone":"Slt"}}"#).expect("saved choices");
         assert!(!t.keep_map_open);
         assert_eq!(t.history.zone, HistoryZone::Slt);
     }

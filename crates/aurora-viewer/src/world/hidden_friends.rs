@@ -67,14 +67,17 @@ impl HiddenFriends {
         self.ids.contains(id)
     }
 
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.ids.is_empty()
     }
 
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.ids.len()
     }
 
+    #[cfg(test)]
     pub fn ids(&self) -> impl Iterator<Item = &Uuid> {
         self.ids.iter()
     }
