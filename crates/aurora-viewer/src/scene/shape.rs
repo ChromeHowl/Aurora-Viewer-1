@@ -51,6 +51,8 @@ enum Kind {
 
 #[derive(Debug, Clone)]
 struct Param {
+    /// `name=` (an appearance XML writes it next to the id).
+    name: Box<str>,
     group: u8,
     min: f32,
     max: f32,
@@ -60,19 +62,6 @@ struct Param {
     /// LLWearableType.
     wearable: Option<u8>,
     kind: Kind,
-    /// `name=`, for the appearance XML a dump writes.
-    name: Box<str>,
-}
-
-/// One parameter of an appearance dump (`shape_editor::xml_export`).
-#[derive(Debug, Clone, PartialEq)]
-pub struct Dumped {
-    pub id: i32,
-    pub name: Box<str>,
-    pub wearable: u8,
-    pub weight: f32,
-    pub min: f32,
-    pub max: f32,
 }
 
 /// The parameter definitions of `avatar_lad.xml`.
@@ -81,6 +70,18 @@ pub struct ShapeParams {
     params: BTreeMap<i32, Param>,
     /// Ids of the parameters sent in AvatarAppearance, in message order.
     transmitted: Vec<i32>,
+}
+
+/// One parameter of a wearable type, as [`ShapeParams::wearable_params`]
+/// lists them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WearableParam<'a> {
+    pub id: i32,
+    pub name: &'a str,
+    pub min: f32,
+    pub max: f32,
+    pub default: f32,
+    pub group: u8,
 }
 
 /// Collision volume offsets (per unit of weight) of a body morph.
@@ -238,6 +239,7 @@ impl ShapeParams {
             Kind::Other
         };
         Some(Param {
+            name: e.attr("name").unwrap_or_default().into(),
             group,
             min,
             max,
@@ -245,11 +247,10 @@ impl ShapeParams {
             sex,
             wearable: e.attr("wearable").and_then(crate::world::inventory::wearable::kind_of),
             kind,
-            name: e.attr("name").unwrap_or_default().into(),
         })
     }
 
-    #[cfg(test)]
+    /// Number of bytes in a complete AvatarAppearance parameter block.
     pub fn transmitted_count(&self) -> usize {
         self.transmitted.len()
     }
@@ -261,29 +262,20 @@ impl ShapeParams {
         self.params.get(&id).filter(|p| p.wearable == Some(kind)).map(|p| (p.min, p.max))
     }
 
-    /// The tweakable parameters a wearable carries, with their weights for
-    /// these AvatarAppearance values, by wearable type then id: what
-    /// LLVOAvatar::dumpArchetypeXML lists grouped by wearable. Only the
-    /// transmitted ones (group 0) are known from an appearance.
-    pub fn dump(&self, values: &[u8]) -> Vec<Dumped> {
-        let weights = self.weights(values);
-        let mut out: Vec<Dumped> = self
-            .params
+    /// The parameters a wearable of `kind` carries, by id, the same set as
+    /// [`Self::wearable_range`] accepts.
+    pub fn wearable_params(&self, kind: u8) -> impl Iterator<Item = WearableParam<'_>> {
+        self.params
             .iter()
-            .filter(|(_, p)| p.group == 0)
-            .filter_map(|(id, p)| {
-                Some(Dumped {
-                    id: *id,
-                    name: p.name.clone(),
-                    wearable: p.wearable?,
-                    weight: weights.get(id).copied().unwrap_or(p.default),
-                    min: p.min,
-                    max: p.max,
-                })
+            .filter(move |(_, p)| p.wearable == Some(kind))
+            .map(|(&id, p)| WearableParam {
+                id,
+                name: &p.name,
+                min: p.min,
+                max: p.max,
+                default: p.default,
+                group: p.group,
             })
-            .collect();
-        out.sort_by_key(|d| (d.wearable, d.id));
-        out
     }
 
     /// Range and default weight of a parameter.

@@ -12,12 +12,6 @@ use crate::settings::chat_more::TabOrder;
 pub fn groups(cx: &mut Cx) {
     use aurora_i18n::tr;
     cx.group(tr!("chat-extras-group-nearby"), |cx| {
-        // PlayChatAnim
-        cx.toggle(
-            tr!("chat-extras-play-chat-anim"),
-            tr!("chat-extras-play-chat-anim-hint"),
-            &field!(chat_display.play_chat_anim),
-        );
         // FSSecondsinChatTimestamps
         cx.toggle(
             tr!("chat-extras-seconds"),

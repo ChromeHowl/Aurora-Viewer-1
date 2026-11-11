@@ -85,6 +85,8 @@ fn toast_seconds(n: &Notification, message_seconds: f64, o: &NotificationOptions
     match n.data {
         Data::Presence { .. } => f64::from(o.tip_toast_seconds),
         Data::Message { .. } => message_seconds,
+        // ShowMyComplexityChanges (the notice's expiry)
+        Data::Complexity { seconds } => f64::from(seconds),
         _ if n.interactive() => f64::from(o.offer_toast_seconds),
         _ => f64::from(o.info_toast_seconds),
     }
@@ -504,7 +506,12 @@ pub(super) fn card(
             match &n.data {
                 // drawn by `person_card`; the restart's live card by
                 // `region_restart::bell_card`, its text alone here
-                Data::None | Data::Presence { .. } | Data::Message { .. } | Data::RegionRestart | Data::RegionMessage { .. } => {}
+                Data::None
+                | Data::Presence { .. }
+                | Data::Message { .. }
+                | Data::RegionRestart
+                | Data::RegionMessage { .. }
+                | Data::Complexity { .. } => {}
                 // the attachment as in the group's Notices tab, saved from
                 // here (LLToastGroupNotifyPanel::onClickAttachment)
                 Data::GroupNotice { attachment: Some(a), .. } => {

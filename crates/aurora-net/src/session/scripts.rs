@@ -302,6 +302,7 @@ mod tests {
             viewer_stats: Default::default(),
             viewer_stats_posts: Default::default(),
             network: Default::default(),
+            seen_avatars: Default::default(),
         };
         let login = Arc::new(LoginResponse {
             agent_id: Uuid::from_u128(1),
@@ -356,6 +357,7 @@ mod tests {
             finished: false,
             agent_moved: false,
             viewer_stats: Default::default(),
+            render_info: crate::render_info::Schedule::new(Instant::now()),
             regions_visited: Default::default(),
             cam_requested_at: None,
             login_arrival: false,

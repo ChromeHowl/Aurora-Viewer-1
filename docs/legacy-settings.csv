@@ -399,7 +399,7 @@ FSAllowDoubleClickOnScriptedObjects,Boolean,in-aurora,,double_click_scripted,"If
 FSAllowEEPWaterDerender,Boolean,in-aurora,,"ported (2026-11), `settings/render_extras.rs`",Allow EEP assets to disable water rendering to increase FPS
 FSAlwaysFly,Boolean,in-aurora,,"a session toggle (fly override), not saved, as in the Legacy Viewer","Fly Override, for no-fly zones. Must be activated each time."
 FSAlwaysShowInboxButton,Boolean,to-add,low,,"If enabled, the Received Items folder aka Inbox is always shown at the bottom of the inventory, even if it is shown as folder in the invento"
-FSAlwaysShowTPCancel,Boolean,in-aurora,,"ported (2026-11), `settings/teleport_extras.rs`",Always show the TP cancel button even if the sim says it cant be canceled. The sim will always know if it can and will ignore cancel request
+FSAlwaysShowTPCancel,Boolean,in-aurora,,"`always_show_tp_cancel` (upstream #3325)",Always show the TP cancel button even if the sim says it cant be canceled. The sim will always know if it can and will ignore cancel request
 FSAlwaysTrackPayments,Boolean,in-aurora,,always_track_payments,Always track payments even if the money tracker is closed
 FSAnimatedScriptDialogs,Boolean,to-add,low,,Animates script dialogs V1 style. Only effective when dialogs in top right are activated.
 FSAnimationPreviewExpanded,Boolean,not-applicable,,a window's last state; Aurora keeps its own window state,Expand or collapse the advanced animation information in the animation preview floater by default
@@ -1491,7 +1491,7 @@ PieMenuPopupFontEffect,Boolean,unreviewed,,,"If enabled, the labels in the pie m
 PingInterpolate,Boolean,unreviewed,,,Extrapolate object position along velocity vector based on ping delay
 PitchFromMousePosition,F32,unreviewed,,field `head_yaw`,Vertical range over which avatar head tracks mouse position (degrees of head rotation from top of window to bottom)
 PlainTextChatHistory,Boolean,unreviewed,,,Enable/Disable plain text chat transcript style
-PlayChatAnim,Boolean,in-aurora,,"ported (2026-11), `settings/chat_display.rs`","Your avatar plays the chat animation whenever you say, shout or whisper something in nearby chat"
+PlayChatAnim,Boolean,in-aurora,,"`play_chat_anim` (upstream #3322)","Your avatar plays the chat animation whenever you say, shout or whisper something in nearby chat"
 PlayModeUISndAlert,Boolean,unreviewed,,,Holds state for Prefs > Sound/Media > UI Sounds - UISndAlert.
 PlayModeUISndBadKeystroke,Boolean,unreviewed,,,Holds state for Prefs > Sound/Media > UI Sounds - UISndBadKeystroke.
 PlayModeUISndChatMention,Boolean,unreviewed,,,Holds state for Prefs > Sound/Media > UI Sounds - UISndChatMention.
@@ -2023,7 +2023,7 @@ ShowMatureLand,Boolean,not-listed,,HideFromEditor in the Legacy Viewer,Display r
 ShowMatureSims,Boolean,not-listed,,HideFromEditor in the Legacy Viewer,Display results of find places or find popular that are in moderate sims
 ShowMenuBarLocation,Boolean,unreviewed,,,Show/Hide location info in the menu bar
 ShowMiniLocationPanel,Boolean,unreviewed,,,Show/hide mini-location panel
-ShowMyComplexityChanges,U32,unreviewed,,,How long to show notices about avatar complexity (set to zero to disable those notices)
+ShowMyComplexityChanges,U32,in-aurora,,"`complexity_notice_seconds` (upstream #3339)",How long to show notices about avatar complexity (set to zero to disable those notices)
 ShowNavbarFavoritesPanel,Boolean,unreviewed,,,Show/hide navigation bar favorites panel
 ShowNavbarNavigationPanel,Boolean,unreviewed,,,Show/hide navigation bar navigation panel
 ShowNetStats,Boolean,unreviewed,,field `show_net_stats`,Show the Status Indicators for the Viewer and Network Usage in the Status Overlay.

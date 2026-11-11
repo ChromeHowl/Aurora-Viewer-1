@@ -205,6 +205,19 @@ pub fn export_texture(inv: &Inventory, texture: Uuid) -> bool {
     [BLANK_TEXTURE, DEFAULT_TEXTURE, TRANSPARENT_TEXTURE].contains(&texture) || export_asset(inv, texture)
 }
 
+/// Whether the agent may write a wearable's slider values to an appearance
+/// XML file (the Export XML button of the shape, physics and layer editors).
+/// Stricter than the Legacy Viewer, whose Advanced > Character > Appearance
+/// to XML (LLVOAvatar::dumpArchetypeXML, indra/newview/llvoavatar.cpp)
+/// checks nothing: it asks modify rights, like the Import button
+/// (LLPanelEditWearable `import_btn`, allowModifyBy,
+/// indra/newview/llpaneleditwearable.cpp). A no-modify shape is often a
+/// bought one; its sliders stay visible, but it is not written to a file.
+/// The file never carries a texture id.
+pub fn appearance_xml_export_allowed(item: &InvItem, agent: Uuid) -> bool {
+    agent_mask(item, agent) & MODIFY != 0
+}
+
 /// [`asset_uuid_shown`] for an agent that may be a god: a god sees every
 /// asset UUID (LLViewerInventoryItem::getProtectedAssetUUID,
 /// isGodlikeWithoutAdminMenuFakery).

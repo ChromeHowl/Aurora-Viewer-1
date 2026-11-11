@@ -361,7 +361,8 @@ pub fn page(cx: &mut Cx, tab: usize) {
                     );
                 });
             });
-            // PlayTypingAnim and FSTypeDuringEmote (panel_preferences_chat.xml)
+            // PlayTypingAnim, FSTypeDuringEmote and PlayChatAnim
+            // (panel_preferences_chat.xml)
             cx.group(tr!("ui-options-typing-and-voice"), |cx| {
                 cx.toggle(
                     tr!("ui-options-play-typing-anim"),
@@ -376,6 +377,11 @@ pub fn page(cx: &mut Cx, tab: usize) {
                         &field!(type_during_emote),
                     );
                 });
+                cx.toggle(
+                    tr!("ui-options-play-chat-anim"),
+                    tr!("ui-options-play-chat-anim-hint"),
+                    &field!(play_chat_anim),
+                );
                 cx.toggle(tr!("voice-lip-sync"), "", &field!(audio.lip_sync));
             });
             // AvatarRotateThresholdSlow / Fast and our own head and eye

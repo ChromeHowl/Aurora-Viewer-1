@@ -1,9 +1,8 @@
 //! Me › Avatar health's character tests, our own avatar only:
 //!
 //! - "Appearance to XML" (Advanced.AppearanceToXML, LLVOAvatar::
-//!   dumpArchetypeXML in indra/newview/llvoavatar.cpp): our visual
-//!   parameters written to a file the user chooses
-//!   (`shape_editor::xml_export`).
+//!   dumpArchetypeXML in indra/newview/llvoavatar.cpp): the Appearance
+//!   window's own export (`world::appearance_xml`), from this menu too.
 //! - "Reset default male / female avatar (Character Test)" (handle_test_male
 //!   / handle_test_female in indra/newview/llviewermenu.cpp,
 //!   LLAppearanceMgr::wearOutfitByName in llappearancemgr.cpp): the folder
@@ -44,40 +43,15 @@ pub fn pick_outfit(candidates: &[Candidate]) -> Option<(Uuid, bool)> {
 }
 
 impl App {
+    /// Me › Avatar health › Appearance to XML: the Appearance window's
+    /// "Export my appearance XML…" (`world::appearance_xml`), reached from
+    /// where the Legacy Viewer's Advanced › Character menu has it.
     pub(super) fn dump_appearance_xml(&mut self) {
-        let me = self.world.agent_id;
-        let Some(values) = self.world.visual_params(&me).filter(|v| v.len() > 1) else {
+        if !crate::world::appearance_xml::ready(&self.world) {
             self.world.system_message(aurora_i18n::tr!("b4-dump-not-ready"));
             return;
-        };
-        let rows = self.world.avatar_lib.shape_params.dump(values);
-        let text = crate::shape_editor::xml_export::archetype_xml(&rows);
-        if self.appearance_dump.is_none() {
-            self.appearance_dump = crate::shape_editor::xml_export::save(&self.egui_ctx, text);
         }
-    }
-
-    /// The dump's file written (or not): one line in the nearby chat.
-    pub(super) fn poll_appearance_dump(&mut self) {
-        let Some(receiver) = &self.appearance_dump else { return };
-        let result = match receiver.try_recv() {
-            Ok(result) => result,
-            Err(std::sync::mpsc::TryRecvError::Empty) => return,
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => Err(String::new()),
-        };
-        self.appearance_dump = None;
-        match result {
-            Ok(None) => {}
-            Ok(Some(path)) => {
-                log::info!("appearance written to {}", path.display());
-                let path = path.display().to_string();
-                self.world.system_message(aurora_i18n::tr!("b4-dump-saved", path = path));
-            }
-            Err(e) => {
-                log::warn!("appearance dump failed: {e}");
-                self.world.system_message(aurora_i18n::tr!("b4-dump-failed"));
-            }
-        }
+        self.appearance_ui.json.export_appearance(&self.egui_ctx, &self.world);
     }
 
     pub(super) fn reset_default_avatar(&mut self, male: bool) {

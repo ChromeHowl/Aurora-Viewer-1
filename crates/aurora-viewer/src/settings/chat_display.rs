@@ -9,9 +9,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ChatDisplay {
-    /// PlayChatAnim (on): our avatar plays the talk, shout or whisper
-    /// animation when we say something on channel 0 (`chat_animation`).
-    pub play_chat_anim: bool,
+    /// The former PlayChatAnim switch of this group, read once: it became
+    /// `Settings::play_chat_anim` (Preferences › Avatars).
+    #[serde(rename = "play_chat_anim", skip_serializing)]
+    pub(crate) former_play_chat_anim: Option<bool>,
     /// FSShowIMInChatHistory (off): residents' IMs and group chat copied
     /// into the nearby chat (`world/chat_copies.rs`).
     pub im_in_nearby_chat: bool,
@@ -98,7 +99,7 @@ pub struct ChatDisplay {
 impl Default for ChatDisplay {
     fn default() -> Self {
         Self {
-            play_chat_anim: true,
+            former_play_chat_anim: None,
             im_in_nearby_chat: false,
             im_nearby_fade: 0.5,
             im_in_console: false,
@@ -249,7 +250,7 @@ mod tests {
     fn an_old_settings_file_takes_the_legacy_defaults() {
         let s: crate::settings::Settings = serde_json::from_value(serde_json::json!({})).expect("old file");
         assert_eq!(s.chat_display, ChatDisplay::default());
-        assert!(s.chat_display.play_chat_anim && s.chat_display.group_notices_in_chat);
+        assert!(s.chat_display.group_notices_in_chat);
         assert_eq!(s.chat_display.moderator_name_style, TextStyle::BOLD);
         let partial: ChatDisplay = serde_json::from_value(serde_json::json!({ "show_you": true })).expect("partial");
         assert!(partial.show_you);

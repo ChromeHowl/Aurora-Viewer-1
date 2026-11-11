@@ -82,6 +82,12 @@ pub fn page(cx: &mut Cx) {
             tr!("ui-options-fly-after-teleport-help"),
             &field!(fly_after_teleport),
         );
+        // FSAlwaysShowTPCancel (panel_preferences_move.xml)
+        cx.toggle(
+            tr!("ui-options-always-show-teleport-cancel"),
+            tr!("ui-options-always-show-teleport-cancel-help"),
+            &field!(always_show_tp_cancel),
+        );
         friends_only_row(cx);
         friends_only_keep_row(cx);
         cx.link(
@@ -128,17 +134,11 @@ fn teleport_group(cx: &mut Cx) {
             tr!("tpmap-opt-no-login-screen-help"),
             &field!(teleport.no_login_screen),
         );
-        // FSDisableLogoutScreens (panel_preferences_firestorm.xml) and
-        // FSAlwaysShowTPCancel
+        // FSDisableLogoutScreens (panel_preferences_firestorm.xml)
         cx.toggle(
             tr!("l3-opt-no-logout-screen"),
             tr!("l3-opt-no-logout-screen-help"),
             &field!(teleport_extras.no_logout_screen),
-        );
-        cx.toggle(
-            tr!("l3-opt-always-cancel"),
-            tr!("l3-opt-always-cancel-help"),
-            &field!(teleport_extras.always_cancel),
         );
         cx.toggle(
             tr!("tpmap-opt-unmute-sounds"),
