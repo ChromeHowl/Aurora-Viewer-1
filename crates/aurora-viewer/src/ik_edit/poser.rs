@@ -172,6 +172,13 @@ pub(super) struct State {
     /// with Ctrl (the handles, never a marker).
     gizmo_hover: bool,
     marker_hover: bool,
+    /// Where the open tab's joint markers are this frame (their 12-point
+    /// squares), empty while they are hidden: what the handles give way
+    /// to (`point_owns_pointer`). Measured from this frame's skeleton, not
+    /// from egui's rectangles of the last frame, which are keyed by joint
+    /// and so still held the previous subject's joints right after a
+    /// switch, or the place of markers faded out "On hover".
+    marker_spots: Vec<egui::Rect>,
     /// Last frame, Ctrl showed another part or avatar under the pointer:
     /// the handles let it through this frame (`poser_ctrl_picks`).
     ctrl_hint: bool,

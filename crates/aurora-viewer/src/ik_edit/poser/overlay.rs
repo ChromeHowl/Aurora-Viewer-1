@@ -2,7 +2,14 @@
 use super::*;
 use crate::ik_edit::segments::{self, Source};
 
+/// A joint marker's square, in points.
+const MARKER_SIZE: f32 = 12.0;
+
 impl Editor {
+    /// Whether a joint marker drawn this frame is under `pointer`.
+    pub(in crate::ik_edit) fn poser_marker_at(&self, pointer: egui::Pos2) -> bool {
+        self.poser.marker_spots.iter().any(|r| r.contains(pointer))
+    }
     pub(in crate::ik_edit) fn select_pose_bone(&mut self, bone: usize, rig: &Rig, frame: &Frame) {
         self.mirrors.initialize(rig);
         self.selected = Some(bone);
@@ -78,6 +85,7 @@ impl Editor {
         self.poser.pointer_owned = false;
         self.poser.gizmo_hover = false;
         self.poser.marker_hover = false;
+        self.poser.marker_spots.clear();
         if !ctx.input(|i| i.pointer.primary_down()) {
             self.drag = None;
             if !ctx.input(|i| i.pointer.primary_released()) {
@@ -233,6 +241,17 @@ impl Editor {
         let layer = egui::LayerId::new(egui::Order::Background, egui::Id::unique("poser-skeleton"));
         let mut painter = ctx.layer_painter(layer);
         let segments = self.skeleton_segments(world, proj, frame);
+        // the markers as they are drawn below, before the handles ask
+        // whether one is under the pointer
+        self.poser.marker_spots = if fade > 0.0 && !ctx.input(|i| i.modifiers.alt) {
+            (0..rig.len())
+                .filter(|b| self.bone_visible(&rig.canonical_names[*b]))
+                .filter_map(|b| proj.project(frame.joints[b].w_axis.truncate()))
+                .map(|(at, _)| egui::Rect::from_center_size(at, egui::Vec2::splat(MARKER_SIZE)))
+                .collect()
+        } else {
+            Vec::new()
+        };
         if fade > 0.0 {
             painter.multiply_opacity(fade);
             self.draw_segments(&painter, p, &segments);
@@ -271,7 +290,7 @@ impl Editor {
             let selected = chosen == Some(joint);
             let follower = !selected && self.poser.together.contains(&joint);
             let response = egui::Area::new(egui::Id::unique(("poser-joint", joint)))
-                .fixed_pos(at - egui::vec2(6.0, 6.0))
+                .fixed_pos(at - egui::Vec2::splat(MARKER_SIZE / 2.0))
                 .order(egui::Order::Background)
                 .movable(false)
                 .interactable(!gizmo_owns)
@@ -284,7 +303,7 @@ impl Editor {
                     } else {
                         Sense::click_and_drag()
                     };
-                    let (rect, response) = ui.allocate_exact_size(egui::Vec2::splat(12.0), sense);
+                    let (rect, response) = ui.allocate_exact_size(egui::Vec2::splat(MARKER_SIZE), sense);
                     if selected {
                         ui.painter().circle_stroke(rect.center(), 7.0, Stroke::new(2.0, p.teal));
                     } else if follower {

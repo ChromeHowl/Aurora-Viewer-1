@@ -2422,11 +2422,9 @@ fn a_marker_click_selects_its_joint_right_after_switching_avatars_even_with_none
             pressed,
             modifiers: egui::Modifiers::NONE,
         };
-        // the pointer rests on the marker a moment before the press, as a hand does
-        for _ in 0..2 {
-            frames.run(vec![egui::Event::PointerMoved(at)], |ui| editor.show(ui.ctx(), &p, &world, &proj));
-        }
-        let on_marker = editor.poser.marker_hover;
+        // one frame over the marker, then the press
+        frames.run(vec![egui::Event::PointerMoved(at)], |ui| editor.show(ui.ctx(), &p, &world, &proj));
+        let on_marker = editor.poser.marker_hover && !editor.poser.gizmo_hover;
         for events in [vec![button(true)], vec![button(false)], vec![]] {
             frames.run(events, |ui| editor.show(ui.ctx(), &p, &world, &proj));
         }
@@ -2438,23 +2436,24 @@ fn a_marker_click_selects_its_joint_right_after_switching_avatars_even_with_none
             editor.show(ui.ctx(), &p, &world, &proj)
         });
     }
-    // the switch leaves no joint selected until the next frame; the first
-    // click goes to an ankle, clear of the new pelvis' handles
+    // the switch leaves no joint selected until the next frame, which picks
+    // the new pelvis: its rotation rings pass over the knee (about 110
+    // points away), where the old avatar had no marker. The knee's marker
+    // takes the click, not the rings
     editor.pick_subject(&world, peer);
     assert_eq!((editor.poser.subject, editor.selected), (peer, None));
-    assert!(click(&mut editor, on(ankle)), "the pointer is on the new avatar's marker");
-    assert_eq!(editor.poser.subject, peer);
-    assert_eq!(
-        editor.selected,
-        Some(ankle),
-        "the first click on the new avatar's marker selects it"
+    assert!(
+        click(&mut editor, on(knee)),
+        "the new avatar's marker, not the rings, under the pointer"
     );
+    assert_eq!(editor.poser.subject, peer);
+    assert_eq!(editor.selected, Some(knee), "the first click on the new avatar's marker selects it");
     // none selected at all (a click beside), still on the new avatar
     click(&mut editor, egui::pos2(790.0, 890.0));
     assert_eq!(editor.selected, None);
     assert!(editor.poser.unselected);
-    assert!(click(&mut editor, on(knee)));
-    assert_eq!(editor.selected, Some(knee), "a marker selects its joint with none selected");
+    assert!(click(&mut editor, on(ankle)));
+    assert_eq!(editor.selected, Some(ankle), "a marker selects its joint with none selected");
     assert!(!editor.poser.unselected);
 }
 

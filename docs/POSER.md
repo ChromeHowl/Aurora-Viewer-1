@@ -143,7 +143,10 @@ Only the active tab's joints and shafts are visible and selectable. Changing
 tabs selects a joint in that group and replaces the previous group's gizmo.
 Choosing another subject keeps the open tab and selects a joint of it (the
 pelvis in Body); a click on any of its markers selects that joint at once,
-also while no joint is selected. Rotation, Position and Scale change the
+also while no joint is selected, and also where the new joint's rings pass
+over it: the handles give way to the markers drawn in the same frame (they
+used the markers' places of the frame before, which right after a switch
+were the previous subject's). Rotation, Position and Scale change the
 handles at once: they are measured again every frame, and a press is judged
 on the handles of the mode shown then, never on the previous mode's.
 
