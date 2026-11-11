@@ -7,7 +7,6 @@ use super::*;
 use std::collections::HashMap;
 use std::time::Duration;
 
-const DELAY: f64 = 0.7;
 const SIZE: f32 = 256.0;
 
 #[derive(Default)]
@@ -49,15 +48,17 @@ impl State {
             self.since = None;
             return;
         }
+        // FSInventoryThumbnailTooltipsDelay (Preferences › Layout)
+        let delay = f64::from(crate::ui::text_tuning::current(&response.ctx).thumbnail_tooltip_delay);
         let now = response.ctx.input(|i| i.time);
         let since = self.since.get_or_insert((response.id, now));
         if since.0 != response.id {
             *since = (response.id, now);
         }
-        if picture.is_some() && now - since.1 < DELAY {
+        if picture.is_some() && now - since.1 < delay {
             response
                 .ctx
-                .request_repaint_after(Duration::from_secs_f64((DELAY - (now - since.1)).max(0.0)));
+                .request_repaint_after(Duration::from_secs_f64((delay - (now - since.1)).max(0.0)));
             return;
         }
         response.on_hover_ui(|ui| {

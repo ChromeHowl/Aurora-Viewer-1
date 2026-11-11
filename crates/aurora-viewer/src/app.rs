@@ -11621,6 +11621,7 @@ impl App {
         }
         crate::theme::apply_motion(&self.egui_ctx, self.settings.reduce_motion);
         crate::theme::apply_tooltip_delay(&self.egui_ctx, self.settings.legacy_prefs.tooltip_delay);
+        ui::text_tuning::apply(&self.egui_ctx, &self.settings.text_tuning);
         self.demo_gains_tick(Instant::now());
         if actions.settings_changed || std::mem::take(&mut self.snapshots.settings_changed) {
             crate::media::set_web_prefs(crate::media::web_prefs(&self.settings.legacy_prefs));

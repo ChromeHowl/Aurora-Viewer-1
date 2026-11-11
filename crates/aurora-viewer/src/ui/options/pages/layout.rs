@@ -133,6 +133,7 @@ pub fn page(cx: &mut Cx, tab: usize) {
                 );
             });
             super::legacy_prefs::interface(cx);
+            super::text_tuning::rows(cx);
         }
         1 => {
             cx.group(tr!("ui-options-hover-tips"), |cx| {

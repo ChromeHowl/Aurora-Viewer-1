@@ -30,6 +30,7 @@ pub mod socks_proxy;
 pub mod sound;
 pub mod spelling;
 pub mod system;
+pub mod text_tuning;
 
 use super::Page;
 use super::cx::Cx;
