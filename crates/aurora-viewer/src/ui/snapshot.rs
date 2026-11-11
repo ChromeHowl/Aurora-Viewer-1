@@ -175,6 +175,10 @@ pub struct View<'a> {
     pub quality_reduced: bool,
     /// A 360° photo can be taken (no RLVa camera limit).
     pub pano_allowed: bool,
+    /// Preferences' colour grade, which the photo's style starts from, and
+    /// why its tone curves change nothing now (None: they apply).
+    pub prefs_grade: crate::settings::render_extras::Grade,
+    pub tone_why: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -839,6 +843,21 @@ impl SnapshotUi {
         self.looks.show(ui, p, s, opts, out);
         if std::mem::take(&mut self.looks.reveal) {
             ui.scroll_to_rect(filter.with_max_y(ui.cursor().top()), Some(egui::Align::Center));
+        }
+        // the photo's picture style and white balance (photo mode only),
+        // the viewfinder's Style sheet without its fine tuning
+        ui.add_space(4.0);
+        ui.label(RichText::new(aurora_i18n::tr!("pcu-style-title")).color(p.ink));
+        let cx = super::viewfinder::StyleContext {
+            prefs_grade: &view.prefs_grade,
+            tone_ok: view.tone_why.map_or(Ok(()), Err),
+        };
+        let light_before = self.light;
+        if super::viewfinder::style_rows(ui, p, &mut self.light, &cx, false) {
+            out.push(Action::KeepStyle);
+        }
+        if self.light != light_before && !out.contains(&Action::Changed) {
+            out.push(Action::Changed);
         }
 
         ui.add_space(2.0);

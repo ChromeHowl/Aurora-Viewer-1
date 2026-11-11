@@ -908,7 +908,7 @@ impl App {
             _ if free => letter
                 .chars()
                 .next()
-                .filter(|c| matches!(c, 'q' | 'i' | 'n' | 'v' | 'g' | 'h' | 'l' | 'p' | 'b')),
+                .filter(|c| matches!(c, 'q' | 'i' | 'n' | 'v' | 'g' | 'h' | 'l' | 'p' | 'b' | 't')),
             _ => None,
         };
         let Some(which) = which else {
@@ -940,6 +940,17 @@ impl App {
             }
             'n' => self.vf_cycle_af(),
             'b' => v.toggle_wb_dial(),
+            't' => {
+                let mut ignored = Vec::new();
+                v.toggle_sheet(Sheet::Style, &mut ignored);
+                // (the isolation panel closed by the one-panel rule)
+                for o in ignored {
+                    if let Out::Isolate(o) = o {
+                        let ppp = self.egui_ctx.pixels_per_point();
+                        self.photo_isolate_out(o, ppp);
+                    }
+                }
+            }
             'p' => {
                 let ui = &self.snapshots.ui;
                 let next = vf::next_choice(vf::shown(ui.shot, ui.depth, ui.bank), &self.vf_shot_list());
@@ -1163,6 +1174,7 @@ impl App {
             depth_ok: self.world.rlva.visuals.spheres.is_empty(),
             banks: self.vf_banks(),
             prefs_grade: self.settings.render_extras.grade,
+            tone_ok: self.photo_tone_why(),
         };
         // the demo aims at the own avatar's face, then shoots
         let (aim, shoot) = self.photo_demo_viewfinder();

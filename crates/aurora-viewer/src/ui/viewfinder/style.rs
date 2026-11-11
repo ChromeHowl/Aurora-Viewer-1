@@ -128,6 +128,177 @@ impl Viewfinder {
     }
 }
 
+pub(super) fn style_label(st: style::Style) -> &'static str {
+    use style::Style;
+    match st {
+        Style::AsViewer => aurora_i18n::tr!("pcu-style-viewer"),
+        Style::Standard => aurora_i18n::tr!("pcu-style-standard"),
+        Style::Neutral => aurora_i18n::tr!("pcu-style-neutral"),
+        Style::Soft => aurora_i18n::tr!("pcu-style-soft"),
+        Style::Classic => aurora_i18n::tr!("pcu-style-classic"),
+        Style::Natural => aurora_i18n::tr!("pcu-style-natural"),
+        Style::Film => aurora_i18n::tr!("pcu-style-film"),
+        Style::Vivid => aurora_i18n::tr!("pcu-style-vivid"),
+        Style::Custom => aurora_i18n::tr!("pcu-style-custom"),
+    }
+}
+
+fn fine_label(f: style::Fine) -> &'static str {
+    match f {
+        style::Fine::Shadows => aurora_i18n::tr!("pcu-fine-shadows"),
+        style::Fine::Midtones => aurora_i18n::tr!("pcu-fine-midtones"),
+        style::Fine::Highlights => aurora_i18n::tr!("pcu-fine-highlights"),
+        style::Fine::Colour => aurora_i18n::tr!("pcu-fine-colour"),
+    }
+}
+
+/// What the photo's style rows are given: Preferences' grade, and whether
+/// tone mapping applies (HDR on and a sky that is tone mapped), else why
+/// the curves do nothing.
+pub struct StyleContext<'a> {
+    pub prefs_grade: &'a crate::settings::render_extras::Grade,
+    pub tone_ok: Result<(), &'a str>,
+}
+
+/// A row of a value in steps with − and +; the step asked.
+fn stepper(ui: &mut egui::Ui, p: &Palette, label: &str, value: String) -> i32 {
+    let mut dir = 0;
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(label).color(p.ink));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if crate::ui::widgets::icon_button(ui, p, "plus", aurora_i18n::tr!("photo-vf-ring-more"), true) {
+                dir = 1;
+            }
+            ui.add_sized(
+                egui::Vec2::new(34.0, 18.0),
+                egui::Label::new(egui::RichText::new(value).color(p.ink)),
+            );
+            if crate::ui::widgets::icon_button(ui, p, "minus", aurora_i18n::tr!("photo-vf-ring-less"), true) {
+                dir = -1;
+            }
+        });
+    });
+    dir
+}
+
+/// The photo's picture style: its chips (the curves greyed with the reason
+/// when tone mapping does nothing), the white balance's presets, and with
+/// `fine` the fine-tuning rows and the tint; "Photo only" while set, "Back
+/// to viewer" and "Keep this look". The viewfinder's Style sheet and the
+/// photo window's row (both interface styles) draw the same rows; true
+/// when "Keep this look" was clicked.
+pub fn style_rows(ui: &mut egui::Ui, p: &Palette, light: &mut crate::snapshot::light::PhotoLight, cx: &StyleContext, fine: bool) -> bool {
+    let prefs = cx.prefs_grade;
+    let now = style::matching(light, prefs);
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = egui::Vec2::splat(4.0);
+        let all = std::iter::once(style::Style::AsViewer).chain(style::STYLES.iter().map(|(s, _, _)| *s));
+        for st in all {
+            let curve = st != style::Style::AsViewer;
+            let enabled = !curve || cx.tone_ok.is_ok();
+            let r = crate::ui::snapshot::chip(ui, p, style_label(st), None, now == st, enabled);
+            let r = match cx.tone_ok {
+                Err(why) if curve => r.on_disabled_hover_text(why),
+                _ => r,
+            };
+            if r.clicked() {
+                style::apply_style(light, prefs, st);
+            }
+        }
+        if now == style::Style::Custom {
+            crate::ui::snapshot::chip(ui, p, style_label(style::Style::Custom), None, true, false);
+        }
+    });
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = egui::Vec2::splat(4.0);
+        let wb = style::wb_of(light, prefs);
+        for w in Wb::ALL {
+            if crate::ui::snapshot::chip(ui, p, wb_label(w), None, wb == Some(w), true)
+                .on_hover_text(wb_tip(w))
+                .clicked()
+            {
+                style::set_wb(light, prefs, w);
+            }
+        }
+    });
+    if fine {
+        for row in style::Fine::ALL {
+            let dir = stepper(ui, p, fine_label(row), signed(row.steps(light, prefs)));
+            if dir != 0 {
+                style::fine_step(light, prefs, row, dir);
+            }
+        }
+        let g = style::grade(light, prefs);
+        let dir = stepper(ui, p, aurora_i18n::tr!("pcu-fine-tint"), signed(-style::steps(g.tint)));
+        if dir != 0 {
+            // (the row counts green: more green, less tint)
+            style::set_tint(light, prefs, style::step(g.tint, -dir));
+        }
+    }
+    let mut keep = false;
+    if style::is_set(light) {
+        ui.label(
+            egui::RichText::new(aurora_i18n::tr!("pcu-style-photo-only"))
+                .size(11.5)
+                .color(p.muted),
+        );
+    }
+    ui.horizontal(|ui| {
+        let set = style::is_set(light);
+        if ui
+            .add_enabled_ui(set, |ui| crate::ui::widgets::flat_button(ui, p, aurora_i18n::tr!("pcu-style-back")))
+            .inner
+            .clicked()
+        {
+            light.tonemapper = None;
+            light.grade = None;
+        }
+        keep = ui
+            .add_enabled_ui(set, |ui| crate::ui::widgets::flat_button(ui, p, aurora_i18n::tr!("pcu-keep-look")))
+            .inner
+            .on_hover_text(aurora_i18n::tr!("pcu-keep-look-tip"))
+            .clicked();
+    });
+    keep
+}
+
+impl Viewfinder {
+    /// The Style sheet (T, the quick menu's tile, the style's line).
+    pub(super) fn style_sheet(
+        &mut self,
+        ctx: &egui::Context,
+        p: &Palette,
+        screen: Rect,
+        panel: &mut SnapshotUi,
+        f: &Frame,
+        out: &mut Vec<super::Out>,
+    ) {
+        let mut keep = false;
+        let cx = StyleContext {
+            prefs_grade: &f.prefs_grade,
+            tone_ok: f.tone_ok.map_or(Ok(()), Err),
+        };
+        let open = super::sheets::sheet(
+            ctx,
+            p,
+            screen,
+            "vf_style_sheet",
+            "palette-filled",
+            aurora_i18n::tr!("pcu-style-title"),
+            |ui| {
+                ui.spacing_mut().item_spacing.y = 6.0;
+                keep = style_rows(ui, p, &mut panel.light, &cx, true);
+            },
+        );
+        if keep {
+            out.push(super::Out::Panel(crate::ui::snapshot::Action::KeepStyle));
+        }
+        if !open {
+            self.sheet = None;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

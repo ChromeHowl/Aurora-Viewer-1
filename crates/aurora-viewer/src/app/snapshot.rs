@@ -2684,6 +2684,8 @@ LUT_3D_SIZE {n}
                 back_key: self.settings.keybinds.get(crate::keybinds::Action::ResetCamera)[0].clone(),
                 quality_reduced,
                 pano_allowed: !snapshot::pano::rlva_blocks(|b| self.world.rlva.has(b)),
+                prefs_grade: self.settings.render_extras.grade,
+                tone_why: self.photo_tone_why(),
             };
             // (under the reel's quick view, nothing of the viewfinder acts:
             // no focus by a click, no shutter)
@@ -2763,6 +2765,8 @@ LUT_3D_SIZE {n}
                 back_key: self.settings.keybinds.get(crate::keybinds::Action::ResetCamera)[0].clone(),
                 quality_reduced,
                 pano_allowed: !snapshot::pano::rlva_blocks(|b| self.world.rlva.has(b)),
+                prefs_grade: self.settings.render_extras.grade,
+                tone_why: self.photo_tone_why(),
             };
             let mut open = self.panels.snapshot;
             actions.extend(state.show(
@@ -3029,6 +3033,18 @@ LUT_3D_SIZE {n}
     /// Preferences'.
     pub(super) fn photo_tonemapper(&self) -> u8 {
         snapshot::style::tonemapper(&self.snapshots.ui.light, self.settings.tonemapper)
+    }
+
+    /// Why a tone curve changes nothing now (the reasons Preferences give):
+    /// HDR off, or a classic sky that is not tone mapped.
+    pub(super) fn photo_tone_why(&self) -> Option<&'static str> {
+        if !self.settings.hdr_emissive {
+            Some(aurora_i18n::tr!("ui-options-needs-hdr-emissive"))
+        } else if !self.options_ui.sky_tone_mapped {
+            Some(aurora_i18n::tr!("ui-options-tone-mapping-classic-sky"))
+        } else {
+            None
+        }
     }
 
     /// The renderer's settings with the photo's tone curve: what every

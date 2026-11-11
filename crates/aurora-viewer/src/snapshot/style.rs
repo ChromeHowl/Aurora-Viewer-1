@@ -169,6 +169,113 @@ pub fn wb_of(light: &PhotoLight, prefs: &Grade) -> Option<Wb> {
         .find(|w| w.temperature().is_some_and(|t| steps(t) == steps(g.temperature)) && steps(g.tint) == 0)
 }
 
+/// A picture style: a named tone curve and grade, adjusted in steps (a
+/// camera's film simulations, a phone's photographic styles).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Style {
+    /// Preferences' curve and grade: no style of the photo's own.
+    AsViewer,
+    Standard,
+    Neutral,
+    Soft,
+    Classic,
+    Natural,
+    Film,
+    Vivid,
+    /// Off every style's values.
+    Custom,
+}
+
+/// The styles that can be chosen: their curve (`Settings::tonemapper`'s
+/// numbers) and lift, gamma, gain, vibrance. Standard is the default curve
+/// (ACES, `Settings::default`).
+pub const STYLES: [(Style, u8, [f32; 4]); 7] = [
+    (Style::Standard, 1, [0.0; 4]),
+    (Style::Neutral, 0, [0.0; 4]),
+    (Style::Soft, 2, [0.0; 4]),
+    (Style::Classic, 3, [0.0; 4]),
+    (Style::Natural, 4, [0.0; 4]),
+    (Style::Film, 5, [0.0; 4]),
+    (Style::Vivid, 1, [0.0, 0.0, 0.25, 0.5]),
+];
+
+/// The fine tuning's grid: −4 to +4 steps of 0.25.
+pub const FINE_STEP: f32 = 0.25;
+
+fn rest(g: &Grade) -> [f32; 4] {
+    [g.lift, g.gamma, g.gain, g.vibrance]
+}
+
+fn on_grid(v: f32) -> i32 {
+    (v / FINE_STEP).round() as i32
+}
+
+/// A style chosen; the white balance is kept. As viewer gives back
+/// Preferences' curve and the start's lift, gamma, gain and vibrance.
+pub fn apply_style(light: &mut PhotoLight, prefs: &Grade, style: Style) {
+    let b = base(prefs);
+    let (tone, values) = match STYLES.iter().find(|(s, _, _)| *s == style) {
+        Some((_, t, v)) => (Some(*t), *v),
+        None if style == Style::AsViewer => (None, rest(&b)),
+        None => return,
+    };
+    light.tonemapper = tone;
+    edit(light, prefs, |g| {
+        [g.lift, g.gamma, g.gain, g.vibrance] = values;
+    });
+}
+
+/// The style the overlay is on (what its chips and label show).
+pub fn matching(light: &PhotoLight, prefs: &Grade) -> Style {
+    let g = edit_start(light, prefs);
+    let same = |v: [f32; 4], w: [f32; 4]| v.iter().zip(w).all(|(a, b)| on_grid(*a) == on_grid(b) && (a - b).abs() < 1e-3);
+    match light.tonemapper {
+        None if same(rest(&g), rest(&base(prefs))) => Style::AsViewer,
+        None => Style::Custom,
+        Some(t) => STYLES
+            .iter()
+            .find(|(_, st, v)| *st == t && same(rest(&g), *v))
+            .map_or(Style::Custom, |(s, _, _)| *s),
+    }
+}
+
+/// A fine-tuning row: Shadows (lift), Midtones (gamma), Highlights (gain),
+/// Colour (vibrance).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fine {
+    Shadows,
+    Midtones,
+    Highlights,
+    Colour,
+}
+
+impl Fine {
+    pub const ALL: [Fine; 4] = [Fine::Shadows, Fine::Midtones, Fine::Highlights, Fine::Colour];
+
+    fn of(self, g: &mut Grade) -> &mut f32 {
+        match self {
+            Fine::Shadows => &mut g.lift,
+            Fine::Midtones => &mut g.gamma,
+            Fine::Highlights => &mut g.gain,
+            Fine::Colour => &mut g.vibrance,
+        }
+    }
+
+    /// Its value in steps (−4 to +4).
+    pub fn steps(self, light: &PhotoLight, prefs: &Grade) -> i32 {
+        let mut g = edit_start(light, prefs);
+        on_grid(*self.of(&mut g))
+    }
+}
+
+/// A fine-tuning row stepped (`dir` −1 or 1), within ±4 steps.
+pub fn fine_step(light: &mut PhotoLight, prefs: &Grade, row: Fine, dir: i32) {
+    edit(light, prefs, |g| {
+        let v = row.of(g);
+        *v = (on_grid(*v) + dir.signum()).clamp(-4, 4) as f32 * FINE_STEP;
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -326,5 +433,48 @@ mod tests {
         let g = light.grade.expect("set");
         assert_eq!((g.lift, g.gamma, g.gain, g.vibrance), (0.25, -0.5, 0.75, 0.5));
         assert_eq!((steps(g.temperature), steps(g.tint)), (2, 0));
+    }
+
+    #[test]
+    fn each_style_round_trips_through_matching() {
+        for prefs in [Grade::default(), prefs()] {
+            for (style, _, _) in STYLES {
+                let mut light = PhotoLight::default();
+                apply_style(&mut light, &prefs, style);
+                assert_eq!(matching(&light, &prefs), style, "{style:?}");
+            }
+            let mut light = PhotoLight::default();
+            assert_eq!(matching(&light, &prefs), Style::AsViewer);
+            apply_style(&mut light, &prefs, Style::Film);
+            apply_style(&mut light, &prefs, Style::AsViewer);
+            assert_eq!(matching(&light, &prefs), Style::AsViewer);
+            assert!(!is_set(&light), "back to the viewer: no overlay");
+        }
+    }
+
+    #[test]
+    fn vivid_is_on_the_grid_and_any_step_is_custom() {
+        let (_, _, v) = STYLES[6];
+        for x in v {
+            assert_eq!(x, on_grid(x) as f32 * FINE_STEP);
+        }
+        let mut light = PhotoLight::default();
+        apply_style(&mut light, &Grade::default(), Style::Vivid);
+        fine_step(&mut light, &Grade::default(), Fine::Shadows, 1);
+        assert_eq!(matching(&light, &Grade::default()), Style::Custom);
+        assert_eq!(Fine::Shadows.steps(&light, &Grade::default()), 1);
+        for _ in 0..9 {
+            fine_step(&mut light, &Grade::default(), Fine::Colour, 1);
+        }
+        assert_eq!(Fine::Colour.steps(&light, &Grade::default()), 4, "clamped");
+    }
+
+    #[test]
+    fn standard_is_aces_the_default_curve_and_a_style_keeps_the_white_balance() {
+        assert_eq!(STYLES[0].1, crate::settings::Settings::default().tonemapper);
+        let mut light = PhotoLight::default();
+        set_wb(&mut light, &Grade::default(), Wb::Shade);
+        apply_style(&mut light, &Grade::default(), Style::Classic);
+        assert_eq!(wb_of(&light, &Grade::default()), Some(Wb::Shade));
     }
 }

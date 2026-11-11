@@ -28,6 +28,7 @@ pub use isolate::{Isolate, IsolateRow};
 pub use modes::refused_text;
 pub use presets::{Preset, PresetForm, anchor_icon};
 pub use sheets::BankEdit;
+pub use style::{StyleContext, style_rows};
 #[cfg(test)]
 mod message_tests;
 
@@ -228,6 +229,9 @@ pub struct Frame<'a> {
     /// Preferences' colour grade, which the photo's style and white
     /// balance start from (`snapshot::style::base`).
     pub prefs_grade: crate::settings::render_extras::Grade,
+    /// Why the tone curves do nothing (HDR off, a classic sky); None when
+    /// they apply.
+    pub tone_ok: Option<&'static str>,
 }
 
 /// A custom mode's slot as the viewfinder shows it.
@@ -760,6 +764,7 @@ impl Viewfinder {
         }
         match self.sheet {
             Some(Sheet::Modes) if shows => self.mode_list(ctx, p, screen, panel, f, &mut out),
+            Some(Sheet::Style) => self.style_sheet(ctx, p, screen, panel, f, &mut out),
             Some(Sheet::Bank(i)) => {
                 let bank = f.banks[usize::from(i.min(2))].clone();
                 self.bank_sheet(ctx, p, screen, i, s, &bank, &mut out);
@@ -1026,6 +1031,24 @@ impl Viewfinder {
             self.toggle_wb_dial();
         }
         y += 24.0;
+        // the photo's own style, while it has one: a click opens its sheet
+        if crate::snapshot::style::is_set(&panel.light) {
+            let st = crate::snapshot::style::matching(&panel.light, &f.prefs_grade);
+            let text = format!("{} · {}", style::style_label(st), aurora_i18n::tr!("pcu-style-photo-only-short"));
+            let open = egui::Area::new(Id::unique("vf_style_line"))
+                .order(Order::Foreground)
+                .fade_in(false)
+                .pivot(Align2::LEFT_CENTER)
+                .fixed_pos(Pos2::new(screen.left() + GAP, y))
+                .show(ctx, |ui| {
+                    icon_text_button(ui, p, "palette-filled", &text, p.ink, aurora_i18n::tr!("pcu-style-tip")).clicked()
+                })
+                .inner;
+            if open {
+                self.toggle_sheet(Sheet::Style, out);
+            }
+            y += 24.0;
+        }
         if panel.freeze_world {
             line(&mut y, "snowflake", aurora_i18n::tr!("photo-vf-world-frozen"), p.ink);
         }
@@ -2478,6 +2501,11 @@ fn tiles(s: &Settings, panel: &SnapshotUi, f: &Frame) -> Vec<(&'static str, Stri
         aurora_i18n::tr!("pcu-tile-custom"),
         bank,
         Box::new(|_, _| Some(Out::Sheet(Sheet::Modes))),
+    ));
+    v.push((
+        aurora_i18n::tr!("pcu-tile-style"),
+        style::style_label(crate::snapshot::style::matching(&panel.light, &f.prefs_grade)).to_owned(),
+        Box::new(|_, _| Some(Out::Sheet(Sheet::Style))),
     ));
     v.push((
         aurora_i18n::tr!("pcu-shot-title"),
