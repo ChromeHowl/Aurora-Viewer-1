@@ -149,7 +149,7 @@ Not built yet:
 - Notifications: animated script dialogs, toast startup and fade times, overflow height, bottom margin, nearby-chat toasts; the corner position covers llDialog and llTextBox only.
 - Build: new-prim default texture, embedded item and new-script template; drag texture offset; selection beam and particle effects; save object back to contents; pathfinding editing; selection level-of-detail override; the rest of the script editor link (object, command and syntax files, Luau, runtime forwarding).
 - Export: backup import (rez-and-apply with the upload cost shown and confirmed); object contents in backups.
-- Inventory: favourite wearables window; inbox display options and ShowNewInventory.
+- Inventory: inbox display options and ShowNewInventory.
 - Preferences: SOCKS5 proxy (UDP wrapping, password in the credential store), line spacing, notecard and script fonts, inspector tooltip delays. The proxy and the UDP port apply at start, not at each login; a fixed UDP port already taken falls back to a system port (the Legacy Viewer fails the login).
 - Worn tab: a separate Hair / Body grouping (needs name rules).
 
@@ -163,4 +163,4 @@ To check against the Legacy Viewer's source or settings:
 - The chat range spheres' per-segment depth test: cost not measured.
 - Hide selected: look at the outline on a hidden object.
 
-Still to write: the POSER.md and ANIMATION_CREATION.md paragraphs for the poser and timeline additions.
+Final polish (`feat/final-polish`): favourite wearables on the inventory stars, the toolbar's 360capture / omnifilter / wearable_favorites, the script editor folder removed at exit, the release-build warnings cleared, the SOCKS relay test fixed, and the POSER.md and ANIMATION_CREATION.md paragraphs for the poser and timeline additions.
