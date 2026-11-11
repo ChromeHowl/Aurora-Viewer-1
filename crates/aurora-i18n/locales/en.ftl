@@ -15026,3 +15026,12 @@ pcu-help-t = Picture style sheet
 pcu-help-arrows = Arrows, Enter
 pcu-help-arrows-text = In the quick menu, the mode list or a sheet: move, change (Enter steps the tile or chooses the mode)
 pcu-cheat-pbt = shot mode · white balance · style
+
+# Snapshot safety: what the last photo holds of the effects on screen
+ss-effect-bloom = Bloom
+ss-effect-dof = Depth of field
+ss-effect-ao = Ambient occlusion
+ss-effect-contact = Contact shadows
+ss-not-applied-parts = { $effect }: not applied (the photo was drawn in parts)
+ss-not-applied-screen = { $effect }: not applied (not shown on screen)
+ss-unverified = { $effect }: unverified where the photo's parts meet

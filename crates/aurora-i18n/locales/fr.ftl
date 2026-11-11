@@ -15025,3 +15025,12 @@ pcu-help-t = Feuille du style d’image
 pcu-help-arrows = Flèches, Entrée
 pcu-help-arrows-text = Dans le menu rapide, la liste des modes ou une feuille : se déplacer, changer (Entrée fait avancer la tuile ou choisit le mode)
 pcu-cheat-pbt = mode de prise de vue · balance des blancs · style
+
+# Sécurité des photos : ce que la dernière photo contient des effets de l’écran
+ss-effect-bloom = Bloom
+ss-effect-dof = Profondeur de champ
+ss-effect-ao = Occlusion ambiante
+ss-effect-contact = Ombres de contact
+ss-not-applied-parts = { $effect } : non appliqué (la photo a été rendue en plusieurs parties)
+ss-not-applied-screen = { $effect } : non appliqué (absent de l’écran)
+ss-unverified = { $effect } : non vérifié là où les parties de la photo se rejoignent

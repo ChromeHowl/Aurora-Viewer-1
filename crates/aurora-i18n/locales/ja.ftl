@@ -14974,3 +14974,12 @@ pcu-help-t = ピクチャースタイルのシート
 pcu-help-arrows = 矢印キー、Enter
 pcu-help-arrows-text = クイックメニュー、モード一覧、シートで：移動、変更（Enter でタイルを進めるかモードを選択）
 pcu-cheat-pbt = 撮影モード · ホワイトバランス · スタイル
+
+# スナップショットの安全性：直前の写真に画面の効果がどこまで入ったか
+ss-effect-bloom = ブルーム
+ss-effect-dof = 被写界深度
+ss-effect-ao = アンビエントオクルージョン
+ss-effect-contact = コンタクトシャドウ
+ss-not-applied-parts = { $effect }：未適用（写真を分割して描画したため）
+ss-not-applied-screen = { $effect }：未適用（画面に表示されていないため）
+ss-unverified = { $effect }：写真の分割部分のつなぎ目では未確認
