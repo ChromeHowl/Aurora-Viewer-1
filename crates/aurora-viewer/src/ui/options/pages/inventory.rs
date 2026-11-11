@@ -133,6 +133,19 @@ pub fn page(cx: &mut Cx) {
         }
         cx.track(&field!(received_items_since));
     });
+    cx.group(tr!("b8-inventory-textures"), |cx| {
+        use crate::settings::inventory_extras::TextureSaveFormat;
+        cx.choice(
+            tr!("b8-inventory-save-format"),
+            tr!("b8-inventory-save-format-help"),
+            &field!(inventory_extras.texture_save_format),
+            &[
+                (TextureSaveFormat::Ask, tr!("b8-inventory-save-format-ask"), false),
+                (TextureSaveFormat::Png, "PNG", false),
+                (TextureSaveFormat::Tga, "TGA", false),
+            ],
+        );
+    });
     cx.group(tr!("import-window-title"), |cx| {
         cx.choice(
             tr!("import-entry-point"),

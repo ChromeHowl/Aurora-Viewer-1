@@ -271,6 +271,7 @@ pub(super) fn toolbar(
     held: u32,
     dimensions: Option<(u32, u32)>,
     display: &mut Display,
+    save_format: Option<bool>,
     actions: &mut Vec<Action>,
 ) {
     ui.horizontal_wrapped(|ui| {
@@ -282,6 +283,15 @@ pub(super) fn toolbar(
         let full = held & rules::FULL == rules::FULL;
         if widgets::icon_button(ui, p, "copy-filled", aurora_i18n::tr!("resource-preview-copy-uuid"), full) {
             ui.ctx().copy_text(item.asset_id.to_string());
+        }
+        // FSTextureDefaultSaveAsFormat: one button for the chosen format
+        if let Some(png) = save_format {
+            let label = if png { "PNG" } else { "TGA" };
+            let tip = format!("{} ({label})", aurora_i18n::tr!("common-save-as"));
+            if widgets::icon_button(ui, p, "device-floppy-filled", &tip, full) {
+                actions.push(Action::ExportTexture { item: item.id, png });
+            }
+            return;
         }
         ui.add_enabled_ui(full, |ui| {
             egui::ComboBox::from_id_salt("texture_export")

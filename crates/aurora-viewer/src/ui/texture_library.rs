@@ -137,6 +137,9 @@ pub enum Action {
 }
 #[derive(Default)]
 pub struct LibraryUi {
+    /// Preferences › Inventory's texture save format (None: ask), set by
+    /// the app before each frame.
+    pub save_format: Option<bool>,
     export_folder: Option<crossbeam_channel::Receiver<Option<std::path::PathBuf>>>,
     export_items: Vec<(Uuid, bool)>,
     export_queue: std::collections::VecDeque<(Uuid, std::path::PathBuf, bool)>,

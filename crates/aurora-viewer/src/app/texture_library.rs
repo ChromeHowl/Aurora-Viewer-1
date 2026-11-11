@@ -561,6 +561,7 @@ impl App {
             }
         }
         let preferences = self.settings.texture_library.clone();
+        self.texture_library.save_format = self.settings.inventory_extras.texture_save_format.png();
         let actions = self.texture_library.show(
             ctx,
             p,

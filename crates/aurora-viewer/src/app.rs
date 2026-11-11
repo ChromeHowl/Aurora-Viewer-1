@@ -555,6 +555,8 @@ pub struct App {
     avatar_textures: ui::context::AvatarTexturesUi,
     object_profile: ui::context::ObjectProfileUi,
     pathfinding_ui: ui::context::PathfindingUi,
+    /// "Save as ▸ Backup / Collada" of a linkset.
+    export_ui: crate::export::ExportUi,
     /// What a left-button drag does (steer the avatar, orbit a focus point).
     mouse_mode: MouseMode,
     /// Build tools (selection, manipulators, create, terraform).
@@ -1631,6 +1633,7 @@ impl App {
             avatar_textures: Default::default(),
             object_profile: Default::default(),
             pathfinding_ui: Default::default(),
+            export_ui: Default::default(),
             mouse_mode: MouseMode::None,
             build: Default::default(),
             ik_editor: Default::default(),
@@ -17305,6 +17308,24 @@ impl App {
                     if self.demo {
                         self.pathfinding_ui.demo(&self.world, command);
                     } else {
+                        self.send(command);
+                    }
+                }
+                let grid = crate::world::chat_log::grid_name(&self.settings.grid, &self.settings.custom_login_uri, self.demo);
+                let texture_cache = self.scene.textures.cache_dir().to_path_buf();
+                let export_commands = self.export_ui.show(
+                    &ctx,
+                    &p,
+                    crate::export::Sources {
+                        world: &self.world,
+                        build: &self.build,
+                        meshes: &mut self.scene.meshes,
+                        texture_cache: &texture_cache,
+                        grid,
+                    },
+                );
+                if !self.demo {
+                    for command in export_commands {
                         self.send(command);
                     }
                 }

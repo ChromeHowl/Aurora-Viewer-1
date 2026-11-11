@@ -510,6 +510,7 @@ impl MeshStreamer {
                     physics_convex: None,
                     physics_mesh: None,
                     version: 1,
+                    creator: Uuid::nil(),
                 }),
                 stage: Stage::Known,
                 local: true,
@@ -1441,6 +1442,7 @@ mod tests {
             physics_convex: None,
             physics_mesh: None,
             version: 1,
+            creator: Uuid::nil(),
         };
         streamer.entries.insert(
             id,

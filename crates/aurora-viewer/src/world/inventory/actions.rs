@@ -55,6 +55,108 @@ pub fn asset_uuid_shown(inv: &Inventory, asset: Uuid) -> bool {
         || inv.items.values().any(|it| it.asset_id == asset && held(inv, it) & FULL == FULL)
 }
 
+/// What a file export of objects needs to know about one prim: its
+/// ObjectProperties (full ones: the family reply has no creator), its
+/// sculpt or mesh and, for a mesh, the creator of its header.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ExportPrim {
+    pub owner: Uuid,
+    pub group: Uuid,
+    pub creator: Uuid,
+    pub owner_mask: u32,
+    pub sculpt: Option<aurora_prim::params::SculptParams>,
+    /// `MeshHeader::creator`; None while the header is not known.
+    pub mesh_creator: Option<Uuid>,
+}
+
+/// The file an export writes: a linkset backup (`.oxp`) or a Collada model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ExportFormat {
+    Backup,
+    Collada,
+}
+
+/// Why a prim stays out of an export.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ExportRefusal {
+    /// Owned by someone else, by a group, or not known yet.
+    NotOwner,
+    /// Owned by us but made by someone else.
+    NotCreator,
+    /// Ours and made by us, without copy, modify and transfer.
+    NotFullPermission,
+    /// A mesh: never in a backup (the Legacy Viewer refuses it too).
+    MeshInBackup,
+    /// A mesh uploaded by someone else, or whose header is not known.
+    MeshCreator,
+    /// A sculpt whose map is not one of our own textures.
+    SculptCreator,
+}
+
+/// Whether one prim may be exported: port of FSExportPermsCheck::canExportNode
+/// (indra/newview/fsexportperms.cpp) for Second Life, applied on every grid.
+/// The prim must be owned by the agent (never a group) and created by the
+/// agent; a mesh must have been uploaded by the agent (creator of its
+/// header) and is never written to a backup; a sculpt map must pass
+/// [`export_asset`]. Stricter than the Legacy Viewer: the agent's owner mask
+/// must also hold copy, modify and transfer, the large-prim exception is not
+/// kept, and the more permissive OpenSim export policies are not used.
+pub fn export_prim(inv: &Inventory, prim: &ExportPrim, format: ExportFormat) -> Result<(), ExportRefusal> {
+    let agent = inv.owner;
+    if agent.is_nil() || prim.owner != agent || prim.owner == prim.group {
+        return Err(ExportRefusal::NotOwner);
+    }
+    if prim.creator != agent {
+        return Err(ExportRefusal::NotCreator);
+    }
+    if prim.owner_mask & FULL != FULL {
+        return Err(ExportRefusal::NotFullPermission);
+    }
+    match prim.sculpt {
+        Some(sculpt) if sculpt.is_mesh() => match format {
+            ExportFormat::Backup => Err(ExportRefusal::MeshInBackup),
+            ExportFormat::Collada if prim.mesh_creator == Some(agent) => Ok(()),
+            ExportFormat::Collada => Err(ExportRefusal::MeshCreator),
+        },
+        Some(sculpt) if !export_asset(inv, sculpt.texture) => Err(ExportRefusal::SculptCreator),
+        _ => Ok(()),
+    }
+}
+
+/// Whether an asset (a texture, a sculpt map) an exported object carries may
+/// go into the file: port of FSExportPermsCheck::canExportAsset
+/// (indra/newview/fsexportperms.cpp): an item of the agent's inventory
+/// (the Trash included, never the Library) holding that asset was created
+/// by the agent. Stricter: the agent must also hold it with copy, modify and
+/// transfer. Returns the name and description of that item.
+pub fn export_asset_item(inv: &Inventory, asset: Uuid) -> Option<&InvItem> {
+    let agent = inv.owner;
+    if agent.is_nil() || asset.is_nil() {
+        return None;
+    }
+    inv.items.values().find(|it| {
+        it.asset_id == asset
+            && it.creator == agent
+            && it.owner == agent
+            && !it.group_owned
+            && !library(inv, it.id)
+            && agent_mask(it, agent) & FULL == FULL
+    })
+}
+
+/// [`export_asset_item`] as a yes or no.
+pub fn export_asset(inv: &Inventory, asset: Uuid) -> bool {
+    export_asset_item(inv, asset).is_some()
+}
+
+/// Whether a texture of an exported face may keep its id in the file: one
+/// of the built-in textures (FSCommon::isDefaultTexture), else
+/// [`export_asset`]. A face whose texture fails keeps the default texture.
+pub fn export_texture(inv: &Inventory, texture: Uuid) -> bool {
+    use aurora_prim::te::{BLANK_TEXTURE, DEFAULT_TEXTURE, TRANSPARENT_TEXTURE};
+    [BLANK_TEXTURE, DEFAULT_TEXTURE, TRANSPARENT_TEXTURE].contains(&texture) || export_asset(inv, texture)
+}
+
 pub fn parent(inv: &Inventory, id: Uuid) -> Option<Uuid> {
     inv.folders
         .get(&id)

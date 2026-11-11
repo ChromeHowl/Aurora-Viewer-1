@@ -692,6 +692,7 @@ impl App {
             CtxAction::ObjectInfo(id) => self.inspect_object_information(id),
             CtxAction::RefreshTextures(id) => self.refresh_object_textures(id),
             CtxAction::RefreshAvatarTextures(id) => self.refresh_avatar_textures(id),
+            CtxAction::Export { id, format } => self.export_ui.open(format, id),
             CtxAction::Rebake => self.rebake(),
             CtxAction::Take(id) | CtxAction::TakeCopy(id) => {
                 let copy = matches!(act, CtxAction::TakeCopy(_));

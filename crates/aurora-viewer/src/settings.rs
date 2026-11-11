@@ -11,6 +11,7 @@ pub mod chat_display;
 pub mod chat_translation;
 pub mod draw_stepping;
 mod hover_height;
+pub mod inventory_extras;
 pub mod people;
 pub mod registry;
 pub mod render_extras;
@@ -519,6 +520,8 @@ pub struct Settings {
     pub teleport: teleport::Teleport,
     pub inventory: crate::ui::inventory::InventoryPreferences,
     pub texture_library: crate::ui::texture_library::Preferences,
+    /// Default texture save format (settings/inventory_extras.rs).
+    pub inventory_extras: inventory_extras::InventoryExtras,
     pub gestures: crate::ui::gestures::Settings,
     pub imports: crate::imports::Preferences,
     pub ao: crate::ao::Settings,
@@ -1985,6 +1988,7 @@ impl Default for Settings {
             teleport: Default::default(),
             inventory: Default::default(),
             texture_library: Default::default(),
+            inventory_extras: Default::default(),
             gestures: Default::default(),
             shape_show_hints: true,
             shape_height_feet: false,

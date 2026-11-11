@@ -14177,3 +14177,50 @@ chatxl-action-highlight = Surligner
 chatxl-action-set-aside = Mettre de côté
 chatxl-replacement-hint = Texte de remplacement (vide : masquer)
 chatxl-uninstall-key = Clé de traduction ({ $service })
+b8-export-title-backup = Enregistrer une sauvegarde
+b8-export-title-collada = Enregistrer en Collada
+b8-export-rule = Seul ce que vous possédez et avez créé vous-même est enregistré, avec les textures et les meshes que vous avez créés.
+b8-export-waiting = Lecture des propriétés de l'objet…
+b8-export-no-object = L'objet n'est plus en vue.
+b8-export-object = Objet : { $name }
+b8-export-refused = Cet objet ne peut pas être enregistré : { $reason }
+b8-export-prims = { $count ->
+    [one] { $count } prim sera enregistrée
+   *[other] { $count } prims seront enregistrées
+    }
+b8-export-textures-in = { $count ->
+    [one] { $count } de vos textures est incluse
+   *[other] { $count } de vos textures sont incluses
+    }
+b8-export-collada-no-textures = Un fichier Collada ne garde que les formes et les couleurs des faces, sans textures.
+b8-export-textures-replaced = { $count ->
+    [one] { $count } face utilise une texture que vous n'avez pas créée : elle reçoit la texture par défaut.
+   *[other] { $count } faces utilisent une texture que vous n'avez pas créée : elles reçoivent la texture par défaut.
+    }
+b8-export-dropped = { $count ->
+    [one] { $count } matériau ou texture de lumière est laissé de côté.
+   *[other] { $count } matériaux ou textures de lumière sont laissés de côté.
+    }
+b8-export-left-out = { $count ->
+    [one] { $count } partie est laissée de côté :
+   *[other] { $count } parties sont laissées de côté :
+    }
+b8-export-unnamed = (sans nom)
+b8-export-why-not-owner = vous ne la possédez pas
+b8-export-why-not-creator = vous n'en êtes pas le créateur
+b8-export-why-not-full = vous n'avez pas les droits de copie, de modification et de transfert
+b8-export-why-mesh-backup = un mesh ne peut pas être enregistré dans une sauvegarde
+b8-export-why-mesh-creator = vous n'avez pas importé ce mesh
+b8-export-why-sculpt = vous n'avez pas créé sa sculpt map
+b8-export-why-geometry = sa forme n'est pas chargée ou c'est une sculptie
+b8-export-save = Enregistrer…
+b8-export-saved = Enregistré dans { $path }.
+b8-export-failed = Le fichier n'a pas pu être enregistré : { $reason }
+b8-export-not-cached = { $count ->
+    [one] { $count } texture n'est pas encore téléchargée et n'est gardée que par son identifiant.
+   *[other] { $count } textures ne sont pas encore téléchargées et ne sont gardées que par leur identifiant.
+    }
+b8-inventory-textures = Textures
+b8-inventory-save-format = Format de « Enregistrer sous » des textures
+b8-inventory-save-format-help = Le format dans lequel l'aperçu d'une texture l'enregistre ; Demander propose PNG et TGA à chaque fois
+b8-inventory-save-format-ask = Demander
