@@ -1179,11 +1179,6 @@ fn main_menus(ui: &mut egui::Ui, p: &Palette, panels: &mut Panels, st: &StatusIn
         if st.marketplace {
             use super::web_guides::Guide;
             for (icon, label, guide) in [
-                (
-                    "map-pin-link-filled",
-                    aurora_i18n::tr!("b9-guide-destinations"),
-                    Guide::Destinations,
-                ),
                 ("gift-filled", aurora_i18n::tr!("b9-guide-welcome-pack"), Guide::WelcomePack),
                 ("home-2-filled", aurora_i18n::tr!("b9-guide-linden-home"), Guide::LindenHome),
             ] {

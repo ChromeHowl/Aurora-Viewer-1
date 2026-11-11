@@ -14718,7 +14718,6 @@ b9-rlva-text-stopim-none = @stopim sans conversation (distant)
 b9-rlva-text-stopim-none-hint = Envoyé quand un résident essaie de fermer une conversation qui n’existe pas. Vide : le texte par défaut.
 b9-rlva-text-stopim-ended = @stopim avec une conversation (distant)
 b9-rlva-text-stopim-ended-hint = Envoyé quand un résident ferme votre conversation avec lui. Vide : le texte par défaut.
-b9-guide-destinations = Guide des destinations
 b9-guide-welcome-pack = Pack de bienvenue des avatars
 b9-guide-linden-home = Ma maison Linden
 b9-window-size = Définir la taille de la fenêtre

@@ -1,19 +1,18 @@
 //! The Second Life web guides of the World menu, shown in Aurora's built-in
-//! browser (`web_browser.rs`): the Destination Guide (the `destinations`
-//! command, DestinationGuideURL), the Avatar Welcome Pack
+//! browser (`web_browser.rs`): the Avatar Welcome Pack
 //! (LLFloaterAvatarWelcomePack, AvatarWelcomePack) and My Linden Home
 //! (LLWorldLindenHome, indra/newview/llviewermenu.cpp). Addresses and
 //! choices from the Legacy Viewer's settings.xml and strings.xml (originally
 //! LGPL 2.1); [GRID_LOWERCASE] is the grid's id (LLWeb's substitution).
 //! Second Life grids only, as the Legacy Viewer's GridCheck "secondlife":
-//! the pages are Linden Lab's.
+//! the pages are Linden Lab's. The Destination Guide is its own window
+//! (`ui/destinations.rs`).
 
 use crate::settings::GridChoice;
 
 /// A guide of the World menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Guide {
-    Destinations,
     WelcomePack,
     LindenHome,
 }
@@ -21,7 +20,6 @@ pub enum Guide {
 /// ProductSKU of a Linden Home (LINDEN_HOMES_SKU, llfloaterlandholdings.cpp).
 pub const LINDEN_HOME_SKU: &str = "131";
 
-const DESTINATIONS: &str = "https://lecs-viewer-web-components.s3.amazonaws.com/v3.0/[GRID_LOWERCASE]/guide.html";
 const WELCOME_PACK: &str = "https://lecs-viewer-web-components.s3.amazonaws.com/v3.0/[GRID_LOWERCASE]/vawp/index.html";
 /// lindenhomes_my_home_url and lindenhomes_get_home_url.
 const MY_LINDEN_HOME: &str = "https://land.secondlife.com/en-Us/lindenhomes/my-home.php";
@@ -36,7 +34,6 @@ pub fn url(guide: Guide, grid: &GridChoice, has_linden_home: bool) -> Option<Str
         GridChoice::Custom => return None,
     };
     Some(match guide {
-        Guide::Destinations => DESTINATIONS.replace("[GRID_LOWERCASE]", id),
         Guide::WelcomePack => WELCOME_PACK.replace("[GRID_LOWERCASE]", id),
         Guide::LindenHome if has_linden_home => MY_LINDEN_HOME.to_owned(),
         Guide::LindenHome => GET_LINDEN_HOME.to_owned(),
@@ -50,14 +47,10 @@ mod tests {
     #[test]
     fn the_guides_name_the_grid_and_exist_on_second_life_only() {
         assert_eq!(
-            url(Guide::Destinations, &GridChoice::SecondLife, false).as_deref(),
-            Some("https://lecs-viewer-web-components.s3.amazonaws.com/v3.0/agni/guide.html")
-        );
-        assert_eq!(
             url(Guide::WelcomePack, &GridChoice::SecondLifeBeta, false).as_deref(),
             Some("https://lecs-viewer-web-components.s3.amazonaws.com/v3.0/aditi/vawp/index.html")
         );
-        assert_eq!(url(Guide::Destinations, &GridChoice::Custom, false), None);
+        assert_eq!(url(Guide::WelcomePack, &GridChoice::Custom, false), None);
     }
 
     #[test]

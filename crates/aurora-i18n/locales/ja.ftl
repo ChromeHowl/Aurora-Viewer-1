@@ -14662,7 +14662,6 @@ b9-rlva-text-stopim-none = 会話のない@stopim（相手側）
 b9-rlva-text-stopim-none-hint = 存在しない会話を住人が閉じようとしたときに送られます。空欄の場合は既定のテキストです。
 b9-rlva-text-stopim-ended = 会話のある@stopim（相手側）
 b9-rlva-text-stopim-ended-hint = 住人があなたとの会話を閉じたときに送られます。空欄の場合は既定のテキストです。
-b9-guide-destinations = 行き先ガイド
 b9-guide-welcome-pack = アバターウェルカムパック
 b9-guide-linden-home = マイ・リンデンホーム
 b9-window-size = ウィンドウサイズを設定
