@@ -847,3 +847,24 @@ fn stacked_layers_draw_one_after_the_other() {
     let under = draw(&device, &queue, wgpu::TextureFormat::Rgba8Unorm, &stacked, (w, h), &image);
     assert_eq!(first, under);
 }
+
+#[test]
+fn a_look_tells_how_far_it_reads_around_a_pixel() {
+    let h = 2000.0;
+    assert_eq!(LookOp::Sepia.reach(h), Some(0.0));
+    assert_eq!(LookOp::blur().reach(h), Some(1.0));
+    let glow = LookOp::Glow {
+        amount: 0.5,
+        radius: 0.02,
+        threshold: 0.7,
+        tint: [1.0; 3],
+    };
+    let near = |v: Option<f32>, want: f32| v.is_some_and(|v| (v - want).abs() < 1e-3);
+    assert!(near(glow.reach(h), 40.0));
+    assert_eq!(LookOp::Paint(0.5).reach(h), Some(5.0), "the shader's 5 pixels at most");
+    assert!(near(LookOp::Pixelate(0.01).reach(h), 20.0));
+    // a lens effect reads across the whole photo
+    assert_eq!(LookOp::Distort(0.2).reach(h), None);
+    assert_eq!(LookOp::Chroma(0.01).reach(h), None);
+    assert_eq!(LookOp::Chroma(0.0).reach(h), Some(0.0));
+}
