@@ -1188,6 +1188,7 @@ mod tests {
             quiet_snapshots: false,
             mouse_smoothing: false,
             release_keys: false,
+            hide_selected: false,
             marketplace: false,
             destinations: false,
             parcel_landmark: None,

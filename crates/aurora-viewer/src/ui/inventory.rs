@@ -502,6 +502,9 @@ pub struct InventoryUi {
     thumbnails_helper: thumbnails_helper::State,
     menu_editor: context_customize::State,
     menu_notecards: context_notecards::State,
+    /// The Received tab is not offered (`InventoryPreferences::
+    /// received_tab_shown`), as of the last frame.
+    received_tab_hidden: bool,
     /// Library wearables being copied to be worn: copy request → replace.
     pub wear_copies: std::collections::HashMap<Uuid, (Uuid, usize)>,
     pub wear_copy_groups: std::collections::HashMap<Uuid, WearCopyGroup>,
@@ -816,8 +819,9 @@ impl InventoryUi {
     /// Marketplace inbox (and the inbox itself), which the main tab leaves
     /// out (#752, #1604).
     pub fn show_notified(&mut self, inv: &Inventory, id: Uuid) {
-        let tab = if crate::world::inventory::actions::system(inv, 50)
-            .is_some_and(|inbox| crate::world::inventory::actions::under(inv, id, inbox))
+        let tab = if !self.received_tab_hidden
+            && crate::world::inventory::actions::system(inv, 50)
+                .is_some_and(|inbox| crate::world::inventory::actions::under(inv, id, inbox))
         {
             RECEIVED_TAB
         } else {
@@ -2076,7 +2080,11 @@ fn inventory_contents(
         (3, aurora_i18n::tr!("common-worn"), prefs.show_worn),
         (4, aurora_i18n::tr!("common-favorites"), prefs.show_favorites),
         // LLSidepanelInventory::postBuild: the Received Items in the main window only
-        (RECEIVED_TAB, aurora_i18n::tr!("ui-inventory-received-purchases"), st.is_main()),
+        (
+            RECEIVED_TAB,
+            aurora_i18n::tr!("ui-inventory-received-purchases"),
+            st.is_main() && prefs.received_tab_shown(),
+        ),
     ] {
         if show {
             tab_ids.push(id);
@@ -2143,6 +2151,10 @@ pub fn show(
 ) -> Vec<InvAction> {
     let mut actions = Vec::new();
     clipboard::prepare(st);
+    st.received_tab_hidden = !prefs.received_tab_shown();
+    if st.received_tab_hidden && st.tab == RECEIVED_TAB {
+        set_tab(st, prefs, 0);
+    }
     if !*open {
         st.pending_delete = None;
     }

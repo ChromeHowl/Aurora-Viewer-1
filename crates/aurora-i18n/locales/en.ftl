@@ -15110,3 +15110,30 @@ fpol-favwear-wear-tip = Wear it in place of what is worn in its slot.
 fpol-favwear-add-tip = Wear it beside what is already worn.
 fpol-favwear-unstar = Unstar
 fpol-favwear-unstar-tip = Remove it from the inventory favourites. The item stays where it is.
+## Next-B: inventory display, rule sets, tools
+nb-inbox-folder = Show Received Items as a folder in the inventory
+nb-inbox-folder-help = The Marketplace inbox is listed in the inventory's tree; off, it is only in the Received tab
+nb-inbox-tab = Keep the Received tab
+nb-inbox-tab-help = While Received Items is shown as a folder, the Received tab stays as well
+nb-show-new-inventory = Open new notecards, textures and other items when they arrive
+nb-show-new-inventory-help = What an object gives, a group notice's attachment and an offer accepted automatically open in their preview once they are in the inventory
+nb-omnifilter-rule-set = Rule set
+nb-omnifilter-default-set = Default
+nb-omnifilter-remove-set = Remove this rule set (the Default one stays)
+nb-omnifilter-set-name = New rule set name
+nb-omnifilter-new-set = New
+nb-omnifilter-copy-set = Copy
+nb-omnifilter-name-needed = Give the rule set a name.
+nb-omnifilter-name-taken = A rule set already has this name.
+nb-omnifilter-sets-full = No more rule sets can be added.
+nb-omnifilter-imported-set =
+    { $count ->
+        [one] { $count } rule imported into the new rule set “{ $name }”
+       *[other] { $count } rules imported into the new rule set “{ $name }”
+    }
+nb-omnifilter-load-notecard = Load from an inventory notecard…
+nb-omnifilter-save-notecard = Save to an inventory notecard…
+nb-omnifilter-save-help = The rule set in use is written to a new notecard of your Notecards folder, readable by the Legacy Viewer.
+nb-omnifilter-no-notecards = Your inventory has no Notecards folder.
+nb-omnifilter-notecard-exists = A notecard named “{ $name }” is already in your Notecards folder.
+nb-omnifilter-saved = Rule set saved to the notecard “{ $name }”.

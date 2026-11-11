@@ -456,7 +456,25 @@ pub struct InventoryPreferences {
     /// DebugHideEmptySystemFolders: system folders holding nothing are left
     /// out of the tree. Off by default, as in the Legacy Viewer.
     pub hide_empty_system_folders: bool,
+    /// FSShowInboxFolder: the Marketplace inbox (Received Items) is listed
+    /// as a folder of the inventory's tree, besides the Received tab. On by
+    /// default, Aurora's place for it, where the Legacy Viewer leaves it to
+    /// its Received Items panel.
+    pub show_inbox_folder: bool,
+    /// FSAlwaysShowInboxButton: the Received tab stays while the inbox is
+    /// listed as a folder (it always does when it is not). On by default,
+    /// Aurora's, where the Legacy Viewer hides its panel then.
+    pub always_show_received_tab: bool,
 }
+
+impl InventoryPreferences {
+    /// The Received tab of the main window is offered (LLSidepanelInventory::
+    /// refreshInboxVisibility: !FSShowInboxFolder || FSAlwaysShowInboxButton).
+    pub fn received_tab_shown(&self) -> bool {
+        !self.show_inbox_folder || self.always_show_received_tab
+    }
+}
+
 impl Default for InventoryPreferences {
     fn default() -> Self {
         Self {
@@ -504,6 +522,8 @@ impl Default for InventoryPreferences {
             folder_colors_enabled: true,
             folder_colors: Default::default(),
             hide_empty_system_folders: false,
+            show_inbox_folder: true,
+            always_show_received_tab: true,
         }
     }
 }
@@ -632,9 +652,11 @@ struct Query {
 
 #[derive(Default)]
 pub struct ViewCache {
-    version: Option<(Uuid, Uuid, u64, Sort, bool)>,
+    version: Option<(Uuid, Uuid, u64, Sort, (bool, bool))>,
     /// `InventoryPreferences::hide_empty_system_folders` for the next build.
     hide_empty_system: bool,
+    /// `InventoryPreferences::show_inbox_folder` off, for the next build.
+    hide_inbox: bool,
     entries: Vec<Entry>,
     children: IdMap<Vec<Uuid>>,
     result_children: IdMap<Vec<Uuid>>,
@@ -652,13 +674,23 @@ pub struct ViewCache {
 }
 
 impl ViewCache {
-    /// Whether the next `prepare` leaves out the empty system folders.
-    pub fn set_hide_empty_system(&mut self, hide: bool) {
-        self.hide_empty_system = hide;
+    /// Whether the next `prepare` leaves out the empty system folders and
+    /// the Marketplace inbox (FSShowInboxFolder off: LLInventoryPanel's
+    /// filter drops FT_INBOX, llinventorypanel.cpp; the Received tab still
+    /// lists it).
+    pub fn set_display(&mut self, prefs: &InventoryPreferences) {
+        self.hide_empty_system = prefs.hide_empty_system_folders;
+        self.hide_inbox = !prefs.show_inbox_folder;
     }
 
     pub fn prepare(&mut self, inv: &Inventory, sort: Sort) {
-        let version = (inv.root, inv.lib_root, inv.generation, sort, self.hide_empty_system);
+        let version = (
+            inv.root,
+            inv.lib_root,
+            inv.generation,
+            sort,
+            (self.hide_empty_system, self.hide_inbox),
+        );
         if self.version == Some(version) {
             return;
         }
@@ -758,8 +790,12 @@ impl ViewCache {
         self.folders = inv.folders.keys().copied().collect();
         // Keep the lists' memory: a folder gone keeps an empty list.
         self.children.values_mut().for_each(Vec::clear);
+        let inbox = if self.hide_inbox { rules::system(inv, 50) } else { None };
         for entry in &self.entries {
             if self.hide_empty_system && entry.folder && hidden_when_empty(inv, entry.id) {
+                continue;
+            }
+            if entry.folder && Some(entry.id) == inbox && entry.parent == inv.root {
                 continue;
             }
             self.children.entry(entry.parent).or_default().push(entry.id);
@@ -821,7 +857,7 @@ impl ViewCache {
         agent: Uuid,
         time: i64,
     ) {
-        self.set_hide_empty_system(prefs.hide_empty_system_folders);
+        self.set_display(prefs);
         self.prepare(inv, prefs.sort_for(tab));
         let age = if tab == 2 && filters.age == Age::Any {
             Age::SinceLogout
@@ -903,6 +939,19 @@ impl ViewCache {
         } else {
             within(inv, &favorites)
         };
+        // FSShowInboxFolder off: the inbox and what it holds stay out of the
+        // other tabs' results (the Worn tab keeps them, as LLInventoryPanel
+        // leaves its "Worn Items" panel unfiltered)
+        let inbox_hidden: Vec<Uuid> = if self.hide_inbox && !received && tab != 3 {
+            rules::system(inv, 50).into_iter().collect()
+        } else {
+            Vec::new()
+        };
+        let in_inbox = if inbox_hidden.is_empty() {
+            IdSet::default()
+        } else {
+            within(inv, &inbox_hidden)
+        };
         // Advanced search: patterns and creator names resolved once, then
         // shared by the parallel walk. Its Date rules keep their own clock;
         // the Recent tab still limits to since logout.
@@ -921,6 +970,9 @@ impl ViewCache {
             .par_iter()
             .filter(|e| {
                 if !scope.contains(if e.folder { &e.id } else { &e.parent }) {
+                    return false;
+                }
+                if in_inbox.contains(if e.folder { &e.id } else { &e.parent }) {
                     return false;
                 }
                 if e.id == root || e.id == inv.lib_root {
@@ -2472,6 +2524,41 @@ mod tests {
         prefs.received_sort.by_date = false;
         assert_eq!(run(&mut cache, &prefs, 2), [id(10), id(11)]);
         assert_eq!(cache.built, built, "other tabs do not rebuild Recent");
+    }
+
+    #[test]
+    fn the_inbox_folder_option_hides_it_from_the_tree_and_searches_but_not_received_or_worn() {
+        let (mut inv, facts) = fixture();
+        let root = inv.root;
+        folder(&mut inv, 20, root, 50, "Marketplace");
+        folder(&mut inv, 21, id(20), -1, "A delivery");
+        inv.add_items(vec![item(23, id(21), "A gift", 100)]);
+        let mut prefs = InventoryPreferences::default();
+        assert!(prefs.show_inbox_folder && prefs.received_tab_shown());
+        let mut cache = ViewCache::default();
+        let run = |cache: &mut ViewCache, prefs: &InventoryPreferences, tab| {
+            cache.search(&inv, root, "", prefs, &Filters::default(), tab, None, &facts, facts.agent, 1000);
+            [id(20), id(21), id(23)]
+                .into_iter()
+                .filter(|entry| cache.results.contains(entry))
+                .count()
+        };
+        assert_eq!(run(&mut cache, &prefs, 0), 3);
+        assert!(cache.children(root, &prefs, inv.lib_root).contains(&id(20)));
+        prefs.show_inbox_folder = false;
+        assert_eq!(run(&mut cache, &prefs, 0), 0, "the main tab leaves the inbox out");
+        assert!(!cache.children(root, &prefs, inv.lib_root).contains(&id(20)));
+        assert_eq!(
+            run(&mut cache, &prefs, super::super::RECEIVED_TAB),
+            3,
+            "the Received tab still lists it"
+        );
+        // the Received tab is always offered while the folder is hidden
+        prefs.always_show_received_tab = false;
+        assert!(prefs.received_tab_shown());
+        prefs.show_inbox_folder = true;
+        assert!(!prefs.received_tab_shown(), "FSAlwaysShowInboxButton off hides the tab");
+        assert_eq!(run(&mut cache, &prefs, 0), 3);
     }
 
     #[test]

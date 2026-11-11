@@ -95,6 +95,7 @@ pub mod notification_center;
 pub mod notifications;
 pub(crate) mod numeric_drag;
 pub mod object_actions;
+pub mod omnifilter_notecards;
 pub mod options;
 pub mod owned_land;
 pub mod parcel_icons;

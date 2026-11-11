@@ -23,6 +23,7 @@ fn filter(rules: Vec<Rule>) -> Omnifilter {
         version: VERSION,
         on: true,
         rules,
+        ..RuleSet::default()
     });
     f
 }
@@ -304,4 +305,91 @@ fn a_dialog_is_matched_on_its_buttons_too() {
     };
     assert_eq!(result(&f, h), Some(Outcome::Hide));
     assert_eq!(result(&f, nearby("Jane", "Party")), None);
+}
+
+#[test]
+fn a_file_from_before_the_rule_sets_holds_the_default_set_alone() {
+    let (set, skipped) = RuleSet::parse(br#"{"version":1,"on":true,"rules":[{"name":"spam","enabled":true}]}"#);
+    assert_eq!(skipped, 0);
+    assert_eq!(set.set_names(), [DEFAULT_SET]);
+    assert_eq!((set.current, set.current_name()), (0, DEFAULT_SET));
+    assert_eq!(set.rules.len(), 1);
+    assert!(set.sets[0].rules.is_empty(), "the rules in use live in `rules` alone");
+    let (none, _) = RuleSet::parse(b"not json");
+    assert_eq!(none.set_names(), [DEFAULT_SET]);
+}
+
+#[test]
+fn rule_sets_are_added_switched_and_removed_keeping_their_rules() {
+    let mut set = RuleSet {
+        on: true,
+        rules: vec![rule("a", Action::Hide)],
+        ..RuleSet::default()
+    };
+    set.normalize();
+    assert_eq!(set.add(" ", Vec::new()), Err(SetError::NoName));
+    assert_eq!(set.add(DEFAULT_SET, Vec::new()), Err(SetError::Taken));
+    // a new set, empty, in use
+    assert_eq!(set.add("Club", Vec::new()), Ok(()));
+    assert_eq!((set.current, set.rules.len()), (1, 0));
+    // a copy of the rules in use
+    set.rules.push(rule("b", Action::Replace));
+    let copy = set.rules.clone();
+    assert_eq!(set.add("Club copy", copy), Ok(()));
+    assert_eq!(set.set_names(), [DEFAULT_SET, "Club", "Club copy"]);
+    assert_eq!(set.rules[0].name, "b");
+    set.select(0);
+    assert_eq!(set.rules[0].name, "a");
+    set.select(1);
+    assert_eq!(set.rules[0].name, "b");
+    assert!(set.sets[1].rules.is_empty());
+    // the Default set is never removed; another falls back to it
+    assert!(set.remove_current());
+    assert_eq!(set.set_names(), [DEFAULT_SET, "Club copy"]);
+    assert_eq!((set.current, set.rules[0].name.as_str()), (0, "a"));
+    assert!(!set.remove_current());
+    assert_eq!(set.free_name("Club copy"), "Club copy (2)");
+    assert_eq!(set.free_name("New"), "New");
+    // the bound
+    for n in set.sets.len()..MAX_SETS {
+        assert_eq!(set.add(&format!("s{n}"), Vec::new()), Ok(()));
+    }
+    assert_eq!(set.add("one more", Vec::new()), Err(SetError::Full));
+}
+
+#[test]
+fn rule_sets_survive_the_file_and_hand_edits_are_bounded() {
+    let mut set = RuleSet {
+        on: true,
+        rules: vec![rule("a", Action::Hide)],
+        ..RuleSet::default()
+    };
+    set.normalize();
+    set.add("Second", vec![rule("b", Action::Hide)]).expect("added");
+    let (read, skipped) = RuleSet::parse(&set.to_bytes());
+    assert_eq!(skipped, 0);
+    assert_eq!(read, set);
+    // names repeated or missing, the set in use out of range
+    let (odd, _) =
+        RuleSet::parse(br#"{"on":false,"current":9,"sets":[{"name":"","rules":[{"name":"x"}]},{"name":"Same"},{"name":"Same"}]}"#);
+    assert_eq!(odd.set_names(), [DEFAULT_SET, "Same", "Same (2)"]);
+    assert_eq!(odd.current, 0);
+    assert_eq!(odd.rules.len(), 1, "the set in use takes its rules");
+}
+
+#[test]
+fn the_filter_matches_the_set_in_use_only() {
+    let mut set = RuleSet {
+        on: true,
+        rules: vec![rule("all", Action::Hide)],
+        ..RuleSet::default()
+    };
+    set.normalize();
+    set.add("Quiet", Vec::new()).expect("added");
+    let mut f = Omnifilter::default();
+    f.replace(set.clone());
+    assert_eq!(result(&f, nearby("Jane", "hello")), None);
+    set.select(0);
+    f.replace(set);
+    assert_eq!(result(&f, nearby("Jane", "hello")), Some(Outcome::Hide));
 }

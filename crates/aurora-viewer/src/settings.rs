@@ -1263,6 +1263,11 @@ pub struct Settings {
     /// inventory on what it gave (ShowInInventory, off by default as in the
     /// Legacy Viewer).
     pub show_accepted_in_inventory: bool,
+    /// Preferences › Inventory › Received items: what an object gives, a
+    /// notice's attachment or an offer taken without a prompt opens in its
+    /// preview once it is there (ShowNewInventory; off here where the
+    /// Legacy Viewer has it on, so that no window opens unasked).
+    pub show_new_inventory: bool,
     /// Replace native motion foot placement/recovery with Aurora's terrain
     /// solver. Off by default: the Legacy Viewer behaviour remains automatic.
     pub ground_avatar_feet: bool,
@@ -2383,6 +2388,7 @@ impl Default for Settings {
             auto_accept_inventory_chat: true,
             auto_accept_inventory_notify: true,
             show_accepted_in_inventory: false,
+            show_new_inventory: false,
             ground_avatar_feet: false,
             ground_feet_while_moving: false,
             ground_feet_max_height: DEFAULT_GROUND_FEET_HEIGHT,

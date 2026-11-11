@@ -15109,3 +15109,30 @@ fpol-favwear-wear-tip = Le porter à la place de ce qui est porté au même empl
 fpol-favwear-add-tip = Le porter en plus de ce qui est déjà porté.
 fpol-favwear-unstar = Retirer l'étoile
 fpol-favwear-unstar-tip = Le retirer des favoris de l'inventaire. L'article reste à sa place.
+## Next-B: inventory display, rule sets, tools
+nb-inbox-folder = Afficher les Éléments reçus comme un dossier de l’inventaire
+nb-inbox-folder-help = La boîte de réception du Marketplace figure dans l’arborescence de l’inventaire ; désactivé, elle n’est que dans l’onglet Reçus
+nb-inbox-tab = Garder l’onglet Reçus
+nb-inbox-tab-help = Tant que les Éléments reçus sont affichés comme un dossier, l’onglet Reçus reste aussi
+nb-show-new-inventory = Ouvrir les nouvelles notes, textures et autres objets à leur arrivée
+nb-show-new-inventory-help = Ce qu’un objet donne, la pièce jointe d’une notice de groupe et une offre acceptée automatiquement s’ouvrent dans leur aperçu une fois dans l’inventaire
+nb-omnifilter-rule-set = Jeu de règles
+nb-omnifilter-default-set = Par défaut
+nb-omnifilter-remove-set = Supprimer ce jeu de règles (celui par défaut reste)
+nb-omnifilter-set-name = Nom du nouveau jeu de règles
+nb-omnifilter-new-set = Nouveau
+nb-omnifilter-copy-set = Copier
+nb-omnifilter-name-needed = Donnez un nom au jeu de règles.
+nb-omnifilter-name-taken = Un jeu de règles porte déjà ce nom.
+nb-omnifilter-sets-full = Impossible d’ajouter d’autres jeux de règles.
+nb-omnifilter-imported-set =
+    { $count ->
+        [one] { $count } règle importée dans le nouveau jeu de règles « { $name } »
+       *[other] { $count } règles importées dans le nouveau jeu de règles « { $name } »
+    }
+nb-omnifilter-load-notecard = Charger depuis une note de l’inventaire…
+nb-omnifilter-save-notecard = Enregistrer dans une note de l’inventaire…
+nb-omnifilter-save-help = Le jeu de règles utilisé est écrit dans une nouvelle note de votre dossier Notes, lisible par le Legacy Viewer.
+nb-omnifilter-no-notecards = Votre inventaire n’a pas de dossier Notes.
+nb-omnifilter-notecard-exists = Une note nommée « { $name } » se trouve déjà dans votre dossier Notes.
+nb-omnifilter-saved = Jeu de règles enregistré dans la note « { $name } ».

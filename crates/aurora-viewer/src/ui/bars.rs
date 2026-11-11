@@ -125,6 +125,8 @@ pub enum BarAction {
     /// Advanced › Mouse smoothing (MouseSmooth: the mouselook smoothing of
     /// Preferences › Camera).
     ToggleMouseSmoothing,
+    /// Advanced › Rendering types › Hide selected (HideSelectedObjects).
+    ToggleHideSelected,
     ToggleWaterWalk,
     ToggleSwimming,
     MoveLockOptions,
@@ -361,6 +363,9 @@ pub struct StatusInfo<'a> {
     /// A script holds a control and no RLVa lock forbids letting it go:
     /// Advanced › Release Keys is enabled (`app::release_keys::enabled`).
     pub release_keys: bool,
+    /// The selection is not drawn while the build tools are open
+    /// (HideSelectedObjects).
+    pub hide_selected: bool,
     /// The grid has a Marketplace (World › SL Marketplace is shown only on
     /// the Second Life grids, GridCheck "secondlife").
     pub marketplace: bool,
@@ -765,6 +770,11 @@ fn render_types_menu(ui: &mut egui::Ui, p: &Palette, st: &StatusInfo, action: &m
     }
     if changed {
         *action = BarAction::RenderTypes(h, particles);
+    }
+    // Develop › Rendering › Hide Selected (menu_viewer.xml), its own switch:
+    // Show all leaves it
+    if menu::check(ui, p, "eye-off", tr!("b7-hide-selected"), st.hide_selected, true) {
+        *action = BarAction::ToggleHideSelected;
     }
 }
 

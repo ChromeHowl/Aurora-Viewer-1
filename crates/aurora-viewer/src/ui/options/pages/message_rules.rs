@@ -8,7 +8,7 @@ use super::super::{COMBO_W, OptionsUi, combo, swatch};
 use crate::settings::chat_translation::Service;
 use crate::theme::Palette;
 use crate::ui::widgets;
-use crate::world::omnifilter::{Action, Channel, MatchMode, Pattern, Rule, RuleSet, Source, legacy};
+use crate::world::omnifilter::{Action, Channel, DEFAULT_SET, MatchMode, Pattern, Rule, RuleSet, SetError, Source, legacy};
 use crate::world::translate::{KeyState, LANGUAGES};
 use aurora_i18n::tr;
 use egui::{RichText, Vec2};
@@ -201,6 +201,10 @@ fn rules(ui: &mut egui::Ui, p: &Palette, st: &mut OptionsUi) {
     ui.vertical(|ui| {
         widgets::switch_labeled(ui, p, &mut edited.on, tr!("chatxl-omnifilter-on"));
         ui.add_space(4.0);
+        if rule_sets(ui, p, st, &mut edited) {
+            open = None;
+        }
+        ui.add_space(4.0);
         if edited.rules.is_empty() {
             muted(ui, p, tr!("chatxl-omnifilter-empty"));
         }
@@ -275,18 +279,25 @@ fn rules(ui: &mut egui::Ui, p: &Palette, st: &mut OptionsUi) {
             });
             open = Some(edited.rules.len() - 1);
         }
-        // a Legacy Omnifilter notecard, as a file
-        if let Some(added) = poll_import(st) {
-            let room = crate::world::omnifilter::MAX_RULES.saturating_sub(edited.rules.len());
-            let count = added.len().min(room);
-            edited.rules.extend(added.into_iter().take(room));
-            st.omnifilter_note = Some(tr!("l2s-omnifilter-imported", count = count as i64));
+        // a Legacy Omnifilter notecard, as a file: a new rule set, as the
+        // Legacy Viewer's import from a notecard
+        if let Some((name, added)) = poll_import(st) {
+            let count = added.len().min(crate::world::omnifilter::MAX_RULES);
+            let name = edited.free_name(&name);
+            st.omnifilter_note = Some(match edited.add(&name, added) {
+                Ok(()) => {
+                    open = None;
+                    tr!("nb-omnifilter-imported-set", count = count as i64, name = name)
+                }
+                Err(e) => set_error(e).to_owned(),
+            });
         }
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             let size = Vec2::new(0.0, 26.0);
             let busy = st.omnifilter_import.is_some();
+            let sets_room = edited.sets.len() < crate::world::omnifilter::MAX_SETS;
             if ui
-                .add_enabled_ui(room && !busy, |ui| {
+                .add_enabled_ui(sets_room && !busy, |ui| {
                     widgets::action_button(ui, p, "file-import", tr!("l2s-omnifilter-import"), widgets::ActionKind::Flat, size)
                 })
                 .inner
@@ -301,7 +312,41 @@ fn rules(ui: &mut egui::Ui, p: &Palette, st: &mut OptionsUi) {
                 .inner
                 .clicked()
             {
-                export_file(&edited.rules);
+                export_file(&edited.rules, edited.current_name());
+            }
+            // the same notecard in the inventory (the Legacy Viewer's own
+            // place for it)
+            if ui
+                .add_enabled_ui(sets_room, |ui| {
+                    widgets::action_button(
+                        ui,
+                        p,
+                        "file-text-filled",
+                        tr!("nb-omnifilter-load-notecard"),
+                        widgets::ActionKind::Flat,
+                        size,
+                    )
+                })
+                .inner
+                .clicked()
+            {
+                st.omnifilter_notecard = Some(crate::ui::inventory::context_notecards::Mode::Load);
+            }
+            if ui
+                .add_enabled_ui(!edited.rules.is_empty(), |ui| {
+                    widgets::action_button(
+                        ui,
+                        p,
+                        "file-text-filled",
+                        tr!("nb-omnifilter-save-notecard"),
+                        widgets::ActionKind::Flat,
+                        size,
+                    )
+                })
+                .inner
+                .clicked()
+            {
+                st.omnifilter_notecard = Some(crate::ui::inventory::context_notecards::Mode::Export);
             }
         });
         if let Some(note) = &st.omnifilter_note {
@@ -322,11 +367,102 @@ fn rules(ui: &mut egui::Ui, p: &Palette, st: &mut OptionsUi) {
     }
 }
 
-/// The notecard's file name (its Legacy inventory name, "[Omnifilter] …").
-const NOTECARD_FILE: &str = "[Omnifilter] Aurora.txt";
+/// What a rule set could not become.
+fn set_error(e: SetError) -> &'static str {
+    match e {
+        SetError::NoName => tr!("nb-omnifilter-name-needed"),
+        SetError::Taken => tr!("nb-omnifilter-name-taken"),
+        SetError::Full => tr!("nb-omnifilter-sets-full"),
+    }
+}
+
+/// The rule sets (floater_omnifilter.xml's rule set row,
+/// OmnifilterEngine::setCurrentRuleSet / addNewRuleSet / addClonedRuleSet /
+/// removeCurrentRuleSet): the one in use, a new one empty or copied from
+/// it, and the removal of the one in use (never the Default one). True when
+/// the set in use changed.
+fn rule_sets(ui: &mut egui::Ui, p: &Palette, st: &mut OptionsUi, edited: &mut RuleSet) -> bool {
+    let mut switched = false;
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(tr!("nb-omnifilter-rule-set")).size(12.0).color(p.ink));
+        let names: Vec<String> = edited
+            .set_names()
+            .iter()
+            .enumerate()
+            .map(|(i, name)| {
+                if i == 0 && *name == DEFAULT_SET {
+                    tr!("nb-omnifilter-default-set").to_owned()
+                } else {
+                    (*name).to_owned()
+                }
+            })
+            .collect();
+        let choices: Vec<(usize, &str)> = names.iter().enumerate().map(|(i, n)| (i, n.as_str())).collect();
+        let mut index = edited.current;
+        if combo(ui, &mut index, &choices) {
+            edited.select(index);
+            switched = true;
+        }
+        if widgets::icon_button(ui, p, "trash-filled", tr!("nb-omnifilter-remove-set"), edited.current != 0) && edited.remove_current() {
+            switched = true;
+        }
+    });
+    ui.horizontal(|ui| {
+        ui.add(
+            egui::TextEdit::singleline(&mut st.omnifilter_set_name)
+                .desired_width(COMBO_W)
+                .char_limit(crate::world::omnifilter::MAX_SET_NAME)
+                .hint_text(tr!("nb-omnifilter-set-name")),
+        );
+        let named = !st.omnifilter_set_name.trim().is_empty();
+        let size = Vec2::new(0.0, 24.0);
+        let new = ui
+            .add_enabled_ui(named, |ui| {
+                widgets::action_button(ui, p, "plus", tr!("nb-omnifilter-new-set"), widgets::ActionKind::Flat, size)
+            })
+            .inner
+            .clicked();
+        let copy = ui
+            .add_enabled_ui(named, |ui| {
+                widgets::action_button(ui, p, "copy-filled", tr!("nb-omnifilter-copy-set"), widgets::ActionKind::Flat, size)
+            })
+            .inner
+            .clicked();
+        if new || copy {
+            let rules = if copy { edited.rules.clone() } else { Vec::new() };
+            match edited.add(&st.omnifilter_set_name, rules) {
+                Ok(()) => {
+                    st.omnifilter_set_name.clear();
+                    st.omnifilter_note = None;
+                    switched = true;
+                }
+                Err(e) => st.omnifilter_note = Some(set_error(e).to_owned()),
+            }
+        }
+    });
+    switched
+}
+
+/// The notecard's file name (its Legacy inventory name, "[Omnifilter] …"),
+/// without the characters a file name may not hold.
+fn notecard_file(set: &str) -> String {
+    let name = crate::ui::omnifilter_notecards::notecard_name(set);
+    let clean: String = name
+        .chars()
+        .map(|c| {
+            if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control() {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    format!("{clean}.txt")
+}
 
 /// A Legacy Omnifilter notecard chosen and read off the frame thread.
-fn import_file(ctx: &egui::Context) -> std::sync::mpsc::Receiver<Option<Result<Vec<Rule>, ()>>> {
+#[allow(clippy::type_complexity)]
+fn import_file(ctx: &egui::Context) -> std::sync::mpsc::Receiver<Option<Result<(String, Vec<Rule>), ()>>> {
     let (sender, receiver) = std::sync::mpsc::channel();
     let ctx = ctx.clone();
     let title = tr!("l2s-omnifilter-import").to_owned();
@@ -340,7 +476,7 @@ fn import_file(ctx: &egui::Context) -> std::sync::mpsc::Receiver<Option<Result<V
                 let mut bytes = Vec::new();
                 let read = std::fs::File::open(&path).and_then(|f| f.take(legacy::MAX_BYTES as u64 + 1).read_to_end(&mut bytes));
                 match read {
-                    Ok(_) => legacy::import(&bytes).map(|(_, rules)| rules).ok_or(()),
+                    Ok(_) => legacy::import(&bytes).ok_or(()),
                     Err(e) => {
                         log::warn!("omnifilter: notecard not read: {e}");
                         Err(())
@@ -356,8 +492,9 @@ fn import_file(ctx: &egui::Context) -> std::sync::mpsc::Receiver<Option<Result<V
     receiver
 }
 
-/// The import's answer, once: the rules read (the note says a failure).
-fn poll_import(st: &mut OptionsUi) -> Option<Vec<Rule>> {
+/// The import's answer, once: the rule set's name and rules read (the note
+/// says a failure).
+fn poll_import(st: &mut OptionsUi) -> Option<(String, Vec<Rule>)> {
     let answer = st.omnifilter_import.as_ref()?.try_recv();
     match answer {
         Err(std::sync::mpsc::TryRecvError::Empty) => None,
@@ -368,7 +505,7 @@ fn poll_import(st: &mut OptionsUi) -> Option<Vec<Rule>> {
         Ok(Some(result)) => {
             st.omnifilter_import = None;
             match result {
-                Ok(rules) => Some(rules),
+                Ok(found) => Some(found),
                 Err(()) => {
                     st.omnifilter_note = Some(tr!("l2s-omnifilter-not-notecard").to_owned());
                     None
@@ -378,15 +515,16 @@ fn poll_import(st: &mut OptionsUi) -> Option<Vec<Rule>> {
     }
 }
 
-/// The rules written as a Legacy Omnifilter notecard, to a file chosen off
-/// the frame thread.
-fn export_file(rules: &[Rule]) {
-    let text = legacy::export(rules, "Aurora");
+/// The rules written as a Legacy Omnifilter notecard named after their set,
+/// to a file chosen off the frame thread.
+fn export_file(rules: &[Rule], set: &str) {
+    let text = legacy::export(rules, set);
+    let file = notecard_file(set);
     let title = tr!("l2s-omnifilter-export").to_owned();
     let spawned = std::thread::Builder::new().name("omnifilter-export".into()).spawn(move || {
         let Some(path) = rfd::FileDialog::new()
             .set_title(title)
-            .set_file_name(NOTECARD_FILE)
+            .set_file_name(file)
             .add_filter("Omnifilter", &["txt"])
             .save_file()
         else {

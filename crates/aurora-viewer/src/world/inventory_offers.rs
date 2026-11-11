@@ -15,6 +15,14 @@
 //! With ShowInInventory (Preferences › Inventory, off by default as in the
 //! Legacy Viewer), keeping an offer, a resident's or an object's, opens the
 //! inventory on what it gave once it is there (`World::take_inventory_reveal`).
+//! With ShowNewInventory (off by default here, on in the Legacy Viewer),
+//! what an object gives, a group notice's attachment, or a resident's offer
+//! taken without a prompt (AutoAcceptNewInventory) opens in its preview once
+//! it is there (`World::take_new_inventory_preview`), as open_inventory_offer
+//! does from LLOpenTaskOffer, LLOpenTaskGroupOffer and inventory_offer_handler
+//! (indra/newview/llviewermessage.cpp, llimprocessing.cpp, originally
+//! LGPL 2.1). A resident's offer kept by hand does not: the Legacy Viewer
+//! opens it only from its Show button, which Aurora's cards do not have.
 
 use super::dialog_names;
 use super::inventory::actions;
@@ -135,7 +143,13 @@ pub struct InventoryOffers {
     pub auto_accept_notify: bool,
     /// ShowInInventory, from the preferences.
     pub show_accepted: bool,
+    /// ShowNewInventory, from the preferences.
+    pub preview_new: bool,
+    /// An offer is being answered without a prompt (auto-accept).
+    answering_auto: bool,
     reveal: Option<(Reveal, Instant)>,
+    /// What ShowNewInventory opens once it is there.
+    preview: Option<(Reveal, Instant)>,
 }
 
 impl Default for InventoryOffers {
@@ -147,7 +161,10 @@ impl Default for InventoryOffers {
             auto_accept_chat: true,
             auto_accept_notify: true,
             show_accepted: false,
+            preview_new: false,
+            answering_auto: false,
             reveal: None,
+            preview: None,
         }
     }
 }
@@ -185,6 +202,12 @@ impl InventoryOffers {
             .filter(|v| v.answer == Answer::Pending)
             .map(|v| (v.notification, v.from))
     }
+}
+
+/// The asset types open_inventory_offer opens in a preview
+/// (check_asset_previewable): texture, sound, notecard, script, animation.
+pub fn previewable(asset_type: i32) -> bool {
+    matches!(asset_type, 0 | 1 | 7 | 10 | 20)
 }
 
 /// What an offer gives, from its asset type (the bucket has no inventory
@@ -295,7 +318,9 @@ impl World {
         let feedback = (self.inventory_offers.auto_accept_chat || self.inventory_offers.auto_accept_notify)
             .then(|| self.auto_accepted_inventory_text(im, id))
             .flatten();
+        self.inventory_offers.answering_auto = true;
         let (commands, _) = self.respond_notification(id, Response::Accept);
+        self.inventory_offers.answering_auto = false;
         self.groups.out.extend(commands);
         if let Some(text) = feedback {
             // inventory_offer_handler: local system chat and IMSystemMessageTip
@@ -438,18 +463,29 @@ impl World {
     }
 
     /// A kept offer (its Accept, never its closing: "we simply won't
-    /// highlight it") waits for what it gave, with ShowInInventory. The
-    /// last one kept wins.
+    /// highlight it") waits for what it gave, with ShowInInventory, and to
+    /// open it with ShowNewInventory when an object gave it or nobody was
+    /// asked. The last one kept wins.
     pub(super) fn reveal_kept_offer(&mut self, object: Uuid, task: bool) {
-        if !self.inventory_offers.show_accepted {
-            return;
-        }
         let what = match (task, object.is_nil()) {
             (true, _) => Reveal::Added,
             (false, false) => Reveal::Known(object),
             (false, true) => return,
         };
-        self.inventory_offers.reveal = Some((what, Instant::now()));
+        let offers = &mut self.inventory_offers;
+        if offers.show_accepted {
+            offers.reveal = Some((what, Instant::now()));
+        }
+        if offers.preview_new && (task || offers.answering_auto) {
+            offers.preview = Some((what, Instant::now()));
+        }
+    }
+
+    /// Whether a kept offer counts for check_offer_throttle: something is
+    /// to be shown or opened.
+    pub(super) fn kept_offer_shown(&self, task: bool) -> bool {
+        let offers = &self.inventory_offers;
+        offers.show_accepted || (offers.preview_new && (task || offers.answering_auto))
     }
 
     /// A server update (BulkUpdateInventory, UpdateCreateInventoryItem),
@@ -457,9 +493,10 @@ impl World {
     /// what an object's kept offer gave, its top folder (llGiveInventoryList)
     /// or else its last item, as LLOpenTaskOffer::done shows added.back().
     pub(super) fn reveal_added(&mut self, folders: &[InvFolder], items: &[InvItem]) {
-        let Some((Reveal::Added, since)) = self.inventory_offers.reveal else {
+        let waiting = |slot: &Option<(Reveal, Instant)>| matches!(slot, Some((Reveal::Added, _)));
+        if !waiting(&self.inventory_offers.reveal) && !waiting(&self.inventory_offers.preview) {
             return;
-        };
+        }
         let inv = &self.inventory;
         let new: Vec<&InvFolder> = folders.iter().filter(|f| !inv.folders.contains_key(&f.id)).collect();
         let added = new
@@ -474,17 +511,25 @@ impl World {
                     .map(|it| it.id)
             });
         if let Some(id) = added {
-            self.inventory_offers.reveal = Some((Reveal::Known(id), since));
+            for slot in [&mut self.inventory_offers.reveal, &mut self.inventory_offers.preview] {
+                if let Some((what @ Reveal::Added, _)) = slot {
+                    *what = Reveal::Known(id);
+                }
+            }
         }
     }
 
-    /// What the inventory now shows, once (the app opens its window on it):
-    /// the kept offer's item or folder once the inventory knows it and
-    /// Received items has filed it, unless it is in a quiet folder.
-    pub fn take_inventory_reveal(&mut self, now: Instant) -> Option<Uuid> {
-        let (what, since) = self.inventory_offers.reveal?;
-        if !self.inventory_offers.show_accepted || now.duration_since(since) >= REVEAL_WAIT {
-            self.inventory_offers.reveal = None;
+    /// What `slot` waits for, once the inventory knows it and Received
+    /// items has filed it, unless it is in a quiet folder (taken once).
+    fn take_arrived(&mut self, preview: bool, enabled: bool, now: Instant) -> Option<Uuid> {
+        let slot = if preview {
+            &mut self.inventory_offers.preview
+        } else {
+            &mut self.inventory_offers.reveal
+        };
+        let (what, since) = (*slot)?;
+        if !enabled || now.duration_since(since) >= REVEAL_WAIT {
+            *slot = None;
             return None;
         }
         let Reveal::Known(id) = what else { return None };
@@ -492,8 +537,29 @@ impl World {
         if actions::parent(inv, id).is_none() || self.received_items.filing(id) {
             return None;
         }
-        self.inventory_offers.reveal = None;
+        *slot = None;
         (!QUIET_FOLDERS.iter().any(|t| actions::in_type(inv, id, *t))).then_some(id)
+    }
+
+    /// What the inventory now shows, once (the app opens its window on it):
+    /// the kept offer's item or folder once the inventory knows it and
+    /// Received items has filed it, unless it is in a quiet folder.
+    pub fn take_inventory_reveal(&mut self, now: Instant) -> Option<Uuid> {
+        let enabled = self.inventory_offers.show_accepted;
+        self.take_arrived(false, enabled, now)
+    }
+
+    /// What ShowNewInventory opens now, once: an item of a type with a
+    /// preview (check_asset_previewable; a landmark's place and a material
+    /// excepted, as open_inventory_offer leaves them for those offers).
+    pub fn take_new_inventory_preview(&mut self, now: Instant) -> Option<Uuid> {
+        let enabled = self.inventory_offers.preview_new;
+        let id = self.take_arrived(true, enabled, now)?;
+        self.inventory
+            .items
+            .get(&id)
+            .filter(|it| previewable(it.asset_type))
+            .map(|it| it.id)
     }
 
     /// Answer an offer from its card: through its entry, as its Keep or
@@ -1070,6 +1136,63 @@ mod tests {
             items: vec![item(gift, folder), item(old, folder)],
         });
         assert_eq!(w.take_inventory_reveal(Instant::now()), Some(gift));
+        clean(&w, &root);
+    }
+
+    #[test]
+    fn show_new_inventory_opens_an_object_s_gift_and_an_automatic_offer_not_a_kept_one() {
+        // an object's notecard, kept by hand: opened, alone or with ShowInInventory
+        for show in [false, true] {
+            let root = temp();
+            let mut w = world(&root);
+            w.inventory_offers.preview_new = true;
+            w.inventory_offers.show_accepted = show;
+            w.on_im(offer(im::TASK_INVENTORY_OFFERED, "Free note"));
+            let n = w.notifications.list[0].id;
+            w.respond_notification(n, Response::Accept);
+            assert_eq!(w.take_new_inventory_preview(Instant::now()), None);
+            let gift = Uuid::from_u128(0x52);
+            let folder = w.inventory.root;
+            w.apply(aurora_net::NetEvent::InventoryUpdated {
+                folders: Vec::new(),
+                items: vec![item(gift, folder)],
+            });
+            assert_eq!(w.take_inventory_reveal(Instant::now()), show.then_some(gift));
+            assert_eq!(w.take_new_inventory_preview(Instant::now()), Some(gift));
+            assert_eq!(w.take_new_inventory_preview(Instant::now()), None, "once");
+            clean(&w, &root);
+        }
+        // a resident's offer: only when taken without a prompt
+        for auto in [false, true] {
+            let root = temp();
+            let mut w = world(&root);
+            w.inventory_offers.preview_new = true;
+            w.inventory_offers.auto_accept = auto;
+            w.inventory_offers.auto_accept_chat = false;
+            w.inventory_offers.auto_accept_notify = false;
+            w.on_im(offer(im::INVENTORY_OFFERED, "Welcome note"));
+            if !auto {
+                let id = w.inventory_offers.list[0].id;
+                w.answer_inventory_offer(id, true);
+            }
+            let folder = w.inventory.root;
+            w.inventory.add_items(vec![item(ITEM, folder)]);
+            assert_eq!(w.take_new_inventory_preview(Instant::now()), auto.then_some(ITEM), "{auto}");
+            clean(&w, &root);
+        }
+        // off: nothing opens; an object (no preview) is not opened either
+        let root = temp();
+        let mut w = world(&root);
+        w.on_im(offer(im::TASK_INVENTORY_OFFERED, "Free note"));
+        let n = w.notifications.list[0].id;
+        w.respond_notification(n, Response::Accept);
+        let folder = w.inventory.root;
+        w.apply(aurora_net::NetEvent::InventoryUpdated {
+            folders: Vec::new(),
+            items: vec![item(Uuid::from_u128(0x53), folder)],
+        });
+        assert_eq!(w.take_new_inventory_preview(Instant::now()), None);
+        assert!(!previewable(6) && !previewable(3) && previewable(7) && previewable(0));
         clean(&w, &root);
     }
 

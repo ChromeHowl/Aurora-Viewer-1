@@ -488,8 +488,14 @@ pub struct OptionsUi {
     /// A Legacy notecard being read (`omnifilter::legacy`): None when the
     /// file was not chosen, Err when it is not one; and what the last
     /// import or export came to.
-    pub(crate) omnifilter_import: Option<std::sync::mpsc::Receiver<Option<Result<Vec<crate::world::omnifilter::Rule>, ()>>>>,
+    #[allow(clippy::type_complexity)]
+    pub(crate) omnifilter_import: Option<std::sync::mpsc::Receiver<Option<Result<(String, Vec<crate::world::omnifilter::Rule>), ()>>>>,
     pub(crate) omnifilter_note: Option<String>,
+    /// The name typed for a new rule set.
+    pub(crate) omnifilter_set_name: String,
+    /// Save the rule set in use to an inventory notecard, or load one
+    /// (taken by the app, which shows the picker or the name to save under).
+    pub(crate) omnifilter_notecard: Option<crate::ui::inventory::context_notecards::Mode>,
     /// The translation keys: their state (set by the app), a look at them
     /// asked, the key being typed and the keys typed or forgotten here
     /// (taken by the app, never kept in the settings).

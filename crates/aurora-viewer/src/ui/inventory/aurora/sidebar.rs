@@ -363,7 +363,7 @@ pub(super) fn show(
                 aurora_i18n::tr!("inventory-tab-received"),
                 st.counts.received,
                 // the Received Items in the main window only
-                st.is_main(),
+                st.is_main() && prefs.received_tab_shown(),
             ),
         ]
     } {

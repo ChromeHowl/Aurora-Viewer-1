@@ -128,6 +128,7 @@ The same for all groups unless a row says otherwise:
 | Follow-ups 4 + 5 Snapshot safety | `feat/snap-safety` | not merged | Long photos pause the agent (AgentPause / AgentResume; the circuit timeout keeps counting, the network runs on), slow parts never given up, the GPU stall notice delayed during a photo; bloom sized to the photo, looks only as the screen shows them, an honest list of the effects a photo lacks, uploads whose worker ended no longer keep the shutter disabled. |
 
 | Follow-ups 3 + 6 (owner's updates of 2026-11-11) | `feat/fd-fixes` | not merged | Poser: a subject switch keeps the open tab, marker clicks with no joint selected, one Rotation / Position / Scale switch, animations keep loading with the window closed (stop on close off); tests for the rest, which Aurora already did. People in region: block and item request lanes (4 at once, then 1 a second each) instead of one shared request every 2 s, rows drawn now first, no count for an unnamed region; the world map's labels ask on their own, as the Legacy Viewer's map. |
+| Next-B Inventory, filter, tools | `feat/next-b` | not merged | Received Items folder and tab options, ShowNewInventory (off by default), Omnifilter rule sets and inventory notecards, Hide selected in the Rendering types menu. |
 
 Housekeeping after the merges (formatting, one unused constant removed) and the documentation (TASKS.md, ARCHITECTURE.md, README.md, `docs/legacy-settings.csv`) were done on `chore/maintenance`.
 
@@ -140,6 +141,10 @@ Decided by the owner (2026-11-11), done on `feat/final-polish`:
 
 Decisions for the owner:
 
+- Received Items folder: Aurora listed the Marketplace inbox in the tree and in the Received tab; the new options keep that by default, where the Legacy Viewer hides the folder (FSShowInboxFolder off). Keep Aurora's view or take the Legacy default?
+- ShowNewInventory is off by default (on in the Legacy Viewer: objects' notecards and textures open on arrival). Turn it on?
+
+- Teleport defaults: the map now closes on teleport and the teleport history shows SLT, as in the Legacy Viewer; Aurora kept the map open and used UTC. Keep the Legacy defaults or go back to Aurora's?
 - Discord rich presence: needs a Discord application id owned by the project and a new dependency.
 - The render extras are not part of the graphics presets (the Legacy presets hold several of them).
 - Depth of field on blended faces is off by default (always on in the Legacy Viewer): turn it on after a visual check?
@@ -151,11 +156,12 @@ Not built yet:
 - Render: selection outline styles; ReShade cooperation (feasibility unknown on Vulkan); a 24-bit depth photo.
 - Camera: upper-body aim in mouselook; mouse smoothing outside mouselook.
 - Poser: "Show to others" (upload of one's own pose with the paid-upload consent flow). The pose stand uses built poses, not the Legacy animation assets, and has no lock.
-- Chat: Legacy automatic dialog replies, web page request filtering in the Omnifilter.
-- Notifications: animated script dialogs, toast startup and fade times, overflow height, bottom margin, nearby-chat toasts; the corner position covers llDialog and llTextBox only.
+- Chat: Legacy automatic dialog replies, web page request filtering and the top-bar controls of the Omnifilter.
+- Notifications: the startup toast and the floating nearby-chat toasts do not exist in Aurora (their settings do not apply).
 - Build: new-prim default texture, embedded item and new-script template; drag texture offset; selection beam and particle effects; save object back to contents; pathfinding editing; selection level-of-detail override; the rest of the script editor link (object, command and syntax files, Luau, runtime forwarding).
 - Export: backup import (rez-and-apply with the upload cost shown and confirmed); object contents in backups.
 - Inventory: inbox display options and ShowNewInventory.
+- Inventory: favourite wearables window; ShowNewInventory has no Show button path (Aurora's offer cards have Keep and Reject).
 - Preferences: SOCKS5 proxy (UDP wrapping, password in the credential store), line spacing, notecard and script fonts, inspector tooltip delays. The proxy and the UDP port apply at start, not at each login; a fixed UDP port already taken falls back to a system port (the Legacy Viewer fails the login).
 - Worn tab: a separate Hair / Body grouping (needs name rules).
 
