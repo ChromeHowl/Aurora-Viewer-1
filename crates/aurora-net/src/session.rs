@@ -234,6 +234,25 @@ pub(crate) struct Shared {
     pub viewer_stats: Arc<Mutex<crate::viewer_stats::ViewerSide>>,
     /// Reports being posted (`NetClient::wait_viewer_stats`).
     pub viewer_stats_posts: Arc<crate::viewer_stats::PostsInFlight>,
+    /// ConnectionPort: the UDP port of the circuits (None: the system's).
+    pub udp_port: Option<u16>,
+}
+
+/// The circuits' socket (start_messaging_system's port): the fixed port
+/// when one is set (ConnectionPortEnabled), else one chosen by the system.
+/// A fixed port already taken (another viewer on this PC) falls back to the
+/// system's with a warning, where the Legacy Viewer fails the login.
+async fn bind_circuit_socket(port: Option<u16>) -> std::io::Result<UdpSocket> {
+    if let Some(port) = port.filter(|p| *p != 0) {
+        match UdpSocket::bind((std::net::Ipv4Addr::UNSPECIFIED, port)).await {
+            Ok(sock) => {
+                log::info!("UDP port {port} (fixed in the preferences)");
+                return Ok(sock);
+            }
+            Err(e) => log::warn!("UDP port {port} unavailable ({e}): using one chosen by the system"),
+        }
+    }
+    UdpSocket::bind("0.0.0.0:0").await
 }
 
 /// How long one appearance request may hold the queue.
@@ -472,7 +491,7 @@ pub(crate) async fn run_session(sh: &Shared, req: LoginRequest, cmd_rx: &mut mps
         },
     );
 
-    let sock = match UdpSocket::bind("0.0.0.0:0").await {
+    let sock = match bind_circuit_socket(sh.udp_port).await {
         Ok(s) => {
             size_socket_buffers(&s);
             Arc::new(s)
@@ -2492,6 +2511,12 @@ impl Session<'_> {
             NetCommand::QuoteMesh { request, upload } => self.quote_mesh(request, upload),
             NetCommand::UploadMesh { request, token } => self.upload_mesh(request, token),
             NetCommand::DiscardMeshQuote(token) => self.discard_mesh_quote(token),
+            NetCommand::ForceScriptControlRelease => {
+                let mut message = ForceScriptControlRelease::default();
+                message.agent_data.agent_id = self.agent_id();
+                message.agent_data.session_id = self.session_id();
+                self.send_main(&message, true);
+            }
             NetCommand::RequestBalance => {
                 let mut message = MoneyBalanceRequest::default();
                 message.agent_data.agent_id = self.agent_id();
@@ -5880,6 +5905,24 @@ mod socket_tests {
     use super::*;
 
     #[tokio::test]
+    async fn a_fixed_port_is_used_and_a_taken_one_falls_back() {
+        // a free port, released, then asked for
+        let free = UdpSocket::bind("0.0.0.0:0")
+            .await
+            .expect("socket")
+            .local_addr()
+            .expect("addr")
+            .port();
+        let fixed = bind_circuit_socket(Some(free)).await.expect("fixed");
+        assert_eq!(fixed.local_addr().expect("addr").port(), free);
+        // the same port again: taken, the system chooses
+        let other = bind_circuit_socket(Some(free)).await.expect("fallback");
+        assert_ne!(other.local_addr().expect("addr").port(), free);
+        let system = bind_circuit_socket(None).await.expect("system");
+        assert_ne!(system.local_addr().expect("addr").port(), 0);
+    }
+
+    #[tokio::test]
     async fn the_socket_gets_the_buffers_asked_for() {
         let sock = UdpSocket::bind("127.0.0.1:0").await.expect("socket");
         let system = socket2::SockRef::from(&sock).recv_buffer_size().expect("size");
@@ -6293,6 +6336,7 @@ mod event_queue_tests {
             bandwidth_kbps: Default::default(),
             viewer_stats: Default::default(),
             viewer_stats_posts: Default::default(),
+            udp_port: None,
         }
     }
 
@@ -6635,6 +6679,7 @@ mod script_dialog_tests {
             bandwidth_kbps: Default::default(),
             viewer_stats: Default::default(),
             viewer_stats_posts: Default::default(),
+            udp_port: None,
         }
     }
 

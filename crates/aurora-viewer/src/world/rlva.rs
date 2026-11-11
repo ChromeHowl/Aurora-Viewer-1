@@ -38,6 +38,7 @@ pub mod privacy;
 mod relative;
 mod rename;
 mod sitting;
+pub mod strings;
 mod teleport;
 mod temporary;
 mod version;

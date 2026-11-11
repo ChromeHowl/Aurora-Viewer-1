@@ -17,6 +17,7 @@ pub mod graphics;
 pub mod inventory;
 pub mod joystick;
 pub mod layout;
+pub mod legacy_prefs;
 pub mod media;
 pub mod message_rules;
 pub mod network;

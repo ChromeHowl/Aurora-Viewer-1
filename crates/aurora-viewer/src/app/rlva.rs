@@ -540,11 +540,12 @@ impl App {
                 to: from,
                 message: "Private demo reply".into(),
             });
-            let blocked = self.world.social.ims.iter().find(|im| im.other == from).is_some_and(|im| {
-                im.lines.iter().rev().take(2).all(|line| {
-                    line.text == aurora_i18n::tr!("rlva-im-blocked-receive") || line.text == aurora_i18n::tr!("rlva-im-blocked-send")
-                })
-            });
+            let blocked =
+                self.world.social.ims.iter().find(|im| im.other == from).is_some_and(|im| {
+                    im.lines.iter().rev().take(2).all(|line| {
+                        line.text == self.world.rlva.text("blocked_recvim") || line.text == self.world.rlva.text("blocked_sendim")
+                    })
+                });
             log::info!(
                 "RLVa communication demo: new_session_blocked={new_session_blocked}, local_placeholders={blocked}, existing_session_allowed={}",
                 self.world.rlva_can_start_im(from)

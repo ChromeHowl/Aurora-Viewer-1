@@ -393,6 +393,9 @@ pub struct App {
     gfx: Option<Gfx>,
     /// The restored size, position and maximize state before fullscreen.
     fullscreen_restore: Option<WindowedGeometry>,
+    /// Advanced › Set Window Size: the inside size asked, applied once the
+    /// window left full screen.
+    pending_window_size: Option<(u32, u32)>,
     /// `settings.window_fullscreen` as last applied to the window.
     fullscreen_applied: bool,
     /// The window of a lost GPU device, kept on screen until the new one has
@@ -917,6 +920,9 @@ pub struct App {
     /// Settings last applied to the engine and the authorized stream URL.
     applied_audio: Option<crate::settings::AudioSettings>,
     stream_url: String,
+    /// The parcel music's fade (stream_fade.rs) and its volume last applied.
+    stream_fade: crate::stream_fade::StreamFade,
+    stream_gain: f32,
     /// The parcel music's title last told (ShowStreamMetadata).
     stream_title_said: Option<String>,
     /// Every sound is cut because the window is minimised (MuteWhenMinimized).
@@ -1431,7 +1437,17 @@ impl App {
         }
         // (an adapter known to drop under many downloads keeps them
         // limited: #1545, net_adapters.rs)
-        let net = NetClient::new(crate::net_adapters::startup_mode(settings.download_connections))?;
+        // the proxy and the UDP port of Preferences › Network, read at start
+        // (the Legacy Viewer reads them at the login, and asks a restart for
+        // the port: ChangeConnectionPort)
+        crate::media::set_web_prefs(crate::media::web_prefs(&settings.legacy_prefs));
+        let net = NetClient::new(
+            crate::net_adapters::startup_mode(settings.download_connections),
+            aurora_net::NetOptions {
+                http_proxy: settings.legacy_prefs.http_proxy(),
+                udp_port: settings.legacy_prefs.udp_port(),
+            },
+        )?;
         net.set_agent_language(aurora_i18n::language(), settings.language_is_public);
         let voice_http = net.caps_http();
         let login_info = ui::news::LoginInfo::start(net.runtime());
@@ -1532,6 +1548,7 @@ impl App {
             net,
             gfx: None,
             fullscreen_restore: None,
+            pending_window_size: None,
             fullscreen_applied: false,
             retired_window: None,
             gpu_losses: Default::default(),
@@ -1850,6 +1867,8 @@ impl App {
             },
             applied_audio: None,
             stream_url: String::new(),
+            stream_fade: Default::default(),
+            stream_gain: 1.0,
             stream_title_said: None,
             minimized_mute: audio_mute::MinimizedMute::default(),
             crash_state_at: None,
@@ -3060,6 +3079,7 @@ impl App {
     fn back_to_login(&mut self, error: Option<String>) {
         self.parcel_music.enter(false);
         self.stream_url.clear();
+        self.stream_fade.reset();
         self.music_status = Default::default();
         if let Some(engine) = &self.audio_engine {
             engine.stop_stream();
@@ -5980,6 +6000,8 @@ impl App {
     }
 
     fn update_audio(&mut self) {
+        // the Music channel's place in AUDIO_CHANNELS (Channel::ALL)
+        const MUSIC: usize = 4;
         let in_world = self.in_world();
         if in_world {
             self.parcel_music.update(
@@ -6011,16 +6033,31 @@ impl App {
         if !self.settings.audio.enabled[4] {
             engine.set_enabled(aurora_audio::Channel::Music, false);
         }
-        if want != self.stream_url {
-            if want.is_empty() {
-                engine.stop_stream();
-            } else {
-                log::info!("parcel music: {want}");
-                engine.play_stream(&want);
+        // a change of the parcel's station fades (FSFadeAudioStream); the
+        // user's stop, the Music channel turned off or leaving the world is
+        // at once (stopInternetStreamWithAutoFade)
+        let prefs = &self.settings.legacy_prefs;
+        let fade = (prefs.stream_fade && in_world && self.parcel_music.requested() && self.settings.audio.enabled[MUSIC])
+            .then(|| crate::stream_fade::Fade::from_secs(prefs.stream_fade_in, prefs.stream_fade_out));
+        let (cmd, gain) = self.stream_fade.update(&want, fade, Instant::now());
+        match cmd {
+            Some(crate::stream_fade::Cmd::Play(url)) => {
+                log::info!("parcel music: {url}");
+                engine.play_stream(&url);
             }
-            self.stream_url = want;
+            Some(crate::stream_fade::Cmd::Stop) => engine.stop_stream(),
+            None => {}
         }
-        if self.applied_audio.as_ref() != Some(&self.settings.audio) {
+        if self.stream_url != self.stream_fade.playing() {
+            self.stream_url = self.stream_fade.playing().to_owned();
+        }
+        let audio_changed = self.applied_audio.as_ref() != Some(&self.settings.audio);
+        if audio_changed || gain != self.stream_gain {
+            // getFadeVolume: the music's volume times the fade's
+            engine.set_volume(aurora_audio::Channel::Music, self.settings.audio.volume[MUSIC] * gain);
+            self.stream_gain = gain;
+        }
+        if audio_changed {
             let a = &self.settings.audio;
             if self.applied_audio.as_ref().map(|p| p.output_device.as_str()) != Some(a.output_device.as_str())
                 && self.applied_audio.is_some()
@@ -6029,7 +6066,14 @@ impl App {
             }
             // same order as AUDIO_CHANNELS
             for (i, ch) in aurora_audio::Channel::ALL.iter().enumerate() {
-                engine.set_volume(*ch, a.volume[i]);
+                engine.set_volume(
+                    *ch,
+                    if *ch == aurora_audio::Channel::Music {
+                        a.volume[i] * gain
+                    } else {
+                        a.volume[i]
+                    },
+                );
                 engine.set_muted(*ch, a.muted[i] || (i == 0 && self.minimized_mute.active));
                 engine.set_enabled(*ch, i == 0 || a.enabled[i]);
             }
@@ -6300,6 +6344,34 @@ impl App {
     /// Runs only when the setting moved away from what was last applied: a
     /// full screen the system entered or left by itself (the macOS green
     /// button, a window manager's rule) is left alone.
+    /// Advanced › Set Window Size (LLFloaterWindowSize::onClickSet,
+    /// LLViewerWindow::movieSize): out of full screen first, then the
+    /// window's inside to the size asked, in pixels; the window keeps it at
+    /// the next start (record_window_geometry, as WindowWidth and
+    /// WindowHeight).
+    fn apply_window_size(&mut self) {
+        if self.pending_window_size.is_none() || self.capture.is_some() || forced_window_size().is_some() {
+            self.pending_window_size = None;
+            return;
+        }
+        if self.settings.window_fullscreen {
+            self.settings.window_fullscreen = false;
+            return;
+        }
+        let Some(window) = self.gfx.as_ref().map(|g| g.window.clone()) else {
+            return;
+        };
+        if window.fullscreen().is_some() {
+            return;
+        }
+        let Some((width, height)) = self.pending_window_size.take() else {
+            return;
+        };
+        window.set_maximized(false);
+        let _ = window.request_inner_size(winit::dpi::PhysicalSize::new(width, height));
+        log::info!("window size: {width} x {height}");
+    }
+
     fn apply_fullscreen_setting(&mut self) {
         if self.capture.is_some() || forced_window_size().is_some() {
             return;
@@ -6738,6 +6810,7 @@ impl App {
             processing: self.settings.audio.mic_processing(),
             ear: self.settings.audio.voice_ear,
             transmit,
+            release_mic_when_muted: self.settings.legacy_prefs.release_mic_when_muted,
             avatar: (global(self.world.agent.position), self.world.agent.body_rotation()),
             listener: (global(self.camera.position), cam_rot),
             call: self.world.calls.active.as_ref().and_then(|c| c.channel.as_ref()),
@@ -9313,6 +9386,8 @@ impl App {
             self.world.group_titles = self.settings.group_titles;
             self.world.portal_sources = self.portal_sources();
             self.world.fly_after_teleport = self.settings.fly_after_teleport && !(self.demo && crate::demo::friend_join_flight_scenario());
+            self.world.hud_scale_factor = self.settings.legacy_prefs.hud_scale;
+            self.world.scripts_can_show_ui = self.settings.legacy_prefs.scripts_can_show_ui;
             self.world.region_alerts.cfg = crate::world::region_alerts::Config {
                 script_count: self.settings.script_count_alert,
                 script_threshold: self.settings.script_count_threshold,
@@ -11536,8 +11611,10 @@ impl App {
             self.egui_ctx.set_zoom_factor(ui_scale(&self.settings));
         }
         crate::theme::apply_motion(&self.egui_ctx, self.settings.reduce_motion);
+        crate::theme::apply_tooltip_delay(&self.egui_ctx, self.settings.legacy_prefs.tooltip_delay);
         self.demo_gains_tick(Instant::now());
         if actions.settings_changed || std::mem::take(&mut self.snapshots.settings_changed) {
+            crate::media::set_web_prefs(crate::media::web_prefs(&self.settings.legacy_prefs));
             aurora_i18n::select(&self.settings.language, crate::cli::get().language.as_deref());
             crate::crash::update(&self.skin.theme, &self.settings);
             self.net
@@ -14257,6 +14334,28 @@ impl App {
                 self.settings.save();
                 log::info!("quickjump: {}", self.settings.quickjump);
             }
+            BarAction::WebGuide(guide) => {
+                let has_home = self
+                    .world
+                    .group_money
+                    .get(&uuid::Uuid::nil())
+                    .and_then(|g| g.parcels.as_ref())
+                    .is_some_and(|list| list.iter().any(|p| p.sku == ui::web_guides::LINDEN_HOME_SKU));
+                if let Some(url) = ui::web_guides::url(guide, &self.settings.grid, has_home) {
+                    self.web_browser_ui.go_to(&url);
+                    self.panels.web_browser = true;
+                }
+            }
+            BarAction::WindowSize(width, height) => self.pending_window_size = Some((width, height)),
+            BarAction::ClearGroupCache => {
+                self.world.group_data.clear_all();
+                log::info!("group cache cleared");
+            }
+            BarAction::ReleaseKeys => {
+                if !self.world.rlva_has_remove_locked_attachment() {
+                    self.send(NetCommand::ForceScriptControlRelease);
+                }
+            }
             BarAction::ToggleQuietSnapshots => {
                 self.settings.snapshot.sound = !self.settings.snapshot.sound;
                 self.settings.save();
@@ -15924,6 +16023,11 @@ impl App {
                         aurora_i18n::tr!("rlva-hidden-region")
                     } else {
                         &self.world.region_name()
+                    },
+                    sim_version: if self.settings.legacy_prefs.sim_version_in_bar && !self.world.rlva.has("showloc") {
+                        crate::world::region_alerts::short_version(self.world.region_alerts.channel()).unwrap_or("")
+                    } else {
+                        ""
                     },
                     parcel: if self.world.rlva.has("showloc") {
                         aurora_i18n::tr!("rlva-hidden-parcel")
@@ -21643,6 +21747,7 @@ impl ApplicationHandler for App {
         if self.settings.window_fullscreen != self.fullscreen_applied {
             self.apply_fullscreen_setting();
         }
+        self.apply_window_size();
         self.record_window_geometry();
         self.attention_window();
         self.external_links();

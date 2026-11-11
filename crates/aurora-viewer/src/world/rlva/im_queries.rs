@@ -76,7 +76,7 @@ impl World {
         let from = im.from_agent_id;
         if im.message == "@stopim" {
             if !self.rlva_allows_im("startim", from) {
-                self.rlva_im_reply(from, aurora_i18n::tr!("rlva-im-ended-remote"), true);
+                self.rlva_im_reply(from, &self.rlva.text("stopim_endsession_remote"), true);
                 if self.social.has_session(&from) {
                     self.conversation_closed(&from);
                     self.leave_session(from);
@@ -93,7 +93,7 @@ impl World {
             if !self.rlva.preferences.im_queries {
                 return false;
             }
-            self.rlva_im_reply(from, aurora_i18n::tr!("rlva-im-no-restriction"), true);
+            self.rlva_im_reply(from, &self.rlva.text("stopim_nosession"), true);
             return true;
         }
         if !self.rlva.preferences.im_queries {
@@ -124,7 +124,7 @@ impl World {
                 .count()
                 >= 32
             {
-                self.rlva_im_reply(from, aurora_i18n::tr!("rlva-im-denied"), true);
+                self.rlva_im_reply(from, &self.rlva.text("imquery_list_deny"), true);
                 return true;
             }
             let name = if self.rlva_can_name(from) {
@@ -192,7 +192,7 @@ impl World {
                 }
                 self.rlva_im_list(from, exceptions);
             }
-            _ => self.rlva_im_reply(from, aurora_i18n::tr!("rlva-im-denied"), true),
+            _ => self.rlva_im_reply(from, &self.rlva.text("imquery_list_deny"), true),
         }
     }
 }

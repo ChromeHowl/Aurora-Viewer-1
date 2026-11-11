@@ -127,7 +127,11 @@ fn texts(st: &StatusInfo) -> (String, String, String) {
         return (st.parcel.to_owned(), st.region.to_owned(), String::new());
     }
     let position = format!("({:.0}, {:.0}, {:.0})", st.position.x, st.position.y, st.position.z);
-    let (parcel, region) = (one_line(st.parcel), one_line(st.region));
+    let (parcel, mut region) = (one_line(st.parcel), one_line(st.region));
+    // the simulator's version after the region (FSStatusbarShowSimulatorVersion)
+    if !st.sim_version.is_empty() && !region.is_empty() {
+        region = format!("{region} - {}", one_line(st.sim_version));
+    }
     if parcel.is_empty() {
         (region, String::new(), position)
     } else {

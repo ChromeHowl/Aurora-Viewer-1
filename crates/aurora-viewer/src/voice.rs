@@ -49,6 +49,9 @@ pub struct VoiceInputs<'a> {
     pub processing: aurora_audio::MicProcessing,
     pub ear: crate::settings::VoiceEar,
     pub transmit: bool,
+    /// StopMicCaptureWhenMuted (on): the microphone is closed while we do
+    /// not transmit, so that a Bluetooth headset leaves its call mode.
+    pub release_mic_when_muted: bool,
     /// Global positions (metres) and rotations of the avatar and the camera.
     pub avatar: (DVec3, Quat),
     pub listener: (DVec3, Quat),
@@ -184,12 +187,16 @@ impl Voice {
     }
 
     pub fn update(&mut self, v: VoiceInputs) {
-        // microphone: open while voice is on in world, or for the settings meter
-        let want_mic = v.enabled && (v.in_world || v.tuning);
+        let want_mic = mic_wanted(&v);
         if want_mic && self.mic.is_none() {
             match MicCapture::open(non_empty(v.input_device)) {
                 Ok(m) => {
                     self.mic_device = v.input_device.to_owned();
+                    // a microphone opened again (released while muted) goes
+                    // to the session already joined
+                    if let Some((_, s)) = &self.session {
+                        s.set_mic(Some(m.clone()));
+                    }
                     self.mic = Some(m);
                 }
                 Err(e) => {
@@ -423,9 +430,32 @@ pub(crate) fn listener_rotation(view: glam::Mat4) -> Quat {
     .normalize()
 }
 
+/// Whether the microphone is open: voice on in world, or the settings'
+/// meter; while we do not transmit only if it is not released then
+/// (StopMicCaptureWhenMuted, LLVoiceWebRTC's capture stopped while muted).
+fn mic_wanted(v: &VoiceInputs) -> bool {
+    v.enabled && (v.tuning || (v.in_world && (v.transmit || !v.release_mic_when_muted)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_microphone_is_released_while_muted_when_asked() {
+        let http = reqwest::Client::new();
+        let mut v = inputs(&http);
+        assert!(mic_wanted(&v), "transmitting");
+        v.transmit = false;
+        assert!(!mic_wanted(&v), "muted: released");
+        v.release_mic_when_muted = false;
+        assert!(mic_wanted(&v), "kept open as before");
+        v.release_mic_when_muted = true;
+        v.tuning = true;
+        assert!(mic_wanted(&v), "the settings' meter keeps it");
+        v.enabled = false;
+        assert!(!mic_wanted(&v), "voice off");
+    }
 
     fn inputs(http: &reqwest::Client) -> VoiceInputs<'_> {
         VoiceInputs {
@@ -447,6 +477,7 @@ mod tests {
             processing: Default::default(),
             ear: crate::settings::VoiceEar::Avatar,
             transmit: true,
+            release_mic_when_muted: true,
             avatar: (DVec3::ZERO, Quat::IDENTITY),
             listener: (DVec3::ZERO, Quat::IDENTITY),
             call: None,

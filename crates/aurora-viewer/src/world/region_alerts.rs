@@ -40,7 +40,24 @@ pub struct RegionAlerts {
     version: String,
 }
 
+/// The short simulator version the top bar shows (FIRE-1874 in
+/// LLAgentUI::buildLocationString, indra/newview/llagentui.cpp, originally
+/// LGPL 2.1): of "Second Life Server 2020-03-20T18:40:52.538914", the
+/// fourth word's part after its last dot ("538914"); None when the channel
+/// has no such part.
+pub fn short_version(channel: &str) -> Option<&str> {
+    let word = channel.split_whitespace().nth(3)?;
+    let (_, after) = word.rsplit_once('.')?;
+    (!after.is_empty()).then_some(after)
+}
+
 impl RegionAlerts {
+    /// The simulator channel of the region we arrived in last
+    /// (gLastVersionChannel), empty before the first arrival.
+    pub fn channel(&self) -> &str {
+        &self.version
+    }
+
     /// The change to tell, as (old, new), when it passes the threshold.
     fn script_change(&mut self, stats: &SimStats) -> Option<(i64, i64)> {
         let now = stats.get(sim_stat::NUMSCRIPTSACTIVE)? as i64;
@@ -87,6 +104,16 @@ impl World {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_short_version_is_the_fourth_words_last_part() {
+        assert_eq!(short_version("Second Life Server 2020-03-20T18:40:52.538914"), Some("538914"));
+        assert_eq!(short_version("Second Life Server 2024-01-02.12345"), Some("12345"));
+        assert_eq!(short_version("Second Life Server"), None);
+        assert_eq!(short_version("OpenSim Server 0.9 x"), None, "no dot in the fourth word");
+        assert_eq!(short_version("Second Life Server 2020."), None);
+        assert_eq!(short_version(""), None);
+    }
 
     fn stats(scripts: f32) -> SimStats {
         SimStats {

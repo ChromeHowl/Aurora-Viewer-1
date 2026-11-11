@@ -29,6 +29,10 @@ pub struct Preferences {
     pub hide_locked_layers: bool,
     pub wear_add_prefix: String,
     pub wear_replace_prefix: String,
+    /// The RLVa texts the user changed (RlvFloaterStrings, saved by the
+    /// Legacy Viewer in its own rlva_strings file), by their rlva_strings.xml
+    /// name (`strings.rs`).
+    pub strings: std::collections::BTreeMap<String, String>,
 }
 
 impl Default for Preferences {
@@ -57,6 +61,7 @@ impl Default for Preferences {
             hide_locked_layers: false,
             wear_add_prefix: "+".into(),
             wear_replace_prefix: String::new(),
+            strings: Default::default(),
         }
     }
 }

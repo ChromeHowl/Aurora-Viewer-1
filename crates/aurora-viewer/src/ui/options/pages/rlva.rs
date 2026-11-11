@@ -3,7 +3,7 @@
 //! The page opens on a notice: RLVa is still very experimental.
 //! Rows participate in preference search, modified settings and page reset.
 
-use super::super::cx::{Cx, Nothing, field};
+use super::super::cx::{Custom, Cx, Nothing, field};
 
 pub fn page(cx: &mut Cx) {
     use aurora_i18n::tr;
@@ -158,5 +158,48 @@ pub fn page(cx: &mut Cx) {
                 });
                 false
             });
+    });
+    // RlvFloaterStrings (Advanced › RLVa › Strings in the Legacy Viewer):
+    // the texts shown or sent in place of a blocked message; an empty field
+    // gives the translated text back
+    cx.group(tr!("b9-rlva-texts"), |cx| {
+        cx.greyed(!cx.s.rlva_enabled);
+        for &name in crate::world::rlva::strings::CUSTOMIZABLE {
+            let (label, hint) = crate::world::rlva::strings::label(name);
+            let track = Custom {
+                path: "rlva.strings",
+                modified: move |s: &crate::settings::Settings, d: &crate::settings::Settings| {
+                    s.rlva.strings.get(name) != d.rlva.strings.get(name)
+                },
+                reset: move |s: &mut crate::settings::Settings, d: &crate::settings::Settings| match d.rlva.strings.get(name) {
+                    Some(text) => {
+                        s.rlva.strings.insert(name.to_owned(), text.clone());
+                    }
+                    None => {
+                        s.rlva.strings.remove(name);
+                    }
+                },
+            };
+            cx.keywords("RLVa RLV").row(label, hint, &track, |ui, settings| {
+                let mut text = settings.rlva.strings.get(name).cloned().unwrap_or_default();
+                let changed = ui
+                    .add(
+                        egui::TextEdit::singleline(&mut text)
+                            .desired_width(240.0)
+                            .char_limit(crate::world::rlva::strings::MAX_LEN)
+                            .hint_text(crate::world::rlva::strings::default_text(name)),
+                    )
+                    .changed();
+                if changed {
+                    if text.trim().is_empty() {
+                        settings.rlva.strings.remove(name);
+                    } else {
+                        settings.rlva.strings.insert(name.to_owned(), text);
+                    }
+                }
+                changed
+            });
+        }
+        cx.greyed(false);
     });
 }

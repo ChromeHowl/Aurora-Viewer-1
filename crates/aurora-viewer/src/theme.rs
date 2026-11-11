@@ -321,6 +321,15 @@ pub fn apply_motion(ctx: &egui::Context, reduce: bool) {
     }
 }
 
+/// ToolTipDelay (Preferences › Interface): seconds before a tooltip of the
+/// interface shows. Checked every frame, like `apply_motion`.
+pub fn apply_tooltip_delay(ctx: &egui::Context, seconds: f32) {
+    let wanted = if seconds.is_finite() { seconds.max(0.0) } else { 0.0 };
+    if ctx.global_style().interaction.tooltip_delay != wanted {
+        ctx.all_styles_mut(|s| s.interaction.tooltip_delay = wanted);
+    }
+}
+
 /// The size of the text fields: egui 0.37 makes them as high as a button
 /// (`interact_size`, 26 points here) with a button's padding; they keep egui
 /// 0.36's, 4 × 2 points around their text (stroke included) and no minimum
@@ -502,6 +511,19 @@ mod tests {
                 "ordinary selection must still have its accent background"
             );
         }
+    }
+
+    /// The tooltip delay follows the preference, again after a skin reload.
+    #[test]
+    fn the_tooltip_delay_follows_the_preference() {
+        let ctx = egui::Context::default();
+        apply_tooltip_delay(&ctx, 1.5);
+        assert_eq!(ctx.global_style().interaction.tooltip_delay, 1.5);
+        Theme::default().apply(&ctx, 1.0);
+        apply_tooltip_delay(&ctx, 1.5);
+        assert_eq!(ctx.global_style().interaction.tooltip_delay, 1.5);
+        apply_tooltip_delay(&ctx, f32::NAN);
+        assert_eq!(ctx.global_style().interaction.tooltip_delay, 0.0);
     }
 
     /// "Reduce animations" ends egui's transitions at once, and gives

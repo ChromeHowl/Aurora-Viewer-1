@@ -195,6 +195,10 @@ pub struct BrowserSettings {
     pub cookies_enabled: bool,
     pub javascript_enabled: bool,
     pub zoom_factor: f64,
+    /// The web proxy (BrowserProxyAddress, BrowserProxyPort): an empty host
+    /// for none (LLPluginClassMedia::proxy_setup).
+    pub proxy_host: String,
+    pub proxy_port: u16,
 }
 
 impl Default for BrowserSettings {
@@ -208,6 +212,8 @@ impl Default for BrowserSettings {
             cookies_enabled: true,
             javascript_enabled: true,
             zoom_factor: 1.0,
+            proxy_host: String::new(),
+            proxy_port: 0,
         }
     }
 }
@@ -398,9 +404,9 @@ impl MediaPlugin {
         }
         m.send(
             PluginMessage::new(CLASS_MEDIA_BROWSER, "proxy_setup")
-                .with("enable", false)
-                .with("host", "")
-                .with("port", 0),
+                .with("enable", !browser.proxy_host.is_empty())
+                .with("host", browser.proxy_host.as_str())
+                .with("port", i32::from(browser.proxy_port)),
         );
         m.send(
             PluginMessage::new(CLASS_MEDIA, "init")

@@ -148,6 +148,14 @@ impl GroupMgr {
             .or_else(|| profile.map(|g| i64::from(g.members.max(0))))
     }
 
+    /// Advanced › Clear Group Cache (LLGroupMgr::debugClearAllGroups,
+    /// clearGroups): every group's members, roles, titles and notices are
+    /// forgotten and asked again when its profile opens; the notices read
+    /// are kept.
+    pub fn clear_all(&mut self) {
+        self.groups.clear();
+    }
+
     pub fn take_commands(&mut self) -> Vec<NetCommand> {
         std::mem::take(&mut self.out)
     }

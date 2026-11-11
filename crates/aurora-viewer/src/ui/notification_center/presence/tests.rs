@@ -136,6 +136,7 @@ fn status(classic: bool) -> StatusInfo<'static> {
         show_huds: true,
         hud_zoom: 1.0,
         region: "Aurora Demo",
+        sim_version: "",
         parcel: "Aurora Plaza",
         tp_back: None,
         tp_forward: None,

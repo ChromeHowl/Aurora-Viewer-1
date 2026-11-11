@@ -156,6 +156,16 @@ pub enum BarAction {
     Marketplace,
     /// Me › Marketplace listings (menu_viewer.xml "MarketplaceListings").
     MarketplaceListings,
+    /// World › Destination Guide, Avatar Welcome Pack, My Linden Home, in
+    /// the built-in browser (`web_guides.rs`).
+    WebGuide(super::web_guides::Guide),
+    /// Advanced › Set Window Size (floater_window_size.xml): the window's
+    /// inside to this many pixels.
+    WindowSize(u32, u32),
+    /// Advanced › Clear Group Cache (LLGroupMgr::debugClearAllGroups).
+    ClearGroupCache,
+    /// Advanced › Release Keys (LLAgent::forceReleaseControls).
+    ReleaseKeys,
     /// World › Landmark this Place (World.CreateLandmark).
     CreateLandmark,
     LandmarkStar(StarAction),
@@ -205,6 +215,25 @@ pub enum BarAction {
     OwnedLand,
 }
 
+/// floater_window_size.xml's sizes, with their kind (not translated there
+/// either).
+pub const WINDOW_SIZES: &[(u32, u32, &str)] = &[
+    (1000, 700, ""),
+    (1024, 768, "4:3 XGA"),
+    (1280, 720, "16:9 HD"),
+    (1280, 800, "16:10 WXGA"),
+    (1360, 768, "16:9 WXGA"),
+    (1366, 768, "16:9 WXGA"),
+    (1440, 900, "16:10 WXGA+"),
+    (1536, 864, "16:9"),
+    (1600, 900, "16:9 HD+"),
+    (1680, 1050, "16:10 WSXGA+"),
+    (1920, 1080, "16:9 FHD"),
+    (1920, 1200, "16:10 WUXGA"),
+    (2560, 1440, "16:9 QHD"),
+    (3840, 2160, "16:9 4K UHD"),
+];
+
 /// How the islands of Aurora's top bar are set (Preferences › Interface).
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct IslandsLook {
@@ -228,6 +257,9 @@ pub struct StatusInfo<'a> {
     pub show_huds: bool,
     pub hud_zoom: f32,
     pub region: &'a str,
+    /// The simulator's short version after the region's name
+    /// (FSStatusbarShowSimulatorVersion), empty when off or unknown.
+    pub sim_version: &'a str,
     /// Parcel the agent stands on (may be empty).
     pub parcel: &'a str,
     /// Destinations of the back / forward arrows (None = disabled).
@@ -1007,6 +1039,23 @@ fn main_menus(ui: &mut egui::Ui, p: &Palette, panels: &mut Panels, st: &StatusIn
         if st.marketplace && menu::item(ui, p, "building-store", aurora_i18n::tr!("marketplace-menu")) {
             *action = BarAction::Marketplace;
         }
+        // Linden Lab's web guides, on the Second Life grids (GridCheck "secondlife")
+        if st.marketplace {
+            use super::web_guides::Guide;
+            for (icon, label, guide) in [
+                (
+                    "map-pin-link-filled",
+                    aurora_i18n::tr!("b9-guide-destinations"),
+                    Guide::Destinations,
+                ),
+                ("gift-filled", aurora_i18n::tr!("b9-guide-welcome-pack"), Guide::WelcomePack),
+                ("home-2-filled", aurora_i18n::tr!("b9-guide-linden-home"), Guide::LindenHome),
+            ] {
+                if menu::item(ui, p, icon, label) {
+                    *action = BarAction::WebGuide(guide);
+                }
+            }
+        }
         flip(
             ui,
             p,
@@ -1370,6 +1419,26 @@ fn main_menus(ui: &mut egui::Ui, p: &Palette, panels: &mut Panels, st: &StatusIn
             let quiet = aurora_i18n::tr!("photo-quiet-snapshots");
             if menu::check(ui, p, "camera-off", quiet, st.quiet_snapshots, true) {
                 *action = BarAction::ToggleQuietSnapshots;
+            }
+            // Advanced › Set Window Size (floater_window_size.xml's sizes)
+            menu::submenu(ui, p, "app-window-filled", aurora_i18n::tr!("b9-window-size"), true, |ui| {
+                for &(w, h, kind) in WINDOW_SIZES {
+                    let label = if kind.is_empty() {
+                        format!("{w} × {h}")
+                    } else {
+                        format!("{w} × {h} ({kind})")
+                    };
+                    if menu::item(ui, p, "aspect-ratio-filled", &label) {
+                        *action = BarAction::WindowSize(w, h);
+                    }
+                }
+            });
+            // Advanced › Clear Group Cache, Release Keys (menu_viewer.xml)
+            if menu::item(ui, p, "users-group", aurora_i18n::tr!("b9-clear-group-cache")) {
+                *action = BarAction::ClearGroupCache;
+            }
+            if menu::item(ui, p, "keyboard-filled", aurora_i18n::tr!("b9-release-keys")) {
+                *action = BarAction::ReleaseKeys;
             }
             // Advanced › Media Streams Backup: the parcel stream list to
             // and from an XML file (Streamlist.xml_import / xml_export)
@@ -2177,10 +2246,13 @@ pub fn top_bars(
                                 loc.push_str(st.parcel);
                                 loc.push_str(", ");
                             }
-                            loc.push_str(&format!(
-                                "{} ({:.0}, {:.0}, {:.0})",
-                                st.region, st.position.x, st.position.y, st.position.z
-                            ));
+                            loc.push_str(st.region);
+                            // the Legacy Viewer's "region - version - (x, y, z)"
+                            if !st.sim_version.is_empty() {
+                                loc.push_str(" - ");
+                                loc.push_str(st.sim_version);
+                            }
+                            loc.push_str(&format!(" ({:.0}, {:.0}, {:.0})", st.position.x, st.position.y, st.position.z));
                             if st.location_hidden {
                                 loc = format!("{}, {}", st.parcel, st.region);
                                 panels.nav_edit = None;
