@@ -107,12 +107,8 @@ impl Editor {
     }
     pub(super) fn point_owns_pointer(&self, ctx: &egui::Context, rig: &Rig, pointer: Pos2) -> bool {
         if self.poser.active {
-            return ctx.memory(|m| {
-                (0..rig.len()).filter(|b| self.bone_visible(&rig.canonical_names[*b])).any(|b| {
-                    m.area_rect(egui::Id::unique(("poser-joint", b)))
-                        .is_some_and(|r| r.contains(pointer))
-                })
-            });
+            // this frame's markers (`pose_overlay`), never the last frame's
+            return self.poser_marker_at(pointer);
         }
         ctx.memory(|m| {
             rig.canonical_names
