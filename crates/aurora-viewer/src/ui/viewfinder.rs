@@ -19,9 +19,11 @@ mod controls;
 mod isolate;
 mod light;
 mod looks;
+mod modes;
 mod presets;
 pub use controls::{CamMode, Pad, roll_text};
 pub use isolate::{Isolate, IsolateRow};
+pub use modes::refused_text;
 pub use presets::{Preset, PresetForm, anchor_icon};
 #[cfg(test)]
 mod message_tests;
@@ -57,6 +59,11 @@ pub struct Viewfinder {
     pub help: bool,
     /// The sheet open (`Sheet`), if any.
     pub sheet: Option<Sheet>,
+    /// The row of the mode list the keys are on.
+    pub mode_cursor: usize,
+    /// The shutter on screen, as drawn last frame (the mode list opens
+    /// beside it).
+    shutter_at: Option<Rect>,
     /// Every setting of the photo panel, in a drawer on the right.
     pub drawer: bool,
     /// The isolation panel (what the photo shows), on the right.
@@ -197,6 +204,23 @@ pub struct Frame<'a> {
     pub posing: bool,
     /// The session's photos (`ui::photo_reel`).
     pub reel: &'a crate::ui::photo_reel::ReelView<'a>,
+    /// A 360° photo is allowed (no RLVa camera limit) and the depth (no
+    /// RLVa vision spheres).
+    pub pano_ok: bool,
+    pub depth_ok: bool,
+    /// The custom modes C1 to C3.
+    pub banks: [BankView; 3],
+}
+
+/// A custom mode's slot as the viewfinder shows it.
+#[derive(Debug, Clone, Default)]
+pub struct BankView {
+    /// The photo profile pinned there.
+    pub name: Option<String>,
+    /// That profile still exists.
+    pub exists: bool,
+    /// The photo's settings now differ from it (the slot loaded last).
+    pub differs: bool,
 }
 
 /// The keys the help and the hints name.
@@ -235,6 +259,12 @@ pub enum Out {
     Poser,
     /// The reel's stack or quick view.
     Reel(crate::ui::photo_reel::ReelAction),
+    /// A shot mode chosen (`snapshot::viewfinder::choose`, or a custom
+    /// mode's profile loaded).
+    Shot(vf::ShotChoice),
+    /// A quick-menu tile opens a sheet (the viewfinder's own: never
+    /// reaches the app).
+    Sheet(Sheet),
     /// Out of the photo mode.
     Exit,
 }
@@ -509,6 +539,25 @@ fn on_off(on: bool, yes: &'static str, no: &'static str) -> &'static str {
     if on { yes } else { no }
 }
 
+/// The 360° photo's quality, as its row in the photo window names it.
+fn pano_quality_label(q: crate::snapshot::pano::Quality) -> &'static str {
+    use crate::snapshot::pano::Quality;
+    match q {
+        Quality::Preview => aurora_i18n::tr!("b1-pano-preview"),
+        Quality::Medium => aurora_i18n::tr!("b1-pano-medium"),
+        Quality::High => aurora_i18n::tr!("b1-pano-high"),
+        Quality::Maximum => aurora_i18n::tr!("b1-pano-maximum"),
+        Quality::Ultra => aurora_i18n::tr!("b1-pano-ultra"),
+    }
+}
+
+/// The next of `pano::Quality::ALL`, round.
+pub(crate) fn next_pano_quality(q: crate::snapshot::pano::Quality) -> crate::snapshot::pano::Quality {
+    let all = crate::snapshot::pano::Quality::ALL;
+    let i = all.iter().position(|x| *x == q).unwrap_or(0);
+    all[(i + 1) % all.len()]
+}
+
 impl Viewfinder {
     /// The line at the top for a few seconds.
     pub fn say(&mut self, text: impl Into<String>, error: bool, now: f64) {
@@ -564,6 +613,11 @@ impl Viewfinder {
     ) -> Vec<Out> {
         let mut out = Vec::new();
         panel.looks.hover = None;
+        // a mode that writes to the disk, the destination changed: Photo
+        if vf::on_destination(panel.destination == Destination::Disk, &mut panel.shot, &mut panel.depth) {
+            self.say(aurora_i18n::tr!("pcu-shot-disk-only"), false, f.now);
+            out.push(Out::Panel(Action::Changed));
+        }
         let before = s.clone();
         let light_before = panel.light;
         let screen = ctx.content_rect();
@@ -671,6 +725,9 @@ impl Viewfinder {
         }
         if self.help {
             self.help_panel(ctx, p, screen, f);
+        }
+        if self.sheet == Some(Sheet::Modes) && shows {
+            self.mode_list(ctx, p, screen, panel, f, &mut out);
         }
         if self.drawer {
             self.drawer(ctx, p, screen, s, panel, fov, default_fov, view, &mut out);
@@ -1412,11 +1469,13 @@ impl Viewfinder {
                         })
                         .inner
                     };
+                    // a 360° photo's views have their own fixed lens
+                    let pano = vf::shown(panel.shot, panel.depth, panel.bank) == vf::ShotChoice::Pano;
                     let resp = dial(
                         ui,
                         Dial::Focal,
                         &format!("{} mm", f.focal_mm.round() as i32),
-                        false,
+                        pano,
                         aurora_i18n::tr!("photo-vf-focal-tip"),
                         self.dial,
                     );
@@ -1426,7 +1485,7 @@ impl Viewfinder {
                         ui,
                         Dial::Aperture,
                         &format!("f/{}", aurora_i18n::number(f64::from(n), if n < 10.0 { 1 } else { 0 })),
-                        !s.dof.enabled,
+                        !s.dof.enabled || pano,
                         aurora_i18n::tr!("photo-vf-aperture-tip"),
                         self.dial,
                     );
@@ -1647,7 +1706,7 @@ impl Viewfinder {
                     // the shot together; the session's photos are bottom
                     // left, `reel_tray`)
                     ui.add_space(6.0);
-                    self.shutter_button(ui, p, out);
+                    self.shutter_button(ui, p, vf::shown(panel.shot, panel.depth, panel.bank), out);
                     ui.add_space(6.0);
                     let isolating = self.isolate || f.isolation.mode != crate::snapshot::isolate::Mode::Off;
                     if dock_button(ui, p, Face::Icon("user-scan"), aurora_i18n::tr!("photo-isolate-tip"), isolating) {
@@ -1814,11 +1873,18 @@ impl Viewfinder {
         print(&painter, p, rect, PRINT_EDGE * ease, angle * ease, Some(tex));
     }
 
-    /// The round shutter: pressed, the focus; released on it, the photo;
-    /// let go elsewhere, nothing.
-    fn shutter_button(&mut self, ui: &mut egui::Ui, p: &Palette, out: &mut Vec<Out>) {
+    /// The round shutter: pressed with the main button, the focus;
+    /// released on it, the photo; let go elsewhere, nothing. The other
+    /// button never shoots: it opens the mode list. The mode shows on the
+    /// disc (`modes::glyph`).
+    fn shutter_button(&mut self, ui: &mut egui::Ui, p: &Palette, mode: vf::ShotChoice, out: &mut Vec<Out>) {
         let (rect, resp) = ui.allocate_exact_size(Vec2::splat(66.0), Sense::click_and_drag());
-        let down = resp.is_pointer_button_down_on();
+        self.shutter_at = Some(rect);
+        let primary = ui.input(|i| i.pointer.button_down(egui::PointerButton::Primary));
+        let down = resp.is_pointer_button_down_on() && primary;
+        if resp.secondary_clicked() {
+            self.toggle_sheet(Sheet::Modes, out);
+        }
         if down && !self.mouse_down {
             self.mouse_down = true;
             out.push(Out::HalfPress);
@@ -1837,8 +1903,20 @@ impl Viewfinder {
             p.ink.gamma_multiply(0.92)
         };
         ui.painter().circle_filled(c, if self.pressed { 25.0 * 0.86 } else { 25.0 }, fill);
+        match modes::glyph(mode) {
+            Some(modes::Glyph::Icon(name)) => icon(ui.painter(), name, Rect::from_center_size(c, Vec2::splat(22.0)), p.navy),
+            Some(modes::Glyph::Text(t)) => {
+                ui.painter().text(c, Align2::CENTER_CENTER, t, bold(ui.ctx(), 15.0), p.navy);
+            }
+            None => {}
+        }
         keep_keys(&resp);
-        resp.on_hover_text(aurora_i18n::tr!("photo-vf-shutter-tip"));
+        let tip = format!(
+            "{}\n{}",
+            aurora_i18n::tr!("photo-vf-shutter-tip"),
+            aurora_i18n::tr!("pcu-shutter-modes-tip")
+        );
+        resp.on_hover_text(tip);
     }
 
     /// The quick menu: a tile per setting, a click for the next value.
@@ -1855,6 +1933,8 @@ impl Viewfinder {
     ) {
         let cols = 9.0;
         let width = (screen.width() - 2.0 * GAP - 120.0).min(1300.0);
+        // what the tiles ask: a sheet is the viewfinder's own
+        let mut sheets = Vec::new();
         egui::Area::new(Id::unique("vf_menu"))
             .order(Order::Foreground)
             .fade_in(false)
@@ -1888,7 +1968,7 @@ impl Viewfinder {
                                 if tile(ui, p, Vec2::new(tile_w, 68.0), label, &value)
                                     && let Some(o) = step(s, panel)
                                 {
-                                    out.push(o);
+                                    sheets.push(o);
                                 }
                                 if (i + 1) % cols as usize == 0 {
                                     ui.end_row();
@@ -1897,6 +1977,12 @@ impl Viewfinder {
                         });
                 });
             });
+        for o in sheets {
+            match o {
+                Out::Sheet(sheet) => self.toggle_sheet(sheet, out),
+                o => out.push(o),
+            }
+        }
     }
 
     /// The keys and the mouse, in a panel in the middle.
@@ -2313,6 +2399,33 @@ fn tiles(s: &Settings, panel: &SnapshotUi, f: &Frame) -> Vec<(&'static str, Stri
     let yes_no = |on: bool| on_off(on, aurora_i18n::tr!("photo-vf-on"), aurora_i18n::tr!("photo-vf-off")).to_owned();
     let mut v: Vec<(&'static str, String, Step)> = Vec::new();
     let window = f.window;
+    // the shot mode, and the tiles of its own (a phone camera's controls
+    // follow its mode)
+    let mode = vf::shown(panel.shot, panel.depth, panel.bank);
+    v.push((
+        aurora_i18n::tr!("pcu-shot-title"),
+        modes::label(mode).0,
+        Box::new(|_, _| Some(Out::Sheet(Sheet::Modes))),
+    ));
+    if mode == vf::ShotChoice::Pano {
+        let quality = s.extras.pano_quality;
+        v.push((
+            aurora_i18n::tr!("b1-pano-quality"),
+            pano_quality_label(quality).to_owned(),
+            Box::new(move |s, _| {
+                s.extras.pano_quality = next_pano_quality(quality);
+                None
+            }),
+        ));
+        v.push((
+            aurora_i18n::tr!("pcu-tile-avatars"),
+            on_off(!s.extras.pano_hide_avatars, aurora_i18n::tr!("pcu-in"), aurora_i18n::tr!("pcu-out")).to_owned(),
+            Box::new(|s, _| {
+                s.extras.pano_hide_avatars = !s.extras.pano_hide_avatars;
+                None
+            }),
+        ));
+    }
     v.push((
         aurora_i18n::tr!("photo-section-format"),
         aspect_label(s.aspect).to_owned(),
@@ -2580,5 +2693,68 @@ mod sheet_tests {
         v.toggle_sheet(Sheet::Modes, &mut out);
         v.toggle_sheet(Sheet::Guide, &mut out);
         assert_eq!(v.sheet, Some(Sheet::Guide));
+    }
+}
+
+#[cfg(test)]
+mod shutter_tests {
+    use super::{Out, Sheet, Viewfinder};
+    use crate::snapshot::viewfinder::ShotChoice;
+    use egui::{PointerButton, Pos2, Rect, Vec2};
+
+    /// The shutter drawn over a few frames, a button pressed then let go
+    /// on it; what it asked.
+    fn press(button: PointerButton) -> (Vec<Out>, Viewfinder) {
+        let ctx = egui::Context::default();
+        let theme = crate::theme::Theme::default();
+        theme.apply(&ctx, 1.0);
+        let p = theme.palette();
+        let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(400.0, 300.0));
+        let mut v = Viewfinder::default();
+        let mut out = Vec::new();
+        let mut time = 0.0;
+        let mut frame = |v: &mut Viewfinder, events: Vec<egui::Event>, out: &mut Vec<Out>| {
+            time += 0.1;
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(screen),
+                    time: Some(time),
+                    events,
+                    ..Default::default()
+                },
+                |ui| v.shutter_button(ui, &p, ShotChoice::Photo, out),
+            );
+            output.textures_delta.clear();
+        };
+        frame(&mut v, Vec::new(), &mut out);
+        let at = v.shutter_at.expect("drawn").center();
+        let button_event = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button,
+            pressed,
+            modifiers: Default::default(),
+        };
+        frame(&mut v, vec![egui::Event::PointerMoved(at)], &mut out);
+        frame(&mut v, vec![button_event(true)], &mut out);
+        frame(&mut v, vec![button_event(false)], &mut out);
+        frame(&mut v, Vec::new(), &mut out);
+        (out, v)
+    }
+
+    #[test]
+    fn the_main_button_shoots() {
+        let (out, v) = press(PointerButton::Primary);
+        assert_eq!(out, vec![Out::HalfPress, Out::Release]);
+        assert_eq!(v.sheet, None);
+    }
+
+    #[test]
+    fn the_other_button_opens_the_modes_and_never_shoots() {
+        let (out, v) = press(PointerButton::Secondary);
+        assert!(
+            !out.iter().any(|o| matches!(o, Out::HalfPress | Out::Release | Out::Cancel)),
+            "{out:?}"
+        );
+        assert_eq!(v.sheet, Some(Sheet::Modes));
     }
 }

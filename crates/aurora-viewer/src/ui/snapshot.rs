@@ -58,6 +58,12 @@ pub struct SnapshotUi {
     /// A photo to disk is the depth of the scene (the Legacy Viewer's
     /// "Depth" capture layer; never saved, as there).
     pub depth: bool,
+    /// The viewfinder's shot mode (`snapshot::viewfinder::Shot`; never
+    /// saved, like `depth`).
+    pub shot: crate::snapshot::viewfinder::Shot,
+    /// The custom mode last loaded, C1 to C3 (0 to 2), while no other mode
+    /// was chosen.
+    pub bank: Option<u8>,
 }
 
 /// Where a photo goes (Firestorm's snapshot panels; the profile feed

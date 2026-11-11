@@ -436,8 +436,44 @@ impl App {
         let v = &mut self.snapshots.vf;
         v.flash_at = Some(now);
         v.hinted = true;
-        log::info!("viewfinder: shutter");
-        self.photo_action(Action::Take, renderer);
+        // the shot mode: the shutter button, Enter, a shot waiting for the
+        // focus and the self-timer all come here
+        let ui = &self.snapshots.ui;
+        let action = match vf::shutter_action(ui.shot, ui.depth) {
+            vf::Fire::Take => Action::Take,
+            vf::Fire::FullSave => Action::FullSave,
+            vf::Fire::Pano => Action::Pano,
+        };
+        log::info!("viewfinder: shutter ({action:?})");
+        self.photo_action(action, renderer);
+    }
+
+    /// The shot modes as the viewfinder lists them.
+    fn vf_shot_list(&self) -> Vec<(vf::ShotChoice, Option<vf::Refused>)> {
+        let pano_ok = !crate::snapshot::pano::rlva_blocks(|b| self.world.rlva.has(b));
+        let depth_ok = self.world.rlva.visuals.spheres.is_empty();
+        vf::available(pano_ok, depth_ok, self.vf_banks().map(|b| b.exists))
+    }
+
+    /// The custom modes' slots.
+    fn vf_banks(&self) -> [crate::ui::viewfinder::BankView; 3] {
+        Default::default()
+    }
+
+    /// A shot mode chosen (the list, its tile, the P key): Full set, 360°
+    /// and Depth write to the disk.
+    fn vf_shot(&mut self, choice: vf::ShotChoice) {
+        let now = self.vf_now();
+        if let Some((_, Some(why))) = self.vf_shot_list().into_iter().find(|(c, _)| *c == choice) {
+            self.snapshots.vf.say(crate::ui::viewfinder::refused_text(why), true, now);
+            return;
+        }
+        let ui = &mut self.snapshots.ui;
+        if vf::choose(choice, &mut ui.shot, &mut ui.depth, &mut ui.bank) {
+            ui.destination = crate::ui::snapshot::Destination::Disk;
+        }
+        log::info!("viewfinder: shot mode {choice:?}");
+        self.snapshots.preview_wanted = true;
     }
 
     /// The shutter pressed half way: in AF-S the lens focuses, and the beep
@@ -810,7 +846,7 @@ impl App {
             _ if free => letter
                 .chars()
                 .next()
-                .filter(|c| matches!(c, 'q' | 'i' | 'n' | 'v' | 'g' | 'h' | 'l')),
+                .filter(|c| matches!(c, 'q' | 'i' | 'n' | 'v' | 'g' | 'h' | 'l' | 'p')),
             _ => None,
         };
         let Some(which) = which else {
@@ -841,6 +877,11 @@ impl App {
                 self.settings.save();
             }
             'n' => self.vf_cycle_af(),
+            'p' => {
+                let ui = &self.snapshots.ui;
+                let next = vf::next_choice(vf::shown(ui.shot, ui.depth, ui.bank), &self.vf_shot_list());
+                self.vf_shot(next);
+            }
             'v' => self.vf_toggle_area(),
             'l' => {
                 v.ae_lock = !v.ae_lock;
@@ -1051,6 +1092,9 @@ impl App {
             preset_object,
             posing: self.ik_editor.open && self.ik_editor.posing(),
             reel: &reel,
+            pano_ok: !crate::snapshot::pano::rlva_blocks(|b| self.world.rlva.has(b)),
+            depth_ok: self.world.rlva.visuals.spheres.is_empty(),
+            banks: self.vf_banks(),
         };
         // the demo aims at the own avatar's face, then shoots
         let (aim, shoot) = self.photo_demo_viewfinder();
@@ -1113,6 +1157,9 @@ impl App {
                     }
                 }
                 Out::Reel(a) => self.photo_reel_action(a, renderer),
+                Out::Shot(choice) => self.vf_shot(choice),
+                // (taken by the quick menu itself)
+                Out::Sheet(_) => {}
                 Out::Exit => self.panels.snapshot = false,
             }
         }
