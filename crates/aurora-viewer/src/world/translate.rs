@@ -81,18 +81,74 @@ pub fn target(chosen: &str, interface: &str) -> String {
 }
 
 /// The service's code of a language. Chinese is Traditional Chinese, as in
-/// the Legacy Viewer (getAPILanguageCode); DeepL asks for a variant of
-/// English and Portuguese.
+/// the Legacy Viewer (getAPILanguageCode), where the service names it;
+/// DeepL asks for a variant of English and Portuguese (EN-US, PT-BR: the
+/// regional variants its reference names). Its reference does not name a
+/// Traditional Chinese target: the base code ZH is sent.
 fn code(service: Service, lang: &str) -> String {
     match (service, lang) {
         (Service::Azure, "zh") => "zh-Hant".into(),
         (Service::Google, "zh") => "zh-TW".into(),
-        (Service::DeepL, "zh") => "ZH-HANT".into(),
         (Service::DeepL, "en") => "EN-US".into(),
         (Service::DeepL, "pt") => "PT-BR".into(),
         (Service::DeepL, other) => other.to_ascii_uppercase(),
         (_, other) => other.to_owned(),
     }
+}
+
+/// Azure's mark around what it must leave as it is
+/// (LLTranslate::addNoTranslateTags, AZURE_NOTRANSLATE_OPENING_TAG).
+const NO_TRANSLATE_OPEN: &str = "<div translate=\"no\">";
+const NO_TRANSLATE_CLOSE: &str = "</div>";
+
+/// A word that is a link: a web address or a viewer link (SLURL), as the
+/// URL registry finds them.
+fn is_link(word: &str) -> bool {
+    let lower = word.to_ascii_lowercase();
+    ["http://", "https://", "secondlife://", "www."]
+        .iter()
+        .any(|p| lower.starts_with(p))
+}
+
+/// The links of a text sent to Azure wrapped so that they come back as
+/// they were (LLTranslate::addNoTranslateTags); the other services take
+/// the text as it is.
+pub fn protect_links(service: Service, text: &str) -> String {
+    if service != Service::Azure {
+        return text.to_owned();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while !rest.is_empty() {
+        let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+        let (word, after) = rest.split_at(end);
+        if is_link(word) {
+            out.push_str(NO_TRANSLATE_OPEN);
+            out.push_str(word);
+            out.push_str(NO_TRANSLATE_CLOSE);
+        } else {
+            out.push_str(word);
+        }
+        let space = after.len() - after.trim_start().len();
+        out.push_str(&after[..space]);
+        rest = &after[space..];
+    }
+    out
+}
+
+/// The marks taken out of Azure's answer (LLTranslate::removeNoTranslateTags:
+/// the closing one becomes a space).
+pub fn unprotect_links(service: Service, text: &str) -> String {
+    if service != Service::Azure {
+        return text.to_owned();
+    }
+    // one space where the mark met one
+    let close_space = format!("{NO_TRANSLATE_CLOSE} ");
+    text.replace(NO_TRANSLATE_OPEN, "")
+        .replace(&close_space, " ")
+        .replace(NO_TRANSLATE_CLOSE, " ")
+        .trim_end()
+        .to_owned()
 }
 
 /// A key as typed: printable ASCII without spaces (it goes into a header).
@@ -482,7 +538,7 @@ fn worker(jobs: &Receiver<Job>, replies: &Sender<Reply>) {
                 let (Some(key), _) = known(&mut keys, cfg.service) else {
                     continue;
                 };
-                let Some(req) = request(&cfg, &key, &lang, &text) else {
+                let Some(req) = request(&cfg, &key, &lang, &protect_links(cfg.service, &text)) else {
                     log::info!("translation: {} not set up", cfg.service.name());
                     continue;
                 };
@@ -491,7 +547,7 @@ fn worker(jobs: &Receiver<Job>, replies: &Sender<Reply>) {
                     .map_err(|why| log::info!("translation: {} failed: {why}", cfg.service.name()))
                     .ok()
                     .and_then(|body| parse(cfg.service, &body))
-                    .and_then(|(t, detected)| accept(&text, &t, detected.as_deref(), &lang));
+                    .and_then(|(t, detected)| accept(&text, &unprotect_links(cfg.service, &t), detected.as_deref(), &lang));
                 if let Some(text) = translated {
                     let _ = replies.send(Reply::Translated { line, text });
                 }
@@ -539,13 +595,15 @@ impl World {
         self.translation.on() && !rlva_blocks(&self.rlva)
     }
 
-    /// A nearby line just added: a resident's or an object's, not ours, not
-    /// a script error.
+    /// A nearby line just added: a resident's or an object's (its nearby
+    /// chat or its instant message, llInstantMessage, shown there), not
+    /// ours, not a script error. The same rules hold for all of them: RLVa
+    /// (`translating`), and nothing of a blocked object reaches here.
     pub(super) fn translate_chat(&mut self, line: &ChatLine) {
         use super::ChatKind;
         use aurora_net::ChatType;
         let wanted = match line.kind {
-            ChatKind::Local(_) => true,
+            ChatKind::Local(_) | ChatKind::ObjectIm => true,
             ChatKind::Object(t) => t != ChatType::Debug,
             _ => false,
         };
