@@ -367,6 +367,10 @@ fn plate_content(
         blocked,
         mark: crate::world::staff::mark_named(&id, &legacy),
         marked: world.avatar_marks.get(&id),
+        // the name in its range's colour too, as `classic_name_color` (not
+        // ours, nor over a friend's or a contact set's colour)
+        name_band: (!own && !friend && settings.people.tag_distance_colors && world.contact_appearance(&id).nameplate_name.is_none())
+            .then(|| crate::world::radar::Band::of(position.distance(world.agent.position), crate::world::radar::chat_ranges())),
     }
 }
 
@@ -664,11 +668,10 @@ pub fn draw(
             lines.push((name, col, 13.0));
             if let Some(u) = username {
                 let dim = |v: u8| (v as f32 * 0.83) as u8;
-                lines.push((
-                    u,
-                    Color32::from_rgba_unmultiplied(dim(col.r()), dim(col.g()), dim(col.b()), col.a()),
-                    11.0,
-                ));
+                // FSColorUsername: in its own colour (NameTagUsername)
+                let user = super::colors::username_color()
+                    .unwrap_or_else(|| Color32::from_rgba_unmultiplied(dim(col.r()), dim(col.g()), dim(col.b()), col.a()));
+                lines.push((u, user, 11.0));
             }
             // the distance under the names, in its range's colour
             // (FSTagShowDistance)

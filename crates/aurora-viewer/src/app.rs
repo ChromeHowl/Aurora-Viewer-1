@@ -15478,6 +15478,7 @@ impl App {
         ui::widgets::set_perceptual_volume(&ctx, self.settings.audio.perceptual_volume);
         ui::bars::clock::set_chat_format(self.system_island().clock_format);
         ui::chat::display::set(&self.settings.chat_display);
+        self.emoji.set_monochrome(self.settings.chat_display.more.bw_emojis);
         let beacon_hovered = !ctx.is_pointer_over_egui() && !ctx.egui_wants_pointer_input() && self.beacon_hover();
         self.beacon_hit = None;
         let mut t = Instant::now();
@@ -15812,6 +15813,16 @@ impl App {
                 }
                 if self.camera.mouselook() && !held && self.settings.people.mouselook_markers {
                     ui::people_overlay::mouselook_markers(&ctx, &p, &self.world, projector, self.settings.people.mouselook_marker_range);
+                }
+                if self.camera.mouselook() && !held && self.settings.people.mouselook_name {
+                    ui::people_overlay::crosshair_name(
+                        &ctx,
+                        &p,
+                        &self.world,
+                        self.camera.position,
+                        self.camera.forward(),
+                        self.settings.people.mouselook_marker_range,
+                    );
                 }
                 // RenderTrackerBeacon (LLTracker::render3D, renderBeacon)
                 if !self.camera.mouselook() && !held && self.settings.tracker_beacon {

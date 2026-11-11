@@ -64,6 +64,7 @@ fn sample() -> Content {
         blocked: false,
         mark: None,
         marked: None,
+        name_band: None,
     }
 }
 

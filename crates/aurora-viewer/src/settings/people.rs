@@ -69,6 +69,9 @@ pub struct People {
     /// (FSMouselookCombatFeatures with ExodusMouselookIFF).
     pub mouselook_markers: bool,
     pub mouselook_marker_range: f32,
+    /// In mouselook, the name and distance of the resident under the
+    /// crosshair (FSMouselookCombatFeatures, on), within the markers' range.
+    pub mouselook_name: bool,
     /// The accounts that saw the hidden friends' tip once.
     pub hidden_tip_shown: Vec<Uuid>,
 }
@@ -91,6 +94,7 @@ impl Default for People {
             chat_range_spheres: false,
             mouselook_markers: false,
             mouselook_marker_range: 380.0,
+            mouselook_name: true,
             hidden_tip_shown: Vec::new(),
         }
     }
