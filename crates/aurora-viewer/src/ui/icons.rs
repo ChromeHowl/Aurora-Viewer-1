@@ -109,6 +109,7 @@ const OUTLINE: &[(&str, &[u8])] = svg_list!(
     "indent-increase",
     "jacket",
     "label-off",
+    "layers-difference",
     "layers-intersect",
     "layers-subtract",
     "layers-union",
@@ -180,6 +181,7 @@ const OUTLINE: &[(&str, &[u8])] = svg_list!(
     "stretching",
 
     "swimming",
+    "temperature",
     "terminal-2",
     "text-size",
     "tree",
@@ -243,6 +245,7 @@ const FILLED: &[(&str, &[u8])] = svg_list!(
     "bookmarks",
     "bounce-right",
     "box-align-bottom",
+    "box-multiple",
     "brand-discord",
     "brand-github",
     "brand-youtube",

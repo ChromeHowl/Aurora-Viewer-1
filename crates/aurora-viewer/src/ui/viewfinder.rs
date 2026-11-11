@@ -19,10 +19,16 @@ mod controls;
 mod isolate;
 mod light;
 mod looks;
+mod modes;
 mod presets;
+mod sheets;
+mod style;
 pub use controls::{CamMode, Pad, roll_text};
 pub use isolate::{Isolate, IsolateRow};
+pub use modes::refused_text;
 pub use presets::{Preset, PresetForm, anchor_icon};
+pub use sheets::{BankEdit, LensEdit};
+pub use style::{StyleContext, style_rows};
 #[cfg(test)]
 mod message_tests;
 
@@ -34,6 +40,22 @@ pub enum Dial {
     Aperture,
     Exposure,
     Distance,
+    /// The photo's white balance (`snapshot::style`): no value in the
+    /// bottom bar, its line in the light column.
+    WhiteBalance,
+}
+
+/// A sheet over the right of the screen, in the place of the dock's
+/// panels, one at a time: the shot mode list (left of the shutter), the
+/// picture style, the guide's look, the lens options, a custom mode's slot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Sheet {
+    Modes,
+    Style,
+    Guide,
+    Lens,
+    /// C1 to C3 (0 to 2).
+    Bank(u8),
 }
 
 /// The viewfinder's state for the session (its settings are
@@ -42,6 +64,23 @@ pub enum Dial {
 pub struct Viewfinder {
     pub menu: bool,
     pub help: bool,
+    /// The sheet open (`Sheet`), if any.
+    pub sheet: Option<Sheet>,
+    /// The row of the mode list the keys are on.
+    pub mode_cursor: usize,
+    /// The quick menu's tile the arrows are on, and Enter asked to step
+    /// it this frame.
+    pub tile_cursor: usize,
+    pub tile_enter: bool,
+    /// The row of the open sheet the arrows are on, and what the keys asked
+    /// this frame: rows moved (Up, Down) and the value turned (Left, Right).
+    pub sheet_row: usize,
+    pub sheet_keys: Option<(i32, i32)>,
+    /// The new name typed in a custom mode's sheet.
+    bank_name: String,
+    /// The shutter on screen, as drawn last frame (the mode list opens
+    /// beside it).
+    shutter_at: Option<Rect>,
     /// Every setting of the photo panel, in a drawer on the right.
     pub drawer: bool,
     /// The isolation panel (what the photo shows), on the right.
@@ -54,6 +93,15 @@ pub struct Viewfinder {
     pub presets: bool,
     pub preset_form: PresetForm,
     pub dial: Dial,
+    /// The dial before white balance was chosen (B again goes back to it).
+    pub dial_before_wb: Option<Dial>,
+    /// The top of the ring deck's preset row, as drawn last frame (the mode
+    /// list stays above it).
+    wb_row_top: Option<f32>,
+    /// The camera pad shows this frame.
+    pad_shown: bool,
+    /// What the light column's cheat sheet must stay above this frame.
+    below: Vec<Rect>,
     /// The shutter half-pressed (Enter or the button held).
     pub pressed: bool,
     /// Released while the lens hunts: the photo goes as it locks.
@@ -182,6 +230,35 @@ pub struct Frame<'a> {
     pub posing: bool,
     /// The session's photos (`ui::photo_reel`).
     pub reel: &'a crate::ui::photo_reel::ReelView<'a>,
+    /// A 360° photo is allowed (no RLVa camera limit) and the depth (no
+    /// RLVa vision spheres).
+    pub pano_ok: bool,
+    pub depth_ok: bool,
+    /// The custom modes C1 to C3.
+    pub banks: [BankView; 3],
+    /// Preferences' colour grade, which the photo's style and white
+    /// balance start from (`snapshot::style::base`).
+    pub prefs_grade: crate::settings::render_extras::Grade,
+    /// Why the tone curves do nothing (HDR off, a classic sky); None when
+    /// they apply.
+    pub tone_ok: Option<&'static str>,
+    /// Preferences' depth of field: front blur, bokeh fringe; debanding;
+    /// the joint the camera follows; the camera held by Camera lock.
+    pub lens_extras: (bool, f32),
+    pub deband: f32,
+    pub follow: crate::camera::extra::FollowJoint,
+    pub camera_locked: bool,
+}
+
+/// A custom mode's slot as the viewfinder shows it.
+#[derive(Debug, Clone, Default)]
+pub struct BankView {
+    /// The photo profile pinned there.
+    pub name: Option<String>,
+    /// That profile still exists.
+    pub exists: bool,
+    /// The photo's settings now differ from it (the slot loaded last).
+    pub differs: bool,
 }
 
 /// The keys the help and the hints name.
@@ -220,6 +297,22 @@ pub enum Out {
     Poser,
     /// The reel's stack or quick view.
     Reel(crate::ui::photo_reel::ReelAction),
+    /// A shot mode chosen (`snapshot::viewfinder::choose`, or a custom
+    /// mode's profile loaded).
+    Shot(vf::ShotChoice),
+    /// A custom mode's slot changed (C1 to C3: 0 to 2).
+    Bank(u8, BankEdit),
+    /// Preferences' debanding, lens options and followed joint (global).
+    Deband(f32),
+    Lens(LensEdit),
+    Follow(crate::camera::extra::FollowJoint),
+    /// Camera lock on or off; the Camera Path and Cameratools windows.
+    CameraLock,
+    CameraPath,
+    Cameratools,
+    /// A quick-menu tile opens a sheet (the viewfinder's own: never
+    /// reaches the app).
+    Sheet(Sheet),
     /// Out of the photo mode.
     Exit,
 }
@@ -494,10 +587,94 @@ fn on_off(on: bool, yes: &'static str, no: &'static str) -> &'static str {
     if on { yes } else { no }
 }
 
+/// The supersampling's tile: its samples, or with Off what Photo quality
+/// draws on its own ("Auto 4×", `quality::supersample`).
+fn supersampling_value(choice: crate::snapshot::quality::Supersampling, quality: bool, photo: (u32, u32)) -> String {
+    use crate::snapshot::quality::{Supersampling, supersample};
+    match choice {
+        Supersampling::Off if quality && supersample(photo) > 1 => {
+            aurora_i18n::tr!("pcu-ss-auto", count = supersample(photo) * supersample(photo)).to_owned()
+        }
+        Supersampling::Off => aurora_i18n::tr!("p16-supersampling-off").to_owned(),
+        c => format!("{}×", c.samples()),
+    }
+}
+
+/// The 360° photo's quality, as its row in the photo window names it.
+fn pano_quality_label(q: crate::snapshot::pano::Quality) -> &'static str {
+    use crate::snapshot::pano::Quality;
+    match q {
+        Quality::Preview => aurora_i18n::tr!("b1-pano-preview"),
+        Quality::Medium => aurora_i18n::tr!("b1-pano-medium"),
+        Quality::High => aurora_i18n::tr!("b1-pano-high"),
+        Quality::Maximum => aurora_i18n::tr!("b1-pano-maximum"),
+        Quality::Ultra => aurora_i18n::tr!("b1-pano-ultra"),
+    }
+}
+
+/// The next of `pano::Quality::ALL`, round.
+pub(crate) fn next_pano_quality(q: crate::snapshot::pano::Quality) -> crate::snapshot::pano::Quality {
+    let all = crate::snapshot::pano::Quality::ALL;
+    let i = all.iter().position(|x| *x == q).unwrap_or(0);
+    all[(i + 1) % all.len()]
+}
+
 impl Viewfinder {
     /// The line at the top for a few seconds.
     pub fn say(&mut self, text: impl Into<String>, error: bool, now: f64) {
         self.message = Some((text.into(), error, now + 2.6));
+    }
+
+    /// Escape: a sheet open closes first, on its own; true when one was.
+    pub fn close_sheet(&mut self) -> bool {
+        self.sheet.take().is_some()
+    }
+
+    /// A sheet opened: the one-panel rule closes the dock's panels (the
+    /// isolation's choosing in the scene stops with its panel), the quick
+    /// menu and the help.
+    pub(crate) fn open_sheet(&mut self, sheet: Sheet, out: &mut Vec<Out>) {
+        self.sheet = Some(sheet);
+        self.sheet_row = 0;
+        self.menu = false;
+        self.help = false;
+        self.drawer = false;
+        self.looks = false;
+        self.presets = false;
+        self.light = false;
+        if self.isolate {
+            self.isolate = false;
+            out.push(Out::Isolate(Isolate::Picking(false)));
+        }
+    }
+
+    /// White balance made the dial, or the dial before it back (B, a click
+    /// on its line).
+    pub fn toggle_wb_dial(&mut self) {
+        if self.dial == Dial::WhiteBalance {
+            self.dial = self.dial_before_wb.take().unwrap_or_default();
+        } else {
+            self.dial_before_wb = Some(self.dial);
+            self.dial = Dial::WhiteBalance;
+        }
+    }
+
+    /// The open sheet's keys this frame, on its `rows`: the row now and the
+    /// value's turn (0: none).
+    pub(super) fn sheet_nav(&mut self, rows: usize) -> (usize, i32) {
+        let (moved, turn) = self.sheet_keys.take().unwrap_or((0, 0));
+        let n = rows.max(1) as i32;
+        self.sheet_row = (self.sheet_row as i32 + moved).rem_euclid(n) as usize;
+        (self.sheet_row, turn)
+    }
+
+    /// The sheet opened, or closed when it is the one open.
+    pub(crate) fn toggle_sheet(&mut self, sheet: Sheet, out: &mut Vec<Out>) {
+        if self.sheet == Some(sheet) {
+            self.sheet = None;
+        } else {
+            self.open_sheet(sheet, out);
+        }
     }
 
     /// The whole viewfinder for this frame; `fov` is the camera's vertical
@@ -518,6 +695,11 @@ impl Viewfinder {
     ) -> Vec<Out> {
         let mut out = Vec::new();
         panel.looks.hover = None;
+        // a mode that writes to the disk, the destination changed: Photo
+        if vf::on_destination(panel.destination == Destination::Disk, &mut panel.shot, &mut panel.depth) {
+            self.say(aurora_i18n::tr!("pcu-shot-disk-only"), false, f.now);
+            out.push(Out::Panel(Action::Changed));
+        }
         let before = s.clone();
         let light_before = panel.light;
         let screen = ctx.content_rect();
@@ -545,7 +727,16 @@ impl Viewfinder {
         // the on-screen controls (lens ring, AF choices, camera pad)
         let ctl = shows && !self.menu && self.controls_shown(ctx, s, screen, f.now);
         let pad = ctl && s.viewfinder.pad;
+        self.pad_shown = pad;
         if full {
+            self.below = below_cheat(
+                ctx,
+                screen,
+                shows && !self.menu && !f.reel.photos.is_empty(),
+                pad,
+                ctl,
+                self.wb_row_top,
+            );
             self.top_bar(ctx, p, &back, screen, s, panel, f, &mut out);
         }
         self.af_point(ctx, p, &front, s, f);
@@ -626,6 +817,17 @@ impl Viewfinder {
         if self.help {
             self.help_panel(ctx, p, screen, f);
         }
+        match self.sheet {
+            Some(Sheet::Modes) if shows => self.mode_list(ctx, p, screen, panel, f, &mut out),
+            Some(Sheet::Style) => self.style_sheet(ctx, p, screen, panel, f, &mut out),
+            Some(Sheet::Guide) => self.guide_sheet(ctx, p, screen, s),
+            Some(Sheet::Lens) => self.lens_sheet(ctx, p, screen, f, &mut out),
+            Some(Sheet::Bank(i)) => {
+                let bank = f.banks[usize::from(i.min(2))].clone();
+                self.bank_sheet(ctx, p, screen, i, s, &bank, &mut out);
+            }
+            _ => {}
+        }
         if self.drawer {
             self.drawer(ctx, p, screen, s, panel, fov, default_fov, view, &mut out);
         }
@@ -704,17 +906,20 @@ impl Viewfinder {
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 18.0;
-                    if icon_text_button(
+                    let guide = icon_text_button(
                         ui,
                         p,
                         "grid-3x3",
                         guide_label(s.guide),
                         p.ink,
                         aurora_i18n::tr!("photo-vf-guide-tip"),
-                    )
-                    .clicked()
-                    {
+                    );
+                    if guide.clicked() {
                         s.guide = next_guide(s.guide);
+                    }
+                    // its look: the Guide sheet
+                    if guide.secondary_clicked() {
+                        self.toggle_sheet(Sheet::Guide, out);
                     }
                     if s.viewfinder.timer > 0 {
                         let text = format!("{} s", s.viewfinder.timer);
@@ -861,6 +1066,52 @@ impl Viewfinder {
                 }
             });
         y += 24.0;
+        // the white balance, a colour of the light: always shown, a click
+        // makes it the dial (B), underlined while it is
+        let wb = egui::Area::new(Id::unique("vf_wb_line"))
+            .order(Order::Foreground)
+            .fade_in(false)
+            .pivot(Align2::LEFT_CENTER)
+            .fixed_pos(Pos2::new(screen.left() + GAP, y))
+            .show(ctx, |ui| {
+                let text = style::wb_text(&panel.light, &f.prefs_grade);
+                let color = if self.dial == Dial::WhiteBalance { p.teal } else { p.ink };
+                let r = icon_text_button(ui, p, "temperature", &text, color, aurora_i18n::tr!("pcu-wb-tip"));
+                if self.dial == Dial::WhiteBalance {
+                    let under = Rect::from_min_size(
+                        Pos2::new(r.rect.left() + 24.0, r.rect.bottom() + 1.0),
+                        Vec2::new(r.rect.width() - 24.0, 2.0),
+                    );
+                    ui.painter().rect_filled(under, 0.0, p.teal);
+                }
+                r.clicked()
+            })
+            .inner;
+        if wb {
+            self.toggle_wb_dial();
+        }
+        y += 24.0;
+        // the photo's own style, while it has one: a click opens its sheet
+        if crate::snapshot::style::is_set(&panel.light) {
+            let st = crate::snapshot::style::matching(&panel.light, &f.prefs_grade);
+            let text = format!("{} · {}", style::style_label(st), aurora_i18n::tr!("pcu-style-photo-only-short"));
+            let open = egui::Area::new(Id::unique("vf_style_line"))
+                .order(Order::Foreground)
+                .fade_in(false)
+                .pivot(Align2::LEFT_CENTER)
+                .fixed_pos(Pos2::new(screen.left() + GAP, y))
+                .show(ctx, |ui| {
+                    icon_text_button(ui, p, "palette-filled", &text, p.ink, aurora_i18n::tr!("pcu-style-tip")).clicked()
+                })
+                .inner;
+            if open {
+                self.toggle_sheet(Sheet::Style, out);
+            }
+            y += 24.0;
+        }
+        if f.camera_locked {
+            line(&mut y, "lock-filled", aurora_i18n::tr!("pcu-camera-locked"), p.ink);
+        }
         if panel.freeze_world {
             line(&mut y, "snowflake", aurora_i18n::tr!("photo-vf-world-frozen"), p.ink);
         }
@@ -879,8 +1130,9 @@ impl Viewfinder {
                 Dial::Aperture => aurora_i18n::tr!("photo-vf-dial-aperture"),
                 Dial::Exposure => aurora_i18n::tr!("photo-vf-dial-exposure"),
                 Dial::Distance => aurora_i18n::tr!("photo-vf-dial-distance"),
+                Dial::WhiteBalance => aurora_i18n::tr!("pcu-wb-dial"),
             };
-            let rows: [(&str, String); 10] = [
+            let rows: [(&str, String); 11] = [
                 (
                     aurora_i18n::tr!("photo-vf-cheat-click-key"),
                     aurora_i18n::tr!("photo-vf-cheat-click").to_owned(),
@@ -918,9 +1170,14 @@ impl Viewfinder {
                     aurora_i18n::tr!("photo-vf-cheat-camera-key"),
                     aurora_i18n::tr!("photo-vf-cheat-camera").to_owned(),
                 ),
+                ("P · B · T", aurora_i18n::tr!("pcu-cheat-pbt").to_owned()),
             ];
             let x = screen.left() + GAP;
-            for (key, text) in rows {
+            // as many rows as fit above what is drawn below (the reel's
+            // tray, the camera pad, the ring deck and its presets): the rest
+            // is in the help (H)
+            let fit = cheat_fit(y, x, rows.len(), &self.below);
+            for (key, text) in rows.into_iter().take(fit) {
                 let r = shadow_text(back, p, Pos2::new(x, y), Align2::LEFT_CENTER, key, bold(ctx, 12.0), p.ink);
                 shadow_text(
                     back,
@@ -1366,11 +1623,13 @@ impl Viewfinder {
                         })
                         .inner
                     };
+                    // a 360° photo's views have their own fixed lens
+                    let pano = vf::shown(panel.shot, panel.depth, panel.bank) == vf::ShotChoice::Pano;
                     let resp = dial(
                         ui,
                         Dial::Focal,
                         &format!("{} mm", f.focal_mm.round() as i32),
-                        false,
+                        pano,
                         aurora_i18n::tr!("photo-vf-focal-tip"),
                         self.dial,
                     );
@@ -1380,7 +1639,7 @@ impl Viewfinder {
                         ui,
                         Dial::Aperture,
                         &format!("f/{}", aurora_i18n::number(f64::from(n), if n < 10.0 { 1 } else { 0 })),
-                        !s.dof.enabled,
+                        !s.dof.enabled || pano,
                         aurora_i18n::tr!("photo-vf-aperture-tip"),
                         self.dial,
                     );
@@ -1545,6 +1804,7 @@ impl Viewfinder {
                     ) {
                         self.menu = !self.menu;
                         self.help = false;
+                        self.sheet = None;
                     }
                     if dock_button(
                         ui,
@@ -1554,6 +1814,7 @@ impl Viewfinder {
                         self.drawer,
                     ) {
                         self.drawer = !self.drawer;
+                        self.sheet = self.sheet.filter(|_| !self.drawer);
                         self.looks &= !self.drawer;
                         self.presets &= !self.drawer;
                         self.light &= !self.drawer;
@@ -1586,6 +1847,7 @@ impl Viewfinder {
                     // the photo's light, next to the shutter
                     if dock_button(ui, p, Face::Icon("sun-filled"), aurora_i18n::tr!("photo-vf-light-tip"), self.light) {
                         self.light = !self.light;
+                        self.sheet = self.sheet.filter(|_| !self.light);
                         self.drawer &= !self.light;
                         self.looks &= !self.light;
                         self.presets &= !self.light;
@@ -1598,11 +1860,12 @@ impl Viewfinder {
                     // the shot together; the session's photos are bottom
                     // left, `reel_tray`)
                     ui.add_space(6.0);
-                    self.shutter_button(ui, p, out);
+                    self.shutter_button(ui, p, vf::shown(panel.shot, panel.depth, panel.bank), out);
                     ui.add_space(6.0);
                     let isolating = self.isolate || f.isolation.mode != crate::snapshot::isolate::Mode::Off;
                     if dock_button(ui, p, Face::Icon("user-scan"), aurora_i18n::tr!("photo-isolate-tip"), isolating) {
                         self.isolate = !self.isolate;
+                        self.sheet = self.sheet.filter(|_| !self.isolate);
                         self.drawer &= !self.isolate;
                         self.looks &= !self.isolate;
                         self.presets &= !self.isolate;
@@ -1619,6 +1882,7 @@ impl Viewfinder {
                         self.looks || !s.looks.is_empty(),
                     ) {
                         self.looks = !self.looks;
+                        self.sheet = self.sheet.filter(|_| !self.looks);
                         self.drawer &= !self.looks;
                         self.presets &= !self.looks;
                         self.light &= !self.looks;
@@ -1641,6 +1905,7 @@ impl Viewfinder {
                         self.presets,
                     ) {
                         self.presets = !self.presets;
+                        self.sheet = self.sheet.filter(|_| !self.presets);
                         self.drawer &= !self.presets;
                         self.looks &= !self.presets;
                         self.light &= !self.presets;
@@ -1657,6 +1922,7 @@ impl Viewfinder {
                     if dock_button(ui, p, Face::Text("?"), aurora_i18n::tr!("photo-vf-help-tip"), self.help) {
                         self.help = !self.help;
                         self.menu = false;
+                        self.sheet = None;
                     }
                     if dock_button(ui, p, Face::Icon("x"), aurora_i18n::tr!("photo-vf-exit-tip"), false) {
                         out.push(Out::Exit);
@@ -1761,11 +2027,18 @@ impl Viewfinder {
         print(&painter, p, rect, PRINT_EDGE * ease, angle * ease, Some(tex));
     }
 
-    /// The round shutter: pressed, the focus; released on it, the photo;
-    /// let go elsewhere, nothing.
-    fn shutter_button(&mut self, ui: &mut egui::Ui, p: &Palette, out: &mut Vec<Out>) {
+    /// The round shutter: pressed with the main button, the focus;
+    /// released on it, the photo; let go elsewhere, nothing. The other
+    /// button never shoots: it opens the mode list. The mode shows on the
+    /// disc (`modes::glyph`).
+    fn shutter_button(&mut self, ui: &mut egui::Ui, p: &Palette, mode: vf::ShotChoice, out: &mut Vec<Out>) {
         let (rect, resp) = ui.allocate_exact_size(Vec2::splat(66.0), Sense::click_and_drag());
-        let down = resp.is_pointer_button_down_on();
+        self.shutter_at = Some(rect);
+        let primary = ui.input(|i| i.pointer.button_down(egui::PointerButton::Primary));
+        let down = resp.is_pointer_button_down_on() && primary;
+        if resp.secondary_clicked() {
+            self.toggle_sheet(Sheet::Modes, out);
+        }
         if down && !self.mouse_down {
             self.mouse_down = true;
             out.push(Out::HalfPress);
@@ -1784,8 +2057,20 @@ impl Viewfinder {
             p.ink.gamma_multiply(0.92)
         };
         ui.painter().circle_filled(c, if self.pressed { 25.0 * 0.86 } else { 25.0 }, fill);
+        match modes::glyph(mode) {
+            Some(modes::Glyph::Icon(name)) => icon(ui.painter(), name, Rect::from_center_size(c, Vec2::splat(22.0)), p.navy),
+            Some(modes::Glyph::Text(t)) => {
+                ui.painter().text(c, Align2::CENTER_CENTER, t, bold(ui.ctx(), 15.0), p.navy);
+            }
+            None => {}
+        }
         keep_keys(&resp);
-        resp.on_hover_text(aurora_i18n::tr!("photo-vf-shutter-tip"));
+        let tip = format!(
+            "{}\n{}",
+            aurora_i18n::tr!("photo-vf-shutter-tip"),
+            aurora_i18n::tr!("pcu-shutter-modes-tip")
+        );
+        resp.on_hover_text(tip);
     }
 
     /// The quick menu: a tile per setting, a click for the next value.
@@ -1802,6 +2087,8 @@ impl Viewfinder {
     ) {
         let cols = 9.0;
         let width = (screen.width() - 2.0 * GAP - 120.0).min(1300.0);
+        // what the tiles ask: a sheet is the viewfinder's own
+        let mut sheets = Vec::new();
         egui::Area::new(Id::unique("vf_menu"))
             .order(Order::Foreground)
             .fade_in(false)
@@ -1831,11 +2118,20 @@ impl Viewfinder {
                         .num_columns(cols as usize)
                         .spacing(Vec2::splat(8.0))
                         .show(ui, |ui| {
+                            let count = tiles.len();
+                            self.tile_cursor = self.tile_cursor.min(count.saturating_sub(1));
+                            let enter = std::mem::take(&mut self.tile_enter);
                             for (i, (label, value, step)) in tiles.into_iter().enumerate() {
-                                if tile(ui, p, Vec2::new(tile_w, 68.0), label, &value)
+                                // a photo of 8K and more: what it takes (the size's tile)
+                                let tip = (label == aurora_i18n::tr!("photo-section-resolution")
+                                    && panel.destination == Destination::Disk
+                                    && f.photo.0.max(f.photo.1) >= 7680)
+                                    .then(|| aurora_i18n::tr!("p16-memory"));
+                                let lit = i == self.tile_cursor;
+                                if (tile(ui, p, Vec2::new(tile_w, 68.0), label, &value, tip, lit) || (enter && lit))
                                     && let Some(o) = step(s, panel)
                                 {
-                                    out.push(o);
+                                    sheets.push(o);
                                 }
                                 if (i + 1) % cols as usize == 0 {
                                     ui.end_row();
@@ -1844,6 +2140,12 @@ impl Viewfinder {
                         });
                 });
             });
+        for o in sheets {
+            match o {
+                Out::Sheet(sheet) => self.toggle_sheet(sheet, out),
+                o => out.push(o),
+            }
+        }
     }
 
     /// The keys and the mouse, in a panel in the middle.
@@ -1946,6 +2248,22 @@ impl Viewfinder {
                             if let Some(k) = f.keys.first_person {
                                 v.push((k.to_owned(), aurora_i18n::tr!("photo-vf-help-first-person-text")));
                             }
+                            // the shot modes, white balance, style, menus
+                            v.push(("P".to_owned(), aurora_i18n::tr!("pcu-help-p")));
+                            v.push((
+                                aurora_i18n::tr!("pcu-help-right-click").to_owned(),
+                                aurora_i18n::tr!("pcu-help-right-click-text"),
+                            ));
+                            v.push((
+                                aurora_i18n::tr!("pcu-help-banks").to_owned(),
+                                aurora_i18n::tr!("pcu-help-banks-text"),
+                            ));
+                            v.push(("B".to_owned(), aurora_i18n::tr!("pcu-help-b")));
+                            v.push(("T".to_owned(), aurora_i18n::tr!("pcu-help-t")));
+                            v.push((
+                                aurora_i18n::tr!("pcu-help-arrows").to_owned(),
+                                aurora_i18n::tr!("pcu-help-arrows-text"),
+                            ));
                             v.push((
                                 aurora_i18n::tr!("photo-vf-help-h").to_owned(),
                                 aurora_i18n::tr!("photo-vf-help-h-text"),
@@ -2030,6 +2348,48 @@ impl Viewfinder {
                 });
             });
     }
+}
+
+/// The rects the cheat sheet must stay above: the reel's tray, the camera
+/// pad, the ring deck (and its preset row), as drawn last frame or where
+/// they first go.
+fn below_cheat(ctx: &egui::Context, screen: Rect, tray: bool, pad: bool, deck: bool, wb_top: Option<f32>) -> Vec<Rect> {
+    let mut v = Vec::new();
+    let last = |id: &str| ctx.memory(|m| m.area_rect(Id::unique(id)));
+    if tray {
+        let size = crate::ui::photo_reel::TRAY_TILE + Vec2::splat(12.0);
+        let at = Pos2::new(screen.left() + GAP, screen.bottom() - if pad { 300.0 } else { 132.0 } - size.y);
+        v.push(last("vf_reel_tray").unwrap_or(Rect::from_min_size(at, size)));
+    }
+    if pad {
+        v.push(last("vf_pad").unwrap_or(Rect::from_min_max(
+            Pos2::new(screen.left() + GAP, screen.bottom() - 84.0 - 330.0),
+            Pos2::new(screen.left() + 300.0, screen.bottom() - 84.0),
+        )));
+    }
+    if deck {
+        let half = controls::DECK_WIDTH / 2.0;
+        let top = wb_top.unwrap_or(screen.bottom() - 134.0);
+        v.push(Rect::from_min_max(
+            Pos2::new(screen.center().x - half, top),
+            Pos2::new(screen.center().x + half, screen.bottom() - 70.0),
+        ));
+    }
+    v
+}
+
+/// The cheat sheet's rows that fit from `y` (20 points each, its key line
+/// and Hide button after them, 48 more) above every rect of `below` its
+/// column (`x` to `x` + 260) meets; at least none.
+fn cheat_fit(y: f32, x: f32, rows: usize, below: &[Rect]) -> usize {
+    let column = (x, x + 260.0);
+    let limit = below
+        .iter()
+        .filter(|r| r.right() > column.0 && r.left() < column.1)
+        .map(|r| r.top())
+        .fold(f32::INFINITY, f32::min);
+    // the last row's middle at y + 20 (n − 1); its tail ends 48 + 10 under
+    (0..=rows).rev().find(|n| y + 20.0 * *n as f32 + 48.0 + 10.0 <= limit).unwrap_or(0)
 }
 
 /// The AF point's colour: green when sharp, red when it failed, white
@@ -2225,11 +2585,14 @@ fn dock_button(ui: &mut egui::Ui, p: &Palette, face: Face, tip: &str, on: bool) 
 }
 
 /// A tile of the quick menu; true when clicked.
-fn tile(ui: &mut egui::Ui, p: &Palette, size: Vec2, label: &str, value: &str) -> bool {
+fn tile(ui: &mut egui::Ui, p: &Palette, size: Vec2, label: &str, value: &str, tip: Option<&str>, lit: bool) -> bool {
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
     let radius = ui.visuals().window_corner_radius;
     ui.painter().rect_filled(rect, radius, p.panel.gamma_multiply(0.85));
-    let edge = if resp.hovered() {
+    // (the arrows' tile: the hover's edge, brighter)
+    let edge = if lit {
+        p.teal
+    } else if resp.hovered() {
         p.teal.gamma_multiply(0.6)
     } else {
         p.ink.gamma_multiply(0.08)
@@ -2250,7 +2613,11 @@ fn tile(ui: &mut egui::Ui, p: &Palette, size: Vec2, label: &str, value: &str) ->
     job_rect.max.x = job_rect.max.x.min(rect.right() - 12.0);
     ui.painter().with_clip_rect(rect.shrink(2.0)).galley(job_rect.min, galley, p.ink);
     keep_keys(&resp);
-    resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+    let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+    match tip {
+        Some(t) => resp.on_hover_text(t).clicked(),
+        None => resp.clicked(),
+    }
 }
 
 type Step = Box<dyn FnOnce(&mut Settings, &mut SnapshotUi) -> Option<Out>>;
@@ -2260,6 +2627,52 @@ fn tiles(s: &Settings, panel: &SnapshotUi, f: &Frame) -> Vec<(&'static str, Stri
     let yes_no = |on: bool| on_off(on, aurora_i18n::tr!("photo-vf-on"), aurora_i18n::tr!("photo-vf-off")).to_owned();
     let mut v: Vec<(&'static str, String, Step)> = Vec::new();
     let window = f.window;
+    // the shot mode, and the tiles of its own (a phone camera's controls
+    // follow its mode)
+    let mode = vf::shown(panel.shot, panel.depth, panel.bank);
+    // first, the custom mode the photo was made from (a camera's Q menu),
+    // marked when the settings left it since
+    let bank = match panel.bank {
+        Some(i) => {
+            let mark = if f.banks[usize::from(i.min(2))].differs { " •" } else { "" };
+            format!("C{}{mark}", i + 1)
+        }
+        None => aurora_i18n::tr!("pcu-bank-base").to_owned(),
+    };
+    v.push((
+        aurora_i18n::tr!("pcu-tile-custom"),
+        bank,
+        Box::new(|_, _| Some(Out::Sheet(Sheet::Modes))),
+    ));
+    v.push((
+        aurora_i18n::tr!("pcu-tile-style"),
+        style::style_label(crate::snapshot::style::matching(&panel.light, &f.prefs_grade)).to_owned(),
+        Box::new(|_, _| Some(Out::Sheet(Sheet::Style))),
+    ));
+    v.push((
+        aurora_i18n::tr!("pcu-shot-title"),
+        modes::label(mode).0,
+        Box::new(|_, _| Some(Out::Sheet(Sheet::Modes))),
+    ));
+    if mode == vf::ShotChoice::Pano {
+        let quality = s.extras.pano_quality;
+        v.push((
+            aurora_i18n::tr!("b1-pano-quality"),
+            pano_quality_label(quality).to_owned(),
+            Box::new(move |s, _| {
+                s.extras.pano_quality = next_pano_quality(quality);
+                None
+            }),
+        ));
+        v.push((
+            aurora_i18n::tr!("pcu-tile-avatars"),
+            on_off(!s.extras.pano_hide_avatars, aurora_i18n::tr!("pcu-in"), aurora_i18n::tr!("pcu-out")).to_owned(),
+            Box::new(|s, _| {
+                s.extras.pano_hide_avatars = !s.extras.pano_hide_avatars;
+                None
+            }),
+        ));
+    }
     v.push((
         aurora_i18n::tr!("photo-section-format"),
         aspect_label(s.aspect).to_owned(),
@@ -2317,6 +2730,28 @@ fn tiles(s: &Settings, panel: &SnapshotUi, f: &Frame) -> Vec<(&'static str, Stri
             s.quality = !s.quality;
             None
         }),
+    ));
+    v.push((
+        aurora_i18n::tr!("p16-supersampling"),
+        supersampling_value(s.supersampling, s.quality, f.photo),
+        Box::new(|s, _| {
+            let all = crate::snapshot::quality::Supersampling::ALL;
+            let i = all.iter().position(|c| *c == s.supersampling).unwrap_or(0);
+            s.supersampling = all[(i + 1) % all.len()];
+            None
+        }),
+    ));
+    let deband = f.deband;
+    v.push((
+        aurora_i18n::tr!("pcu-tile-deband"),
+        match sheets::preset_of(deband, &sheets::DEBANDS) {
+            Some(0) => aurora_i18n::tr!("photo-vf-off"),
+            Some(1) => aurora_i18n::tr!("pcu-low"),
+            Some(_) => aurora_i18n::tr!("pcu-high"),
+            None => aurora_i18n::tr!("pcu-custom"),
+        }
+        .to_owned(),
+        Box::new(move |_, _| Some(Out::Deband(sheets::next_preset(deband, &sheets::DEBANDS)))),
     ));
     v.push((
         aurora_i18n::tr!("photo-huds"),
@@ -2378,6 +2813,21 @@ fn tiles(s: &Settings, panel: &SnapshotUi, f: &Frame) -> Vec<(&'static str, Stri
             s.guide = next_guide(s.guide);
             None
         }),
+    ));
+    v.push((
+        aurora_i18n::tr!("pcu-tile-guide-style"),
+        guide_label(s.guide).to_owned(),
+        Box::new(|_, _| Some(Out::Sheet(Sheet::Guide))),
+    ));
+    v.push((
+        aurora_i18n::tr!("camtools-lock"),
+        yes_no(f.camera_locked),
+        Box::new(|_, _| Some(Out::CameraLock)),
+    ));
+    v.push((
+        aurora_i18n::tr!("camtools-path-title"),
+        aurora_i18n::tr!("pcu-open").to_owned(),
+        Box::new(|_, _| Some(Out::CameraPath)),
     ));
     v.push((
         aurora_i18n::tr!("photo-vf-peaking"),
@@ -2485,5 +2935,172 @@ mod cut_short_tests {
         assert!(!cuts_short(Some(2), None, true));
         // the very first photo has nothing to cut short
         assert!(!cuts_short(None, Some(1), true));
+    }
+}
+
+#[cfg(test)]
+mod sheet_tests {
+    use super::{Isolate, Out, Sheet, Viewfinder};
+
+    #[test]
+    fn escape_closes_a_sheet_first_and_alone() {
+        for sheet in [Sheet::Modes, Sheet::Style, Sheet::Guide, Sheet::Lens, Sheet::Bank(1)] {
+            let mut v = Viewfinder {
+                sheet: Some(sheet),
+                ..Viewfinder::default()
+            };
+            assert!(v.close_sheet(), "{sheet:?}");
+            assert_eq!(v.sheet, None);
+            assert!(!v.close_sheet(), "nothing left to close");
+        }
+    }
+
+    #[test]
+    fn a_sheet_opens_alone_on_the_right() {
+        let mut v = Viewfinder {
+            menu: true,
+            drawer: true,
+            looks: true,
+            light: true,
+            presets: true,
+            isolate: true,
+            ..Viewfinder::default()
+        };
+        let mut out = Vec::new();
+        v.open_sheet(Sheet::Style, &mut out);
+        assert_eq!(v.sheet, Some(Sheet::Style));
+        assert!(!(v.menu || v.drawer || v.looks || v.light || v.presets || v.isolate));
+        assert_eq!(out, vec![Out::Isolate(Isolate::Picking(false))]);
+        // the same again: closed; another: replaces it
+        v.toggle_sheet(Sheet::Style, &mut out);
+        assert_eq!(v.sheet, None);
+        v.toggle_sheet(Sheet::Modes, &mut out);
+        v.toggle_sheet(Sheet::Guide, &mut out);
+        assert_eq!(v.sheet, Some(Sheet::Guide));
+    }
+}
+
+#[cfg(test)]
+mod shutter_tests {
+    use super::{Out, Sheet, Viewfinder};
+    use crate::snapshot::viewfinder::ShotChoice;
+    use egui::{PointerButton, Pos2, Rect, Vec2};
+
+    /// The shutter drawn over a few frames, a button pressed then let go
+    /// on it; what it asked.
+    fn press(button: PointerButton) -> (Vec<Out>, Viewfinder) {
+        let ctx = egui::Context::default();
+        let theme = crate::theme::Theme::default();
+        theme.apply(&ctx, 1.0);
+        let p = theme.palette();
+        let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(400.0, 300.0));
+        let mut v = Viewfinder::default();
+        let mut out = Vec::new();
+        let mut time = 0.0;
+        let mut frame = |v: &mut Viewfinder, events: Vec<egui::Event>, out: &mut Vec<Out>| {
+            time += 0.1;
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(screen),
+                    time: Some(time),
+                    events,
+                    ..Default::default()
+                },
+                |ui| v.shutter_button(ui, &p, ShotChoice::Photo, out),
+            );
+            output.textures_delta.clear();
+        };
+        frame(&mut v, Vec::new(), &mut out);
+        let at = v.shutter_at.expect("drawn").center();
+        let button_event = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button,
+            pressed,
+            modifiers: Default::default(),
+        };
+        frame(&mut v, vec![egui::Event::PointerMoved(at)], &mut out);
+        frame(&mut v, vec![button_event(true)], &mut out);
+        frame(&mut v, vec![button_event(false)], &mut out);
+        frame(&mut v, Vec::new(), &mut out);
+        (out, v)
+    }
+
+    #[test]
+    fn the_main_button_shoots() {
+        let (out, v) = press(PointerButton::Primary);
+        assert_eq!(out, vec![Out::HalfPress, Out::Release]);
+        assert_eq!(v.sheet, None);
+    }
+
+    #[test]
+    fn the_other_button_opens_the_modes_and_never_shoots() {
+        let (out, v) = press(PointerButton::Secondary);
+        assert!(
+            !out.iter().any(|o| matches!(o, Out::HalfPress | Out::Release | Out::Cancel)),
+            "{out:?}"
+        );
+        assert_eq!(v.sheet, Some(Sheet::Modes));
+    }
+}
+
+#[cfg(test)]
+mod tile_tests {
+    use super::{next_pano_quality, supersampling_value};
+    use crate::snapshot::pano::Quality;
+    use crate::snapshot::quality::Supersampling;
+
+    #[test]
+    fn the_tiles_cycle_every_choice() {
+        let mut q = Quality::ALL[0];
+        let mut seen = Vec::new();
+        for _ in Quality::ALL {
+            seen.push(q);
+            q = next_pano_quality(q);
+        }
+        assert_eq!(seen, Quality::ALL.to_vec());
+        assert_eq!(q, Quality::ALL[0]);
+        for c in Supersampling::ALL {
+            assert!(!supersampling_value(c, false, (3840, 2160)).is_empty());
+        }
+    }
+
+    #[test]
+    fn photo_quality_draws_four_samples_up_to_4k() {
+        let auto = supersampling_value(Supersampling::Off, true, (3840, 2160));
+        assert!(auto.contains('4'), "{auto}");
+        // larger, or without Photo quality: off
+        assert_eq!(
+            supersampling_value(Supersampling::Off, true, (7680, 4320)),
+            supersampling_value(Supersampling::Off, false, (3840, 2160))
+        );
+        assert_eq!(supersampling_value(Supersampling::X9, true, (100, 100)), "9×");
+    }
+}
+
+#[cfg(test)]
+mod cheat_tests {
+    use super::cheat_fit;
+    use egui::{Pos2, Rect};
+
+    #[test]
+    fn at_the_smallest_window_the_cheat_sheet_stays_above_the_tray_and_the_deck() {
+        // 800 x 560: the time and white balance lines, then the rows from
+        // top + 66 + 2 x 24 + 14
+        let y = 66.0 + 48.0 + 14.0;
+        let tray = Rect::from_min_max(Pos2::new(24.0, 324.0), Pos2::new(136.0, 428.0));
+        let deck = Rect::from_min_max(Pos2::new(58.0, 426.0), Pos2::new(742.0, 490.0));
+        let n = cheat_fit(y, 24.0, 11, &[tray, deck]);
+        assert!(n < 11, "it does not all fit at 560");
+        // the Hide button's line ends above the tray
+        assert!(y + 20.0 * n as f32 + 58.0 <= 324.0);
+        // with a style line too, and the camera pad's tray higher: fewer
+        let pad = Rect::from_min_max(Pos2::new(24.0, 146.0), Pos2::new(300.0, 476.0));
+        assert!(cheat_fit(y + 24.0, 24.0, 11, &[pad]) <= n);
+        // a tall window: everything
+        let tall = Rect::from_min_max(Pos2::new(24.0, 900.0), Pos2::new(136.0, 1000.0));
+        assert_eq!(cheat_fit(y, 24.0, 11, &[tall]), 11);
+        // what is right of the column does not count
+        let right = Rect::from_min_max(Pos2::new(400.0, 150.0), Pos2::new(500.0, 200.0));
+        assert_eq!(cheat_fit(y, 24.0, 11, &[right]), 11);
     }
 }

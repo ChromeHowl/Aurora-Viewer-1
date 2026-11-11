@@ -733,9 +733,182 @@ fn wav(samples: Vec<f32>) -> Vec<u8> {
     wav
 }
 
+/// What the shutter takes, chosen in the viewfinder's mode list (a phone
+/// camera's mode selector, VRChat's camera types). Depth is the photo
+/// panel's own switch (`SnapshotUi::depth`), so the mode shown is derived
+/// ([`shown`]) and the window's state is never reset by the viewfinder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Shot {
+    #[default]
+    Photo,
+    /// The photo, its cut-out and its background (`full_save`).
+    FullSet,
+    /// A 360° photo (`pano`).
+    Pano,
+}
+
+/// An entry of the mode list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShotChoice {
+    Photo,
+    FullSet,
+    Pano,
+    Depth,
+    /// A custom mode, C1 to C3 (0 to 2): a photo profile pinned there.
+    Bank(u8),
+}
+
+/// Why an entry is greyed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refused {
+    /// A script limits the camera (RLVa): no 360° photo.
+    CameraLimited,
+    /// RLVa's vision spheres hide what is far: no depth.
+    VisionLimited,
+    /// Nothing pinned to the slot, or its profile was deleted.
+    NoProfile,
+}
+
+/// What the shutter does in a mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fire {
+    Take,
+    FullSave,
+    Pano,
+}
+
+/// The mode shown: the depth switch, else the custom mode loaded, else the
+/// shot.
+pub fn shown(shot: Shot, depth: bool, bank: Option<u8>) -> ShotChoice {
+    match (depth, bank, shot) {
+        (true, _, _) => ShotChoice::Depth,
+        (false, Some(i), _) => ShotChoice::Bank(i),
+        (false, None, Shot::Photo) => ShotChoice::Photo,
+        (false, None, Shot::FullSet) => ShotChoice::FullSet,
+        (false, None, Shot::Pano) => ShotChoice::Pano,
+    }
+}
+
+/// The mode list in its order, each entry with whether it can be chosen
+/// and why not; `banks`: each slot holds a profile that still exists.
+pub fn available(pano_ok: bool, depth_ok: bool, banks: [bool; 3]) -> Vec<(ShotChoice, Option<Refused>)> {
+    let mut v = vec![
+        (ShotChoice::Photo, None),
+        (ShotChoice::FullSet, None),
+        (ShotChoice::Pano, (!pano_ok).then_some(Refused::CameraLimited)),
+        (ShotChoice::Depth, (!depth_ok).then_some(Refused::VisionLimited)),
+    ];
+    for (i, ok) in banks.into_iter().enumerate() {
+        v.push((ShotChoice::Bank(i as u8), (!ok).then_some(Refused::NoProfile)));
+    }
+    v
+}
+
+/// A mode chosen: the shot, the depth switch and the custom mode set;
+/// true when it takes the disk as its destination (Full set, 360°, Depth).
+pub fn choose(choice: ShotChoice, shot: &mut Shot, depth: &mut bool, bank: &mut Option<u8>) -> bool {
+    *depth = choice == ShotChoice::Depth;
+    *bank = match choice {
+        ShotChoice::Bank(i) => Some(i),
+        _ => None,
+    };
+    *shot = match choice {
+        ShotChoice::FullSet => Shot::FullSet,
+        ShotChoice::Pano => Shot::Pano,
+        _ => Shot::Photo,
+    };
+    needs_disk(*shot, *depth)
+}
+
+/// The mode only writes to the disk.
+pub fn needs_disk(shot: Shot, depth: bool) -> bool {
+    depth || shot != Shot::Photo
+}
+
+/// The destination is no longer the disk: a mode that writes there goes
+/// back to Photo; true when it did (the viewfinder says so).
+pub fn on_destination(disk: bool, shot: &mut Shot, depth: &mut bool) -> bool {
+    if disk || !needs_disk(*shot, *depth) {
+        return false;
+    }
+    *shot = Shot::Photo;
+    *depth = false;
+    true
+}
+
+/// What the shutter does (Depth and the custom modes take a photo; the
+/// depth switch makes it the depth).
+pub fn shutter_action(shot: Shot, depth: bool) -> Fire {
+    match (depth, shot) {
+        (false, Shot::FullSet) => Fire::FullSave,
+        (false, Shot::Pano) => Fire::Pano,
+        _ => Fire::Take,
+    }
+}
+
+/// The key's next mode after `now`, the greyed ones skipped.
+pub fn next_choice(now: ShotChoice, list: &[(ShotChoice, Option<Refused>)]) -> ShotChoice {
+    let at = list.iter().position(|(c, _)| *c == now).unwrap_or(0);
+    (1..=list.len())
+        .map(|k| list[(at + k) % list.len()])
+        .find(|(_, why)| why.is_none())
+        .map_or(now, |(c, _)| c)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_mode_is_derived_from_the_window_and_never_reset() {
+        assert_eq!(shown(Shot::Photo, true, None), ShotChoice::Depth, "Depth set in the window");
+        assert_eq!(shown(Shot::Pano, false, None), ShotChoice::Pano);
+        assert_eq!(shown(Shot::Photo, false, Some(1)), ShotChoice::Bank(1));
+        assert_eq!(shown(Shot::default(), false, None), ShotChoice::Photo, "the default");
+    }
+
+    #[test]
+    fn modes_that_write_files_force_the_disk_and_leave_it_for_photo() {
+        let (mut shot, mut depth, mut bank) = (Shot::Photo, false, Some(2));
+        assert!(choose(ShotChoice::Pano, &mut shot, &mut depth, &mut bank));
+        assert_eq!((shot, depth, bank), (Shot::Pano, false, None));
+        assert!(choose(ShotChoice::Depth, &mut shot, &mut depth, &mut bank));
+        assert_eq!((shot, depth), (Shot::Photo, true));
+        assert!(choose(ShotChoice::FullSet, &mut shot, &mut depth, &mut bank));
+        assert!(!depth);
+        assert!(!choose(ShotChoice::Bank(0), &mut shot, &mut depth, &mut bank));
+        assert_eq!((shot, bank), (Shot::Photo, Some(0)));
+        assert!(!choose(ShotChoice::Photo, &mut shot, &mut depth, &mut bank));
+        // the destination changed: back to Photo, said once
+        let (mut shot, mut depth) = (Shot::Pano, false);
+        assert!(!on_destination(true, &mut shot, &mut depth));
+        assert!(on_destination(false, &mut shot, &mut depth));
+        assert_eq!(shot, Shot::Photo);
+        let mut depth = true;
+        assert!(on_destination(false, &mut shot, &mut depth));
+        assert!(!depth);
+        assert!(!on_destination(false, &mut shot, &mut depth));
+    }
+
+    #[test]
+    fn the_shutter_follows_the_mode() {
+        assert_eq!(shutter_action(Shot::Photo, false), Fire::Take);
+        assert_eq!(shutter_action(Shot::FullSet, false), Fire::FullSave);
+        assert_eq!(shutter_action(Shot::Pano, false), Fire::Pano);
+        assert_eq!(shutter_action(Shot::Photo, true), Fire::Take, "Depth: a photo of the depth");
+    }
+
+    #[test]
+    fn the_key_skips_what_cannot_be_chosen() {
+        let list = available(false, true, [true, false, true]);
+        assert_eq!(list[2], (ShotChoice::Pano, Some(Refused::CameraLimited)));
+        assert_eq!(next_choice(ShotChoice::FullSet, &list), ShotChoice::Depth);
+        assert_eq!(next_choice(ShotChoice::Bank(0), &list), ShotChoice::Bank(2));
+        assert_eq!(next_choice(ShotChoice::Bank(2), &list), ShotChoice::Photo);
+        let none = available(true, false, [false; 3]);
+        assert_eq!(none[3].1, Some(Refused::VisionLimited));
+        assert_eq!(next_choice(ShotChoice::Pano, &none), ShotChoice::Photo);
+    }
 
     #[test]
     fn the_beep_is_two_tones_with_silence_between() {

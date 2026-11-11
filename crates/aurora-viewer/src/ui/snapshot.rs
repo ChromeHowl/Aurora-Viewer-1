@@ -58,6 +58,12 @@ pub struct SnapshotUi {
     /// A photo to disk is the depth of the scene (the Legacy Viewer's
     /// "Depth" capture layer; never saved, as there).
     pub depth: bool,
+    /// The viewfinder's shot mode (`snapshot::viewfinder::Shot`; never
+    /// saved, like `depth`).
+    pub shot: crate::snapshot::viewfinder::Shot,
+    /// The custom mode last loaded, C1 to C3 (0 to 2), while no other mode
+    /// was chosen.
+    pub bank: Option<u8>,
 }
 
 /// Where a photo goes (Firestorm's snapshot panels; the profile feed
@@ -169,6 +175,10 @@ pub struct View<'a> {
     pub quality_reduced: bool,
     /// A 360° photo can be taken (no RLVa camera limit).
     pub pano_allowed: bool,
+    /// Preferences' colour grade, which the photo's style starts from, and
+    /// why its tone curves change nothing now (None: they apply).
+    pub prefs_grade: crate::settings::render_extras::Grade,
+    pub tone_why: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -196,6 +206,9 @@ pub enum Action {
     PersonalLighting,
     /// "Keep this light": the photo's environment becomes the user's.
     KeepLight,
+    /// "Keep this look": the photo's picture style and white balance
+    /// become Preferences' own (`snapshot::style`).
+    KeepStyle,
     /// Open the Controls window (it drives the free camera).
     Controls,
     /// The upload's price was confirmed (true) or not.
@@ -217,6 +230,8 @@ pub enum Action {
     ProfileLoad(String),
     ProfileSave(String),
     ProfileDelete(String),
+    /// A profile renamed (old, new); the custom modes pinned to it follow.
+    ProfileRename(String, String),
     /// "Reset all" (None) or one part of the window back to its defaults.
     ProfileReset(Option<crate::snapshot::saved::Part>),
     /// A 360° photo to disk (`snapshot::pano`).
@@ -829,6 +844,21 @@ impl SnapshotUi {
         if std::mem::take(&mut self.looks.reveal) {
             ui.scroll_to_rect(filter.with_max_y(ui.cursor().top()), Some(egui::Align::Center));
         }
+        // the photo's picture style and white balance (photo mode only),
+        // the viewfinder's Style sheet without its fine tuning
+        ui.add_space(4.0);
+        ui.label(RichText::new(aurora_i18n::tr!("pcu-style-title")).color(p.ink));
+        let cx = super::viewfinder::StyleContext {
+            prefs_grade: &view.prefs_grade,
+            tone_ok: view.tone_why.map_or(Ok(()), Err),
+        };
+        let light_before = self.light;
+        if super::viewfinder::style_rows(ui, p, &mut self.light, &cx, false, None) {
+            out.push(Action::KeepStyle);
+        }
+        if self.light != light_before && !out.contains(&Action::Changed) {
+            out.push(Action::Changed);
+        }
 
         ui.add_space(2.0);
         widgets::collapsing(ui, p, "photo_guide", aurora_i18n::tr!("b1-guide-section"), false, |ui| {
@@ -1246,6 +1276,17 @@ fn light_rows(
             out.push(Action::PersonalLighting);
         }
     });
+    // the photo's picture style and white balance, kept as the light is
+    let look = crate::snapshot::style::is_set(l);
+    if ui
+        .add_enabled_ui(look, |ui| widgets::flat_button(ui, p, aurora_i18n::tr!("pcu-keep-look")))
+        .inner
+        .on_hover_text(aurora_i18n::tr!("pcu-keep-look-tip"))
+        .on_disabled_hover_text(aurora_i18n::tr!("pcu-keep-look-tip"))
+        .clicked()
+    {
+        out.push(Action::KeepStyle);
+    }
 }
 
 /// Width of a list's label in the Light section.
@@ -1509,7 +1550,7 @@ pub fn outside(screen: Rect, frame: Rect) -> Vec<Rect> {
 }
 
 /// Icon and name of a guide.
-fn guide_face(g: Guide) -> (&'static str, &'static str) {
+pub(crate) fn guide_face(g: Guide) -> (&'static str, &'static str) {
     match g {
         Guide::Thirds => ("grid-3x3", aurora_i18n::tr!("photo-guide-thirds")),
         Guide::Golden => ("grid-pattern-filled", aurora_i18n::tr!("photo-guide-golden")),
@@ -1899,7 +1940,7 @@ impl SnapshotUi {
 }
 
 /// "Reset" and the part of the window (the Legacy Viewer's "Reset tab").
-fn reset_label(part: crate::snapshot::saved::Part) -> &'static str {
+pub(crate) fn reset_label(part: crate::snapshot::saved::Part) -> &'static str {
     use crate::snapshot::saved::Part;
     match part {
         Part::Format => aurora_i18n::tr!("b1-reset-format"),
@@ -1910,6 +1951,7 @@ fn reset_label(part: crate::snapshot::saved::Part) -> &'static str {
         Part::Looks => aurora_i18n::tr!("b1-reset-looks"),
         Part::Isolation => aurora_i18n::tr!("b1-reset-isolation"),
         Part::Guide => aurora_i18n::tr!("b1-reset-guide"),
+        Part::Style => aurora_i18n::tr!("pcu-reset-style"),
     }
 }
 

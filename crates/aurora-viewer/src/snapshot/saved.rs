@@ -4,9 +4,11 @@
 //! (`graphics_presets::saved`). A profile holds the photo's size and
 //! proportions, its file format, the supersampling and Photo quality, the
 //! window's lens, the photo's exposure and quick light switches, its looks,
-//! the isolation chosen and the guide. Nothing the graphics profiles hold
-//! (the Preferences' depth of field and exposure, the rendering levels) and
-//! nothing of the camera's place (the camera presets, `camera::presets`).
+//! the isolation chosen and the guide, and the photo's own tone curve and
+//! colour grade (its picture style and white balance, `style`). Nothing of
+//! the graphics profiles' own (the Preferences' depth of field, exposure,
+//! tone curve and grade, the rendering levels) and nothing of the camera's
+//! place (the camera presets, `camera::presets`).
 //!
 //! A profile is external data: each field is read on its own, one that
 //! does not parse (a later version's value) left at its default, and the
@@ -63,6 +65,8 @@ profile_fields! {
     isolation: isolate::Mode,
     transparent: bool,
     guide: Guide,
+    tonemapper: Option<u8>,
+    grade: Option<crate::settings::render_extras::Grade>,
 }
 
 impl Default for Profile {
@@ -93,6 +97,8 @@ impl Profile {
             isolation: iso.mode,
             transparent: iso.transparent,
             guide: s.guide,
+            tonemapper: light.tonemapper,
+            grade: light.grade,
         }
     }
 
@@ -123,6 +129,7 @@ impl Profile {
         iso.set_mode(self.isolation);
         iso.set_transparent(self.transparent);
         s.guide = self.guide;
+        (light.tonemapper, light.grade) = super::style::sanitize(self.tonemapper, self.grade);
     }
 }
 
@@ -146,10 +153,12 @@ pub enum Part {
     Isolation,
     /// The composition guide.
     Guide,
+    /// The photo's picture style and white balance.
+    Style,
 }
 
 impl Part {
-    pub const ALL: [Part; 8] = [
+    pub const ALL: [Part; 9] = [
         Part::Format,
         Part::File,
         Part::Quality,
@@ -158,6 +167,7 @@ impl Part {
         Part::Looks,
         Part::Isolation,
         Part::Guide,
+        Part::Style,
     ];
 }
 
@@ -195,7 +205,51 @@ pub fn reset(part: Option<Part>, s: &mut Settings, light: &mut PhotoLight, iso: 
     if is(Part::Guide) {
         p.guide = d.guide;
     }
+    if is(Part::Style) {
+        (p.tonemapper, p.grade) = (d.tonemapper, d.grade);
+    }
     p.apply(s, light, iso);
+}
+
+/// The photo's settings `now` differ from `profile` (a custom mode's
+/// "differs" mark). Photo quality is left out while its warning was never
+/// accepted: loading never switches it on then (`apply`).
+pub fn differs(profile: &Profile, now: &Profile, quality_warned: bool) -> bool {
+    let mut p = profile.clone();
+    if !quality_warned {
+        p.quality = now.quality;
+    }
+    p != *now
+}
+
+/// Loading `profile` asks the Photo quality warning first: it holds Photo
+/// quality, whose warning was never accepted.
+pub fn asks_quality(profile: &Profile, quality_warned: bool) -> bool {
+    profile.quality && !quality_warned
+}
+
+/// A profile renamed: its settings and the custom modes pinned to it move
+/// to the new name; false when the name is not valid, taken or unknown.
+pub fn rename(profiles: &mut BTreeMap<String, Profile>, banks: &mut [Option<String>; 3], old: &str, new: &str) -> bool {
+    let new = new.trim();
+    if !valid_name(new) || profiles.contains_key(new) {
+        return false;
+    }
+    let Some(p) = profiles.remove(old) else {
+        return false;
+    };
+    profiles.insert(new.to_owned(), p);
+    for b in banks.iter_mut().filter(|b| b.as_deref() == Some(old)) {
+        *b = Some(new.to_owned());
+    }
+    true
+}
+
+/// A profile deleted: the custom modes pinned to it are emptied.
+pub fn unpin(banks: &mut [Option<String>; 3], name: &str) {
+    for b in banks.iter_mut().filter(|b| b.as_deref() == Some(name)) {
+        *b = None;
+    }
 }
 
 /// Names are labels, never file paths: one line, at most 64 characters.
@@ -324,6 +378,83 @@ mod tests {
                 "{part:?} of the defaults changes nothing"
             );
         }
+    }
+
+    #[test]
+    fn the_photo_style_is_held_reset_and_old_profiles_load_without_it() {
+        use crate::settings::render_extras::Grade;
+        let style = Grade {
+            enabled: true,
+            temperature: 0.4,
+            gain: 0.25,
+            ..Grade::default()
+        };
+        let s = Settings::default();
+        let mut light = PhotoLight {
+            tonemapper: Some(5),
+            grade: Some(style),
+            ..PhotoLight::default()
+        };
+        let mut iso = Isolation::default();
+        let profile = Profile::capture(&s, &light, &iso);
+        assert_eq!((profile.tonemapper, profile.grade), (Some(5), Some(style)));
+        // applied over a photo without a style: the style comes back
+        let (mut l2, mut s2) = (PhotoLight::default(), Settings::default());
+        profile.apply(&mut s2, &mut l2, &mut iso);
+        assert_eq!((l2.tonemapper, l2.grade), (Some(5), Some(style)));
+        // a profile saved before the style: none (Preferences' look)
+        let old: Settings = serde_json::from_str(r#"{"profiles": {"Old": {"guide": "Center"}}}"#).expect("load");
+        assert_eq!((old.profiles["Old"].tonemapper, old.profiles["Old"].grade), (None, None));
+        // its part alone, or everything, back to Preferences' look
+        let mut s = Settings {
+            guide: Guide::Center,
+            ..Settings::default()
+        };
+        reset(Some(Part::Style), &mut s, &mut light, &mut iso);
+        assert_eq!((light.tonemapper, light.grade), (None, None));
+        assert_eq!(s.guide, Guide::Center, "the rest kept");
+        light.tonemapper = Some(2);
+        reset(None, &mut s, &mut light, &mut iso);
+        assert_eq!(light.tonemapper, None);
+    }
+
+    #[test]
+    fn a_custom_mode_does_not_differ_right_after_its_load() {
+        let saved = Settings {
+            quality: true,
+            quality_warned: true,
+            guide: Guide::Center,
+            ..Settings::default()
+        };
+        let profile = Profile::capture(&saved, &PhotoLight::default(), &Isolation::default());
+        for warned in [true, false] {
+            let mut s = Settings {
+                quality_warned: warned,
+                ..Settings::default()
+            };
+            let (mut light, mut iso) = (PhotoLight::default(), Isolation::default());
+            profile.apply(&mut s, &mut light, &mut iso);
+            let now = Profile::capture(&s, &light, &iso);
+            assert!(!differs(&profile, &now, warned), "warned: {warned}");
+            assert_eq!(asks_quality(&profile, warned), !warned);
+            s.guide = Guide::Golden;
+            assert!(differs(&profile, &Profile::capture(&s, &light, &iso), warned));
+        }
+    }
+
+    #[test]
+    fn renaming_moves_the_pins_and_deleting_clears_them() {
+        let mut profiles = BTreeMap::new();
+        profiles.insert("Night".to_owned(), Profile::default());
+        profiles.insert("Day".to_owned(), Profile::default());
+        let mut banks = [Some("Night".to_owned()), None, Some("Night".to_owned())];
+        assert!(!rename(&mut profiles, &mut banks, "Night", "Day"), "taken");
+        assert!(!rename(&mut profiles, &mut banks, "Nope", "Dusk"), "unknown");
+        assert!(rename(&mut profiles, &mut banks, "Night", " Dusk "));
+        assert!(profiles.contains_key("Dusk") && !profiles.contains_key("Night"));
+        assert_eq!(banks, [Some("Dusk".to_owned()), None, Some("Dusk".to_owned())]);
+        unpin(&mut banks, "Dusk");
+        assert_eq!(banks, [None, None, None]);
     }
 
     #[test]

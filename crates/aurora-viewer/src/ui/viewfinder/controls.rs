@@ -16,6 +16,8 @@ use egui::{Align2, Color32, Id, Order, Pos2, Rect, Sense, Stroke, StrokeKind, Ve
 
 /// The ruler of the lens ring.
 const RULER: Vec2 = Vec2::new(600.0, 46.0);
+/// The ring deck's width: the ruler and its two 42-point buttons.
+pub(super) const DECK_WIDTH: f32 = RULER.x + 2.0 * 42.0;
 /// A stick of the pad, and how far its puck goes.
 const STICK: f32 = 96.0;
 const STICK_TRAVEL: f32 = 28.0;
@@ -155,6 +157,34 @@ impl Viewfinder {
                     keys: aurora_i18n::tr!("photo-vf-ring-focus-keys"),
                 }
             }
+            Dial::WhiteBalance => {
+                let g = crate::snapshot::style::grade(&panel.light, &f.prefs_grade);
+                let presets: Vec<i32> = crate::snapshot::style::Wb::ALL
+                    .iter()
+                    .filter_map(|w| w.temperature())
+                    .map(crate::snapshot::style::steps)
+                    .collect();
+                let n = crate::snapshot::style::WB_STEPS;
+                Ring {
+                    u: crate::snapshot::style::steps(g.temperature) as f32,
+                    k: 26.0,
+                    min: -n as f32,
+                    max: n as f32,
+                    marks: (-n..=n)
+                        .map(|t| {
+                            let label = match t {
+                                t if t == -n => aurora_i18n::tr!("pcu-wb-cooler").to_owned(),
+                                t if t == n => aurora_i18n::tr!("pcu-wb-warmer").to_owned(),
+                                t if t % 5 == 0 => super::style::signed(t),
+                                _ => String::new(),
+                            };
+                            (t as f32, label, presets.contains(&t) || t % 5 == 0)
+                        })
+                        .collect(),
+                    title: aurora_i18n::tr!("pcu-wb-ring"),
+                    keys: aurora_i18n::tr!("pcu-wb-ring-keys"),
+                }
+            }
             Dial::Focal => {
                 let mm = focal_of_fov(fov).clamp(10.0, 135.0);
                 let labelled = [10.0, 14.0, 18.0, 24.0, 35.0, 50.0, 70.0, 85.0, 135.0];
@@ -216,6 +246,9 @@ impl Viewfinder {
                 }
                 let d = u.exp();
                 s.dof.distance = if d >= vf::INFINITY { 200.0 } else { d.max(vf::MIN_FOCUS) };
+            }
+            Dial::WhiteBalance => {
+                crate::snapshot::style::set_temperature(&mut panel.light, &f.prefs_grade, u.round() * crate::snapshot::style::WB_STEP);
             }
         }
     }
@@ -310,6 +343,11 @@ impl Viewfinder {
         out: &mut Vec<Out>,
     ) {
         let dial = self.dial;
+        if dial == Dial::WhiteBalance {
+            self.wb_presets(ctx, p, screen, panel, f);
+        } else {
+            self.wb_row_top = None;
+        }
         egui::Area::new(Id::unique("vf_ring"))
             .order(Order::Foreground)
             .fade_in(false)
@@ -320,7 +358,7 @@ impl Viewfinder {
                 let r = self.ring(dial, s, panel, *fov, f);
                 // the title and its keys
                 let (head, _) = ui.allocate_exact_size(Vec2::new(RULER.x + 2.0 * 42.0, 14.0), Sense::hover());
-                shadow_text(
+                let title = shadow_text(
                     ui.painter(),
                     p,
                     Pos2::new(head.left() + 42.0, head.center().y),
@@ -329,6 +367,20 @@ impl Viewfinder {
                     bold(ctx, 11.0),
                     p.ink,
                 );
+                // the aperture ring's lens options (front blur, bokeh fringe)
+                if dial == Dial::Aperture {
+                    let at = Rect::from_center_size(Pos2::new(title.right() + 14.0, head.center().y), Vec2::splat(16.0));
+                    let resp = ui
+                        .interact(at.expand(3.0), ui.scope_id().with("vf_lens_options"), Sense::click())
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .on_hover_text(aurora_i18n::tr!("pcu-lens-tip"));
+                    let on = self.sheet == Some(super::Sheet::Lens);
+                    icon(ui.painter(), "aperture", at, if on || resp.hovered() { p.teal } else { p.ink });
+                    if resp.clicked() {
+                        resp.surrender_focus();
+                        self.toggle_sheet(super::Sheet::Lens, out);
+                    }
+                }
                 shadow_text(
                     ui.painter(),
                     p,
@@ -505,6 +557,16 @@ impl Viewfinder {
                                     },
                                 );
                             });
+                            // the joint the camera follows (Preferences'
+                            // FSCameraFollowJoint, global)
+                            let joints = crate::camera::extra::FollowJoint::ALL;
+                            for half in joints.chunks(4) {
+                                let items: Vec<(&str, bool, &str)> =
+                                    half.iter().map(|j| (follow_short(*j), f.follow == *j, j.label())).collect();
+                                if let Some(i) = segmented(ui, p, &items, Some(STICK * 2.0 + 14.0)) {
+                                    out.push(Out::Follow(half[i]));
+                                }
+                            }
                             // the tilt
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = 8.0;
@@ -527,6 +589,10 @@ impl Viewfinder {
                         ui.allocate_ui_with_layout(Vec2::new(32.0, 200.0), egui::Layout::top_down(egui::Align::Center), |ui| {
                             ui.set_width(32.0);
                             ui.spacing_mut().item_spacing.y = 4.0;
+                            // Cameratools (the World menu's window and icon)
+                            if widgets::icon_button(ui, p, "video-filled", aurora_i18n::tr!("camx-cameratools-title"), true) {
+                                out.push(Out::Cameratools);
+                            }
                             let (in_tip, out_tip) = if mode == CamMode::Free {
                                 (
                                     aurora_i18n::tr!("photo-vf-pad-forward-tip"),
@@ -583,6 +649,22 @@ impl Viewfinder {
                 });
             });
         ctx.request_repaint();
+    }
+}
+
+/// A followed joint's short name, for the pad's 49-point chips (the
+/// full name is the chip's tip).
+pub fn follow_short(j: crate::camera::extra::FollowJoint) -> &'static str {
+    use crate::camera::extra::FollowJoint as J;
+    match j {
+        J::Avatar => aurora_i18n::tr!("pcu-follow-avatar"),
+        J::Head => aurora_i18n::tr!("pcu-follow-head"),
+        J::Chest => aurora_i18n::tr!("pcu-follow-chest"),
+        J::Pelvis => aurora_i18n::tr!("pcu-follow-pelvis"),
+        J::LeftHand => aurora_i18n::tr!("pcu-follow-left-hand"),
+        J::RightHand => aurora_i18n::tr!("pcu-follow-right-hand"),
+        J::LeftFoot => aurora_i18n::tr!("pcu-follow-left-foot"),
+        J::RightFoot => aurora_i18n::tr!("pcu-follow-right-foot"),
     }
 }
 
@@ -935,4 +1017,19 @@ fn tilt(ui: &mut egui::Ui, p: &Palette, width: f32, roll: f32) -> Option<f32> {
 /// The colour of the level and of the tilt's value: green when straight.
 pub fn level_color(p: &Palette, roll: f32, pitch: f32) -> Color32 {
     if roll == 0.0 && pitch.abs() < 0.5 { p.success } else { p.ink }
+}
+
+#[cfg(test)]
+mod follow_tests {
+    use crate::camera::extra::FollowJoint;
+
+    #[test]
+    fn follow_lights_the_chosen_hand_or_foot() {
+        // the pad's two rows of four: every joint has its chip, lit alone
+        for chosen in FollowJoint::ALL {
+            let lit: Vec<FollowJoint> = FollowJoint::ALL.chunks(4).flatten().copied().filter(|j| *j == chosen).collect();
+            assert_eq!(lit, vec![chosen]);
+        }
+        assert_eq!(FollowJoint::ALL.chunks(4).count(), 2);
+    }
 }

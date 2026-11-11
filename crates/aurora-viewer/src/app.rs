@@ -10066,12 +10066,12 @@ impl App {
                 self.start.elapsed().as_secs_f32(),
             )
         {
-            gfx.renderer.apply_settings(self.settings.render_settings());
+            gfx.renderer.apply_settings(self.render_settings_now());
         }
         if let Some(mode) = crate::demo::aa_switch::due(&mut self.aa_switch_demo, self.frame_count) {
             log::info!("demo: anti-aliasing {mode} at frame {}", self.frame_count);
             self.settings.antialiasing = mode;
-            gfx.renderer.apply_settings(self.settings.render_settings());
+            gfx.renderer.apply_settings(self.render_settings_now());
         }
         if !gfx.renderer.vr_engaged()
             && self.vr_start_in == 0
@@ -11189,7 +11189,7 @@ impl App {
             cutout: self.world.photo_isolation.empty_background(),
             hide_sky: self.settings.debug.hidden_types.sky,
             look: None,
-            grade: self.settings.render_extras.grade.render(),
+            grade: self.photo_grade().render(),
             deband: self.settings.render_extras.deband,
             // RenderDisablePostProcessing applies while building
             // (LLPipeline::tonemap: buildNoPost && gFloaterTools)
@@ -11827,7 +11827,7 @@ impl App {
             crate::link_trust::configure(&self.settings.trusted_sites);
             crate::link_preview::configure_sites(&self.settings.link_previews.picture_sites, crate::demo::picture_sites());
             sync_auto_render_scale(&mut self.settings, gfx.window.scale_factor());
-            gfx.renderer.apply_settings(self.settings.render_settings());
+            gfx.renderer.apply_settings(self.render_settings_now());
             self.panels.time_of_day = self.settings.time_of_day;
             self.egui_ctx.set_zoom_factor(ui_scale(&self.settings));
             self.disk_cache.set_limit_mb(self.settings.cache_size_mb);
@@ -18925,7 +18925,7 @@ impl ApplicationHandler for App {
             apply_test_overrides(&mut self.settings);
             self.settings.save();
         }
-        renderer.apply_settings(self.settings.render_settings());
+        renderer.apply_settings(self.render_settings_now());
         self.note_gpus(&renderer);
         self.login_form.driver_notice = self.driver_notice(&renderer.info);
         self.safe_graphics_at_start();
@@ -21678,7 +21678,8 @@ impl ApplicationHandler for App {
             WindowEvent::Resized(s) => {
                 ui::menu::window_geometry_changed(&self.egui_ctx);
                 if sync_auto_render_scale(&mut self.settings, g.window.scale_factor()) {
-                    g.renderer.apply_settings(self.settings.render_settings());
+                    g.renderer
+                        .apply_settings(snapshot::render_settings_with(&self.settings, &self.snapshots.ui.light));
                 }
                 g.renderer.resize(s.width, s.height);
                 self.geom_changed = Some(Instant::now());
@@ -21689,7 +21690,8 @@ impl ApplicationHandler for App {
                 // the automatic world resolution before the Resized event that
                 // winit sends next.
                 if sync_auto_render_scale(&mut self.settings, g.window.scale_factor()) {
-                    g.renderer.apply_settings(self.settings.render_settings());
+                    g.renderer
+                        .apply_settings(snapshot::render_settings_with(&self.settings, &self.snapshots.ui.light));
                 }
             }
             WindowEvent::Moved(_) => {

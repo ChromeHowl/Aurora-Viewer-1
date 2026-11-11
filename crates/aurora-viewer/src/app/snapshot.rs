@@ -249,6 +249,9 @@ pub(super) struct Snapshots {
     /// "Photo quality" was switched on for the first time: held off until
     /// its warning is answered (`Settings::quality_warned`).
     quality_ask: bool,
+    /// The photo's tone curve the renderer last had (`photo_light`): a
+    /// new one is applied once.
+    tone_applied: Option<u8>,
     upload: Option<Upload>,
     /// The message tells of this item, saved to the inventory.
     message_item: Option<Uuid>,
@@ -493,6 +496,7 @@ impl Default for Snapshots {
             confirm: None,
             short: None,
             quality_ask: false,
+            tone_applied: None,
             upload: None,
             message_item: None,
             message_profile: false,
@@ -1505,7 +1509,14 @@ impl App {
     /// until the third is written; the first waits for the photo quality's
     /// details as any photo does.
     fn photo_full_save_start(&mut self, renderer: &Renderer) {
-        if self.photo_busy() || self.snapshots.held.is_some() || !self.in_world() {
+        if !self.in_world() {
+            return;
+        }
+        if self.photo_busy() {
+            self.photo_refuse_busy();
+            return;
+        }
+        if self.snapshots.held.is_some() {
             return;
         }
         let s = &self.settings.snapshot;
@@ -1563,11 +1574,16 @@ impl App {
     /// left out if asked, then its six views drawn one after the other
     /// from where the camera is now.
     fn photo_pano_start(&mut self, renderer: &Renderer) {
-        if self.photo_busy() || self.snapshots.pano.is_some() || !self.in_world() {
+        if !self.in_world() {
+            return;
+        }
+        if self.photo_busy() || self.snapshots.pano.is_some() {
+            self.photo_refuse_busy();
             return;
         }
         if snapshot::pano::rlva_blocks(|b| self.world.rlva.has(b)) {
             self.snapshots.message = Some((aurora_i18n::tr!("b1-pano-rlva").to_owned(), true));
+            self.photo_vf_error(aurora_i18n::tr!("b1-pano-rlva"));
             return;
         }
         let s = &self.settings.snapshot;
@@ -2201,6 +2217,14 @@ impl App {
                     self.snapshots.ui.light.env = Default::default();
                 }
             }
+            Action::KeepStyle => {
+                let s = &mut self.settings;
+                if snapshot::style::keep(&mut self.snapshots.ui.light, &mut s.tonemapper, &mut s.render_extras.grade) {
+                    log::info!("photo style kept: tone curve {}", s.tonemapper);
+                    s.save();
+                    self.snapshots.settings_changed = true;
+                }
+            }
             Action::Controls => {
                 if !self.panels.camera_controls && !self.panels.movement_controls {
                     self.panels.camera_controls = true;
@@ -2295,20 +2319,13 @@ impl App {
                 gallery::reveal(&dir, None);
             }
             Action::Reel(a) => self.photo_reel_action(a, renderer),
-            Action::ProfileLoad(name) => {
-                let Some(profile) = self.settings.snapshot.profiles.get(&name).cloned() else {
-                    return;
-                };
-                log::info!("photo profile loaded: {name}");
-                profile.apply(
-                    &mut self.settings.snapshot,
-                    &mut self.snapshots.ui.light,
-                    &mut self.world.photo_isolation,
-                );
-                self.snapshots.ui.looks.selected = 0;
-                self.snapshots.preview_wanted = true;
-                self.settings.save();
-                self.snapshots.message = Some((aurora_i18n::tr!("p16-profile-loaded", name = name.as_str()).to_owned(), false));
+            Action::ProfileLoad(name) => self.photo_profile_load(&name),
+            Action::ProfileRename(old, new) => {
+                let s = &mut self.settings.snapshot;
+                if snapshot::saved::rename(&mut s.profiles, &mut s.banks, &old, &new) {
+                    log::info!("photo profile renamed: {old} to {}", new.trim());
+                    self.settings.save();
+                }
             }
             Action::ProfileSave(name) => {
                 if !snapshot::saved::valid_name(&name) {
@@ -2323,6 +2340,7 @@ impl App {
             }
             Action::ProfileDelete(name) => {
                 if self.settings.snapshot.profiles.remove(&name).is_some() {
+                    snapshot::saved::unpin(&mut self.settings.snapshot.banks, &name);
                     log::info!("photo profile deleted: {name}");
                     self.settings.save();
                 }
@@ -2603,6 +2621,41 @@ LUT_3D_SIZE {n}
         }
     }
 
+    /// A photo profile loaded (the window's list, a custom mode): never
+    /// `Profile::apply` from the interface, which has no isolation. A
+    /// profile with Photo quality asks its warning first, as switching it
+    /// on would.
+    pub(super) fn photo_profile_load(&mut self, name: &str) {
+        let Some(profile) = self.settings.snapshot.profiles.get(name).cloned() else {
+            return;
+        };
+        log::info!("photo profile loaded: {name}");
+        profile.apply(
+            &mut self.settings.snapshot,
+            &mut self.snapshots.ui.light,
+            &mut self.world.photo_isolation,
+        );
+        if snapshot::saved::asks_quality(&profile, self.settings.snapshot.quality_warned) {
+            self.snapshots.quality_ask = true;
+        }
+        self.snapshots.ui.looks.selected = 0;
+        self.snapshots.preview_wanted = true;
+        self.settings.save();
+        self.snapshots.message = Some((aurora_i18n::tr!("p16-profile-loaded", name = name).to_owned(), false));
+    }
+
+    /// A Full save or a 360° photo asked while the last photo is still
+    /// being taken or saved: said, in the window and on the viewfinder's
+    /// line, rather than a shutter that seems to do nothing.
+    fn photo_refuse_busy(&mut self) {
+        let text = aurora_i18n::tr!("pcu-busy");
+        self.snapshots.message = Some((text.to_owned(), true));
+        if self.viewfinder_on() {
+            let now = self.egui_ctx.input(|i| i.time);
+            self.snapshots.vf.say(text, true, now);
+        }
+    }
+
     /// An upload's error, on the viewfinder's line too.
     fn photo_vf_error(&mut self, text: &str) {
         let now = self.egui_ctx.input(|i| i.time);
@@ -2689,6 +2742,8 @@ LUT_3D_SIZE {n}
                 back_key: self.settings.keybinds.get(crate::keybinds::Action::ResetCamera)[0].clone(),
                 quality_reduced,
                 pano_allowed: !snapshot::pano::rlva_blocks(|b| self.world.rlva.has(b)),
+                prefs_grade: self.settings.render_extras.grade,
+                tone_why: self.photo_tone_why(),
             };
             // (under the reel's quick view, nothing of the viewfinder acts:
             // no focus by a click, no shutter)
@@ -2769,6 +2824,8 @@ LUT_3D_SIZE {n}
                 back_key: self.settings.keybinds.get(crate::keybinds::Action::ResetCamera)[0].clone(),
                 quality_reduced,
                 pano_allowed: !snapshot::pano::rlva_blocks(|b| self.world.rlva.has(b)),
+                prefs_grade: self.settings.render_extras.grade,
+                tone_why: self.photo_tone_why(),
             };
             let mut open = self.panels.snapshot;
             actions.extend(state.show(
@@ -2841,6 +2898,8 @@ LUT_3D_SIZE {n}
                 self.world.photo_isolation.set_picking(false);
             } else if v.preset_form.picking {
                 v.preset_form.picking = false;
+            } else if v.close_sheet() {
+                // a sheet closes alone: the panel or the list under it stays
             } else if v.menu || v.help || v.drawer || v.isolate || v.presets || v.light {
                 v.menu = false;
                 v.help = false;
@@ -3005,6 +3064,12 @@ LUT_3D_SIZE {n}
         }
         self.world.eep.set_photo(light.env);
         self.scene.attached_lights = light.attached_lights;
+        // the photo's tone curve set, changed or given back: the renderer
+        // takes it once (the grade goes with each frame)
+        if light.tonemapper != self.snapshots.tone_applied {
+            self.snapshots.tone_applied = light.tonemapper;
+            self.snapshots.settings_changed = true;
+        }
     }
 
     /// The lists of the Light section load like the environment window's.
@@ -3021,6 +3086,31 @@ LUT_3D_SIZE {n}
     /// The exposure the frame is drawn with: the photo's, else Preferences'.
     pub(super) fn photo_exposure(&self) -> f32 {
         self.snapshots.ui.light.exposure.unwrap_or(self.settings.exposure)
+    }
+
+    /// The colour grade the frame is drawn with: the photo's style and
+    /// white balance, else Preferences' (`snapshot::style`).
+    pub(super) fn photo_grade(&self) -> crate::settings::render_extras::Grade {
+        snapshot::style::grade(&self.snapshots.ui.light, &self.settings.render_extras.grade)
+    }
+
+    /// Why a tone curve changes nothing now (the reasons Preferences give):
+    /// HDR off, or a classic sky that is not tone mapped.
+    pub(super) fn photo_tone_why(&self) -> Option<&'static str> {
+        if !self.settings.hdr_emissive {
+            Some(aurora_i18n::tr!("ui-options-needs-hdr-emissive"))
+        } else if !self.options_ui.sky_tone_mapped {
+            Some(aurora_i18n::tr!("ui-options-tone-mapping-classic-sky"))
+        } else {
+            None
+        }
+    }
+
+    /// The renderer's settings with the photo's tone curve: what every
+    /// `apply_settings` takes, so that a change of settings or a GPU
+    /// recovery during the photo mode keeps the photo's curve.
+    pub(super) fn render_settings_now(&self) -> aurora_render::RenderSettings {
+        render_settings_with(&self.settings, &self.snapshots.ui.light)
     }
 
     /// The photo's light holds the clouds still.
@@ -3594,4 +3684,16 @@ fn env_view<'a>(
         locked: eep.rlva_locked,
         loading: eep.photo_loading(),
     }
+}
+
+/// `App::render_settings_now` from its two fields, for the places that hold
+/// the window's graphics while they apply the settings (a resize, a change
+/// of display scale): the photo's tone curve stays during the photo mode.
+pub(super) fn render_settings_with(
+    settings: &crate::settings::Settings,
+    light: &crate::snapshot::light::PhotoLight,
+) -> aurora_render::RenderSettings {
+    let mut r = settings.render_settings();
+    r.tonemapper = crate::settings::tonemapper_of(snapshot::style::tonemapper(light, settings.tonemapper));
+    r
 }

@@ -10,7 +10,7 @@ use crate::keybinds::{Action as Bind, Input, Mods};
 use crate::settings::PhotoWindowStyle;
 use crate::snapshot::viewfinder::{self as vf, AfArea, Event, Phase, Subject};
 use crate::ui::snapshot::Action;
-use crate::ui::viewfinder::{CamMode, Dial, Frame, Keys, Out, Preset};
+use crate::ui::viewfinder::{CamMode, Dial, Frame, Keys, Out, Preset, Sheet};
 use aurora_render::Renderer;
 use egui::{Pos2, Rect, Vec2};
 use std::time::Instant;
@@ -81,9 +81,10 @@ impl App {
             v.ae_lock = false;
             v.countdown = None;
             v.pad = Default::default();
-            if v.menu || v.help || v.drawer || v.presets || v.light || v.pressed || v.pick.is_some() {
+            if v.menu || v.help || v.sheet.is_some() || v.drawer || v.presets || v.light || v.pressed || v.pick.is_some() {
                 v.menu = false;
                 v.help = false;
+                v.sheet = None;
                 v.drawer = false;
                 v.presets = false;
                 v.light = false;
@@ -435,8 +436,98 @@ impl App {
         let v = &mut self.snapshots.vf;
         v.flash_at = Some(now);
         v.hinted = true;
-        log::info!("viewfinder: shutter");
-        self.photo_action(Action::Take, renderer);
+        // the shot mode: the shutter button, Enter, a shot waiting for the
+        // focus and the self-timer all come here
+        let ui = &self.snapshots.ui;
+        let action = match vf::shutter_action(ui.shot, ui.depth) {
+            vf::Fire::Take => Action::Take,
+            vf::Fire::FullSave => Action::FullSave,
+            vf::Fire::Pano => Action::Pano,
+        };
+        log::info!("viewfinder: shutter ({action:?})");
+        self.photo_action(action, renderer);
+    }
+
+    /// The shot modes as the viewfinder lists them.
+    fn vf_shot_list(&self) -> Vec<(vf::ShotChoice, Option<vf::Refused>)> {
+        let pano_ok = !crate::snapshot::pano::rlva_blocks(|b| self.world.rlva.has(b));
+        let depth_ok = self.world.rlva.visuals.spheres.is_empty();
+        vf::available(pano_ok, depth_ok, self.vf_banks().map(|b| b.exists))
+    }
+
+    /// The custom modes' slots.
+    fn vf_banks(&self) -> [crate::ui::viewfinder::BankView; 3] {
+        let s = &self.settings.snapshot;
+        let now = crate::snapshot::saved::Profile::capture(s, &self.snapshots.ui.light, &self.world.photo_isolation);
+        std::array::from_fn(|i| {
+            let name = s.banks[i].clone();
+            let profile = name.as_ref().and_then(|n| s.profiles.get(n));
+            crate::ui::viewfinder::BankView {
+                exists: profile.is_some(),
+                differs: self.snapshots.ui.bank == Some(i as u8)
+                    && profile.is_some_and(|p| crate::snapshot::saved::differs(p, &now, s.quality_warned)),
+                name,
+            }
+        })
+    }
+
+    /// A custom mode's slot changed from its sheet.
+    fn vf_bank(&mut self, slot: u8, edit: crate::ui::viewfinder::BankEdit, renderer: &Renderer) {
+        use crate::ui::viewfinder::BankEdit;
+        let i = usize::from(slot.min(2));
+        let pinned = self.settings.snapshot.banks[i].clone();
+        match edit {
+            BankEdit::SaveHere => {
+                // over the profile pinned there, else a new one named after the slot
+                let name = pinned
+                    .filter(|n| self.settings.snapshot.profiles.contains_key(n))
+                    .unwrap_or_else(|| format!("C{}", i + 1));
+                self.photo_action(Action::ProfileSave(name.clone()), renderer);
+                self.settings.snapshot.banks[i] = Some(name);
+                self.snapshots.ui.bank = Some(i as u8);
+            }
+            BankEdit::Pin(name) => {
+                if self.settings.snapshot.profiles.contains_key(&name) {
+                    self.settings.snapshot.banks[i] = Some(name);
+                }
+            }
+            BankEdit::Rename(new) => {
+                if let Some(old) = pinned {
+                    self.photo_action(Action::ProfileRename(old, new), renderer);
+                }
+            }
+            BankEdit::Unpin => {
+                self.settings.snapshot.banks[i] = None;
+                if self.snapshots.ui.bank == Some(i as u8) {
+                    self.snapshots.ui.bank = None;
+                }
+            }
+        }
+        self.settings.save();
+    }
+
+    /// A shot mode chosen (the list, its tile, the P key): Full set, 360°
+    /// and Depth write to the disk.
+    fn vf_shot(&mut self, choice: vf::ShotChoice) {
+        let now = self.vf_now();
+        if let Some((_, Some(why))) = self.vf_shot_list().into_iter().find(|(c, _)| *c == choice) {
+            self.snapshots.vf.say(crate::ui::viewfinder::refused_text(why), true, now);
+            return;
+        }
+        let ui = &mut self.snapshots.ui;
+        if vf::choose(choice, &mut ui.shot, &mut ui.depth, &mut ui.bank) {
+            ui.destination = crate::ui::snapshot::Destination::Disk;
+        }
+        log::info!("viewfinder: shot mode {choice:?}");
+        self.snapshots.preview_wanted = true;
+        // a custom mode: its profile, with its picture style and white
+        // balance
+        if let vf::ShotChoice::Bank(i) = choice
+            && let Some(name) = self.settings.snapshot.banks[usize::from(i.min(2))].clone()
+        {
+            self.photo_profile_load(&name);
+            self.snapshots.vf.say(format!("C{} · {name}", i + 1), false, now);
+        }
     }
 
     /// The shutter pressed half way: in AF-S the lens focuses, and the beep
@@ -512,9 +603,10 @@ impl App {
             return true;
         }
         let v = &mut self.snapshots.vf;
-        if v.menu || v.help {
+        if v.menu || v.help || v.sheet.is_some() {
             v.menu = false;
             v.help = false;
+            v.sheet = None;
             return true;
         }
         if !self.build.selection.is_empty() {
@@ -605,6 +697,12 @@ impl App {
                 let ev = vf::ev_of(self.snapshots.ui.light.exposure.unwrap_or(base), base) + dir as f32 / 3.0;
                 let e = vf::exposure_at(ev, base);
                 self.snapshots.ui.light.exposure = if (e - base).abs() < 1e-4 { None } else { Some(e) };
+            }
+            Dial::WhiteBalance => {
+                let light = &mut self.snapshots.ui.light;
+                let prefs = self.settings.render_extras.grade;
+                let t = crate::snapshot::style::grade(light, &prefs).temperature;
+                crate::snapshot::style::set_temperature(light, &prefs, crate::snapshot::style::step(t, dir));
             }
             Dial::Distance => {
                 // direct manual focus: from where the lens is
@@ -780,6 +878,21 @@ impl App {
         if !self.viewfinder_on() || mods.ctrl || mods.alt {
             return false;
         }
+        // the quick menu, the mode list or a sheet open: the arrows and
+        // Enter are theirs, before any shortcut (the arrows walk by default)
+        let v = &self.snapshots.vf;
+        let open = Open {
+            menu: v.menu,
+            modes: v.sheet == Some(Sheet::Modes),
+            sheet: v.sheet.is_some_and(|s| s != Sheet::Modes),
+        };
+        let route = nav_route(code, open);
+        if route != Nav::Pass {
+            if pressed {
+                self.vf_nav(route, repeat);
+            }
+            return true;
+        }
         if matches!(code, KeyCode::Enter | KeyCode::NumpadEnter) {
             if pressed && !repeat {
                 if let Some(mut gfx) = self.gfx.take() {
@@ -800,6 +913,8 @@ impl App {
         let which = match code {
             KeyCode::Tab => Some('q'),
             KeyCode::F1 => Some('h'),
+            // 1 to 3 pick C1 to C3 while the mode list is open (Shift +
+            // digit stays a focal length: it is how some layouts type one)
             KeyCode::Digit1 | KeyCode::Numpad1 => Some('1'),
             KeyCode::Digit2 | KeyCode::Numpad2 => Some('2'),
             KeyCode::Digit3 | KeyCode::Numpad3 => Some('3'),
@@ -808,7 +923,7 @@ impl App {
             _ if free => letter
                 .chars()
                 .next()
-                .filter(|c| matches!(c, 'q' | 'i' | 'n' | 'v' | 'g' | 'h' | 'l')),
+                .filter(|c| matches!(c, 'q' | 'i' | 'n' | 'v' | 'g' | 'h' | 'l' | 'p' | 'b' | 't')),
             _ => None,
         };
         let Some(which) = which else {
@@ -823,10 +938,12 @@ impl App {
             'q' => {
                 v.menu = !v.menu;
                 v.help = false;
+                v.sheet = None;
             }
             'h' => {
                 v.help = !v.help;
                 v.menu = false;
+                v.sheet = None;
             }
             'i' => {
                 s.viewfinder.display = s.viewfinder.display.next();
@@ -837,6 +954,23 @@ impl App {
                 self.settings.save();
             }
             'n' => self.vf_cycle_af(),
+            'b' => v.toggle_wb_dial(),
+            't' => {
+                let mut ignored = Vec::new();
+                v.toggle_sheet(Sheet::Style, &mut ignored);
+                // (the isolation panel closed by the one-panel rule)
+                for o in ignored {
+                    if let Out::Isolate(o) = o {
+                        let ppp = self.egui_ctx.pixels_per_point();
+                        self.photo_isolate_out(o, ppp);
+                    }
+                }
+            }
+            'p' => {
+                let ui = &self.snapshots.ui;
+                let next = vf::next_choice(vf::shown(ui.shot, ui.depth, ui.bank), &self.vf_shot_list());
+                self.vf_shot(next);
+            }
             'v' => self.vf_toggle_area(),
             'l' => {
                 v.ae_lock = !v.ae_lock;
@@ -848,21 +982,58 @@ impl App {
                 let now = self.vf_now();
                 self.snapshots.vf.say(text, false, now);
             }
-            d => {
-                let i = d.to_digit(10).unwrap_or(3) as usize;
-                let mm = vf::FOCAL_PRESETS[i.clamp(1, 5) - 1];
-                self.settings.camera.fov = crate::snapshot::fov_of_focal(mm);
-                self.settings.save();
-            }
+            d => match digit_command(d.to_digit(10).unwrap_or(3) as u8, v.sheet == Some(Sheet::Modes)) {
+                Digit::Bank(i) => {
+                    v.sheet = None;
+                    self.vf_shot(vf::ShotChoice::Bank(i));
+                }
+                Digit::Focal(mm) => {
+                    self.settings.camera.fov = crate::snapshot::fov_of_focal(mm);
+                    self.settings.save();
+                }
+            },
         }
         true
     }
 
     /// A shortcut of the viewer uses this key alone.
     fn vf_key_bound(&self, code: KeyCode) -> bool {
-        let input = Input::key(code);
-        let kb = &self.settings.keybinds;
-        kb.triggered(&input, Mods::default()).is_some() || !kb.held_actions_of(&input).is_empty()
+        !vf_key_free(&self.settings.keybinds, code, Mods::default())
+    }
+
+    /// A key of the quick menu, the mode list or a sheet (`nav_route`).
+    fn vf_nav(&mut self, nav: Nav, repeat: bool) {
+        let v = &mut self.snapshots.vf;
+        match nav {
+            Nav::Pass => {}
+            Nav::MoveTile(d) => v.tile_cursor = (v.tile_cursor as i32 + d).max(0) as usize,
+            Nav::StepTile => v.tile_enter |= !repeat,
+            Nav::MoveMode(d) => {
+                let n = self.vf_shot_list().len() as i32;
+                let v = &mut self.snapshots.vf;
+                v.mode_cursor = (v.mode_cursor as i32 + d).rem_euclid(n.max(1)) as usize;
+            }
+            Nav::ChooseMode => {
+                if repeat {
+                    return;
+                }
+                let list = self.vf_shot_list();
+                let Some((choice, why)) = list.get(self.snapshots.vf.mode_cursor).copied() else {
+                    return;
+                };
+                let v = &mut self.snapshots.vf;
+                v.sheet = None;
+                match (choice, why) {
+                    // an empty or lost slot: its sheet, to fill it
+                    (vf::ShotChoice::Bank(i), Some(_)) => v.sheet = Some(Sheet::Bank(i)),
+                    _ => self.vf_shot(choice),
+                }
+            }
+            Nav::Sheet(rows, turn) => {
+                let (r, t) = v.sheet_keys.unwrap_or((0, 0));
+                v.sheet_keys = Some((r + rows, t + turn));
+            }
+        }
     }
 
     /// The keys the help names: the AF mode's, the menu's (Q too when no
@@ -1047,6 +1218,18 @@ impl App {
             preset_object,
             posing: self.ik_editor.open && self.ik_editor.posing(),
             reel: &reel,
+            pano_ok: !crate::snapshot::pano::rlva_blocks(|b| self.world.rlva.has(b)),
+            depth_ok: self.world.rlva.visuals.spheres.is_empty(),
+            banks: self.vf_banks(),
+            prefs_grade: self.settings.render_extras.grade,
+            tone_ok: self.photo_tone_why(),
+            lens_extras: (
+                self.settings.render_extras.dof_front_blur,
+                self.settings.render_extras.dof_dispersion,
+            ),
+            deband: self.settings.render_extras.deband,
+            follow: self.settings.camera.extra.follow_joint,
+            camera_locked: self.camera.locked(),
         };
         // the demo aims at the own avatar's face, then shoots
         let (aim, shoot) = self.photo_demo_viewfinder();
@@ -1109,6 +1292,32 @@ impl App {
                     }
                 }
                 Out::Reel(a) => self.photo_reel_action(a, renderer),
+                Out::Shot(choice) => self.vf_shot(choice),
+                Out::Bank(slot, edit) => self.vf_bank(slot, edit, renderer),
+                // (taken by the quick menu itself)
+                Out::Sheet(_) => {}
+                // Preferences' own, shown in the viewfinder too
+                Out::Deband(v) => {
+                    self.settings.render_extras.deband = v.clamp(0.0, 2.0);
+                    self.settings.save();
+                }
+                Out::Lens(crate::ui::viewfinder::LensEdit::FrontBlur(on)) => {
+                    self.settings.render_extras.dof_front_blur = on;
+                    self.settings.save();
+                }
+                Out::Lens(crate::ui::viewfinder::LensEdit::Fringe(v)) => {
+                    self.settings.render_extras.dof_dispersion = v.clamp(0.0, 1.0);
+                    self.settings.save();
+                }
+                Out::Follow(joint) => {
+                    self.settings.camera.extra.follow_joint = joint;
+                    self.settings.save();
+                }
+                Out::CameraLock => self.toggle_camera_lock(),
+                Out::CameraPath => crate::ui::widgets::toggle_floater(ctx, crate::ui::camera_path::WINDOW, &mut self.panels.camera_path),
+                Out::Cameratools => {
+                    crate::ui::widgets::toggle_floater(ctx, crate::ui::options::cameratools::WINDOW, &mut self.panels.cameratools)
+                }
                 Out::Exit => self.panels.snapshot = false,
             }
         }
@@ -1168,6 +1377,89 @@ fn free_pad_axes(pad: &crate::ui::viewfinder::Pad) -> (egui::Vec2, egui::Vec2, f
     )
 }
 
+/// No shortcut of the viewer uses `code` with `mods` (an exact match, or
+/// with Shift alone an unmodified one, `KeyBindings::triggered`), nor, for
+/// an unmodified key, a held action (the movement keys): the viewfinder may
+/// take it. A user who binds it gets the viewer's action instead.
+fn vf_key_free(kb: &crate::keybinds::KeyBindings, code: KeyCode, mods: Mods) -> bool {
+    let input = Input::key(code);
+    let plain = !mods.ctrl && !mods.alt && !mods.shift;
+    kb.triggered(&input, mods).is_none() && (!plain || kb.held_actions_of(&input).is_empty())
+}
+
+/// What is open over the viewfinder, for the keys.
+#[derive(Debug, Clone, Copy, Default)]
+struct Open {
+    menu: bool,
+    modes: bool,
+    sheet: bool,
+}
+
+/// What a key does while something is open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Nav {
+    /// Not taken: the viewfinder's other keys, then the viewer's.
+    Pass,
+    MoveTile(i32),
+    /// Enter steps the quick menu's tile (never the shutter there).
+    StepTile,
+    MoveMode(i32),
+    ChooseMode,
+    /// A sheet's rows moved, its value turned.
+    Sheet(i32, i32),
+}
+
+/// The arrows and Enter: the quick menu's (9 tiles a row), the mode list's,
+/// a sheet's arrows (Enter stays the shutter there); nothing open, none.
+fn nav_route(code: KeyCode, open: Open) -> Nav {
+    use KeyCode as K;
+    let enter = matches!(code, K::Enter | K::NumpadEnter);
+    if open.menu {
+        return match code {
+            K::ArrowLeft => Nav::MoveTile(-1),
+            K::ArrowRight => Nav::MoveTile(1),
+            K::ArrowUp => Nav::MoveTile(-9),
+            K::ArrowDown => Nav::MoveTile(9),
+            _ if enter => Nav::StepTile,
+            _ => Nav::Pass,
+        };
+    }
+    if open.modes {
+        return match code {
+            K::ArrowUp => Nav::MoveMode(-1),
+            K::ArrowDown => Nav::MoveMode(1),
+            _ if enter => Nav::ChooseMode,
+            _ => Nav::Pass,
+        };
+    }
+    if open.sheet {
+        return match code {
+            K::ArrowUp => Nav::Sheet(-1, 0),
+            K::ArrowDown => Nav::Sheet(1, 0),
+            K::ArrowLeft => Nav::Sheet(0, -1),
+            K::ArrowRight => Nav::Sheet(0, 1),
+            _ => Nav::Pass,
+        };
+    }
+    Nav::Pass
+}
+
+/// What a digit key does in the viewfinder.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Digit {
+    Focal(f32),
+    Bank(u8),
+}
+
+/// 1 to 5 the focal presets; 1 to 3 the custom modes while the mode list
+/// is open.
+fn digit_command(digit: u8, modes_open: bool) -> Digit {
+    match digit {
+        1..=3 if modes_open => Digit::Bank(digit - 1),
+        d => Digit::Focal(vf::FOCAL_PRESETS[usize::from(d.clamp(1, 5)) - 1]),
+    }
+}
+
 /// About half a head's depth (m): from its middle to the face.
 const HEAD_RADIUS: f32 = 0.09;
 
@@ -1180,6 +1472,87 @@ enum VfSound {
     Tick,
     /// A lens ring's detent.
     Click,
+}
+
+#[cfg(test)]
+mod digit_tests {
+    use super::{Digit, digit_command};
+
+    #[test]
+    fn digits_are_focal_lengths_unless_the_mode_list_is_open() {
+        assert_eq!(digit_command(1, false), Digit::Focal(24.0), "plain 1 still 24 mm");
+        assert_eq!(digit_command(5, false), Digit::Focal(135.0));
+        assert_eq!(digit_command(1, true), Digit::Bank(0));
+        assert_eq!(digit_command(3, true), Digit::Bank(2));
+        assert_eq!(digit_command(4, true), Digit::Focal(85.0));
+    }
+}
+
+#[cfg(test)]
+mod key_tests {
+    use super::{KeyCode, Mods, Nav, Open, nav_route, vf_key_free};
+    use crate::keybinds::{Action, Binding, Input, KeyBindings};
+
+    #[test]
+    fn p_b_and_t_are_free_on_default_bindings_and_yield_when_bound() {
+        let mut kb = KeyBindings::default();
+        for code in [KeyCode::KeyP, KeyCode::KeyB, KeyCode::KeyT] {
+            assert!(vf_key_free(&kb, code, Mods::default()), "{code:?}");
+        }
+        kb.set(
+            Action::Fly,
+            1,
+            Some(Binding {
+                input: Input::key(KeyCode::KeyP),
+                ctrl: false,
+                shift: false,
+                alt: false,
+            }),
+        );
+        assert!(!vf_key_free(&kb, KeyCode::KeyP, Mods::default()), "the user's binding wins");
+    }
+
+    #[test]
+    fn the_arrows_are_only_taken_while_something_is_open() {
+        for code in [
+            KeyCode::ArrowUp,
+            KeyCode::ArrowDown,
+            KeyCode::ArrowLeft,
+            KeyCode::ArrowRight,
+            KeyCode::Enter,
+        ] {
+            assert_eq!(
+                nav_route(code, Open::default()),
+                Nav::Pass,
+                "{code:?}: the camera's and the shutter's"
+            );
+        }
+        let modes = Open {
+            modes: true,
+            ..Open::default()
+        };
+        assert_eq!(nav_route(KeyCode::ArrowDown, modes), Nav::MoveMode(1));
+        assert_eq!(nav_route(KeyCode::Enter, modes), Nav::ChooseMode);
+        let sheet = Open {
+            sheet: true,
+            ..Open::default()
+        };
+        assert_eq!(nav_route(KeyCode::ArrowRight, sheet), Nav::Sheet(0, 1));
+        assert_eq!(nav_route(KeyCode::Enter, sheet), Nav::Pass, "Enter stays the shutter over a sheet");
+    }
+
+    #[test]
+    fn enter_with_the_menu_open_steps_the_tile_not_the_shutter() {
+        let menu = Open {
+            menu: true,
+            ..Open::default()
+        };
+        assert_eq!(nav_route(KeyCode::Enter, menu), Nav::StepTile);
+        assert_eq!(nav_route(KeyCode::NumpadEnter, menu), Nav::StepTile);
+        assert_eq!(nav_route(KeyCode::ArrowDown, menu), Nav::MoveTile(9));
+        // closed: Enter goes on to the two-stage shutter (`vf_half_press`)
+        assert_eq!(nav_route(KeyCode::Enter, Open::default()), Nav::Pass);
+    }
 }
 
 #[cfg(test)]

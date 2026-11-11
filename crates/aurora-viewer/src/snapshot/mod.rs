@@ -28,6 +28,7 @@ pub mod quality;
 pub mod reel;
 pub mod save;
 pub mod saved;
+pub mod style;
 pub mod viewfinder;
 
 use glam::{Mat4, Vec4};
@@ -368,6 +369,9 @@ pub struct Settings {
     /// The guide's look, what follows a save, the cut-out's matte, the
     /// 360° photo (`extras`).
     pub extras: extras::Extras,
+    /// The viewfinder's custom modes C1 to C3: the names of the photo
+    /// profiles pinned there (`saved`).
+    pub banks: [Option<String>; 3],
 }
 
 impl Default for Settings {
@@ -403,6 +407,7 @@ impl Default for Settings {
             look_settings: Default::default(),
             profiles: Default::default(),
             extras: Default::default(),
+            banks: Default::default(),
         }
     }
 }
