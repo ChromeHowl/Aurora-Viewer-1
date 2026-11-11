@@ -113,6 +113,9 @@ impl H {
             st: ChatUi {
                 style,
                 voice_on: true,
+                // as the app sets it from `chat_keep_focus`, on by default
+                // (the Legacy Viewer's CloseChatOnReturn off)
+                keep_focus: true,
                 ..ChatUi::default()
             },
             icons,
