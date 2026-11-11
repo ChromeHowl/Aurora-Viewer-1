@@ -2670,8 +2670,13 @@ mod tests {
     }
 
     fn settle(cam: &mut Camera, w: &mut World, s: &CameraSettings) {
+        settle_on(cam, w, s, &frame(1.0 / 60.0));
+    }
+
+    /// `settle` with a frame of the test's own (a head rotation, say).
+    fn settle_on(cam: &mut Camera, w: &mut World, s: &CameraSettings, f: &FrameInput) {
         for _ in 0..300 {
-            cam.update(w, s, &frame(1.0 / 60.0));
+            cam.update(w, s, f);
         }
     }
 
@@ -4593,7 +4598,7 @@ mod tests {
         let mut cam = Camera::default();
         let mut f = frame(1.0 / 60.0);
         f.head_rotation = Some(Quat::from_rotation_x(0.3));
-        settle(&mut cam, &mut w, &s);
+        settle_on(&mut cam, &mut w, &s, &f);
         assert!((cam.current_view().roll - 0.3).abs() < 0.01, "{}", cam.current_view().roll);
         assert_eq!(cam.roll, 0.0, "the camera's own roll is untouched");
         let locked = cam.current_view();
@@ -4605,17 +4610,17 @@ mod tests {
         }
         // given back: the head leads the roll again
         cam.release_view(false);
-        settle(&mut cam, &mut w, &s);
+        settle_on(&mut cam, &mut w, &s, &f);
         assert!((cam.current_view().roll + 0.4).abs() < 0.01);
         // damped standing by half
         let half = with_extra(CameraExtra {
             roll_damping: 0.5,
             ..s.extra.clone()
         });
-        settle(&mut cam, &mut w, &half);
+        settle_on(&mut cam, &mut w, &half, &f);
         assert!((cam.current_view().roll + 0.2).abs() < 0.01);
         // off: level again
-        settle(&mut cam, &mut w, &CameraSettings::default());
+        settle_on(&mut cam, &mut w, &CameraSettings::default(), &f);
         assert!(cam.current_view().roll.abs() < 1e-4);
     }
 
@@ -4689,9 +4694,17 @@ mod tests {
             ..strongest_smoothing()
         };
         let (mut cam, mut w) = alt_focused(90.0, &s);
+        // the alt focus keeps the camera where it is (its goal does not move)
+        cam.update(&mut w, &s, &frame(1.0 / 60.0));
+        // then the camera alone is sent 81 m nearer the same focus, in one
+        // frame and without an animation (the focus did not move): a jump
+        let focus = cam.focus_target;
+        let near = focus + (cam.position - focus) * 0.1;
+        cam.set_view(near, focus, &mut w.agent, &s);
         let before = cam.position;
         cam.update(&mut w, &s, &frame(1.0 / 60.0));
         let goal = cam.focus_target + cam.focus_offset_target;
+        assert!(goal.distance(before) > 50.0, "a large move: {}", goal.distance(before));
         assert!(cam.position.distance(goal) > 10.0, "smoothed, not jumped");
         assert!(cam.position.distance(before) < 1.0);
     }

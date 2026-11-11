@@ -280,7 +280,7 @@ mod tests {
 
     #[test]
     fn accept_key_matches_the_rfc_example() {
-        assert_eq!(accept_key("dGhlIHNhbXBsZSBub25jZQ=="), "s3pPLMBiTxaYIoNKZPeGlnvdgk4=");
+        assert_eq!(accept_key("dGhlIHNhbXBsZSBub25jZQ=="), "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=");
     }
 
     #[test]
@@ -290,7 +290,7 @@ mod tests {
             Upgrade::Accept { reply, used } => {
                 let reply = String::from_utf8(reply).unwrap();
                 assert!(reply.starts_with("HTTP/1.1 101"));
-                assert!(reply.contains("Sec-WebSocket-Accept: s3pPLMBiTxaYIoNKZPeGlnvdgk4=\r\n"));
+                assert!(reply.contains("Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n"));
                 assert_eq!(&request[used..], b"rest");
             }
             other => panic!("{other:?}"),
