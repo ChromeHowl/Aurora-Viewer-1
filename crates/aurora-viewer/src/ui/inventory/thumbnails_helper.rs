@@ -15,9 +15,9 @@ use crate::ui::widgets::{Floater, Modal, flat_button, primary_button_sized};
 use aurora_net::inventory::operations::metadata_thumbnail;
 use std::collections::BTreeMap;
 
-/// The item kinds the helper takes from a paste (LLIsType filters of
-/// onPasteItems): objects, clothing and body parts.
-const ITEM_KINDS: [i32; 3] = [6, 5, 13];
+/// The item kinds the helper takes from a paste, in the order onPasteItems
+/// collects them (its LLIsType passes): objects, body parts, clothing.
+const ITEM_KINDS: [i32; 3] = [6, 13, 5];
 /// Textures (onPasteTextures).
 const TEXTURE_KINDS: [i32; 1] = [0];
 
@@ -40,8 +40,10 @@ pub(super) struct State {
 
 /// The items of `kinds` among `roots`: an item itself, or what a folder
 /// holds at any depth, the Trash left out (collectDescendentsIf with
-/// EXCLUDE_TRASH). Only loaded folders are walked: the count of those still
-/// loading is returned so the log can say so.
+/// EXCLUDE_TRASH), in the order of `kinds` as onPasteItems collects them
+/// (one pass per kind), the oldest first within a kind. Only loaded folders
+/// are walked: the count of those still loading is returned so the log can
+/// say so.
 pub(super) fn collect(inv: &Inventory, roots: &[Uuid], kinds: &[i32]) -> (Vec<Uuid>, usize) {
     let mut found = Vec::new();
     let mut loading = 0;
@@ -62,7 +64,11 @@ pub(super) fn collect(inv: &Inventory, roots: &[Uuid], kinds: &[i32]) -> (Vec<Uu
             found.push(id);
         }
     }
-    found.sort_by_key(|id| inv.items.get(id).map(|it| it.created_at));
+    found.sort_by_key(|id| {
+        inv.items
+            .get(id)
+            .map(|it| (kinds.iter().position(|k| *k == it.asset_type), it.created_at))
+    });
     (found, loading)
 }
 
