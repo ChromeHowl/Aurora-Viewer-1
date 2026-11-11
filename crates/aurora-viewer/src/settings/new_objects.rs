@@ -236,8 +236,10 @@ mod tests {
 
     #[test]
     fn the_view_names_choices_and_what_a_drag_may_become() {
-        let mut inv = crate::world::inventory::Inventory::default();
-        inv.owner = AGENT;
+        let mut inv = crate::world::inventory::Inventory {
+            owner: AGENT,
+            ..Default::default()
+        };
         let mut tex = item(AT_TEXTURE, AGENT, FULL, 0);
         tex.name = "Wood".into();
         let mut script = item(AT_LSL_TEXT, AGENT, FULL, 0);
@@ -298,8 +300,10 @@ mod tests {
 
     #[test]
     fn the_default_texture_needs_full_permissions() {
-        let mut inv = crate::world::inventory::Inventory::default();
-        inv.owner = AGENT;
+        let inv = crate::world::inventory::Inventory {
+            owner: AGENT,
+            ..Default::default()
+        };
         let ok = |i: &InvItem| texture_allowed(&inv, i);
         assert!(ok(&item(AT_TEXTURE, AGENT, FULL, 0)), "full permissions");
         let mut group = item(AT_TEXTURE, OTHER, FULL, 0);

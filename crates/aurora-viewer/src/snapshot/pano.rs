@@ -315,7 +315,7 @@ mod tests {
         }
         let (x, y) = (clip.x / clip.w, clip.y / clip.w);
         let n = drawn_side(side) as f32;
-        ((-1.0..=1.0).contains(&x) && (-1.0..=1.0).contains(&y)).then(|| ((x + 1.0) * 0.5 * n - 0.5, (1.0 - y) * 0.5 * n - 0.5))
+        ((-1.0..=1.0).contains(&x) && (-1.0..=1.0).contains(&y)).then_some(((x + 1.0) * 0.5 * n - 0.5, (1.0 - y) * 0.5 * n - 0.5))
     }
 
     #[test]

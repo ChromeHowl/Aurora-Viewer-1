@@ -404,9 +404,11 @@ mod tests {
     }
 
     fn fixture() -> Inventory {
-        let mut inv = Inventory::default();
-        inv.root = id(ROOT);
-        inv.lib_root = id(LIB);
+        let mut inv = Inventory {
+            root: id(ROOT),
+            lib_root: id(LIB),
+            ..Default::default()
+        };
         folder(&mut inv, ROOT, Uuid::nil(), 8, false);
         folder(&mut inv, TRASH, id(ROOT), 14, false);
         folder(&mut inv, CLOTHES, id(ROOT), -1, false);
