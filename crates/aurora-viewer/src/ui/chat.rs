@@ -747,6 +747,22 @@ pub(crate) fn auto_close_ooc(text: &str) -> String {
     out
 }
 
+/// A conversation's field after a message: it keeps the keyboard, except
+/// the nearby chat's when the chat bar lets go of it too (Aurora's
+/// `chat_keep_focus` off, the Legacy CloseChatOnReturn) and
+/// FSUnfocusChatHistoryOnReturn is on (FSFloaterNearbyChat::sendChat).
+fn focus_after_send(resp: &egui::Response, nearby: bool, keep_focus: bool) {
+    if keeps_focus_after_send(nearby, keep_focus, display::get().more.unfocus_nearby_on_send) {
+        resp.request_focus();
+    } else {
+        resp.surrender_focus();
+    }
+}
+
+fn keeps_focus_after_send(nearby: bool, keep_focus: bool, unfocus_nearby: bool) -> bool {
+    !(nearby && !keep_focus && unfocus_nearby)
+}
+
 /// The line typed as it is sent: wrapped by Alt+Enter (`ooc_key`), then
 /// closed when AutoCloseOOC asks (nearby chat and conversations alike).
 fn typed_line(text: &str, ooc_key: bool) -> String {
@@ -1227,6 +1243,9 @@ fn line_job(
                 }
             })
     };
+    // FSColorIMsDistinctly: an IM copied over the world (these lines'
+    // only copies) in AgentIMColor, a contact set's colour first
+    let col = super::colors::console_im_color(line, world).unwrap_or(col);
     let mut job = egui::text::LayoutJob::default();
     let small = egui::TextFormat {
         color: p.muted_dim,
@@ -2096,15 +2115,27 @@ const USERNAME_MIN_W: f32 = 36.0;
 /// box keeps its place); what was cut shows on hover. Returns the response
 /// of the name, clickable.
 fn header_names(ui: &mut egui::Ui, p: &Palette, name: &str, username: Option<&str>, col: Color32, reserve: f32) -> egui::Response {
+    header_names_styled(ui, p, name, username, col, reserve, None)
+}
+
+/// `header_names` with a moderator's name style (FSModNameStyle) in place
+/// of the bold name.
+fn header_names_styled(
+    ui: &mut egui::Ui,
+    p: &Palette,
+    name: &str,
+    username: Option<&str>,
+    col: Color32,
+    reserve: f32,
+    moderator: Option<(crate::settings::chat_display::TextStyle, crate::settings::chat_display::TextStyle)>,
+) -> egui::Response {
     let room = ui.available_width() - reserve;
-    let label = super::widgets::elided_label(
-        ui,
-        RichText::new(name)
-            .size(super::fonts::chat_size(ui.ctx(), 13.0))
-            .strong()
-            .color(col),
-        room,
-    );
+    let size = super::fonts::chat_size(ui.ctx(), 13.0);
+    let text = match moderator {
+        Some(_) => thread::styled_name(ui.ctx(), name, size, col, moderator),
+        None => RichText::new(name).size(size).strong().color(col),
+    };
+    let label = super::widgets::elided_label(ui, text, room);
     let r = ui.add(label.sense(egui::Sense::click()));
     let Some(u) = username else {
         return r;
@@ -2469,6 +2500,7 @@ fn conversation_lines(ui: &mut egui::Ui, p: &Palette, l: Lines, st: &mut ChatUi,
             Rows::Thread(_) => None,
         },
         previews: Some(&mut st.previews),
+        moderators: st.selected.and_then(|id| w.groups.sessions.get(&id)).map(|s| &s.moderators),
     };
     let wash = find::wash(p);
     let current = search.find.as_ref().and_then(|f| f.current_line(view));
@@ -2616,6 +2648,9 @@ pub(crate) struct LineEnv<'a> {
     /// The cards under live links in all conversation styles; None in the
     /// History window and the on-screen chat.
     pub previews: Option<&'a mut previews::Previews>,
+    /// The moderators of the group chat or conference drawn, whose name
+    /// and text take the moderators' styles (FSHighlightGroupMods).
+    pub moderators: Option<&'a HashSet<uuid::Uuid>>,
 }
 
 /// One line of a conversation: the day when it changes, the sender's header
@@ -2706,6 +2741,8 @@ pub(crate) fn draw_line(ui: &mut egui::Ui, env: &mut LineEnv, line: &crate::worl
         None if own && !logged => env.own_name.to_owned(),
         None => line.from.clone(),
     };
+    // FSHighlightGroupMods: a moderator's name and text in their styles
+    let moderator = thread::moderator_styles(env.moderators, line);
     if look.header {
         ui.add_space(6.0);
         let username = cached.and_then(|n| n.chat_username(&names.options));
@@ -2738,7 +2775,7 @@ pub(crate) fn draw_line(ui: &mut egui::Ui, env: &mut LineEnv, line: &crate::worl
                         .unwrap_or_else(|| super::colors::sender_color(line));
                     let time = header_time(ui, p, hhmm(line.time));
                     let reserve = time.size().x + ui.spacing().item_spacing.x;
-                    let r = header_names(ui, p, &name, username.as_deref(), col, reserve);
+                    let r = header_names_styled(ui, p, &name, username.as_deref(), col, reserve, moderator);
                     // the inspector in the Legacy Viewer; Aurora opens the
                     // profile (a history line's when its sender is known)
                     let avatar = match (logged, own) {
@@ -2783,7 +2820,7 @@ pub(crate) fn draw_line(ui: &mut egui::Ui, env: &mut LineEnv, line: &crate::worl
                     &visible,
                     super::fonts::chat_size(ui.ctx(), 13.5),
                     tone.unwrap_or_else(|| super::colors::chat_color(line, world)),
-                    message_emphasis(line.kind, italics),
+                    thread::with_text_style(message_emphasis(line.kind, italics), moderator),
                     mark,
                 );
             }
@@ -3661,7 +3698,7 @@ fn classic_pane(
             }
         }
         draft.clear();
-        resp.request_focus();
+        focus_after_send(&resp, st.selected.is_none(), st.keep_focus);
     }
     st.typing_field = Some(typing::Field {
         to: st.selected.filter(|id| !world.is_group_session(id) && (resp.has_focus() || sent)),
@@ -4385,6 +4422,12 @@ mod tests {
         assert_eq!(super::ooc_with("brb", "((", "))"), "(( brb ))");
         assert_eq!(super::ooc_with("", "((", "))"), "");
         assert_eq!(super::auto_close_ooc("(( brb"), "(( brb ))");
+        // FSUnfocusChatHistoryOnReturn: only the nearby chat, only with
+        // the bar letting go too
+        assert!(!super::keeps_focus_after_send(true, false, true));
+        assert!(super::keeps_focus_after_send(true, true, true));
+        assert!(super::keeps_focus_after_send(false, false, true));
+        assert!(super::keeps_focus_after_send(true, false, false));
         assert_eq!(super::auto_close_ooc("((brb"), "((brb))");
         assert_eq!(super::auto_close_ooc("((brb "), "((brb ))");
         assert_eq!(super::auto_close_ooc("((brb :)"), "((brb :) ))");

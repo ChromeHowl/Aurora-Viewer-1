@@ -14177,3 +14177,62 @@ chatxl-action-highlight = Surligner
 chatxl-action-set-aside = Mettre de côté
 chatxl-replacement-hint = Texte de remplacement (vide : masquer)
 chatxl-uninstall-key = Clé de traduction ({ $service })
+l2s-crosshair-unknown = Agent inconnu
+l2s-crosshair-name = { $name }, { $meters } m
+l2s-crosshair-show = Nom sous le réticule
+l2s-crosshair-show-hint = En vue subjective, le nom et la distance du résident sous le réticule, dans la portée ci-dessous.
+l2s-bw-emojis = Emoji en noir et blanc
+l2s-bw-emojis-hint = Les emoji du texte prennent sa couleur, et le sélecteur les montre en gris.
+l2s-unfocus-nearby = Libérer aussi le champ du chat local
+l2s-unfocus-nearby-hint = Quand la barre de chat rend le clavier après un message, le champ du chat local de la fenêtre Conversations le rend aussi.
+l2s-log-im-copies = Enregistrer les copies dans la transcription du chat local
+l2s-log-im-copies-hint = Les MI affichés dans le chat local sont aussi écrits dans sa transcription, si elle est conservée.
+l2s-tab-order = Ordre des conversations
+l2s-tab-order-hint = L'ordre des types dans la liste des conversations.
+l2s-new-tabs-first = Nouvelles conversations en tête de leur type
+l2s-order-ims-groups-conferences = MI, groupes, conférences
+l2s-order-ims-conferences-groups = MI, conférences, groupes
+l2s-order-groups-conferences-ims = Groupes, conférences, MI
+l2s-order-groups-ims-conferences = Groupes, MI, conférences
+l2s-order-conferences-groups-ims = Conférences, groupes, MI
+l2s-order-conferences-ims-groups = Conférences, MI, groupes
+l2s-color-ims = Colorer à part les MI et le chat de groupe sur le monde
+l2s-color-ims-hint = Les MI et le chat de groupe affichés dans les lignes de chat sur le monde prennent leur propre couleur.
+l2s-color-ims-color = MI et chat de groupe
+l2s-color-username = Colorer les noms d'utilisateur à part
+l2s-color-username-hint = Le nom d'utilisateur sous le nom, sur les étiquettes, prend sa propre couleur.
+l2s-color-username-color = Noms d'utilisateur
+l2s-ban-all = Bannir de tous mes groupes
+l2s-unban-all = Lever le bannissement de tous mes groupes
+l2s-ban = Bannir
+l2s-unban = Lever le bannissement
+l2s-ban-all-question = Vous allez bannir { $name } des { $count } groupes où vous pouvez gérer les bannissements :
+l2s-unban-all-question = Vous allez lever le bannissement de { $name } dans les { $count } groupes où vous pouvez gérer les bannissements :
+l2s-ban-all-title = Bannissements de groupe
+l2s-ban-all-started = Mise à jour des bannissements de { $name } dans { $count } groupes, un groupe à la fois. Un rapport suivra à la fin.
+l2s-ban-all-report =
+    { $name } a été banni de { $done } groupes sur { $count }.
+    Banni de : { $succeeded }
+    Échec dans : { $failed }
+l2s-unban-all-report =
+    Le bannissement de { $name } a été levé dans { $done } groupes sur { $count }.
+    Levé dans : { $succeeded }
+    Échec dans : { $failed }
+l2s-worn-out-of-view = { $name } est dans une région proche, hors de vue
+l2s-worn-out-of-view-hint = Approchez-vous pour voir ce qu'il ou elle porte.
+l2s-worn-out-of-view-since = { $name } est hors de vue depuis { $time } : ce qu'il ou elle portait alors
+l2s-source-notice = Avis de groupe
+l2s-source-invite = Invitations de groupe
+l2s-source-offer = Offres d'inventaire
+l2s-source-friendship = Offres d'amitié
+l2s-source-lure = Offres de téléportation
+l2s-source-tp-request = Demandes de téléportation
+l2s-source-dialog = Dialogues de script
+l2s-omnifilter-import = Importer une note Legacy…
+l2s-omnifilter-export = Exporter en note Legacy…
+l2s-omnifilter-imported =
+    { $count ->
+        [one] { $count } règle importée
+       *[other] { $count } règles importées
+    }
+l2s-omnifilter-not-notecard = Ce fichier n'est pas une note de l'Omnifilter.

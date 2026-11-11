@@ -106,8 +106,14 @@ impl State {
     pub fn begin(&mut self, ctx: &egui::Context, world: &World) {
         let mut remaining: HashSet<_> = world.social.ims.iter().map(|s| s.other).collect();
         self.order.retain(|id| remaining.remove(id));
-        self.order
-            .extend(world.social.ims.iter().map(|s| s.other).filter(|id| remaining.remove(id)));
+        // a new conversation goes last, or first of its section with
+        // FSAutoOrderIMTabsAtTop
+        let first = super::display::get().more.new_tabs_first;
+        for id in world.social.ims.iter().map(|s| s.other).filter(|id| remaining.remove(id)) {
+            let own = section(world, &id);
+            let at = crate::settings::chat_more::insert_at(&self.order, first, |other| section(world, other) == own);
+            self.order.insert(at, id);
+        }
         self.rows.clear();
         self.local = None;
         self.shift = 0.0;

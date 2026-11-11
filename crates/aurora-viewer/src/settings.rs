@@ -8,6 +8,7 @@ pub mod area_search;
 pub mod avatar_motion;
 pub mod backup;
 pub mod chat_display;
+pub mod chat_more;
 pub mod chat_translation;
 pub mod draw_stepping;
 mod hover_height;
@@ -1685,6 +1686,8 @@ pub struct ColorSettings {
     pub tag_match: Rgba,
     /// Custom display name (NameTagMismatch).
     pub tag_mismatch: Rgba,
+    /// The username of the tags with FSColorUsername (NameTagUsername).
+    pub tag_username: Rgba,
     // minimap
     pub map_me: Rgba,
     pub map_other: Rgba,
@@ -1709,6 +1712,8 @@ pub struct ColorSettings {
     /// Script errors (DEBUG_CHANNEL).
     pub chat_errors: Rgba,
     pub chat_object_im: Rgba,
+    /// IMs and group chat with FSColorIMsDistinctly (AgentIMColor).
+    pub chat_im: Rgba,
     /// llOwnerSay.
     pub chat_owner: Rgba,
     pub chat_urls: Rgba,
@@ -1735,6 +1740,7 @@ impl Default for ColorSettings {
             tag_linden: hex(0xF472B6),
             tag_match: hex(0xE8EDFB),
             tag_mismatch: hex(0xE8EDFB),
+            tag_username: hex(0xFFFFFF),
             map_me: hex(0x8B5CF6),
             map_other: hex(0x4ADE80),
             map_friend: hex(0x818CF8),
@@ -1756,6 +1762,7 @@ impl Default for ColorSettings {
             chat_system: hex(0x9AA6C6),
             chat_errors: hex(0xF87171),
             chat_object_im: hex(0xA78BFA),
+            chat_im: hex(0xFFFFFF),
             chat_owner: hex(0xFCD34D),
             chat_urls: hex(0x5EEAD4),
             // every clickable link of a text (web, place, avatar, group)

@@ -6,6 +6,7 @@
 use super::super::COMBO_W;
 use super::super::cx::{Cx, field};
 use crate::settings::chat_display::{ConsoleFont, MARKER_CHARS, TabNameFormat, TextStyle};
+use crate::settings::chat_more::TabOrder;
 
 /// The nearby chat's group and the conversations' group.
 pub fn groups(cx: &mut Cx) {
@@ -92,6 +93,21 @@ pub fn groups(cx: &mut Cx) {
             &field!(chat_display.emoji_popup_while_typing),
         );
         cx.toggle(tr!("chat-extras-emoji-button"), "", &field!(chat_display.show_emoji_button));
+        // FSUseBWEmojis
+        cx.toggle(
+            tr!("l2s-bw-emojis"),
+            tr!("l2s-bw-emojis-hint"),
+            &field!(chat_display.more.bw_emojis),
+        );
+        // FSUnfocusChatHistoryOnReturn, with the bar letting go (CloseChatOnReturn)
+        let keeps = cx.s.chat_keep_focus;
+        cx.subs(keeps, |cx| {
+            cx.toggle(
+                tr!("l2s-unfocus-nearby"),
+                tr!("l2s-unfocus-nearby-hint"),
+                &field!(chat_display.more.unfocus_nearby_on_send),
+            );
+        });
     });
     cx.group(tr!("chat-extras-group-conversations"), |cx| {
         // FSShowIMInChatHistory and FSIMChatHistoryFade
@@ -103,6 +119,12 @@ pub fn groups(cx: &mut Cx) {
         let off = !cx.s.chat_display.im_in_nearby_chat;
         cx.subs(off, |cx| {
             cx.slider(tr!("chat-extras-im-fade"), "", &field!(chat_display.im_nearby_fade), 0.25..=1.0, "");
+            // FSLogIMInChatHistory
+            cx.toggle(
+                tr!("l2s-log-im-copies"),
+                tr!("l2s-log-im-copies-hint"),
+                &field!(chat_display.more.log_im_copies),
+            );
         });
         // FSLogImToChatConsole, FSLogGroupImToChatConsole
         cx.toggle(
@@ -181,6 +203,15 @@ pub fn groups(cx: &mut Cx) {
                 (TabNameFormat::UserThenDisplay, tr!("chat-extras-name-user-display")),
             ],
         );
+        // FSAutoOrderIMTabsPriorities, FSAutoOrderIMTabsAtTop
+        let orders: Vec<_> = TabOrder::ALL.iter().map(|o| (*o, tab_order_label(*o))).collect();
+        cx.combo(
+            tr!("l2s-tab-order"),
+            tr!("l2s-tab-order-hint"),
+            &field!(chat_display.more.tab_order),
+            &orders,
+        );
+        cx.toggle(tr!("l2s-new-tabs-first"), "", &field!(chat_display.more.new_tabs_first));
         // FSIMSystemMessageBrackets, FSChatHistoryShowYou, FSMarkObjects
         cx.toggle(
             tr!("chat-extras-system-brackets"),
@@ -192,6 +223,19 @@ pub fn groups(cx: &mut Cx) {
         // FSShowIMSendButton
         cx.toggle(tr!("chat-extras-im-send-button"), "", &field!(chat_display.show_im_send_button));
     });
+}
+
+/// The orders of FSAutoOrderIMTabsPriorities, as the Legacy combo box.
+fn tab_order_label(order: TabOrder) -> &'static str {
+    use aurora_i18n::tr;
+    match order {
+        TabOrder::ImsGroupsConferences => tr!("l2s-order-ims-groups-conferences"),
+        TabOrder::ImsConferencesGroups => tr!("l2s-order-ims-conferences-groups"),
+        TabOrder::GroupsConferencesIms => tr!("l2s-order-groups-conferences-ims"),
+        TabOrder::GroupsImsConferences => tr!("l2s-order-groups-ims-conferences"),
+        TabOrder::ConferencesGroupsIms => tr!("l2s-order-conferences-groups-ims"),
+        TabOrder::ConferencesImsGroups => tr!("l2s-order-conferences-ims-groups"),
+    }
 }
 
 /// The eight styles of FSModNameStyle / FSModTextStyle.

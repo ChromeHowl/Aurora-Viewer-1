@@ -14148,3 +14148,58 @@ chatxl-action-highlight = 強調表示
 chatxl-action-set-aside = 保留
 chatxl-replacement-hint = 置換テキスト（空欄：非表示）
 chatxl-uninstall-key = 翻訳キー（{ $service }）
+l2s-crosshair-unknown = 不明なエージェント
+l2s-crosshair-name = { $name }、{ $meters }m
+l2s-crosshair-show = 照準の下に名前を表示
+l2s-crosshair-show-hint = マウスルックで、照準の下にいる住人の名前と距離を、下の範囲内で表示します。
+l2s-bw-emojis = 白黒の絵文字
+l2s-bw-emojis-hint = テキスト内の絵文字は文字色で表示され、ピッカーではグレーで表示されます。
+l2s-unfocus-nearby = 近くのチャット欄からもフォーカスを外す
+l2s-unfocus-nearby-hint = メッセージ送信後にチャットバーがキーボードを離すとき、会話ウィンドウの近くのチャット欄も離します。
+l2s-log-im-copies = コピーを近くのチャットの記録に保存
+l2s-log-im-copies-hint = 近くのチャットに表示された IM も、記録が有効なときはその記録に書き込まれます。
+l2s-tab-order = 会話の並び順
+l2s-tab-order-hint = 会話リストでの種類の順番です。
+l2s-new-tabs-first = 新しい会話を種類の先頭に追加
+l2s-order-ims-groups-conferences = IM、グループ、会議
+l2s-order-ims-conferences-groups = IM、会議、グループ
+l2s-order-groups-conferences-ims = グループ、会議、IM
+l2s-order-groups-ims-conferences = グループ、IM、会議
+l2s-order-conferences-groups-ims = 会議、グループ、IM
+l2s-order-conferences-ims-groups = 会議、IM、グループ
+l2s-color-ims = ワールド上の IM とグループチャットを別の色にする
+l2s-color-ims-hint = ワールド上のチャット行に表示される IM とグループチャットを専用の色にします。
+l2s-color-ims-color = IM とグループチャット
+l2s-color-username = ユーザー名を別の色にする
+l2s-color-username-hint = 名前タグの名前の下にあるユーザー名を専用の色にします。
+l2s-color-username-color = ユーザー名
+l2s-ban-all = 自分のすべてのグループから追放
+l2s-unban-all = 自分のすべてのグループで追放を解除
+l2s-ban = 追放
+l2s-unban = 追放を解除
+l2s-ban-all-question = { $name } を、追放を管理できる { $count } 個のすべてのグループから追放しようとしています：
+l2s-unban-all-question = 追放を管理できる { $count } 個のすべてのグループで、{ $name } の追放を解除しようとしています：
+l2s-ban-all-title = グループの追放
+l2s-ban-all-started = { $name } の追放を { $count } 個のグループで 1 つずつ更新しています。完了したら報告します。
+l2s-ban-all-report =
+    { $name } は { $count } 個中 { $done } 個のグループで追放されました。
+    追放：{ $succeeded }
+    失敗：{ $failed }
+l2s-unban-all-report =
+    { $name } の追放は { $count } 個中 { $done } 個のグループで解除されました。
+    解除：{ $succeeded }
+    失敗：{ $failed }
+l2s-worn-out-of-view = { $name } は近くのリージョンにいますが、視界の外です
+l2s-worn-out-of-view-hint = 近づくと着用しているものが見えます。
+l2s-worn-out-of-view-since = { $name } は { $time } から視界の外です：その時に着用していたもの
+l2s-source-notice = グループ通知
+l2s-source-invite = グループへの招待
+l2s-source-offer = インベントリの提供
+l2s-source-friendship = フレンドの申し出
+l2s-source-lure = テレポートの誘い
+l2s-source-tp-request = テレポートの依頼
+l2s-source-dialog = スクリプトのダイアログ
+l2s-omnifilter-import = Legacy のノートカードを読み込む…
+l2s-omnifilter-export = Legacy のノートカードとして書き出す…
+l2s-omnifilter-imported = { $count } 件のルールを読み込みました
+l2s-omnifilter-not-notecard = このファイルは Omnifilter のノートカードではありません。

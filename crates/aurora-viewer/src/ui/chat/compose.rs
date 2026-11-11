@@ -273,7 +273,7 @@ pub(super) fn show(
                     }
                 }
                 draft.clear();
-                resp.request_focus();
+                super::focus_after_send(&resp, st.selected.is_none(), st.keep_focus);
             }
             st.typing_field = Some(typing::Field {
                 to: st

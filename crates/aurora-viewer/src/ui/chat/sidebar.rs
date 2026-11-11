@@ -77,11 +77,19 @@ pub(super) fn section(world: &World, id: &Uuid) -> Section {
 }
 
 /// The sections from top to bottom: the sets shown apart (highest
-/// priority first), the private messages, the groups, the conferences.
+/// priority first), then the kinds in the order chosen
+/// (FSAutoOrderIMTabsPriorities; by default the private messages, the
+/// groups, the conferences).
 fn sections(world: &World) -> impl Iterator<Item = Section> {
+    use crate::settings::chat_more::ConversationKind;
+    let kinds = super::display::get().more.tab_order.kinds().map(|k| match k {
+        ConversationKind::Private => Kind::Private,
+        ConversationKind::Group => Kind::Group,
+        ConversationKind::Conference => Kind::Conference,
+    });
     (0..world.contact_sets.chat_sections().len())
         .map(Section::Set)
-        .chain([Kind::Private, Kind::Group, Kind::Conference].map(Section::Kind))
+        .chain(kinds.map(Section::Kind))
 }
 
 /// The insignia of a group conversation's group: our membership's, else

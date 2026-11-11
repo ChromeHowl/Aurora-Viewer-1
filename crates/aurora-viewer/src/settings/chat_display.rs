@@ -91,6 +91,8 @@ pub struct ChatDisplay {
     /// FSSecondsinChatTimestamps (off): seconds in the times of the chat
     /// and of the transcripts.
     pub seconds_in_timestamps: bool,
+    /// More options (`settings/chat_more.rs`).
+    pub more: super::chat_more::ChatMore,
 }
 
 impl Default for ChatDisplay {
@@ -125,6 +127,7 @@ impl Default for ChatDisplay {
             show_im_send_button: true,
             show_muted_chat: false,
             seconds_in_timestamps: false,
+            more: Default::default(),
         }
     }
 }

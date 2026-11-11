@@ -211,7 +211,9 @@ impl World {
         let from = match line.kind {
             ChatKind::System => String::new(),
             ChatKind::Own(_) => names.complete(&self.agent_id).unwrap_or_else(|| line.from.clone()),
-            ChatKind::Local(_) | ChatKind::Im if !line.source.is_nil() => names.complete(&line.source).unwrap_or_else(|| line.from.clone()),
+            ChatKind::Local(_) | ChatKind::Im if !line.source.is_nil() && line.origin != Origin::Copy => {
+                names.complete(&line.source).unwrap_or_else(|| line.from.clone())
+            }
             _ => line.from.clone(),
         };
         // the verbs Firestorm puts before what is shouted or whispered
@@ -293,10 +295,17 @@ impl World {
     }
 
     /// A line of the nearby chat, written when the nearby chat is logged
-    /// (LogNearbyChat). Instant messages shown there are not
-    /// (FSLogIMInChatHistory is off by default), those of objects are.
+    /// (LogNearbyChat). The instant messages copied there only with
+    /// FSLogIMInChatHistory (off by default; FSFloaterNearbyChat::
+    /// addMessage), behind their "IM:" or group name; those of objects are.
     pub(super) fn log_nearby(&mut self, line: &ChatLine) {
-        if line.origin != Origin::Live || !self.chat_log.cfg.log_nearby || line.kind == ChatKind::Im || self.chat_log.identity().is_none() {
+        let copy = line.origin == Origin::Copy && line.kind == ChatKind::Im;
+        let logged = if copy {
+            self.chat_display.more.log_im_copies
+        } else {
+            line.origin == Origin::Live && line.kind != ChatKind::Im
+        };
+        if !logged || !self.chat_log.cfg.log_nearby || self.chat_log.identity().is_none() {
             return;
         }
         let (from, text) = self.transcript_text(line);
@@ -727,6 +736,30 @@ mod tests {
                 ("Me Resident".to_owned(), "whispers: psst".to_owned())
             ]
         );
+        clean(&w, &root);
+    }
+
+    #[test]
+    fn copied_ims_enter_the_nearby_transcript_only_when_asked() {
+        let root = temp();
+        let me = Uuid::from_u128(1);
+        let jane = Uuid::from_u128(2);
+        let mut w = world(&root, me);
+        w.chat_log.cfg.log_nearby = true;
+        let copy = |text: &str| ChatLine {
+            time: SystemTime::now(),
+            from: "IM: Jane Doe".into(),
+            text: text.into(),
+            kind: ChatKind::Im,
+            source: jane,
+            origin: Origin::Copy,
+        };
+        w.nearby_push(copy("not logged"));
+        w.chat_display.more.log_im_copies = true;
+        w.nearby_push(copy("logged"));
+        settle(&mut w);
+        // with the "IM:" of the copy, as FSFloaterNearbyChat::addMessage
+        assert_eq!(file_texts(&w, names::NEARBY), [("IM: Jane Doe".to_owned(), "logged".to_owned())]);
         clean(&w, &root);
     }
 

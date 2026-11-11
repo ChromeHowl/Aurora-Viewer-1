@@ -163,6 +163,29 @@ pub fn chat_color_near(line: &ChatLine, world: &World) -> Color32 {
     text(v)
 }
 
+/// An IM or group line copied into the chat lines over the world, in its
+/// own colour with FSColorIMsDistinctly (AgentIMColor, LLViewerChat::
+/// getChatColor with for_console, indra/newview/llviewerchat.cpp,
+/// originally LGPL 2.1); a contact set's colour still wins
+/// (LGGContactSets::colorize). None for any other line or with the option
+/// off.
+pub fn console_im_color(line: &ChatLine, world: &World) -> Option<Color32> {
+    (line.origin == crate::world::Origin::Copy
+        && line.kind == ChatKind::Im
+        && crate::ui::chat::display::get().more.color_ims
+        && contact_chat_color(line, world).is_none())
+    .then(|| text(get().chat_im))
+}
+
+/// The username of the name tags with FSColorUsername (NameTagUsername,
+/// LLVOAvatar::idleUpdateNameTagText); None with the option off.
+pub fn username_color() -> Option<Color32> {
+    crate::ui::chat::display::get()
+        .more
+        .color_username
+        .then(|| text(get().tag_username))
+}
+
 /// Text of a script error (ScriptErrorColor), the Aurora red by default:
 /// the same in every style of the chat (#1263).
 pub fn script_error_color() -> Color32 {

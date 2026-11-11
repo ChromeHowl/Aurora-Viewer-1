@@ -14181,3 +14181,62 @@ chatxl-action-highlight = Highlight
 chatxl-action-set-aside = Set aside
 chatxl-replacement-hint = Replacement text (empty: hide)
 chatxl-uninstall-key = Translation key ({ $service })
+l2s-crosshair-unknown = Unknown agent
+l2s-crosshair-name = { $name }, { $meters }m
+l2s-crosshair-show = Name under the crosshair
+l2s-crosshair-show-hint = In mouselook, the name and distance of the resident under the crosshair, within the range below.
+l2s-bw-emojis = Black and white emoji
+l2s-bw-emojis-hint = Emoji in the text take its colour, and the picker shows them in greys.
+l2s-unfocus-nearby = Release the nearby chat field too
+l2s-unfocus-nearby-hint = When the chat bar lets go of the keyboard after a message, the nearby chat field of the Conversations window does too.
+l2s-log-im-copies = Save the copies in the nearby chat transcript
+l2s-log-im-copies-hint = The IMs shown in the nearby chat are also written to its transcript, when it is kept.
+l2s-tab-order = Order of the conversations
+l2s-tab-order-hint = The order of the kinds in the list of conversations.
+l2s-new-tabs-first = New conversations first of their kind
+l2s-order-ims-groups-conferences = IMs, Groups, Conferences
+l2s-order-ims-conferences-groups = IMs, Conferences, Groups
+l2s-order-groups-conferences-ims = Groups, Conferences, IMs
+l2s-order-groups-ims-conferences = Groups, IMs, Conferences
+l2s-order-conferences-groups-ims = Conferences, Groups, IMs
+l2s-order-conferences-ims-groups = Conferences, IMs, Groups
+l2s-color-ims = Colour IMs and group chat distinctly over the world
+l2s-color-ims-hint = The IMs and group chat shown in the chat lines over the world take their own colour.
+l2s-color-ims-color = IMs and group chat
+l2s-color-username = Colour usernames distinctly
+l2s-color-username-hint = The username under the name on the name tags takes its own colour.
+l2s-color-username-color = Usernames
+l2s-ban-all = Ban from all my groups
+l2s-unban-all = Unban from all my groups
+l2s-ban = Ban
+l2s-unban = Unban
+l2s-ban-all-question = You are about to ban { $name } from all { $count } groups you can manage bans in:
+l2s-unban-all-question = You are about to lift the ban on { $name } in all { $count } groups you can manage bans in:
+l2s-ban-all-title = Group bans
+l2s-ban-all-started = Updating group bans for { $name } in { $count } groups, one group at a time. A report will follow when done.
+l2s-ban-all-report =
+    { $name } has been banned in { $done } of { $count } groups.
+    Banned in: { $succeeded }
+    Failed in: { $failed }
+l2s-unban-all-report =
+    The ban on { $name } has been lifted in { $done } of { $count } groups.
+    Lifted in: { $succeeded }
+    Failed in: { $failed }
+l2s-worn-out-of-view = { $name } is in a region nearby, out of view
+l2s-worn-out-of-view-hint = Come closer to see what they wear.
+l2s-worn-out-of-view-since = { $name } is out of view since { $time }: what they wore then
+l2s-source-notice = Group notices
+l2s-source-invite = Group invitations
+l2s-source-offer = Inventory offers
+l2s-source-friendship = Friendship offers
+l2s-source-lure = Teleport offers
+l2s-source-tp-request = Teleport requests
+l2s-source-dialog = Script dialogs
+l2s-omnifilter-import = Import a Legacy notecard…
+l2s-omnifilter-export = Export as a Legacy notecard…
+l2s-omnifilter-imported =
+    { $count ->
+        [one] { $count } rule imported
+       *[other] { $count } rules imported
+    }
+l2s-omnifilter-not-notecard = This file is not an Omnifilter notecard.
