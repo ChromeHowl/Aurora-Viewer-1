@@ -404,7 +404,12 @@ fn crosshair(cx: &mut Cx) {
             tr!("b6-markers-show-hint"),
             &field!(people.mouselook_markers),
         );
-        let off = !cx.s.people.mouselook_markers;
+        cx.toggle(
+            tr!("l2s-crosshair-show"),
+            tr!("l2s-crosshair-show-hint"),
+            &field!(people.mouselook_name),
+        );
+        let off = !cx.s.people.mouselook_markers && !cx.s.people.mouselook_name;
         cx.subs(off, |cx| {
             cx.slider(
                 tr!("b6-markers-range"),

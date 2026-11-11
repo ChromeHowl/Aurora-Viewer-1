@@ -229,6 +229,8 @@ fn face(env: &Env<'_>, level: Level, c: &Content, t: f32) -> Face {
         .nameplate_name
         .map(crate::ui::colors::set_color)
         .unwrap_or_else(|| c.role.name_color(p, &crate::ui::colors::get()));
+    // the chat range's colour (FSTagShowDistanceColors), as the classic tag
+    let color = c.name_band.map_or(color, |band| crate::ui::colors::band_color(p, band));
     // a radar mark wins (LLVOAvatar::getNameTagColor applies it last)
     let color = c.marked.map_or(color, |[r, g, b]| Color32::from_rgb(r, g, b));
     let color = surface_tint(env, c).map(|bg| readable_name(color, bg, p.ink)).unwrap_or(color);
@@ -245,14 +247,16 @@ fn face(env: &Env<'_>, level: Level, c: &Content, t: f32) -> Face {
         (false, Some(band)) => crate::ui::colors::band_color(p, band),
         (false, None) => p.muted,
     };
+    // FSColorUsername: the username in its own colour (NameTagUsername)
+    let user_color = crate::ui::colors::username_color().unwrap_or(p.muted);
     let subs = super::sub_lines(level, c).map(|sub| {
         Some(match sub? {
-            SubLine::Username(user, None) => (line(env, user, small(p.muted), m.max_text), None),
+            SubLine::Username(user, None) => (line(env, user, small(user_color), m.max_text), None),
             SubLine::Username(user, Some(d)) => {
                 // the figure is never the part that gets elided
                 let tail = line(env, &format!(" · {}", d.short), small(detail_color(d)), m.max_text * 0.6);
                 let room = m.max_text - tail.size().x;
-                (line(env, user, small(p.muted), room), Some(tail))
+                (line(env, user, small(user_color), room), Some(tail))
             }
             SubLine::Title(title) => (line(env, title, small(p.teal), m.max_text), None),
             SubLine::Detail(d) => (line(env, &d.full, small(detail_color(d)), m.max_text), None),

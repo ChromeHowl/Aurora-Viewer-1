@@ -75,6 +75,9 @@ pub struct Emoji {
     /// The egui pass that last drew the picker: a picker not drawn in the
     /// pass before was just opened, and its search takes the keyboard.
     shown_pass: Option<u64>,
+    /// FSUseBWEmojis: the text draws emoji with the fonts' black and white
+    /// glyphs, in the text's colour, and the picker in greys.
+    monochrome: bool,
 }
 
 /// What the picker did this pass: an emoji chosen, or Escape pressed (the
@@ -170,6 +173,17 @@ const JUMBO_SCALE: f32 = 2.4;
 /// bitmap (136 × 128) instead of an enlarged blur.
 const DECODED: u32 = 64;
 
+/// The picture in greys (Rec. 709 luminance), its transparency kept.
+fn grey(img: &mut image::RgbaImage) {
+    for px in img.pixels_mut() {
+        let [r, g, b, a] = px.0;
+        let l = (0.2126 * f32::from(r) + 0.7152 * f32::from(g) + 0.0722 * f32::from(b))
+            .round()
+            .clamp(0.0, 255.0) as u8;
+        px.0 = [l, l, l, a];
+    }
+}
+
 impl Emoji {
     pub fn load() -> Emoji {
         // The font asked for (to compare another one), else the built-in one.
@@ -209,6 +223,7 @@ impl Emoji {
             tab: 0,
             query: String::new(),
             shown_pass: None,
+            monochrome: false,
         }
     }
 
@@ -216,9 +231,20 @@ impl Emoji {
         self.face.is_some()
     }
 
-    /// Is this character drawn as a color emoji?
+    /// FSUseBWEmojis (published each frame): the pictures decoded so far
+    /// are forgotten when it changes.
+    pub fn set_monochrome(&mut self, on: bool) {
+        if self.monochrome != on {
+            self.monochrome = on;
+            self.glyphs.clear();
+        }
+    }
+
+    /// Is this character drawn as a color emoji? Never in black and white:
+    /// the text's fonts then draw it, as the Legacy Viewer's black and white
+    /// emoji font does.
     pub fn has(&self, c: char) -> bool {
-        (c as u32) >= 0x2190 && self.face.as_ref().is_some_and(|f| f.glyph_index(c).is_some())
+        !self.monochrome && (c as u32) >= 0x2190 && self.face.as_ref().is_some_and(|f| f.glyph_index(c).is_some())
     }
 
     /// Can the picker and the recent row draw it? Wider than [`Emoji::has`],
@@ -248,15 +274,23 @@ impl Emoji {
             .filter(|img| img.format == ttf_parser::RasterImageFormat::PNG)
             .and_then(|img| image::load_from_memory(img.data).ok())
             .map(|img| {
-                let img = if full {
+                let mut img = if full {
                     img.to_rgba8()
                 } else {
                     img.resize(DECODED, DECODED, image::imageops::FilterType::Triangle).to_rgba8()
                 };
+                if self.monochrome {
+                    grey(&mut img);
+                }
                 let (w, h) = img.dimensions();
                 egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], img.as_raw())
             });
-        let name = format!("emoji-{:x}{}", c as u32, if full { "-full" } else { "" });
+        let name = format!(
+            "emoji-{:x}{}{}",
+            c as u32,
+            if full { "-full" } else { "" },
+            if self.monochrome { "-bw" } else { "" }
+        );
         let g = match decoded {
             Some(ci) => Glyph::Ready(ctx.load_texture(name, ci, egui::TextureOptions::LINEAR)),
             None => Glyph::Missing,
@@ -681,6 +715,20 @@ mod tests {
             assert!(!emoji.only_emoji(text), "{text:?} is not emoji alone");
             assert_eq!(emoji.message_size(text, 13.5), 13.5);
         }
+    }
+
+    #[test]
+    fn black_and_white_emoji_are_text_and_grey_pictures() {
+        let mut emoji = Emoji::load();
+        assert!(emoji.has('😀'));
+        emoji.set_monochrome(true);
+        assert!(!emoji.has('😀') && !emoji.only_emoji("😀"), "drawn by the text's fonts");
+        let mut img = image::RgbaImage::from_pixel(1, 1, image::Rgba([255, 0, 0, 128]));
+        grey(&mut img);
+        let [r, g, b, a] = img.get_pixel(0, 0).0;
+        assert!(r == g && g == b && a == 128);
+        emoji.set_monochrome(false);
+        assert!(emoji.has('😀'));
     }
 
     /// Opened, the picker's search has the keyboard and what is typed

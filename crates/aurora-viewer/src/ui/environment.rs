@@ -63,6 +63,9 @@ pub struct EnvironmentUi {
     pub open_list: Option<SettingsKind>,
     /// Type this into an open list's search field (demo captures).
     pub search_list: Option<(SettingsKind, &'static str)>,
+    /// The sky assets known to be made for PBR, as the sky list was last
+    /// sorted with; `None` after a rebuild of the lists.
+    pbr_sorted: Option<std::collections::HashSet<Uuid>>,
 }
 
 impl EnvironmentUi {
@@ -75,6 +78,7 @@ impl EnvironmentUi {
         if self.built != Some(version) && (due || sort_changed) {
             let order = super::inventory::view::picker_order(ctx, inv);
             self.catalog = SettingsCatalog::build(inv, |id| order.rank(id));
+            self.pbr_sorted = None;
             self.built = Some(version);
             self.built_at = Some(std::time::Instant::now());
         }
@@ -82,6 +86,24 @@ impl EnvironmentUi {
 
     pub fn catalog(&self) -> &SettingsCatalog {
         &self.catalog
+    }
+
+    /// The skies made for PBR first in the sky list (as the photo window's
+    /// and the quick preferences' lists show them): `probe` tells whether a
+    /// sky asset is one, `None` while it loads. Sorted again only when what
+    /// is known changes.
+    pub fn sort_pbr_skies(&mut self, mut probe: impl FnMut(Uuid) -> Option<bool>) {
+        let known: std::collections::HashSet<Uuid> = self
+            .catalog
+            .sky
+            .iter()
+            .filter(|c| probe(c.asset) == Some(true))
+            .map(|c| c.asset)
+            .collect();
+        if self.pbr_sorted.as_ref() != Some(&known) {
+            env_select::pbr_first(&mut self.catalog.sky, |a| known.contains(a));
+            self.pbr_sorted = Some(known);
+        }
     }
 
     /// The selector window. `lighting` opens "Personal lighting".

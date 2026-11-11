@@ -13948,7 +13948,7 @@ chat-extras-show-muted-hint = What blocked residents and objects say stays in th
 chat-extras-show-chat-type = Volume button in nearby chat
 chat-extras-show-chat-type-hint = The whisper, say and shout button beside the nearby chat field
 chat-extras-beyond-range = Dim chat from afar
-chat-extras-beyond-range-hint = The colour of nearby chat said from more than 10 m away is multiplied by this factor (1: unchanged)
+chat-extras-beyond-range-hint = The colour of nearby chat said from beyond the say range (20 m) is multiplied by this factor (1: unchanged)
 chat-extras-console-font = Size of the chat lines over the world
 chat-extras-console-font-small = Small
 chat-extras-console-font-medium = Medium
@@ -14366,3 +14366,98 @@ b7-light-radius = Show the light radius of the selection
 b7-select-group-owned-hint = Off, a selection rectangle leaves out the objects owned by a group
 b7-hide-selected = Hide selected objects
 b7-hide-selected-hint = While the build tools are open, the selection is not drawn; its outline stays
+
+# Rendering and photo extras (render_photo)
+rphoto-autotune = Auto-tune to a target frame rate
+rphoto-autotune-enable = Auto-tune
+rphoto-autotune-enable-help = Lowers the avatars' render time limit and the draw distance until the target frame rate is reached, then stops unless locked. Avatars over the limit are drawn as impostors.
+rphoto-autotune-target = Target frame rate
+rphoto-autotune-target-help = The frame rate the auto-tune tries to reach (FPS).
+rphoto-autotune-lock = Keep tuning
+rphoto-autotune-lock-help = The auto-tune keeps adjusting after the target is reached, until it is turned off.
+rphoto-autotune-keep-lock = Keep tuning in later sessions
+rphoto-autotune-keep-lock-help = With "Keep tuning", the auto-tune is on again at the next login.
+rphoto-autotune-strategy = What to tune
+rphoto-autotune-strategy-help = What the auto-tune may lower to reach the target.
+rphoto-autotune-avatars = Avatars only
+rphoto-autotune-both = Avatars and scene
+rphoto-autotune-scene = Scene only
+rphoto-autotune-dd-min = Lowest draw distance
+rphoto-autotune-dd-min-help = The auto-tune never lowers the draw distance under this.
+rphoto-autotune-dd-target = Preferred draw distance
+rphoto-autotune-dd-target-help = The draw distance the auto-tune climbs back to when there is time to spare.
+rphoto-autotune-by-distance = Fully draw only nearby avatars
+rphoto-autotune-by-distance-help = While the auto-tune is on, the avatars farther than the distance below are drawn as impostors.
+rphoto-autotune-distance = Nearby avatars distance
+rphoto-autotune-distance-help = Avatars within this distance of the camera are drawn in full.
+rphoto-dof-alphas = Focus on transparent surfaces
+rphoto-dof-alphas-help = Glass, hair and other blended surfaces get their own blur, as in the Legacy Viewer, instead of the blur of what lies behind them.
+rphoto-impostor-exclude = Never impostor avatars wearing animesh
+rphoto-impostor-exclude-help = Avatars wearing an animated mesh are always drawn in full, whatever their complexity or rank. Blocked residents stay grey silhouettes.
+rphoto-precaching = Pre-caching delay at login
+rphoto-precaching-help = How long the loading screen stays at least after arriving in the world, so that more of it has loaded. 0 shows the world as soon as the ground is there.
+rphoto-transparent-water = Transparent water
+rphoto-transparent-water-help = Off, the water is opaque: nothing is seen under its surface.
+rphoto-view-transparency = Transparency (this session)
+rphoto-view-transparency-help = Off, what others own is drawn opaque, for your view only. Your own objects are untouched. Fully invisible faces stay hidden.
+rphoto-view-fullbright = Fullbright (this session)
+rphoto-view-fullbright-help = Off, fullbright faces of what others own are lit like the rest, for your view only. Your own objects are untouched.
+l2s-crosshair-unknown = Unknown agent
+l2s-crosshair-name = { $name }, { $meters }m
+l2s-crosshair-show = Name under the crosshair
+l2s-crosshair-show-hint = In mouselook, the name and distance of the resident under the crosshair, within the range below.
+l2s-bw-emojis = Black and white emoji
+l2s-bw-emojis-hint = Emoji in the text take its colour, and the picker shows them in greys.
+l2s-unfocus-nearby = Release the nearby chat field too
+l2s-unfocus-nearby-hint = When the chat bar lets go of the keyboard after a message, the nearby chat field of the Conversations window does too.
+l2s-log-im-copies = Save the copies in the nearby chat transcript
+l2s-log-im-copies-hint = The IMs shown in the nearby chat are also written to its transcript, when it is kept.
+l2s-tab-order = Order of the conversations
+l2s-tab-order-hint = The order of the kinds in the list of conversations.
+l2s-new-tabs-first = New conversations first of their kind
+l2s-order-ims-groups-conferences = IMs, Groups, Conferences
+l2s-order-ims-conferences-groups = IMs, Conferences, Groups
+l2s-order-groups-conferences-ims = Groups, Conferences, IMs
+l2s-order-groups-ims-conferences = Groups, IMs, Conferences
+l2s-order-conferences-groups-ims = Conferences, Groups, IMs
+l2s-order-conferences-ims-groups = Conferences, IMs, Groups
+l2s-color-ims = Colour IMs and group chat distinctly over the world
+l2s-color-ims-hint = The IMs and group chat shown in the chat lines over the world take their own colour.
+l2s-color-ims-color = IMs and group chat
+l2s-color-username = Colour usernames distinctly
+l2s-color-username-hint = The username under the name on the name tags takes its own colour.
+l2s-color-username-color = Usernames
+l2s-ban-all = Ban from all my groups
+l2s-unban-all = Unban from all my groups
+l2s-ban = Ban
+l2s-unban = Unban
+l2s-ban-all-question = You are about to ban { $name } from all { $count } groups you can manage bans in:
+l2s-unban-all-question = You are about to lift the ban on { $name } in all { $count } groups you can manage bans in:
+l2s-ban-all-title = Group bans
+l2s-ban-all-started = Updating group bans for { $name } in { $count } groups, one group at a time. A report will follow when done.
+l2s-ban-all-report =
+    { $name } has been banned in { $done } of { $count } groups.
+    Banned in: { $succeeded }
+    Failed in: { $failed }
+l2s-unban-all-report =
+    The ban on { $name } has been lifted in { $done } of { $count } groups.
+    Lifted in: { $succeeded }
+    Failed in: { $failed }
+l2s-worn-out-of-view = { $name } is in a region nearby, out of view
+l2s-worn-out-of-view-hint = Come closer to see what they wear.
+l2s-worn-out-of-view-since = { $name } is out of view since { $time }: what they wore then
+l2s-source-notice = Group notices
+l2s-source-invite = Group invitations
+l2s-source-offer = Inventory offers
+l2s-source-friendship = Friendship offers
+l2s-source-lure = Teleport offers
+l2s-source-tp-request = Teleport requests
+l2s-source-dialog = Script dialogs
+l2s-omnifilter-import = Import a Legacy notecard…
+l2s-omnifilter-export = Export as a Legacy notecard…
+l2s-omnifilter-imported =
+    { $count ->
+        [one] { $count } rule imported
+       *[other] { $count } rules imported
+    }
+l2s-omnifilter-not-notecard = This file is not an Omnifilter notecard.

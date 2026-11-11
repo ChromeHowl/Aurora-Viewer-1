@@ -13,8 +13,9 @@
 //!   (FSShowMutedChatHistory, process_chat_from_simulator in
 //!   indra/newview/llviewermessage.cpp), all originally LGPL 2.1.
 //!
-//! A copy is never written to a transcript (FSLogIMInChatHistory stays off),
-//! never counted as unread and never alerts: its own conversation did.
+//! A copy is written to the nearby chat's transcript only with
+//! FSLogIMInChatHistory (`World::log_nearby`), is never counted as unread
+//! and never alerts: its own conversation did.
 
 use super::{ChatKind, ChatLine, Origin, World};
 use crate::ui_sound::{ImKind, ImMessage};

@@ -310,6 +310,9 @@ pub struct Content {
     /// The colour the resident was marked with (radar's "Mark"): the
     /// name's, over every other (LLVOAvatar::getNameTagColor).
     pub marked: Option<[u8; 3]>,
+    /// The name in the colour of the avatar's chat range
+    /// (FSTagShowDistanceColors), under a radar mark.
+    pub name_band: Option<crate::world::radar::Band>,
 }
 
 /// A live editor preview shares the live geometry, contrast and badge code.
@@ -336,6 +339,7 @@ pub fn preview(ui: &mut egui::Ui, p: &Palette, appearance: std::sync::Arc<crate:
         blocked: false,
         mark: None,
         marked: None,
+        name_band: None,
     };
     let tag = Tag {
         id: Uuid::nil(),

@@ -93,6 +93,7 @@ mod tests {
             mode: 0,
             exceptions: &settings.render_exceptions_map(),
             friends: &Default::default(),
+            exclude_animesh: false,
         };
         assert!(rules.too_complex(&a, false, 0, 0.0));
         settings.set_render_exception(a, 2);

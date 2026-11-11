@@ -13944,7 +13944,7 @@ chat-extras-show-muted-hint = Ce que disent les résidents et objets bloqués re
 chat-extras-show-chat-type = Bouton de volume du chat local
 chat-extras-show-chat-type-hint = Le bouton chuchoter, parler, crier à côté du champ du chat local
 chat-extras-beyond-range = Atténuer le chat lointain
-chat-extras-beyond-range-hint = La couleur du chat local prononcé à plus de 10 m est multipliée par ce facteur (1 : inchangée)
+chat-extras-beyond-range-hint = La couleur du chat local prononcé au-delà de la portée de la voix (20 m) est multipliée par ce facteur (1 : inchangée)
 chat-extras-console-font = Taille des lignes de chat au-dessus du monde
 chat-extras-console-font-small = Petite
 chat-extras-console-font-medium = Moyenne
@@ -14362,3 +14362,98 @@ b7-light-radius = Afficher le rayon des lumières sélectionnées
 b7-select-group-owned-hint = Désactivé, un rectangle de sélection laisse de côté les objets cédés à un groupe
 b7-hide-selected = Masquer les objets sélectionnés
 b7-hide-selected-hint = Tant que les outils de construction sont ouverts, la sélection n'est pas affichée ; son contour reste
+
+# Rendering and photo extras (render_photo)
+rphoto-autotune = Réglage automatique vers une fréquence d'images
+rphoto-autotune-enable = Réglage automatique
+rphoto-autotune-enable-help = Abaisse la limite de temps de rendu des avatars et la distance d'affichage jusqu'à atteindre la fréquence d'images visée, puis s'arrête sauf s'il est verrouillé. Les avatars au-dessus de la limite sont dessinés en imposteurs.
+rphoto-autotune-target = Fréquence d'images visée
+rphoto-autotune-target-help = La fréquence d'images que le réglage automatique cherche à atteindre (IPS).
+rphoto-autotune-lock = Continuer le réglage
+rphoto-autotune-lock-help = Le réglage automatique continue d'ajuster une fois la cible atteinte, jusqu'à ce qu'il soit désactivé.
+rphoto-autotune-keep-lock = Continuer le réglage aux sessions suivantes
+rphoto-autotune-keep-lock-help = Avec « Continuer le réglage », le réglage automatique est de nouveau actif à la prochaine connexion.
+rphoto-autotune-strategy = Ce qui est réglé
+rphoto-autotune-strategy-help = Ce que le réglage automatique peut abaisser pour atteindre la cible.
+rphoto-autotune-avatars = Avatars seulement
+rphoto-autotune-both = Avatars et scène
+rphoto-autotune-scene = Scène seulement
+rphoto-autotune-dd-min = Distance d'affichage minimale
+rphoto-autotune-dd-min-help = Le réglage automatique ne descend jamais la distance d'affichage en dessous.
+rphoto-autotune-dd-target = Distance d'affichage préférée
+rphoto-autotune-dd-target-help = La distance d'affichage à laquelle le réglage automatique remonte quand il reste du temps.
+rphoto-autotune-by-distance = Dessiner en entier seulement les avatars proches
+rphoto-autotune-by-distance-help = Pendant le réglage automatique, les avatars plus loin que la distance ci-dessous sont dessinés en imposteurs.
+rphoto-autotune-distance = Distance des avatars proches
+rphoto-autotune-distance-help = Les avatars à moins de cette distance de la caméra sont dessinés en entier.
+rphoto-dof-alphas = Mise au point sur les surfaces transparentes
+rphoto-dof-alphas-help = Le verre, les cheveux et les autres surfaces mélangées ont leur propre flou, comme dans le Legacy Viewer, au lieu du flou de ce qui est derrière.
+rphoto-impostor-exclude = Jamais d'imposteur pour les avatars portant un animesh
+rphoto-impostor-exclude-help = Les avatars portant un mesh animé sont toujours dessinés en entier, quels que soient leur complexité ou leur rang. Les résidents bloqués restent des silhouettes grises.
+rphoto-precaching = Délai de préchargement à la connexion
+rphoto-precaching-help = Durée minimale de l'écran de chargement après l'arrivée dans le monde, pour qu'il en soit chargé davantage. 0 montre le monde dès que le sol est là.
+rphoto-transparent-water = Eau transparente
+rphoto-transparent-water-help = Désactivée, l'eau est opaque : rien ne se voit sous sa surface.
+rphoto-view-transparency = Transparence (cette session)
+rphoto-view-transparency-help = Désactivée, ce que possèdent les autres est dessiné opaque, pour votre vue seulement. Vos propres objets ne changent pas. Les faces entièrement invisibles restent cachées.
+rphoto-view-fullbright = Pleine lumière (cette session)
+rphoto-view-fullbright-help = Désactivée, les faces en pleine lumière de ce que possèdent les autres sont éclairées comme le reste, pour votre vue seulement. Vos propres objets ne changent pas.
+l2s-crosshair-unknown = Agent inconnu
+l2s-crosshair-name = { $name }, { $meters } m
+l2s-crosshair-show = Nom sous le réticule
+l2s-crosshair-show-hint = En vue subjective, le nom et la distance du résident sous le réticule, dans la portée ci-dessous.
+l2s-bw-emojis = Emoji en noir et blanc
+l2s-bw-emojis-hint = Les emoji du texte prennent sa couleur, et le sélecteur les montre en gris.
+l2s-unfocus-nearby = Libérer aussi le champ du chat local
+l2s-unfocus-nearby-hint = Quand la barre de chat rend le clavier après un message, le champ du chat local de la fenêtre Conversations le rend aussi.
+l2s-log-im-copies = Enregistrer les copies dans la transcription du chat local
+l2s-log-im-copies-hint = Les MI affichés dans le chat local sont aussi écrits dans sa transcription, si elle est conservée.
+l2s-tab-order = Ordre des conversations
+l2s-tab-order-hint = L'ordre des types dans la liste des conversations.
+l2s-new-tabs-first = Nouvelles conversations en tête de leur type
+l2s-order-ims-groups-conferences = MI, groupes, conférences
+l2s-order-ims-conferences-groups = MI, conférences, groupes
+l2s-order-groups-conferences-ims = Groupes, conférences, MI
+l2s-order-groups-ims-conferences = Groupes, MI, conférences
+l2s-order-conferences-groups-ims = Conférences, groupes, MI
+l2s-order-conferences-ims-groups = Conférences, MI, groupes
+l2s-color-ims = Colorer à part les MI et le chat de groupe sur le monde
+l2s-color-ims-hint = Les MI et le chat de groupe affichés dans les lignes de chat sur le monde prennent leur propre couleur.
+l2s-color-ims-color = MI et chat de groupe
+l2s-color-username = Colorer les noms d'utilisateur à part
+l2s-color-username-hint = Le nom d'utilisateur sous le nom, sur les étiquettes, prend sa propre couleur.
+l2s-color-username-color = Noms d'utilisateur
+l2s-ban-all = Bannir de tous mes groupes
+l2s-unban-all = Lever le bannissement de tous mes groupes
+l2s-ban = Bannir
+l2s-unban = Lever le bannissement
+l2s-ban-all-question = Vous allez bannir { $name } des { $count } groupes où vous pouvez gérer les bannissements :
+l2s-unban-all-question = Vous allez lever le bannissement de { $name } dans les { $count } groupes où vous pouvez gérer les bannissements :
+l2s-ban-all-title = Bannissements de groupe
+l2s-ban-all-started = Mise à jour des bannissements de { $name } dans { $count } groupes, un groupe à la fois. Un rapport suivra à la fin.
+l2s-ban-all-report =
+    { $name } a été banni de { $done } groupes sur { $count }.
+    Banni de : { $succeeded }
+    Échec dans : { $failed }
+l2s-unban-all-report =
+    Le bannissement de { $name } a été levé dans { $done } groupes sur { $count }.
+    Levé dans : { $succeeded }
+    Échec dans : { $failed }
+l2s-worn-out-of-view = { $name } est dans une région proche, hors de vue
+l2s-worn-out-of-view-hint = Approchez-vous pour voir ce qu'il ou elle porte.
+l2s-worn-out-of-view-since = { $name } est hors de vue depuis { $time } : ce qu'il ou elle portait alors
+l2s-source-notice = Avis de groupe
+l2s-source-invite = Invitations de groupe
+l2s-source-offer = Offres d'inventaire
+l2s-source-friendship = Offres d'amitié
+l2s-source-lure = Offres de téléportation
+l2s-source-tp-request = Demandes de téléportation
+l2s-source-dialog = Dialogues de script
+l2s-omnifilter-import = Importer une note Legacy…
+l2s-omnifilter-export = Exporter en note Legacy…
+l2s-omnifilter-imported =
+    { $count ->
+        [one] { $count } règle importée
+       *[other] { $count } règles importées
+    }
+l2s-omnifilter-not-notecard = Ce fichier n'est pas une note de l'Omnifilter.

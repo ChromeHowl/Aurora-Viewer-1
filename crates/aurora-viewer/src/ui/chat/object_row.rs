@@ -346,6 +346,7 @@ pub(super) mod tests {
                     menu: None,
                     bubbles: style,
                     previews: None,
+                    moderators: None,
                 };
                 super::super::draw_line(ui, &mut env, &said, look, None);
             },
@@ -480,6 +481,7 @@ pub(super) mod tests {
                                 menu: None,
                                 bubbles: None,
                                 previews: None,
+                                moderators: None,
                             };
                             let place = Place {
                                 icon_center: 14.0,

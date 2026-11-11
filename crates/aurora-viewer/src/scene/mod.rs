@@ -51,6 +51,7 @@ pub mod picking;
 mod plants;
 pub mod portals;
 pub mod probes;
+pub mod render_time;
 pub mod rez;
 mod sculpt_watch;
 mod selection_demo;
@@ -854,6 +855,15 @@ pub struct Scene {
     pub avatar_complexity: HashMap<Uuid, u32>,
     /// Avatars over RenderAvatarMaxComplexity: grey silhouettes, no attachments.
     pub too_complex: std::collections::HashSet<usize>,
+    /// Avatars wearing animesh (complexity.rs `wears_animesh`), refreshed
+    /// with their complexity.
+    pub animesh_wearers: std::collections::HashSet<usize>,
+    /// FSImpostorAvatarExclude "User": the avatars wearing animesh are
+    /// drawn in full whatever their rank.
+    pub impostor_exclude_animesh: bool,
+    /// Avatars over the auto-tune's render time limit, drawn as impostors
+    /// (render_time.rs).
+    pub too_slow: std::collections::HashSet<usize>,
     parcel_visibility_version: u64,
     photo_isolation_version: u64,
     /// The rendering types of the session (Preferences › Graphics): trees,
@@ -864,6 +874,10 @@ pub struct Scene {
     pub hidden_selected: Vec<usize>,
     hidden_selected_synced: Vec<usize>,
     render_types_synced: crate::settings::render_extras::RenderTypes,
+    /// The view-only transparency and fullbright switches of the session
+    /// (settings/render_photo.rs), and those the records were built with.
+    pub view_faces: crate::settings::render_photo::ViewFaces,
+    view_faces_synced: crate::settings::render_photo::ViewFaces,
     /// RenderTerrainScale: metres per repeat of the classic terrain's
     /// detail textures (terrain_surface.rs).
     pub terrain_scale: f32,
@@ -1577,12 +1591,17 @@ impl Scene {
             ground_feet_own_moving: false,
             avatar_complexity: HashMap::new(),
             too_complex: Default::default(),
+            animesh_wearers: Default::default(),
+            impostor_exclude_animesh: false,
+            too_slow: Default::default(),
             parcel_visibility_version: 0,
             photo_isolation_version: 0,
             render_types: Default::default(),
             hidden_selected: Vec::new(),
             hidden_selected_synced: Vec::new(),
             render_types_synced: Default::default(),
+            view_faces: Default::default(),
+            view_faces_synced: Default::default(),
             terrain_scale: crate::settings::render_extras::TERRAIN_SCALE,
             held_at: None,
             photo_marks: Default::default(),
@@ -2849,6 +2868,18 @@ impl Scene {
                 }
             }
         }
+        // the view-only switches: every object's faces built again (an
+        // avatar's own body is not an object's face)
+        if self.view_faces_synced != self.view_faces {
+            self.view_faces_synced = self.view_faces;
+            for (idx, object) in world.objects.slots.iter_mut().enumerate() {
+                if let Some(object) = object.as_mut().filter(|o| !o.is_avatar()) {
+                    object.render.needs_records = true;
+                    object.material_dirty = true;
+                    self.sets.dirty.insert(idx);
+                }
+            }
+        }
         self.rebuild_reslotted(world);
         use crate::frame_profile::Part;
         let t0 = Instant::now();
@@ -3906,6 +3937,13 @@ impl Scene {
         // its texture entry says
         let plant = plants::plant_face(o);
         let visible = world.rlva_object_visible(idx);
+        // the view-only switches leave what the user owns or wears, and
+        // the HUDs, as they are (LLViewerObject::permYouOwner)
+        let view = self.view_faces;
+        let own = g.hud
+            || o.update_flags & crate::ui::context::flags::OBJECT_YOU_OWNER != 0
+            || wearer.is_some_and(|(id, _)| id == world.agent_id);
+        let view_on = view.applies(own);
         for (fi, face) in geom.faces.iter().enumerate() {
             if !visible {
                 continue;
@@ -3913,7 +3951,8 @@ impl Scene {
             let Some(alloc) = face else {
                 continue;
             };
-            let tf = plant.unwrap_or_else(|| o.visual_texture_face(fi));
+            let mut tf = plant.unwrap_or_else(|| o.visual_texture_face(fi));
+            tf.color[3] = view.face_alpha(own, tf.color[3]);
             let mat_id = o.visual_material(fi).filter(|_| plant.is_none());
             // a glTF material ignores the texture entry's color: its own base
             // color alpha decides, in `classify`
@@ -4163,6 +4202,18 @@ impl Scene {
                 // loads four times too coarse each way.
                 if let Some(r) = a.frame_repeats {
                     repeats = r;
+                }
+            }
+            if view_on {
+                if !view.fullbright {
+                    rec.flags[0] &= !flags::FULLBRIGHT;
+                }
+                // transparency off: drawn as an opaque face (the pass of an
+                // opaque glTF material), never the transparent texture's
+                // unused layers nor a fully transparent face
+                if !view.transparency && !invisible && rec.tex[0] != aurora_render::textures::TRANSPARENT {
+                    rec.base_color[3] = 1.0;
+                    pbr_alpha = Some(0);
                 }
             }
             rec.set_hud_zoom(hud_zoom);
@@ -4674,8 +4725,20 @@ impl Scene {
         };
         avatars.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
         let mut avatar_ok = vec![false; self.gpu.len()];
-        for (_, i) in avatars.iter().take(self.max_avatars.max(1)) {
+        // (those over the auto-tune's render time limit give their place)
+        for (_, i) in avatars
+            .iter()
+            .filter(|(_, i)| !self.too_slow.contains(i))
+            .take(self.max_avatars.max(1))
+        {
             avatar_ok[*i] = true;
+        }
+        if self.impostor_exclude_animesh {
+            for &i in &self.animesh_wearers {
+                if let Some(ok) = avatar_ok.get_mut(i) {
+                    *ok = true;
+                }
+            }
         }
         for &index in self.portals.planes.keys() {
             avatar_ok[index] = true;
@@ -4684,8 +4747,7 @@ impl Scene {
         // complete, and one over the complexity limit is its silhouette)
         let imp_avatars: Vec<impostors::Far> = avatars
             .iter()
-            .skip(self.max_avatars.max(1))
-            .filter(|(_, index)| !self.portals.planes.contains_key(index))
+            .filter(|(_, index)| !avatar_ok[*index])
             .filter_map(|&(d, i)| {
                 let g = self.gpu.get(i)?;
                 let loading = self.hide_loading && self.loading.indices.contains(&i);

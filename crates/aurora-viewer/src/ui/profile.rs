@@ -1601,6 +1601,8 @@ fn overflow_menu(ui: &mut egui::Ui, p: &Palette, world: &World, id: Uuid, blocke
         if menu::item(ui, p, "ban", block) {
             actions.push(ProfileAction::ToggleBlock(id));
         }
+        // menu_fs_profile_overflow.xml: ban and unban from all our groups
+        super::context::group_ban_items(ui, p, world, id, true);
         // a friend hidden in this viewer, or shown again
         // (`world/hidden_friends.rs`)
         if world.social.is_friend_hidden(&id) {

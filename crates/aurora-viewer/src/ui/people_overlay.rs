@@ -10,10 +10,15 @@
 //!
 //! Differences: the spheres are drawn as a light wire frame (rings of
 //! latitude and meridians) in the mini-map's ring colours
-//! (MapWhisperRingColor, MapChatRingColor, MapShoutRingColor) over the
-//! world, where the Legacy Viewer fills translucent spheres tested against
-//! the depth: a label layer has no depth, and a wire hides less of a scene.
-//! The crosshair's name and distance of the combat features are not drawn.
+//! (MapWhisperRingColor, MapChatRingColor, MapShoutRingColor), where the
+//! Legacy Viewer fills translucent spheres: a wire hides less of a scene.
+//! Like the Legacy spheres, each segment is tested against the scene's
+//! depth (`aurora_render::world_line_at`): a wall in front hides it.
+//!
+//! In mouselook, the resident nearest the crosshair's line within the
+//! markers' range has their name and distance under it, in their colour
+//! (FSMouselookCombatFeatures, LLViewerWindow::draw), unless RLVa hides
+//! names.
 
 use super::hud::Projector;
 use crate::theme::Palette;
@@ -78,11 +83,76 @@ pub fn chat_spheres(ctx: &egui::Context, world: &World, proj: &Projector) {
                 let b = ring[(i + 1) % ring.len()];
                 if let Some(segment) = super::minimap::beacon_segment(proj.view_proj * a.extend(1.0), proj.view_proj * b.extend(1.0), proj)
                 {
+                    // hidden where the scene stands in front of it
+                    aurora_render::world_line_at(ctx, *a, b);
                     painter.line_segment(segment, stroke);
                 }
             }
         }
     }
+    aurora_render::world_label_at(ctx, None);
+}
+
+/// Half the width and half the height of the box around the crosshair's
+/// line where a resident is "under the crosshair" (LLViewerWindow::draw:
+/// 0.75 m across and 1.5 m up and down, in front of the camera).
+const CROSSHAIR_HALF_WIDTH: f64 = 0.75;
+const CROSSHAIR_HALF_HEIGHT: f64 = 1.5;
+/// How far under the screen's centre the name is written
+/// (ExodusMouselookTextOffsetY, -150).
+const CROSSHAIR_TEXT_BELOW: f32 = 150.0;
+
+/// The first of `candidates` (id, position) under the crosshair of a camera
+/// at `eye` looking along `forward` (world up Z), with its distance; ourselves
+/// excluded by the caller. The Legacy Viewer takes the first in its list:
+/// here the nearest, which does not depend on the list's order.
+pub fn crosshair_target(eye: Vec3, forward: Vec3, candidates: impl Iterator<Item = (uuid::Uuid, Vec3)>) -> Option<(uuid::Uuid, f32)> {
+    let forward = forward.normalize_or_zero().as_dvec3();
+    if forward == glam::DVec3::ZERO {
+        return None;
+    }
+    let left = glam::DVec3::Z.cross(forward).normalize_or(glam::DVec3::Y);
+    let up = forward.cross(left);
+    candidates
+        .filter_map(|(id, at)| {
+            let d = (at - eye).as_dvec3();
+            let (x, y, z) = (-d.dot(left), d.dot(up), d.dot(forward));
+            (x.abs() < CROSSHAIR_HALF_WIDTH && y.abs() < CROSSHAIR_HALF_HEIGHT && z > 0.0).then_some((id, d.length() as f32))
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+}
+
+/// "Name, 12.34m" under the crosshair (see the module), centred.
+pub fn crosshair_name(ctx: &egui::Context, p: &Palette, world: &World, eye: Vec3, forward: Vec3, range: f32) {
+    if world.rlva.has("shownames") || world.rlva.has("shownearby") {
+        return;
+    }
+    let me = world.agent.position;
+    let near = crate::world::radar::sightings(world)
+        .into_iter()
+        .filter(|s| s.id != world.agent_id && s.position.distance(me) <= range)
+        .map(|s| (s.id, s.position));
+    let Some((id, distance)) = crosshair_target(eye, forward, near) else {
+        return;
+    };
+    let name = world
+        .social
+        .avatar_names
+        .complete(&id)
+        .unwrap_or_else(|| aurora_i18n::tr!("l2s-crosshair-unknown").to_owned());
+    let color = super::colors::map_color(world, &id, &name);
+    let color = world.avatar_marks.get(&id).map_or(color, |[r, g, b]| Color32::from_rgb(r, g, b));
+    let text = aurora_i18n::tr!(
+        "l2s-crosshair-name",
+        name = name.as_str(),
+        meters = aurora_i18n::number(f64::from(distance), 2)
+    );
+    let at = ctx.content_rect().center() + vec2(0.0, CROSSHAIR_TEXT_BELOW);
+    let painter = super::hud::world_painter(ctx);
+    let font = egui::FontId::new(14.0, super::fonts::semibold(ctx));
+    // a soft shadow under the letters (DROP_SHADOW_SOFT)
+    painter.text(at + vec2(1.0, 1.0), egui::Align2::CENTER_TOP, &text, font.clone(), p.bar);
+    painter.text(at, egui::Align2::CENTER_TOP, &text, font, color);
 }
 
 /// The residents within `range` of our avatar (ExodusMouselookIFFRange)
@@ -146,5 +216,35 @@ mod tests {
         }
         // the middle ring of latitude is the equator, at the avatar's height
         assert!(rings[LATITUDES / 2].iter().all(|p| (p.z - center.z).abs() < 1e-3));
+    }
+
+    #[test]
+    fn the_crosshair_takes_the_nearest_resident_on_its_line() {
+        let eye = Vec3::new(100.0, 100.0, 30.0);
+        let forward = Vec3::X;
+        let (a, b, c, d) = (
+            uuid::Uuid::from_u128(1),
+            uuid::Uuid::from_u128(2),
+            uuid::Uuid::from_u128(3),
+            uuid::Uuid::from_u128(4),
+        );
+        let list = [
+            (a, Vec3::new(130.0, 100.5, 31.0)),
+            // nearer, still within 0.75 m across and 1.5 m up and down
+            (b, Vec3::new(110.0, 99.4, 28.6)),
+            // too far to the side, and behind the camera
+            (c, Vec3::new(105.0, 101.0, 30.0)),
+            (d, Vec3::new(90.0, 100.0, 30.0)),
+        ];
+        let (id, distance) = crosshair_target(eye, forward, list.into_iter()).expect("one");
+        assert_eq!(id, b);
+        assert!((distance - Vec3::new(10.0, -0.6, -1.4).length()).abs() < 1e-3);
+        assert_eq!(crosshair_target(eye, forward, list[2..].iter().copied()), None);
+        // looking up: the box turns with the camera
+        let up = Vec3::new(1.0, 0.0, 1.0);
+        assert_eq!(
+            crosshair_target(eye, up, [(a, Vec3::new(110.0, 100.0, 40.0))].into_iter()).map(|t| t.0),
+            Some(a)
+        );
     }
 }

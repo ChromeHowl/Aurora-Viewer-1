@@ -8,7 +8,7 @@ use super::super::{COMBO_W, OptionsUi, combo, swatch};
 use crate::settings::chat_translation::Service;
 use crate::theme::Palette;
 use crate::ui::widgets;
-use crate::world::omnifilter::{Action, Channel, MatchMode, Pattern, Rule, RuleSet, Source};
+use crate::world::omnifilter::{Action, Channel, MatchMode, Pattern, Rule, RuleSet, Source, legacy};
 use crate::world::translate::{KeyState, LANGUAGES};
 use aurora_i18n::tr;
 use egui::{RichText, Vec2};
@@ -272,6 +272,38 @@ fn rules(ui: &mut egui::Ui, p: &Palette, st: &mut OptionsUi) {
             });
             open = Some(edited.rules.len() - 1);
         }
+        // a Legacy Omnifilter notecard, as a file
+        if let Some(added) = poll_import(st) {
+            let room = crate::world::omnifilter::MAX_RULES.saturating_sub(edited.rules.len());
+            let count = added.len().min(room);
+            edited.rules.extend(added.into_iter().take(room));
+            st.omnifilter_note = Some(tr!("l2s-omnifilter-imported", count = count as i64));
+        }
+        ui.horizontal(|ui| {
+            let size = Vec2::new(0.0, 26.0);
+            let busy = st.omnifilter_import.is_some();
+            if ui
+                .add_enabled_ui(room && !busy, |ui| {
+                    widgets::action_button(ui, p, "file-import", tr!("l2s-omnifilter-import"), widgets::ActionKind::Flat, size)
+                })
+                .inner
+                .clicked()
+            {
+                st.omnifilter_import = Some(import_file(ui.ctx()));
+            }
+            if ui
+                .add_enabled_ui(!edited.rules.is_empty(), |ui| {
+                    widgets::action_button(ui, p, "file-export", tr!("l2s-omnifilter-export"), widgets::ActionKind::Flat, size)
+                })
+                .inner
+                .clicked()
+            {
+                export_file(&edited.rules);
+            }
+        });
+        if let Some(note) = &st.omnifilter_note {
+            muted(ui, p, note);
+        }
         if let Some(i) = open
             && let Some(rule) = edited.rules.get_mut(i)
         {
@@ -287,6 +319,85 @@ fn rules(ui: &mut egui::Ui, p: &Palette, st: &mut OptionsUi) {
     }
 }
 
+/// The notecard's file name (its Legacy inventory name, "[Omnifilter] …").
+const NOTECARD_FILE: &str = "[Omnifilter] Aurora.txt";
+
+/// A Legacy Omnifilter notecard chosen and read off the frame thread.
+fn import_file(ctx: &egui::Context) -> std::sync::mpsc::Receiver<Option<Result<Vec<Rule>, ()>>> {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let ctx = ctx.clone();
+    let title = tr!("l2s-omnifilter-import").to_owned();
+    let spawned = std::thread::Builder::new().name("omnifilter-import".into()).spawn(move || {
+        let result = rfd::FileDialog::new()
+            .set_title(title)
+            .add_filter("Omnifilter", &["txt", "xml", "notecard"])
+            .pick_file()
+            .map(|path| {
+                use std::io::Read;
+                let mut bytes = Vec::new();
+                let read = std::fs::File::open(&path).and_then(|f| f.take(legacy::MAX_BYTES as u64 + 1).read_to_end(&mut bytes));
+                match read {
+                    Ok(_) => legacy::import(&bytes).map(|(_, rules)| rules).ok_or(()),
+                    Err(e) => {
+                        log::warn!("omnifilter: notecard not read: {e}");
+                        Err(())
+                    }
+                }
+            });
+        let _ = sender.send(result);
+        ctx.request_repaint();
+    });
+    if let Err(e) = spawned {
+        log::warn!("omnifilter: import not started: {e}");
+    }
+    receiver
+}
+
+/// The import's answer, once: the rules read (the note says a failure).
+fn poll_import(st: &mut OptionsUi) -> Option<Vec<Rule>> {
+    let answer = st.omnifilter_import.as_ref()?.try_recv();
+    match answer {
+        Err(std::sync::mpsc::TryRecvError::Empty) => None,
+        Err(std::sync::mpsc::TryRecvError::Disconnected) | Ok(None) => {
+            st.omnifilter_import = None;
+            None
+        }
+        Ok(Some(result)) => {
+            st.omnifilter_import = None;
+            match result {
+                Ok(rules) => Some(rules),
+                Err(()) => {
+                    st.omnifilter_note = Some(tr!("l2s-omnifilter-not-notecard").to_owned());
+                    None
+                }
+            }
+        }
+    }
+}
+
+/// The rules written as a Legacy Omnifilter notecard, to a file chosen off
+/// the frame thread.
+fn export_file(rules: &[Rule]) {
+    let text = legacy::export(rules, "Aurora");
+    let title = tr!("l2s-omnifilter-export").to_owned();
+    let spawned = std::thread::Builder::new().name("omnifilter-export".into()).spawn(move || {
+        let Some(path) = rfd::FileDialog::new()
+            .set_title(title)
+            .set_file_name(NOTECARD_FILE)
+            .add_filter("Omnifilter", &["txt"])
+            .save_file()
+        else {
+            return;
+        };
+        if let Err(e) = crate::atomic_file::write(&path, text.as_bytes()) {
+            log::warn!("omnifilter: notecard not written: {e}");
+        }
+    });
+    if let Err(e) = spawned {
+        log::warn!("omnifilter: export not started: {e}");
+    }
+}
+
 fn source_label(s: Source) -> &'static str {
     match s {
         Source::NearbyChat => tr!("chatxl-source-nearby"),
@@ -294,6 +405,13 @@ fn source_label(s: Source) -> &'static str {
         Source::Im => tr!("chatxl-source-im"),
         Source::GroupChat => tr!("chatxl-source-group"),
         Source::ObjectIm => tr!("chatxl-source-object-im"),
+        Source::GroupNotice => tr!("l2s-source-notice"),
+        Source::GroupInvite => tr!("l2s-source-invite"),
+        Source::InventoryOffer => tr!("l2s-source-offer"),
+        Source::FriendshipOffer => tr!("l2s-source-friendship"),
+        Source::Lure => tr!("l2s-source-lure"),
+        Source::TeleportRequest => tr!("l2s-source-tp-request"),
+        Source::ScriptDialog => tr!("l2s-source-dialog"),
     }
 }
 

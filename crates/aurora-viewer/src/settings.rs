@@ -9,6 +9,7 @@ pub mod avatar_motion;
 pub mod backup;
 pub mod build_tools;
 pub mod chat_display;
+pub mod chat_more;
 pub mod chat_translation;
 pub mod draw_stepping;
 mod hover_height;
@@ -18,6 +19,7 @@ pub mod notification_options;
 pub mod people;
 pub mod registry;
 pub mod render_extras;
+pub mod render_photo;
 mod saver;
 pub mod stream_list;
 pub mod teleport;
@@ -1467,6 +1469,10 @@ pub struct Settings {
     /// Mirror resolution and update rate, shadow and terrain scales,
     /// rendering types, colour grade, light switches (settings/render_extras.rs).
     pub render_extras: render_extras::RenderExtras,
+    /// View-only switches, transparent water, depth of field on blended
+    /// faces, animesh impostor exclusion, pre-caching delay and auto-tune
+    /// (settings/render_photo.rs).
+    pub render_photo: render_photo::RenderPhoto,
     /// Reflection probes (RenderReflectionProbeLevel): 0 none (sky only),
     /// 1 manual, 2 manual + terrain, 3 full scene.
     pub reflection_probes: u8,
@@ -1698,6 +1704,8 @@ pub struct ColorSettings {
     pub tag_match: Rgba,
     /// Custom display name (NameTagMismatch).
     pub tag_mismatch: Rgba,
+    /// The username of the tags with FSColorUsername (NameTagUsername).
+    pub tag_username: Rgba,
     // minimap
     pub map_me: Rgba,
     pub map_other: Rgba,
@@ -1722,6 +1730,8 @@ pub struct ColorSettings {
     /// Script errors (DEBUG_CHANNEL).
     pub chat_errors: Rgba,
     pub chat_object_im: Rgba,
+    /// IMs and group chat with FSColorIMsDistinctly (AgentIMColor).
+    pub chat_im: Rgba,
     /// llOwnerSay.
     pub chat_owner: Rgba,
     pub chat_urls: Rgba,
@@ -1748,6 +1758,7 @@ impl Default for ColorSettings {
             tag_linden: hex(0xF472B6),
             tag_match: hex(0xE8EDFB),
             tag_mismatch: hex(0xE8EDFB),
+            tag_username: hex(0xFFFFFF),
             map_me: hex(0x8B5CF6),
             map_other: hex(0x4ADE80),
             map_friend: hex(0x818CF8),
@@ -1769,6 +1780,7 @@ impl Default for ColorSettings {
             chat_system: hex(0x9AA6C6),
             chat_errors: hex(0xF87171),
             chat_object_im: hex(0xA78BFA),
+            chat_im: hex(0xFFFFFF),
             chat_owner: hex(0xFCD34D),
             chat_urls: hex(0x5EEAD4),
             // every clickable link of a text (web, place, avatar, group)
@@ -2370,6 +2382,7 @@ impl Default for Settings {
             display_name_notices: true,
             mirrors: 1,
             render_extras: Default::default(),
+            render_photo: Default::default(),
             ssr: false,
             anisotropy: 8,
             cache_size_mb: 20480,
@@ -3097,6 +3110,7 @@ impl Settings {
         };
         self.render_extras.sanitize();
         self.build.tools.sanitize();
+        self.render_photo.sanitize();
         self.tonemapper = self.tonemapper.min(TONEMAPPER_MAX);
         self.tonemap_mix = if self.tonemap_mix.is_finite() {
             self.tonemap_mix.clamp(0.0, 1.0)

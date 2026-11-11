@@ -393,6 +393,7 @@ fn action_key(action: &CtxAction) -> String {
         CtxAction::EstateKick(..) => "EstateKick",
         CtxAction::EstateTeleportHome(..) => "EstateTeleportHome",
         CtxAction::EstateBan(..) => "EstateBan",
+        CtxAction::GroupBanAll(..) => "GroupBanAll",
     };
     match action {
         CtxAction::TakeOffClothing(kind) | CtxAction::DetachAt(kind) => format!("{base}:{kind}"),

@@ -59,6 +59,8 @@ struct Entry {
     step: Step,
     retry_at: Option<Instant>,
     failures: u32,
+    /// Asked only to sort a list (`probe`): fetched after everything else.
+    background: bool,
 }
 
 type Parsed = (Uuid, Option<(Settings, Llsd)>, bool);
@@ -103,12 +105,14 @@ impl SettingsStreamer {
             step: Step::New,
             retry_at: None,
             failures: 0,
+            background: false,
         })
     }
 
     /// The asset, requesting it on first use.
     pub fn get(&mut self, id: Uuid) -> SettingsState {
         let e = self.entry(id);
+        e.background = false;
         match (&e.settings, e.step) {
             (Some(s), _) => SettingsState::Ready(s.clone()),
             (None, Step::Failed) => SettingsState::Failed,
@@ -119,6 +123,7 @@ impl SettingsStreamer {
     /// The asset's settings map, requesting it on first use.
     pub fn map(&mut self, id: Uuid) -> MapState {
         let e = self.entry(id);
+        e.background = false;
         match (&e.map, e.step) {
             (Some(m), _) => MapState::Ready(m.clone()),
             (None, Step::Failed) => MapState::Failed,
@@ -137,8 +142,27 @@ impl SettingsStreamer {
                 step: Step::Ready,
                 retry_at: None,
                 failures: 0,
+                background: false,
             },
         );
+    }
+
+    /// Whether a sky asset was made for PBR (it carries its own
+    /// reflection_probe_ambiance: `SkyFrame::can_auto_adjust` false), to
+    /// list it first; `None` while it loads. Asks for the asset behind every
+    /// other settings asset (disk cache first, then the ViewerAsset
+    /// capability once, the way a sky picked from the list comes).
+    pub fn probe_pbr_sky(&mut self, id: Uuid) -> Option<bool> {
+        let fresh = !self.entries.contains_key(&id);
+        let e = self.entry(id);
+        if fresh {
+            e.background = true;
+        }
+        match (&e.settings, e.step) {
+            (Some(s), _) => Some(matches!(&**s, Settings::Sky(sky) if !sky.can_auto_adjust)),
+            (None, Step::Failed) => Some(false),
+            _ => None,
+        }
     }
 
     fn failed(e: &mut Entry, retry: Duration) {
@@ -189,7 +213,7 @@ impl SettingsStreamer {
                 }
                 Step::Retry if viewer_asset.is_some() => {
                     e.step = Step::Fetching;
-                    to_fetch.push(*id);
+                    to_fetch.push((*id, e.background));
                 }
                 _ => {}
             }
@@ -197,7 +221,7 @@ impl SettingsStreamer {
         let Some(base) = viewer_asset else {
             return;
         };
-        for id in to_fetch {
+        for (id, background) in to_fetch {
             let key = FETCH_KIND_SETTINGS | self.next_key;
             self.next_key += 1;
             self.by_key.insert(key, id);
@@ -205,8 +229,8 @@ impl SettingsStreamer {
                 key,
                 url: super::textures::asset_url(base, "settings_id", &id),
                 range: None,
-                // the sky waits on it
-                priority: urgent::SKY,
+                // the sky waits on it; a list's order does not
+                priority: if background { 0.0 } else { urgent::SKY },
                 lane: Lane::Urgent,
                 accept: "*/*",
             });

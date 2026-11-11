@@ -266,3 +266,42 @@ fn highlights_are_remembered_by_line() {
     assert_eq!(highlight(time, source), Some([9, 9, 9, 255]));
     assert_eq!(highlight(time + std::time::Duration::from_nanos(1), source), None);
 }
+
+#[test]
+fn notices_invitations_offers_and_dialogs_have_their_kind() {
+    assert_eq!(Source::of_im(0, true), Some(Source::Im));
+    assert_eq!(Source::of_im(0, false), None, "the system's lines");
+    assert_eq!(Source::of_im(32, true), Some(Source::GroupNotice));
+    assert_eq!(Source::of_im(3, true), Some(Source::GroupInvite));
+    assert_eq!(Source::of_im(4, true), Some(Source::InventoryOffer));
+    assert_eq!(Source::of_im(9, false), Some(Source::InventoryOffer), "an object's offer");
+    assert_eq!(Source::of_im(38, true), Some(Source::FriendshipOffer));
+    assert_eq!(Source::of_im(22, true), Some(Source::Lure));
+    assert_eq!(Source::of_im(26, true), Some(Source::TeleportRequest));
+    assert_eq!(Source::of_im(41, true), None, "typing");
+}
+
+#[test]
+fn a_dialog_is_matched_on_its_buttons_too() {
+    let mut world = crate::world::World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
+    let mut r = rule("vendor", Action::Hide);
+    r.sources = vec![Source::ScriptDialog];
+    r.content = pattern("button_name=Buy", MatchMode::Substring);
+    world.omnifilter = filter(vec![r]);
+    let mut message = "Choose".to_owned();
+    assert!(world.omnifilter_dialog("Vendor", &mut message, &["Buy".into(), "Cancel".into()]));
+    assert!(!world.omnifilter_dialog("Vendor", &mut message, &["Cancel".into()]));
+    assert_eq!(message, "Choose", "left as it was");
+    // a group notice: hidden by a rule on its kind
+    let mut n = rule("notices", Action::Hide);
+    n.sources = vec![Source::GroupNotice];
+    let f = filter(vec![n]);
+    let h = Haystack {
+        source: Source::GroupNotice,
+        channel: None,
+        sender: "Jane Doe",
+        text: "Party|Tonight",
+    };
+    assert_eq!(result(&f, h), Some(Outcome::Hide));
+    assert_eq!(result(&f, nearby("Jane", "Party")), None);
+}

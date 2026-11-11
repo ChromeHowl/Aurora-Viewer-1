@@ -86,6 +86,7 @@ mod gpu_stall;
 mod parcel_music;
 pub(crate) use gpu_stall::withdraw_all as withdraw_gpu_notices;
 mod auto_relogin;
+mod autotune;
 mod debug_settings;
 mod draw_stepping;
 mod graphics_start;
@@ -740,6 +741,8 @@ pub struct App {
     screen_rate: crate::screen_rate::ScreenRate,
     /// The window has the keyboard focus (background frame cap).
     focused: bool,
+    /// The auto-tune of the session (app/autotune.rs).
+    autotune: autotune::AutoTuneState,
     /// Loading / teleport screen background (last view, blurred).
     backdrop: ui::backdrop::Backdrop,
     /// Capture the 3D view on the next frame; a capture is on its way.
@@ -1419,6 +1422,8 @@ impl App {
         // the regional 12 / 24 hours and time zone of the bars' clock, read once
         ui::bars::clock::read_system_clock();
         let mut settings = Settings::load();
+        // Tunables::initialiseFromSettings: a lock lasts only when kept
+        settings.render_photo.autotune.at_login();
         if std::env::var("AURORA_DEMO").as_deref() == Ok("1")
             && let Ok(mode) = std::env::var("AURORA_DEMO_MINIMIZED_MUTE")
         {
@@ -1747,6 +1752,7 @@ impl App {
             named_teleport: Default::default(),
             screen_rate: Default::default(),
             focused: true,
+            autotune: Default::default(),
             backdrop,
             want_scene_capture: false,
             scene_capture_pending: false,
@@ -9983,6 +9989,8 @@ impl App {
             self.scene.lod_factor = self.settings.lod_factor;
             self.scene.tree_lod_factor = self.settings.tree_lod_factor;
             self.scene.render_types = self.settings.render_extras.types;
+            self.scene.view_faces = self.settings.render_photo.view;
+            self.scene.impostor_exclude_animesh = self.settings.render_photo.impostor_exclude_animesh;
             self.scene.terrain_scale = self.settings.render_extras.terrain_scale;
             self.scene.surface_protection = self.settings.surface_protection();
             self.scene.textures.set_max_resolution(self.settings.max_texture_resolution);
@@ -10125,8 +10133,10 @@ impl App {
                     mode: self.settings.complexity_mode,
                     exceptions: &exceptions,
                     friends: &friends,
+                    exclude_animesh: self.settings.render_photo.impostor_exclude_animesh,
                 },
             );
+            self.autotune_frame();
             self.frame_profile.lap(Lap::Complexity);
             let hud_size = gfx.window.inner_size();
             self.world.hud_area = self.hud_area([hud_size.width, hud_size.height]);
@@ -10547,7 +10557,10 @@ impl App {
             let moved = self.move_complete_at.map(|t| t.elapsed().as_secs_f32()).unwrap_or(0.0);
             let terrain = self.world.terrain_progress();
             let skip = self.settings.teleport.no_login_screen;
-            if teleport_comfort::loading_screen_ends(skip, self.world.movement_complete, since.elapsed(), terrain, moved) {
+            // PrecachingDelay: the screen stays at least that long after the
+            // arrival (none without the screen)
+            let precached = skip || crate::settings::render_photo::precached(self.settings.render_photo.precaching_delay, moved);
+            if precached && teleport_comfort::loading_screen_ends(skip, self.world.movement_complete, since.elapsed(), terrain, moved) {
                 self.screen = Screen::World;
                 self.world.notifications.started = true;
                 self.camera.snap();
@@ -11011,6 +11024,7 @@ impl App {
                 self.dof_frame(&mut gfx.renderer, dt, fov, lod_height, h).map(|mut lens| {
                     lens.front_blur = self.settings.render_extras.dof_front_blur;
                     lens.dispersion = self.settings.render_extras.dof_dispersion;
+                    lens.alphas = self.settings.render_photo.dof_alphas;
                     lens
                 })
             },
@@ -11023,6 +11037,7 @@ impl App {
             // (LLPipeline::tonemap: buildNoPost && gFloaterTools)
             no_post: !self.settings.render_extras.types.post_processing && self.build.open,
             hide_sky: !self.settings.render_extras.types.sky,
+            opaque_water: !self.settings.render_photo.transparent_water,
         };
         // a photo's look, or the live view's in the photo mode
         let focus = fp.dof.as_ref().map(|d| d.focus);
@@ -15591,6 +15606,7 @@ impl App {
         ui::widgets::set_perceptual_volume(&ctx, self.settings.audio.perceptual_volume);
         ui::bars::clock::set_chat_format(self.system_island().clock_format);
         ui::chat::display::set(&self.settings.chat_display);
+        self.emoji.set_monochrome(self.settings.chat_display.more.bw_emojis);
         let beacon_hovered = !ctx.is_pointer_over_egui() && !ctx.egui_wants_pointer_input() && self.beacon_hover();
         self.beacon_hit = None;
         let mut t = Instant::now();
@@ -15925,6 +15941,16 @@ impl App {
                 }
                 if self.camera.mouselook() && !held && self.settings.people.mouselook_markers {
                     ui::people_overlay::mouselook_markers(&ctx, &p, &self.world, projector, self.settings.people.mouselook_marker_range);
+                }
+                if self.camera.mouselook() && !held && self.settings.people.mouselook_name {
+                    ui::people_overlay::crosshair_name(
+                        &ctx,
+                        &p,
+                        &self.world,
+                        self.camera.position,
+                        self.camera.forward(),
+                        self.settings.people.mouselook_marker_range,
+                    );
                 }
                 // RenderTrackerBeacon (LLTracker::render3D, renderBeacon)
                 if !self.camera.mouselook() && !held && self.settings.tracker_beacon {
@@ -18300,6 +18326,8 @@ impl App {
                         self.env_ui.scan_left = usize::MAX;
                     }
                     self.env_ui.refresh(&ctx, &self.world.inventory);
+                    let settings = &mut self.scene.settings;
+                    self.env_ui.sort_pbr_skies(|asset| settings.probe_pbr_sky(asset));
                 }
                 let mut open = self.panels.environment;
                 let mut lighting = self.panels.personal_lighting;
