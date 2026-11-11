@@ -2284,20 +2284,13 @@ impl App {
                 gallery::reveal(&dir, None);
             }
             Action::Reel(a) => self.photo_reel_action(a, renderer),
-            Action::ProfileLoad(name) => {
-                let Some(profile) = self.settings.snapshot.profiles.get(&name).cloned() else {
-                    return;
-                };
-                log::info!("photo profile loaded: {name}");
-                profile.apply(
-                    &mut self.settings.snapshot,
-                    &mut self.snapshots.ui.light,
-                    &mut self.world.photo_isolation,
-                );
-                self.snapshots.ui.looks.selected = 0;
-                self.snapshots.preview_wanted = true;
-                self.settings.save();
-                self.snapshots.message = Some((aurora_i18n::tr!("p16-profile-loaded", name = name.as_str()).to_owned(), false));
+            Action::ProfileLoad(name) => self.photo_profile_load(&name),
+            Action::ProfileRename(old, new) => {
+                let s = &mut self.settings.snapshot;
+                if snapshot::saved::rename(&mut s.profiles, &mut s.banks, &old, &new) {
+                    log::info!("photo profile renamed: {old} to {}", new.trim());
+                    self.settings.save();
+                }
             }
             Action::ProfileSave(name) => {
                 if !snapshot::saved::valid_name(&name) {
@@ -2312,6 +2305,7 @@ impl App {
             }
             Action::ProfileDelete(name) => {
                 if self.settings.snapshot.profiles.remove(&name).is_some() {
+                    snapshot::saved::unpin(&mut self.settings.snapshot.banks, &name);
                     log::info!("photo profile deleted: {name}");
                     self.settings.save();
                 }
@@ -2567,6 +2561,29 @@ LUT_3D_SIZE {n}
         if self.viewfinder_on() && !self.snapshots.reel.sent_again {
             self.snapshots.vf.review_until = self.egui_ctx.input(|i| i.time) + crate::ui::viewfinder::CARD_TIME;
         }
+    }
+
+    /// A photo profile loaded (the window's list, a custom mode): never
+    /// `Profile::apply` from the interface, which has no isolation. A
+    /// profile with Photo quality asks its warning first, as switching it
+    /// on would.
+    pub(super) fn photo_profile_load(&mut self, name: &str) {
+        let Some(profile) = self.settings.snapshot.profiles.get(name).cloned() else {
+            return;
+        };
+        log::info!("photo profile loaded: {name}");
+        profile.apply(
+            &mut self.settings.snapshot,
+            &mut self.snapshots.ui.light,
+            &mut self.world.photo_isolation,
+        );
+        if snapshot::saved::asks_quality(&profile, self.settings.snapshot.quality_warned) {
+            self.snapshots.quality_ask = true;
+        }
+        self.snapshots.ui.looks.selected = 0;
+        self.snapshots.preview_wanted = true;
+        self.settings.save();
+        self.snapshots.message = Some((aurora_i18n::tr!("p16-profile-loaded", name = name).to_owned(), false));
     }
 
     /// A Full save or a 360° photo asked while the last photo is still

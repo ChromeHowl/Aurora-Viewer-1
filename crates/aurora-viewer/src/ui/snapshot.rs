@@ -226,6 +226,8 @@ pub enum Action {
     ProfileLoad(String),
     ProfileSave(String),
     ProfileDelete(String),
+    /// A profile renamed (old, new); the custom modes pinned to it follow.
+    ProfileRename(String, String),
     /// "Reset all" (None) or one part of the window back to its defaults.
     ProfileReset(Option<crate::snapshot::saved::Part>),
     /// A 360° photo to disk (`snapshot::pano`).
@@ -1919,7 +1921,7 @@ impl SnapshotUi {
 }
 
 /// "Reset" and the part of the window (the Legacy Viewer's "Reset tab").
-fn reset_label(part: crate::snapshot::saved::Part) -> &'static str {
+pub(crate) fn reset_label(part: crate::snapshot::saved::Part) -> &'static str {
     use crate::snapshot::saved::Part;
     match part {
         Part::Format => aurora_i18n::tr!("b1-reset-format"),

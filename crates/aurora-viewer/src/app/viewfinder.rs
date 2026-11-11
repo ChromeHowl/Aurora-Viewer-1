@@ -10,7 +10,7 @@ use crate::keybinds::{Action as Bind, Input, Mods};
 use crate::settings::PhotoWindowStyle;
 use crate::snapshot::viewfinder::{self as vf, AfArea, Event, Phase, Subject};
 use crate::ui::snapshot::Action;
-use crate::ui::viewfinder::{CamMode, Dial, Frame, Keys, Out, Preset};
+use crate::ui::viewfinder::{CamMode, Dial, Frame, Keys, Out, Preset, Sheet};
 use aurora_render::Renderer;
 use egui::{Pos2, Rect, Vec2};
 use std::time::Instant;
@@ -457,7 +457,53 @@ impl App {
 
     /// The custom modes' slots.
     fn vf_banks(&self) -> [crate::ui::viewfinder::BankView; 3] {
-        Default::default()
+        let s = &self.settings.snapshot;
+        let now = crate::snapshot::saved::Profile::capture(s, &self.snapshots.ui.light, &self.world.photo_isolation);
+        std::array::from_fn(|i| {
+            let name = s.banks[i].clone();
+            let profile = name.as_ref().and_then(|n| s.profiles.get(n));
+            crate::ui::viewfinder::BankView {
+                exists: profile.is_some(),
+                differs: self.snapshots.ui.bank == Some(i as u8)
+                    && profile.is_some_and(|p| crate::snapshot::saved::differs(p, &now, s.quality_warned)),
+                name,
+            }
+        })
+    }
+
+    /// A custom mode's slot changed from its sheet.
+    fn vf_bank(&mut self, slot: u8, edit: crate::ui::viewfinder::BankEdit, renderer: &Renderer) {
+        use crate::ui::viewfinder::BankEdit;
+        let i = usize::from(slot.min(2));
+        let pinned = self.settings.snapshot.banks[i].clone();
+        match edit {
+            BankEdit::SaveHere => {
+                // over the profile pinned there, else a new one named after the slot
+                let name = pinned
+                    .filter(|n| self.settings.snapshot.profiles.contains_key(n))
+                    .unwrap_or_else(|| format!("C{}", i + 1));
+                self.photo_action(Action::ProfileSave(name.clone()), renderer);
+                self.settings.snapshot.banks[i] = Some(name);
+                self.snapshots.ui.bank = Some(i as u8);
+            }
+            BankEdit::Pin(name) => {
+                if self.settings.snapshot.profiles.contains_key(&name) {
+                    self.settings.snapshot.banks[i] = Some(name);
+                }
+            }
+            BankEdit::Rename(new) => {
+                if let Some(old) = pinned {
+                    self.photo_action(Action::ProfileRename(old, new), renderer);
+                }
+            }
+            BankEdit::Unpin => {
+                self.settings.snapshot.banks[i] = None;
+                if self.snapshots.ui.bank == Some(i as u8) {
+                    self.snapshots.ui.bank = None;
+                }
+            }
+        }
+        self.settings.save();
     }
 
     /// A shot mode chosen (the list, its tile, the P key): Full set, 360°
@@ -474,6 +520,14 @@ impl App {
         }
         log::info!("viewfinder: shot mode {choice:?}");
         self.snapshots.preview_wanted = true;
+        // a custom mode: its profile, with its picture style and white
+        // balance
+        if let vf::ShotChoice::Bank(i) = choice
+            && let Some(name) = self.settings.snapshot.banks[usize::from(i.min(2))].clone()
+        {
+            self.photo_profile_load(&name);
+            self.snapshots.vf.say(format!("C{} · {name}", i + 1), false, now);
+        }
     }
 
     /// The shutter pressed half way: in AF-S the lens focuses, and the beep
@@ -838,6 +892,8 @@ impl App {
         let which = match code {
             KeyCode::Tab => Some('q'),
             KeyCode::F1 => Some('h'),
+            // 1 to 3 pick C1 to C3 while the mode list is open (Shift +
+            // digit stays a focal length: it is how some layouts type one)
             KeyCode::Digit1 | KeyCode::Numpad1 => Some('1'),
             KeyCode::Digit2 | KeyCode::Numpad2 => Some('2'),
             KeyCode::Digit3 | KeyCode::Numpad3 => Some('3'),
@@ -893,12 +949,16 @@ impl App {
                 let now = self.vf_now();
                 self.snapshots.vf.say(text, false, now);
             }
-            d => {
-                let i = d.to_digit(10).unwrap_or(3) as usize;
-                let mm = vf::FOCAL_PRESETS[i.clamp(1, 5) - 1];
-                self.settings.camera.fov = crate::snapshot::fov_of_focal(mm);
-                self.settings.save();
-            }
+            d => match digit_command(d.to_digit(10).unwrap_or(3) as u8, v.sheet == Some(Sheet::Modes)) {
+                Digit::Bank(i) => {
+                    v.sheet = None;
+                    self.vf_shot(vf::ShotChoice::Bank(i));
+                }
+                Digit::Focal(mm) => {
+                    self.settings.camera.fov = crate::snapshot::fov_of_focal(mm);
+                    self.settings.save();
+                }
+            },
         }
         true
     }
@@ -1158,6 +1218,7 @@ impl App {
                 }
                 Out::Reel(a) => self.photo_reel_action(a, renderer),
                 Out::Shot(choice) => self.vf_shot(choice),
+                Out::Bank(slot, edit) => self.vf_bank(slot, edit, renderer),
                 // (taken by the quick menu itself)
                 Out::Sheet(_) => {}
                 Out::Exit => self.panels.snapshot = false,
@@ -1219,6 +1280,22 @@ fn free_pad_axes(pad: &crate::ui::viewfinder::Pad) -> (egui::Vec2, egui::Vec2, f
     )
 }
 
+/// What a digit key does in the viewfinder.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Digit {
+    Focal(f32),
+    Bank(u8),
+}
+
+/// 1 to 5 the focal presets; 1 to 3 the custom modes while the mode list
+/// is open.
+fn digit_command(digit: u8, modes_open: bool) -> Digit {
+    match digit {
+        1..=3 if modes_open => Digit::Bank(digit - 1),
+        d => Digit::Focal(vf::FOCAL_PRESETS[usize::from(d.clamp(1, 5)) - 1]),
+    }
+}
+
 /// About half a head's depth (m): from its middle to the face.
 const HEAD_RADIUS: f32 = 0.09;
 
@@ -1231,6 +1308,20 @@ enum VfSound {
     Tick,
     /// A lens ring's detent.
     Click,
+}
+
+#[cfg(test)]
+mod digit_tests {
+    use super::{Digit, digit_command};
+
+    #[test]
+    fn digits_are_focal_lengths_unless_the_mode_list_is_open() {
+        assert_eq!(digit_command(1, false), Digit::Focal(24.0), "plain 1 still 24 mm");
+        assert_eq!(digit_command(5, false), Digit::Focal(135.0));
+        assert_eq!(digit_command(1, true), Digit::Bank(0));
+        assert_eq!(digit_command(3, true), Digit::Bank(2));
+        assert_eq!(digit_command(4, true), Digit::Focal(85.0));
+    }
 }
 
 #[cfg(test)]

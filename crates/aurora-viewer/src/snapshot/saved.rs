@@ -211,6 +211,47 @@ pub fn reset(part: Option<Part>, s: &mut Settings, light: &mut PhotoLight, iso: 
     p.apply(s, light, iso);
 }
 
+/// The photo's settings `now` differ from `profile` (a custom mode's
+/// "differs" mark). Photo quality is left out while its warning was never
+/// accepted: loading never switches it on then (`apply`).
+pub fn differs(profile: &Profile, now: &Profile, quality_warned: bool) -> bool {
+    let mut p = profile.clone();
+    if !quality_warned {
+        p.quality = now.quality;
+    }
+    p != *now
+}
+
+/// Loading `profile` asks the Photo quality warning first: it holds Photo
+/// quality, whose warning was never accepted.
+pub fn asks_quality(profile: &Profile, quality_warned: bool) -> bool {
+    profile.quality && !quality_warned
+}
+
+/// A profile renamed: its settings and the custom modes pinned to it move
+/// to the new name; false when the name is not valid, taken or unknown.
+pub fn rename(profiles: &mut BTreeMap<String, Profile>, banks: &mut [Option<String>; 3], old: &str, new: &str) -> bool {
+    let new = new.trim();
+    if !valid_name(new) || profiles.contains_key(new) {
+        return false;
+    }
+    let Some(p) = profiles.remove(old) else {
+        return false;
+    };
+    profiles.insert(new.to_owned(), p);
+    for b in banks.iter_mut().filter(|b| b.as_deref() == Some(old)) {
+        *b = Some(new.to_owned());
+    }
+    true
+}
+
+/// A profile deleted: the custom modes pinned to it are emptied.
+pub fn unpin(banks: &mut [Option<String>; 3], name: &str) {
+    for b in banks.iter_mut().filter(|b| b.as_deref() == Some(name)) {
+        *b = None;
+    }
+}
+
 /// Names are labels, never file paths: one line, at most 64 characters.
 pub fn valid_name(name: &str) -> bool {
     crate::graphics_presets::saved::valid_name(name)
@@ -375,6 +416,45 @@ mod tests {
         light.tonemapper = Some(2);
         reset(None, &mut s, &mut light, &mut iso);
         assert_eq!(light.tonemapper, None);
+    }
+
+    #[test]
+    fn a_custom_mode_does_not_differ_right_after_its_load() {
+        let saved = Settings {
+            quality: true,
+            quality_warned: true,
+            guide: Guide::Center,
+            ..Settings::default()
+        };
+        let profile = Profile::capture(&saved, &PhotoLight::default(), &Isolation::default());
+        for warned in [true, false] {
+            let mut s = Settings {
+                quality_warned: warned,
+                ..Settings::default()
+            };
+            let (mut light, mut iso) = (PhotoLight::default(), Isolation::default());
+            profile.apply(&mut s, &mut light, &mut iso);
+            let now = Profile::capture(&s, &light, &iso);
+            assert!(!differs(&profile, &now, warned), "warned: {warned}");
+            assert_eq!(asks_quality(&profile, warned), !warned);
+            s.guide = Guide::Golden;
+            assert!(differs(&profile, &Profile::capture(&s, &light, &iso), warned));
+        }
+    }
+
+    #[test]
+    fn renaming_moves_the_pins_and_deleting_clears_them() {
+        let mut profiles = BTreeMap::new();
+        profiles.insert("Night".to_owned(), Profile::default());
+        profiles.insert("Day".to_owned(), Profile::default());
+        let mut banks = [Some("Night".to_owned()), None, Some("Night".to_owned())];
+        assert!(!rename(&mut profiles, &mut banks, "Night", "Day"), "taken");
+        assert!(!rename(&mut profiles, &mut banks, "Nope", "Dusk"), "unknown");
+        assert!(rename(&mut profiles, &mut banks, "Night", " Dusk "));
+        assert!(profiles.contains_key("Dusk") && !profiles.contains_key("Night"));
+        assert_eq!(banks, [Some("Dusk".to_owned()), None, Some("Dusk".to_owned())]);
+        unpin(&mut banks, "Dusk");
+        assert_eq!(banks, [None, None, None]);
     }
 
     #[test]

@@ -21,10 +21,12 @@ mod light;
 mod looks;
 mod modes;
 mod presets;
+mod sheets;
 pub use controls::{CamMode, Pad, roll_text};
 pub use isolate::{Isolate, IsolateRow};
 pub use modes::refused_text;
 pub use presets::{Preset, PresetForm, anchor_icon};
+pub use sheets::BankEdit;
 #[cfg(test)]
 mod message_tests;
 
@@ -61,6 +63,8 @@ pub struct Viewfinder {
     pub sheet: Option<Sheet>,
     /// The row of the mode list the keys are on.
     pub mode_cursor: usize,
+    /// The new name typed in a custom mode's sheet.
+    bank_name: String,
     /// The shutter on screen, as drawn last frame (the mode list opens
     /// beside it).
     shutter_at: Option<Rect>,
@@ -262,6 +266,8 @@ pub enum Out {
     /// A shot mode chosen (`snapshot::viewfinder::choose`, or a custom
     /// mode's profile loaded).
     Shot(vf::ShotChoice),
+    /// A custom mode's slot changed (C1 to C3: 0 to 2).
+    Bank(u8, BankEdit),
     /// A quick-menu tile opens a sheet (the viewfinder's own: never
     /// reaches the app).
     Sheet(Sheet),
@@ -726,8 +732,13 @@ impl Viewfinder {
         if self.help {
             self.help_panel(ctx, p, screen, f);
         }
-        if self.sheet == Some(Sheet::Modes) && shows {
-            self.mode_list(ctx, p, screen, panel, f, &mut out);
+        match self.sheet {
+            Some(Sheet::Modes) if shows => self.mode_list(ctx, p, screen, panel, f, &mut out),
+            Some(Sheet::Bank(i)) => {
+                let bank = f.banks[usize::from(i.min(2))].clone();
+                self.bank_sheet(ctx, p, screen, i, s, &bank, &mut out);
+            }
+            _ => {}
         }
         if self.drawer {
             self.drawer(ctx, p, screen, s, panel, fov, default_fov, view, &mut out);
@@ -2402,6 +2413,20 @@ fn tiles(s: &Settings, panel: &SnapshotUi, f: &Frame) -> Vec<(&'static str, Stri
     // the shot mode, and the tiles of its own (a phone camera's controls
     // follow its mode)
     let mode = vf::shown(panel.shot, panel.depth, panel.bank);
+    // first, the custom mode the photo was made from (a camera's Q menu),
+    // marked when the settings left it since
+    let bank = match panel.bank {
+        Some(i) => {
+            let mark = if f.banks[usize::from(i.min(2))].differs { " •" } else { "" };
+            format!("C{}{mark}", i + 1)
+        }
+        None => aurora_i18n::tr!("pcu-bank-base").to_owned(),
+    };
+    v.push((
+        aurora_i18n::tr!("pcu-tile-custom"),
+        bank,
+        Box::new(|_, _| Some(Out::Sheet(Sheet::Modes))),
+    ));
     v.push((
         aurora_i18n::tr!("pcu-shot-title"),
         modes::label(mode).0,
