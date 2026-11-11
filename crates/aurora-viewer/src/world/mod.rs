@@ -3589,6 +3589,7 @@ impl World {
                 object_id,
                 message,
                 url,
+                ..
             } => {
                 let body = format!("{message}\n{url}");
                 let object_name = dialog_names::shown(&object_name).into_owned();
