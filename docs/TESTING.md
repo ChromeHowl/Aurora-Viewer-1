@@ -3270,6 +3270,7 @@ To check with these scenarios:
 | `AURORA_DEMO_PHYSICS=1\|still\|off\|classic` | Avatar body physics: balls on the breasts, belly and butt bounce as the avatars hop |
 | `AURORA_DEMO_DERENDER=menu\|inspect\|avatar\|hat` | A resident's Inspect, Derender and the Asset blacklist window |
 | `AURORA_DEMO_FRIENDS_ONLY=1\|friend` | Show Friends Only: the other avatar leaves at frame 700 and comes back at 900 |
+| `AURORA_DEMO_SHADOW_REALM=1\|remove\|off` | Shadow Realm: the other avatar hidden at frame 650, back in red at 800, normal at 950 |
 | `AURORA_DEMO_SEAT_KILL=1` | A seat deleted under the resident sitting on it |
 | `AURORA_DEMO_DISPLAYNAME="<name>"` | Display name change (simulated) |
 | `AURORA_DEMO_DISPLAYNAME_ERROR=<error_tag>` | Server error on the name change |
@@ -4066,6 +4067,17 @@ tests do not establish that this report uses an invalid joint or index.
   900. The state is kept per account in the settings, and a teleport
   switches it off unless Preferences › Controls keeps it. Screenshots with
   `AURORA_CAPTURE_FRAMES=680,760,950`.
+- **`AURORA_DEMO_SHADOW_REALM`**: the Shadow Realm (World › Shadow Realm…).
+  At frame 650 Violet Wolf is put in a list of this run only (nothing is
+  written to the account) with a 1 m distance, and the window opens: Wolf,
+  his hat, orb, name plate and dot on the mini-map vanish, and he leaves
+  the radar, while staying loaded. At frame 800 the distance becomes 40 m:
+  he is back at once, his name red on the plate, the mini-map, the radar
+  and in the window. At frame 950 `remove` takes him out of the list and
+  `1` or `off` switches the feature off: back in his usual colours. Each
+  step is logged (`demo shadow realm: frame … wolf hidden … red …`).
+  Screenshots with `AURORA_FPS_LIMIT=60`, `AURORA_DEMO_CAMERA=close,830,330,40`
+  and `AURORA_CAPTURE_FRAMES=720,860,1000`.
 - **`AURORA_DEMO_SEAT_KILL=1`** (issue #746): Violet Wolf, with its hat and
   orb, sits on a violet cushion at frame 700. The cushion is deleted at
   frame 800, before the simulator stands Wolf up at 900, as a carry or pose

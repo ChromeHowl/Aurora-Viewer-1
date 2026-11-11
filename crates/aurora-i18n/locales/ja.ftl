@@ -14974,3 +14974,21 @@ pcu-help-t = ピクチャースタイルのシート
 pcu-help-arrows = 矢印キー、Enter
 pcu-help-arrows-text = クイックメニュー、モード一覧、シートで：移動、変更（Enter でタイルを進めるかモードを選択）
 pcu-cheat-pbt = 撮影モード · ホワイトバランス · スタイル
+
+# Shadow Realm（ワールド › 影の領域…）
+sr-title = 影の領域
+sr-menu-enabled = 影の領域を有効にする
+sr-menu-window = 影の領域…
+sr-menu-add = 影の領域に追加
+sr-menu-remove = 影の領域から削除
+sr-enabled = 有効
+sr-enabled-tip = このリストの住人は、距離より遠くにいる間はどこにも表示されません。描画されず、一覧に出ず、近くのボイスも聞こえず、オブジェクトも沈黙します。ＩＭと通話は引き続き届きます。
+sr-distance = 表示する距離
+sr-distance-tip = この距離以内に入ると、リストの住人が再び表示され、名前が赤くなります。さらに１ｍ離れると再び非表示になります。
+sr-metres-suffix = ｍ
+sr-filter = 住人を絞り込む
+sr-empty = 影の領域には誰もいません。ここか、住人のメニューから追加してください。
+sr-state-off = 表示中（無効）
+sr-state-shown = 範囲内：表示中
+sr-state-hidden = 非表示
+sr-remove = 削除

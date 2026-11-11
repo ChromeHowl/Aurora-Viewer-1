@@ -259,6 +259,7 @@ impl App {
                 f.blocked = w.is_avatar_blocked(id);
                 let name = w.legacy_name(id).unwrap_or_else(|| w.social.name_of(id));
                 f.voice_blocked = w.voice_blocked(id);
+                f.shadow_realm = w.shadow_realm.is_listed(id);
                 f.can_block_voice = !crate::world::mutes::is_linden(&name);
                 f.particles_blocked = self.settings.particle_filters.blocked(*id, true);
                 f.sound_blocks = w.derender.owner_sound_flags(*id);
@@ -934,6 +935,13 @@ impl App {
                         aurora_i18n::tr!("b6-hidden-tip"),
                         crate::world::notifications::Data::None,
                     );
+                }
+            }
+            CtxAction::ShadowRealm { id, add } => {
+                if add {
+                    self.world.shadow_realm_add(id);
+                } else {
+                    self.world.shadow_realm_remove(&id);
                 }
             }
             CtxAction::UnhideFriend(id) => {

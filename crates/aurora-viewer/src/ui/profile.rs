@@ -1612,6 +1612,7 @@ fn overflow_menu(ui: &mut egui::Ui, p: &Palette, world: &World, id: Uuid, blocke
         } else if world.social.is_friend(&id) && menu::item(ui, p, "user-off", aurora_i18n::tr!("hidefriend-hide")) {
             super::context::request(ui.ctx(), super::context::CtxAction::HideFriend(id));
         }
+        super::context::shadow_realm_item(ui, p, world, id);
         menu::separator(ui, p);
         if menu::item(ui, p, "copy-filled", aurora_i18n::tr!("common-copy-name")) {
             ui.ctx().copy_text(world.social.name_of(&id));

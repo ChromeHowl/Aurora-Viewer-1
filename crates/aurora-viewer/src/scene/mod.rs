@@ -879,6 +879,8 @@ pub struct Scene {
     pub too_slow: std::collections::HashSet<usize>,
     parcel_visibility_version: u64,
     photo_isolation_version: u64,
+    /// The Shadow Realm's version last flagged (`world/shadow_realm.rs`).
+    shadow_realm_version: u64,
     /// The kinds of objects not drawn (Advanced › Rendering types), set by
     /// the app at each frame, and those the objects were last flagged for.
     pub hidden_types: render_types::Hidden,
@@ -1599,6 +1601,7 @@ impl Scene {
             too_slow: Default::default(),
             parcel_visibility_version: 0,
             photo_isolation_version: 0,
+            shadow_realm_version: 0,
             hidden_types: Default::default(),
             hidden_types_applied: Default::default(),
             hidden_selected: Vec::new(),
@@ -2709,11 +2712,21 @@ impl Scene {
         // and the selection HideSelectedObjects hides (LLPipeline::markVisible)
         let selected = std::mem::take(&mut self.hidden_selected);
         // (a HUD is no rendering type: it stays)
+        // and those the Shadow Realm hides, with what they wear and own
         let left_out = |idx: usize, hud: bool| {
-            !isolate::object_visible(world, idx) || (!hud && types.hides_object(world, idx)) || selected.binary_search(&idx).is_ok()
+            !isolate::object_visible(world, idx)
+                || (!hud && types.hides_object(world, idx))
+                || selected.binary_search(&idx).is_ok()
+                || world.shadow_hides_index(idx)
         };
-        if self.photo_isolation_version != iso.version || self.hidden_types_applied != types || self.hidden_selected_synced != selected {
+        let shadow = world.shadow_realm.version();
+        if self.photo_isolation_version != iso.version
+            || self.hidden_types_applied != types
+            || self.hidden_selected_synced != selected
+            || self.shadow_realm_version != shadow
+        {
             self.photo_isolation_version = iso.version;
+            self.shadow_realm_version = shadow;
             self.hidden_types_applied = types;
             self.hidden_selected_synced.clone_from(&selected);
             for (idx, g) in self.gpu.iter_mut().enumerate() {
@@ -2723,7 +2736,7 @@ impl Scene {
                     renderer.cull.objects.set(idx, g.cull_object(idx));
                 }
             }
-        } else if iso.applied() || types.any_object() || !selected.is_empty() {
+        } else if iso.applied() || types.any_object() || !selected.is_empty() || world.shadow_realm.active() {
             for &idx in synced {
                 if let Some(g) = self.gpu.get_mut(idx) {
                     g.hidden = left_out(idx, g.hud);
@@ -2761,6 +2774,43 @@ impl Scene {
                 && let Some(o) = world.objects.get(idx)
             {
                 stack.extend(world.objects.children_of(&o.key).iter().copied());
+            }
+        }
+    }
+
+    /// The residents the Shadow Realm shows again: kept in the world all
+    /// along, their objects' records and bounds are built again (what they
+    /// wear follows its anchor without a visit otherwise) and their
+    /// impostor takes a new picture, so they come back as they are now.
+    fn sync_shadow_realm_revealed(&mut self, world: &mut World) {
+        let revealed = world.shadow_realm.take_revealed();
+        if revealed.is_empty() {
+            return;
+        }
+        let mut stack: Vec<(usize, u8)> = revealed
+            .iter()
+            .filter_map(|id| world.objects.index_of_uuid(id))
+            .map(|idx| (idx, 0))
+            .collect();
+        // and their rezzed prims whose owner is known
+        stack.extend(world.objects.slots.iter().enumerate().filter_map(|(idx, o)| {
+            o.as_ref()
+                .filter(|o| o.parent_id == 0 && revealed.contains(&o.owner_id))
+                .map(|_| (idx, 0))
+        }));
+        let mut visited = std::collections::HashSet::new();
+        while let Some((idx, depth)) = stack.pop() {
+            if depth >= sync_sets::MAX_DEPTH || !visited.insert(idx) {
+                continue;
+            }
+            if self.gpu.get(idx).is_some_and(|g| g.is_avatar) {
+                self.impostors.forget(idx);
+            }
+            if let Some(o) = world.objects.get_mut_untracked(idx) {
+                o.render.needs_records = true;
+                let key = o.key;
+                self.sets.dirty.insert(idx);
+                stack.extend(world.objects.children_of(&key).iter().map(|&child| (child, depth + 1)));
             }
         }
     }
@@ -2953,6 +3003,7 @@ impl Scene {
         touched.clear();
         self.touched_tmp = touched;
         self.sync_parcel_crossings(world);
+        self.sync_shadow_realm_revealed(world);
         step(&mut slow, "touched");
         // a new material generation: the faces using materials are rebuilt
         let mat_gen = self.materials.generation;

@@ -125,6 +125,14 @@ fn period(distance: f32) -> f32 {
 }
 
 impl Impostors {
+    /// Forget the picture of avatar `idx`: the next plan takes a new one
+    /// (an avatar shown again after the Shadow Realm hid it).
+    pub fn forget(&mut self, idx: usize) {
+        if let Some(s) = self.states.remove(&idx) {
+            self.free.push(s.tile);
+        }
+    }
+
     /// Whether impostor `a` (as the last frame's lists saw it) can keep the
     /// pose it was given at `posed` in this frame: posed less than its
     /// picture period ago, and, in view, its picture still good (taken less
@@ -340,6 +348,20 @@ mod tests {
         let hidden = Far { in_view: false, ..moved };
         assert!(imp.pose_can_wait(&hidden, turned, t0, soon));
         assert!(!imp.pose_can_wait(&hidden, turned, t0, late));
+    }
+
+    /// An avatar the Shadow Realm shows again gets a new picture at once,
+    /// not the one taken before it was hidden.
+    #[test]
+    fn a_forgotten_picture_is_taken_again_at_once() {
+        let mut imp = Impostors::default();
+        let t0 = Instant::now();
+        assert_eq!(imp.plan(&[far(7, false)], Vec3::ZERO, t0).captures.len(), 1);
+        let t1 = t0 + Duration::from_millis(50);
+        assert!(imp.plan(&[far(7, false)], Vec3::ZERO, t1).captures.is_empty(), "still fresh");
+        imp.forget(7);
+        imp.forget(8);
+        assert_eq!(imp.plan(&[far(7, false)], Vec3::ZERO, t1).captures.len(), 1);
     }
 
     #[test]

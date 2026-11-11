@@ -83,7 +83,7 @@ impl World {
     /// such line; the signs on the avatar (the "..." bubble, the name tag,
     /// the radar's badge) stay as there.
     pub fn nearby_typing_hidden(&self, avatar: &Uuid) -> bool {
-        self.mutes.text_muted(avatar, &self.legacy_name(avatar).unwrap_or_default())
+        self.shadow_hides(avatar) || self.mutes.text_muted(avatar, &self.legacy_name(avatar).unwrap_or_default())
     }
 
     /// Script dialogs, permission requests and URLs from a blocked object
@@ -219,7 +219,10 @@ impl World {
     /// Object sounds of a blocked owner / object (process_sound_trigger,
     /// process_attached_sound).
     pub fn sound_blocked(&self, object: &Uuid, owner: &Uuid) -> bool {
-        self.mutes.is_muted_id(object)
+        // (and the sounds of someone the Shadow Realm hides, of their
+        // objects and of what they wear: `shadow_realm.rs`)
+        self.shadow_hides_source(object, owner)
+            || self.mutes.is_muted_id(object)
             || (!owner.is_nil() && self.mutes.sounds_muted(owner))
             || self.anti_spam.is_blocked(super::anti_spam::Queue::Sound, *object)
             || self.anti_spam.is_blocked(super::anti_spam::Queue::Sound, *owner)
@@ -256,7 +259,7 @@ impl World {
 
     /// Particles of a blocked owner (LLViewerPartSourceScript).
     pub fn particles_blocked(&self, owner: &Uuid) -> bool {
-        !owner.is_nil() && self.mutes.is_muted(owner, "", flag::PARTICLES)
+        !owner.is_nil() && (self.shadow_hides(owner) || self.mutes.is_muted(owner, "", flag::PARTICLES))
     }
 
     /// Voice of a blocked resident.

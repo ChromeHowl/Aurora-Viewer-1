@@ -23,6 +23,7 @@ pub mod registry;
 pub mod render_extras;
 pub mod render_photo;
 mod saver;
+pub mod shadow_realm;
 pub mod socks_proxy;
 pub mod stream_list;
 pub mod teleport;
@@ -1604,6 +1605,8 @@ pub struct Settings {
     /// shown, and crossings on foot or in vehicles are less reliable.
     pub no_neighbour_regions: bool,
     pub parcel_visibility: crate::world::parcel_visibility::Settings,
+    /// World › Shadow Realm: its switch and distance (`settings/shadow_realm.rs`).
+    pub shadow_realm: shadow_realm::ShadowRealm,
     /// Width of the local chat input in the bottom bar (px, 0 = skin default).
     pub chat_bar_width: f32,
     /// Width of the chat island of the bottom islands (px, 0 = the default
@@ -2469,6 +2472,7 @@ impl Default for Settings {
             download_connections: DownloadConnections::Automatic,
             no_neighbour_regions: false,
             parcel_visibility: Default::default(),
+            shadow_realm: Default::default(),
             chat_bar_width: 0.0,
             chat_island_width: 0.0,
             toolbar: Default::default(),
@@ -3213,6 +3217,7 @@ impl Settings {
         };
         self.im_toast_seconds = self.im_toast_seconds.clamp(3.0, 60.0);
         self.notification_options.sanitize();
+        self.shadow_realm.sanitize();
         self.name_tag_distance = self.name_tag_distance.clamp(0.0, 128.0);
         self.name_tag_show_seconds = if self.name_tag_show_seconds.is_finite() {
             self.name_tag_show_seconds.clamp(1.0, 60.0)
