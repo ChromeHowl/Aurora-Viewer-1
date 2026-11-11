@@ -143,6 +143,7 @@ impl Sending {
                 }
             }
         }
+        let mode = report_mode(mode, crate::updater::personal_build().is_some());
         Self {
             mode,
             github,
@@ -153,6 +154,14 @@ impl Sending {
             body_copied: false,
         }
     }
+}
+
+/// A personal build (`AURORA_PERSONAL_BUILD`, built by the Windows
+/// installer from a fork, maybe with local changes) never publishes on the
+/// official tracker: its crashes are not the Aurora Viewer team's, and its
+/// report could carry the local changes' names. The report stays on the PC.
+fn report_mode(chosen: CrashReports, personal: bool) -> CrashReports {
+    if personal { CrashReports::Never } else { chosen }
 }
 
 /// Always opens straight on the report to publish; it is never published
@@ -702,6 +711,14 @@ impl ApplicationHandler for Recovery {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_personal_build_never_publishes_its_crashes() {
+        for chosen in [CrashReports::Ask, CrashReports::Always, CrashReports::Never] {
+            assert_eq!(report_mode(chosen, true), CrashReports::Never);
+            assert_eq!(report_mode(chosen, false), chosen);
+        }
+    }
 
     #[test]
     fn always_opens_on_the_report_to_publish_once() {

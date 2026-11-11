@@ -15025,3 +15025,4 @@ pcu-help-t = Feuille du style d’image
 pcu-help-arrows = Flèches, Entrée
 pcu-help-arrows-text = Dans le menu rapide, la liste des modes ou une feuille : se déplacer, changer (Entrée fait avancer la tuile ou choisit le mode)
 pcu-cheat-pbt = mode de prise de vue · balance des blancs · style
+update-personal-build = { $label } est une version personnelle, construite sur ce PC à partir de son code source. Elle ne suit pas les versions officielles d’Aurora Viewer : pour la mettre à jour, utilisez « Update { $label } » dans le menu Démarrer.

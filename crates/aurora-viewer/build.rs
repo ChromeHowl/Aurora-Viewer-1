@@ -21,6 +21,7 @@ fn main() {
         .map(|i| parts[i].clone())
         .unwrap_or_default();
     println!("cargo:rustc-env=AURORA_BUILD_PROFILE={dir}");
+    personal_build();
     dictionaries();
 
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
@@ -34,6 +35,23 @@ fn main() {
             }
         }
     }
+}
+
+/// The product name of a personal build (`AURORA_PERSONAL_BUILD`, set by
+/// the Windows installer of `installer/`, e.g. "Aurora Viewer +"): it names
+/// the window, and it turns off the in-viewer updater, whose feed is the
+/// official releases, and the crash reports to the official tracker.
+/// Letters, digits, spaces and `-._()+` only, 40 at most; empty for every
+/// other build.
+fn personal_build() {
+    println!("cargo:rerun-if-env-changed=AURORA_PERSONAL_BUILD");
+    let raw = std::env::var("AURORA_PERSONAL_BUILD").unwrap_or_default();
+    let label: String = raw
+        .chars()
+        .filter(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '.' | '_' | '(' | ')' | '+'))
+        .take(40)
+        .collect();
+    println!("cargo:rustc-env=AURORA_PERSONAL_BUILD={}", label.trim());
 }
 
 /// The spelling dictionaries (assets/dictionaries/<name>/<name>.aff and
