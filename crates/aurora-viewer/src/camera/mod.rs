@@ -4694,9 +4694,17 @@ mod tests {
             ..strongest_smoothing()
         };
         let (mut cam, mut w) = alt_focused(90.0, &s);
+        // the alt focus keeps the camera where it is (its goal does not move)
+        cam.update(&mut w, &s, &frame(1.0 / 60.0));
+        // then the camera alone is sent 81 m nearer the same focus, in one
+        // frame and without an animation (the focus did not move): a jump
+        let focus = cam.focus_target;
+        let near = focus + (cam.position - focus) * 0.1;
+        cam.set_view(near, focus, &mut w.agent, &s);
         let before = cam.position;
         cam.update(&mut w, &s, &frame(1.0 / 60.0));
         let goal = cam.focus_target + cam.focus_offset_target;
+        assert!(goal.distance(before) > 50.0, "a large move: {}", goal.distance(before));
         assert!(cam.position.distance(goal) > 10.0, "smoothed, not jumped");
         assert!(cam.position.distance(before) < 1.0);
     }
