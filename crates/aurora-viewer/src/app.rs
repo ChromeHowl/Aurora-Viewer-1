@@ -14590,6 +14590,11 @@ impl App {
                 self.settings.save();
                 log::info!("quiet snapshots: {}", !self.settings.snapshot.sound);
             }
+            BarAction::ToggleHideSelected => {
+                let tools = &mut self.settings.build.tools;
+                tools.hide_selected = !tools.hide_selected;
+                self.settings.save();
+            }
             BarAction::ToggleMouseSmoothing => {
                 let extra = &mut self.settings.camera.extra;
                 extra.mouselook_smoothing = !extra.mouselook_smoothing;
@@ -16346,6 +16351,7 @@ impl App {
                     fly_override: self.world.fly_override,
                     quiet_snapshots: !self.settings.snapshot.sound,
                     mouse_smoothing: self.settings.camera.extra.mouselook_smoothing,
+                    hide_selected: self.settings.build.tools.hide_selected,
                     parcel_landmark,
                     can_set_home: self.world.can_set_home(),
                     can_go_home: self.world.rlva_can_teleport_home(),

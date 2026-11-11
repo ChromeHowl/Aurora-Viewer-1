@@ -1179,6 +1179,7 @@ mod tests {
             fly_override: false,
             quiet_snapshots: false,
             mouse_smoothing: false,
+            hide_selected: false,
             marketplace: false,
             parcel_landmark: None,
             can_set_home: false,
