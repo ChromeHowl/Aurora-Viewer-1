@@ -2576,8 +2576,8 @@ fn closing_with_stop_posing_off_keeps_others_history_animations_and_the_subject(
     assert_eq!(editor.poser.sessions[&peer].undo.len(), 1, "the undo history stays");
     assert!(matches!(editor.poser.playback, playback::Transport::Playing { .. }));
     // the animation arrives while the window is closed, and plays
-    let dir = std::env::temp_dir().join("aurora-poser-closed-tests");
-    let mut streamer = crate::scene::anim::AnimStreamer::new(dir);
+    let dir = std::env::temp_dir().join(format!("aurora-poser-closed-{}", Uuid::new_v4()));
+    let mut streamer = crate::scene::anim::AnimStreamer::new(dir.clone());
     let key = |time: f32| RotKey {
         time,
         rotation: Quat::from_rotation_z(0.9),
@@ -2623,4 +2623,6 @@ fn closing_with_stop_posing_off_keeps_others_history_animations_and_the_subject(
     assert!(!editor.poser.active);
     assert!(editor.pose_layers(&world).is_empty());
     assert!(Config::default().stop_on_close);
+    drop(streamer);
+    let _ = std::fs::remove_dir_all(&dir);
 }

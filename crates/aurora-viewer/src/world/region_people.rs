@@ -553,21 +553,25 @@ mod tests {
             })
             .collect();
         assert_eq!(asked, ["shown 0", "shown 1", "shown 2", "shown 3"]);
-        // past a second off screen they are not asked at all
+        // past a second off screen the rows scrolled past are never asked,
+        // though the lane has room: only new rows on screen are (names never
+        // asked before, so the map's once-a-minute limit plays no part)
         let later = secs(t0, 1.2);
-        for i in 0..4 {
-            people.by_name(&map, &format!("Shown {i}"), None, later);
-        }
-        let mut sent = Vec::new();
+        let mut asked = Vec::new();
         for frame in 0..50 {
             let now = later + Duration::from_millis(100 * frame);
-            for i in 0..4 {
-                people.by_name(&map, &format!("Shown {i}"), None, now);
+            for i in 0..2 {
+                people.by_name(&map, &format!("Fresh {i}"), None, now);
             }
             people.pump(&mut map, now);
-            sent.extend(map.take_commands());
+            for c in map.take_commands() {
+                if let NetCommand::MapNameRequest { name } = c {
+                    asked.push(name);
+                }
+            }
         }
-        assert!(sent.is_empty(), "nothing for the rows scrolled past: {sent:?}");
+        assert_eq!(asked, ["fresh 0", "fresh 1"], "the rows scrolled past are left out");
+        assert!(people.blocks.ready(later + Duration::from_secs(5)), "the lane had room for them");
     }
 
     #[test]
