@@ -1,0 +1,117 @@
+name: Installer
+
+# Compiles the Windows installer of Aurora Viewer +, the personal build of
+# this fork (installer/AuroraFD.iss, docs/INSTALLER.md), with Inno Setup.
+# The installer holds no viewer program and no private code: it builds the
+# public fork on the user's PC. Runs on the fork only, never on the
+# upstream repository.
+#
+# - by hand (Actions > Installer > Run workflow): the installer is kept as
+#   the run's artifact;
+# - a tag installer-v<version> (installer-v1.0.0): the same, and the
+#   installer is published as the release "Installer <version>".
+on:
+  workflow_dispatch:
+  push:
+    tags: ['installer-v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: installer-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Inno Setup when the runner image has none (or an older one): this exact
+  # version, whose Chocolatey package checks the installer's checksum.
+  INNO_SETUP: 6.4.3
+
+jobs:
+  build:
+    if: github.repository == 'ChromeHowl/Aurora-Viewer-1'
+    runs-on: windows-latest
+    outputs:
+      version: ${{ steps.compile.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # the engine runs in Windows PowerShell 5.1 on the users' PCs
+      - name: PowerShell scripts parse (5.1)
+        shell: powershell
+        run: ./scripts/check-scripts.ps1
+      - name: Inno Setup
+        shell: pwsh
+        run: |
+          function Find-Iscc {
+              Get-ChildItem "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe" -ErrorAction SilentlyContinue |
+                  Where-Object { [version]$_.VersionInfo.ProductVersion -ge [version]'6.3' } | Select-Object -First 1
+          }
+          $iscc = Find-Iscc
+          if (-not $iscc) {
+              choco install innosetup --version $env:INNO_SETUP -y --no-progress --allow-downgrade
+              if ($LASTEXITCODE) { exit $LASTEXITCODE }
+              $iscc = Find-Iscc
+          }
+          if (-not $iscc) { throw 'Inno Setup 6.3 or newer was not found.' }
+          $sig = Get-AuthenticodeSignature -LiteralPath $iscc.FullName
+          if ($sig.Status -ne 'Valid') { throw "ISCC.exe is not validly signed ($($sig.Status))." }
+          Write-Host "Inno Setup $($iscc.VersionInfo.ProductVersion), signed by $($sig.SignerCertificate.Subject)"
+          "ISCC=$($iscc.FullName)" >> $env:GITHUB_ENV
+      - name: Compile
+        id: compile
+        shell: pwsh
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          # the installer's own version: the tag's, or 0.0.<run> by hand
+          $version = "0.0.$env:RUN_NUMBER"
+          if ($env:REF_TYPE -eq 'tag') {
+              if ($env:REF_NAME -notmatch '^installer-v(\d+\.\d+\.\d+)$') { throw "Expected a tag installer-v<major>.<minor>.<patch>, got $env:REF_NAME." }
+              $version = $Matches[1]
+          }
+          # the engine and the installer name the same folders
+          $folder = (Get-Content installer/engine/settings.json -Raw | ConvertFrom-Json).folderName
+          if (-not (Select-String -Path installer/AuroraFD.iss -SimpleMatch "#define AppFolder `"$folder`"" -Quiet)) {
+              throw "AppFolder in installer/AuroraFD.iss differs from folderName ($folder) in installer/engine/settings.json."
+          }
+          $env:INSTALLER_VERSION = $version
+          "version=$version" >> $env:GITHUB_OUTPUT
+          & $env:ISCC installer/AuroraFD.iss
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Get-ChildItem installer/output
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: AuroraViewerPlus-Setup-${{ steps.compile.outputs.version }}
+          path: installer/output/AuroraViewerPlus-Setup.exe
+          if-no-files-found: error
+
+  # only this job may write: the release of a tag
+  publish:
+    needs: build
+    if: github.repository == 'ChromeHowl/Aurora-Viewer-1' && github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: AuroraViewerPlus-Setup-${{ needs.build.outputs.version }}
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          notes='Windows installer of Aurora Viewer +, a personal build of Aurora Viewer (not an official Aurora Viewer release).
+
+          It contains no viewer program: run it, and it installs the build tools (it asks first), downloads the public code of this fork, builds the viewer on your PC (20-60 minutes the first time) and installs it. "Update Aurora Viewer +" in the Start menu gets the latest version the same way.
+
+          See docs/INSTALLER.md.'
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" AuroraViewerPlus-Setup.exe --clobber
+          else
+            gh release create "$TAG" AuroraViewerPlus-Setup.exe --title "Installer $VERSION" --notes "$notes" --latest=false
+          fi
