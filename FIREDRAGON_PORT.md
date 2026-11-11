@@ -130,6 +130,7 @@ Housekeeping after the merges (formatting, one unused constant removed) and the 
 Decided by the owner (2026-11-11), done on `feat/final-polish`:
 
 - Teleport defaults: the map stays open during a teleport and the teleport history is in UTC, as Aurora did before (the Legacy Viewer closes the map and uses SLT).
+- "Turn the avatar toward the selection" is off by default (on in the Legacy Viewer).
 
 Decisions for the owner:
 

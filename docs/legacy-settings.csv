@@ -898,7 +898,7 @@ FSTextureDefaultSaveAsFormat,Boolean,in-aurora,,"ported (2026-11), `settings/inv
 FSToolbarsResetOnModeChange,Boolean,not-applicable,,"a look of the Legacy interface (opacity, spacing, cursors); Aurora's interface has its own design (docs/BRANDING.md)",If enabled the user's current toolbar layout for newly selected modes will be overwritten with the default one for a mode. (default on)
 FSToolboxExpanded,Boolean,in-aurora,,build.expanded,Whether to show additional build tool controls
 FSTrimLegacyNames,Boolean,in-aurora,,trim_resident,"Trim ""Resident"" from Legacy Names."
-FSTurnAvatarToSelectedObject,Boolean,to-add,low,,"If enabled, the avatar turns towards an selected object"
+FSTurnAvatarToSelectedObject,Boolean,in-aurora,,"ported (2026-11), `settings/build_extras.rs`; off by default (owner decision)","If enabled, the avatar turns towards an selected object"
 FSTypeDuringEmote,Boolean,in-aurora,,type_during_emote,Enables the typing animation even while emoting
 FSTypingChevronPrefix,Boolean,in-aurora,,typing_chevron,Adds an additional chevron prefix to the IM window as typing indicator
 FSUndeformUUID,String,fixed,,the animation id is built in (app/avatar_health),Animation UUID to use for the undeform

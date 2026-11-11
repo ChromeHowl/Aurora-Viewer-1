@@ -1,6 +1,7 @@
 //! Smaller build options of the Legacy Viewer that Aurora lacked (Preferences
 //! › Build). Held in `BuildSettings::extras`; every default is the Legacy
-//! Viewer's (settings.xml names in comments).
+//! Viewer's (settings.xml names in comments) except the turn toward the
+//! selection, off so that selecting does not move the avatar unasked.
 
 use serde::{Deserialize, Serialize};
 
@@ -19,8 +20,10 @@ pub struct BuildExtras {
     /// FSSaveInventoryScriptsAsMono (on): a script edited from the
     /// inventory is saved as Mono, else as LSL2.
     pub inventory_scripts_mono: bool,
-    /// FSTurnAvatarToSelectedObject (on): the avatar turns toward an object
-    /// it selects, while the camera is not on the avatar.
+    /// FSTurnAvatarToSelectedObject: the avatar turns toward an object it
+    /// selects, while the camera is not on the avatar. Off by default (an
+    /// owner decision; on in the Legacy Viewer): Aurora never turned the
+    /// avatar on a selection before the option.
     pub turn_to_selection: bool,
 }
 
@@ -31,7 +34,7 @@ impl Default for BuildExtras {
             commit_sale_on_change: false,
             parcel_walls_to_max: false,
             inventory_scripts_mono: true,
-            turn_to_selection: true,
+            turn_to_selection: false,
         }
     }
 }
@@ -50,11 +53,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defaults_are_the_legacy_viewers_and_old_files_load() {
+    fn defaults_and_old_files_load() {
         let e: BuildExtras = serde_json::from_str("{}").unwrap();
         assert_eq!(e, BuildExtras::default());
         assert!(!e.drag_texture && !e.commit_sale_on_change && !e.parcel_walls_to_max);
-        assert!(e.inventory_scripts_mono && e.turn_to_selection);
+        assert!(e.inventory_scripts_mono && !e.turn_to_selection);
+        let e: BuildExtras = serde_json::from_str(r#"{"turn_to_selection":true}"#).unwrap();
+        assert!(e.turn_to_selection);
     }
 
     #[test]
