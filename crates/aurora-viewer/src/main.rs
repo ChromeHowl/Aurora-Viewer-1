@@ -329,6 +329,8 @@ fn run_viewer() -> anyhow::Result<()> {
     // while the plugins let go of their files
     drop(app);
     media::private_profile::finish(std::time::Duration::from_secs(8));
+    // the files given to external script editors this session
+    ui::scripts::files::remove_session_dir();
     result?;
     Ok(())
 }
