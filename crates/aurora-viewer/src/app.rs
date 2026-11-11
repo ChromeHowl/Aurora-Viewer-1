@@ -65,6 +65,7 @@ mod describe;
 mod dev_toolbox;
 mod folders;
 mod hover_pick;
+mod photo_camera_demo;
 mod pose_stand;
 mod texture_picker;
 use folders::chat_log_root;

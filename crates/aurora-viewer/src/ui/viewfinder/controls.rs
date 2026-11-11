@@ -813,7 +813,15 @@ pub(super) fn segmented(ui: &mut egui::Ui, p: &Palette, items: &[(&str, bool, &s
             ui.painter().rect_filled(r, radius, p.ink.gamma_multiply(0.07));
         }
         let color = if *on || resp.hovered() { p.ink } else { p.muted };
-        ui.painter().text(r.center(), Align2::CENTER_CENTER, *text, font.clone(), color);
+        // equal cells (the pad's Follow rows): a wide font's label (OpenDyslexic)
+        // shrinks to its cell, then ends in an ellipsis; the tip has it whole
+        let room = w - 2.0 * SEG_INSET;
+        let size = fit_size(widths[i] - 18.0, room);
+        let font = egui::FontId::new(size, font.family.clone());
+        let mut job = egui::text::LayoutJob::simple_singleline((*text).to_owned(), font, color);
+        job.wrap = egui::text::TextWrapping::truncate_at_width(room);
+        let galley = ui.painter().layout_job(job);
+        ui.painter().galley(r.center() - galley.size() / 2.0, galley, color);
         if resp.clicked() {
             resp.surrender_focus();
             clicked = Some(i);
@@ -822,6 +830,22 @@ pub(super) fn segmented(ui: &mut egui::Ui, p: &Palette, items: &[(&str, bool, &s
         x += w + 2.0;
     }
     clicked
+}
+
+/// A segment's label keeps this much room on each side.
+const SEG_INSET: f32 = 3.0;
+/// The segments' labels never get smaller than this.
+const SEG_MIN_SIZE: f32 = 9.0;
+
+/// The size of a 12-point label `natural` points wide that fits `room`
+/// points: 12 when it fits, else smaller, down to `SEG_MIN_SIZE` (text
+/// width follows the size).
+fn fit_size(natural: f32, room: f32) -> f32 {
+    if natural <= room || natural <= 0.0 {
+        12.0
+    } else {
+        (12.0 * room / natural).clamp(SEG_MIN_SIZE, 12.0)
+    }
 }
 
 fn label(ui: &mut egui::Ui, p: &Palette, text: &str) {
@@ -1022,6 +1046,19 @@ pub fn level_color(p: &Palette, roll: f32, pitch: f32) -> Color32 {
 #[cfg(test)]
 mod follow_tests {
     use crate::camera::extra::FollowJoint;
+
+    #[test]
+    fn a_label_too_wide_for_its_cell_shrinks_but_stays_readable() {
+        // the pad's Follow cells: (206 - 4 - 3 × 2) / 4 = 49, room 43
+        assert_eq!(super::fit_size(38.0, 43.0), 12.0, "Inter's \"R hand\" is left as it is");
+        let s = super::fit_size(51.6, 43.0);
+        assert!((s - 10.0).abs() < 1e-3, "a wide font's label at 10 points: {s}");
+        assert_eq!(
+            super::fit_size(120.0, 43.0),
+            super::SEG_MIN_SIZE,
+            "never smaller: the ellipsis does the rest"
+        );
+    }
 
     #[test]
     fn follow_lights_the_chosen_hand_or_foot() {

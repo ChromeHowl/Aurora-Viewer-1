@@ -470,6 +470,7 @@ the background still applies outside screenshots.
 | `AURORA_DEMO_PHOTO_LOOK=<look>[+<look>…][:<percent>][:compare][:panel][:tab=…][:search=…][:set=…]` | The photo's looks stacked (Legacy, Aurora, a LUT or a creator's LUT), the chosen one's strength and settings, the before / after line, the filter panel |
 | `AURORA_DEMO_CONTROLS=camera\|roll\|movement\|compact\|compact-move\|classic\|views\|classic-views\|free\|free-compact` | The Controls window open on a tab, the Legacy Viewer's two windows, a view saved and given back, or driving the photo window's free camera |
 | `AURORA_DEMO_CAMERA_PRESETS=save\|apply\|object\|pick[-…]` | The viewfinder's camera presets: saved on the avatar, a place and an object, applied, or the object chosen in the scene |
+| `AURORA_DEMO_PHOTO_CAMERA=<what>[:down=<n>][:turn=<n>]` | The photo camera's quick menu, mode list or a sheet walked with the arrow keys (the row the keys are on lit), or the camera pad's Follow rows |
 
 `AURORA_DEMO_RENDER_TEXTURE`: with demo mode and `AURORA_CAPTURE`, the capture
 frame draws the full world into a caller-owned GPU texture instead of acquiring
@@ -889,6 +890,22 @@ middle of the window, 70 % down, from 630 and a click there at 640 (the log
 gives `camera preset: anchor object <id>`); capture at 636 for the choosing
 button lit. The presets are saved in the demo profile's settings, like the
 Controls window's.
+
+`AURORA_DEMO_PHOTO_CAMERA` (with `AURORA_DEMO_SNAPSHOT=viewfinder`):
+`<what>` opens at frame 600 one of `menu` (the quick menu), `modes` (the
+shot mode list), `style`, `guide`, `guide-spiral` (the Guide sheet with the
+spiral, so its corner row shows), `lens` or `bank` (the C1 sheet); `follow`
+shows the camera pad with the right hand followed instead. From frame 610 the
+arrow keys go through the viewfinder's own key path, one press every other
+frame: `down=<n>` presses of Down (Right in the quick menu), then
+`turn=<n>` presses of Right, or Left when negative, on the row reached (at
+most 20 of each). Capture from frame 660: the row the keys are on has a
+faint face and a teal edge across the sheet, and the value turned shows. At
+frame 700 the log gives `photo camera demo: menu …, sheet … (row …), mode
+row …`. With `follow` and `AURORA_UI_FONT=OpenDyslexic`, the pad's Follow
+labels shrink to their cells (an ellipsis past 9 points, the whole name in
+the tip); with the default font they keep their size. `follow` changes the
+demo profile's settings only.
 
 `AURORA_DEMO_CONTROLS` opens the Controls window at frame 600: `camera` on
 its Camera tab (joysticks, zoom, the four views, object view, mouselook,
