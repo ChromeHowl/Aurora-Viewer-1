@@ -3353,6 +3353,7 @@ impl App {
             };
             let gesture = item.asset_type == 21;
             let id = item.id;
+            self.world.landmark_created_notice(&item);
             if self.create_landmark_ui.created(id, item.parent, item.asset_type) {
                 // the Create Landmark window edits it: no rename in the inventory
                 self.world.inventory.add_items(vec![item]);
@@ -5615,6 +5616,10 @@ impl App {
             set_presence: self.settings.people.set_notice_toast,
             set_presence_in_chat: self.settings.people.set_notice_chat,
         };
+        w.notifications.options = self.settings.notification_options;
+        if w.notifications.take_open_conversations() {
+            ui::notifications::open_conversations(&self.egui_ctx, &mut self.panels.chat);
+        }
         // a conversation in sight: its tab shown in the Conversations window
         // or its own window (FSFloaterIM visible), whether or not the viewer
         // has the focus

@@ -20,6 +20,7 @@ pub mod layout;
 pub mod media;
 pub mod message_rules;
 pub mod network;
+pub mod notification_options;
 pub mod privacy;
 pub mod protections;
 pub mod rlva;

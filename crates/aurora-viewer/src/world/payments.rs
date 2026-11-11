@@ -330,6 +330,11 @@ impl World {
             let note = self.notice_line(text.clone());
             self.transcript_only(from, &note);
         }
+        // FSPaymentInfoInChat: a line of nearby chat instead of the toast
+        if self.notifications.options.payments_in_chat {
+            self.system_notice(text, super::notice_topics::Topic::Info);
+            return;
+        }
         let id = self
             .notifications
             .push(Kind::Info, aurora_i18n::tr!("world-payments-received-title"), text, Data::None);
@@ -746,6 +751,17 @@ mod tests {
         w.social.session_mut(JANE);
         w.payment(&received(142, GIFT, JANE, 30, "Payment"));
         assert_eq!(cards(&w, JANE).len(), 1);
+    }
+
+    #[test]
+    fn payment_info_in_chat_replaces_the_toast_with_a_nearby_line() {
+        let mut w = world();
+        w.payments.notify_received = true;
+        w.notifications.options.payments_in_chat = true;
+        let before = w.chat.len();
+        w.payment(&received(150, trans::OBJECT_SALE, JANE, 50, "Hat"));
+        assert!(notices(&w).is_empty());
+        assert_eq!(w.chat.len(), before + 1);
     }
 
     #[test]

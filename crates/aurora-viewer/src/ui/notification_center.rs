@@ -191,7 +191,14 @@ pub fn update(list: &Notifications, c: &mut CenterUi, m: Moment, message_seconds
     // and again once the list closes, the view clears or do not disturb
     // ends (seen in the list or not, it is still waiting)
     let mut back = false;
-    for n in list.list.iter().filter(|n| n.stays_until_answered() && !n.quiet && card(n)) {
+    // (the script menus drawn in their corner stay out of the cards,
+    // `cards::dialogs_apart`)
+    let apart = |n: &Notification| cards::dialog_apart(n, &list.options);
+    for n in list
+        .list
+        .iter()
+        .filter(|n| n.stays_until_answered() && !n.quiet && card(n) && !apart(n))
+    {
         if may_show(n, &m) && !c.peek.iter().any(|p| p.id == n.id) {
             c.peek.push(Peek {
                 id: n.id,
@@ -207,7 +214,10 @@ pub fn update(list: &Notifications, c: &mut CenterUi, m: Moment, message_seconds
         c.peek.sort_by_key(|p| p.id);
     }
     for p in c.peek.iter_mut() {
-        let gone = !list.list.iter().any(|n| n.id == p.id && (p.pinned || !n.read) && card(n));
+        let gone = !list
+            .list
+            .iter()
+            .any(|n| n.id == p.id && (p.pinned || !n.read) && card(n) && !apart(n));
         if p.folding.is_none() {
             if !m.hovered && !p.pinned {
                 p.left -= dt;
@@ -360,6 +370,7 @@ pub fn show(
     let now = ctx.input(|i| i.time);
     // published by the islands this frame (Firestorm's bars have none)
     let column = nui.column.take();
+    cards::share_options(ctx, list.options);
     let hovered = nui
         .center
         .panel
@@ -383,6 +394,7 @@ pub fn show(
     let (presence, peek) = (&nui.center.presence, &nui.center.peek);
     list.list
         .retain(|n| !n.transient || presence.iter().any(|t| t.id == n.id) || peek.iter().any(|p| p.id == n.id));
+    cards::dialogs_apart(ctx, p, icons, world, list, nui, env, true, &mut answers);
     let Some(bell) = nui.bell else {
         return (answers, asks);
     };

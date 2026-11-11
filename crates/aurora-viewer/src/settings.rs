@@ -12,6 +12,7 @@ pub mod chat_translation;
 pub mod draw_stepping;
 mod hover_height;
 pub mod inventory_extras;
+pub mod notification_options;
 pub mod people;
 pub mod registry;
 pub mod render_extras;
@@ -977,6 +978,9 @@ pub struct Settings {
     pub ims_in_notification_center: bool,
     /// Seconds a message toast stays (NotificationToastLifeTime, 30).
     pub im_toast_seconds: f32,
+    /// Script dialogs, conversation notices, the Legacy toasts' timing and
+    /// the small notices (settings/notification_options.rs).
+    pub notification_options: notification_options::NotificationOptions,
     /// Write instant messages, group chats and conferences to text files in
     /// the account's folder (Firestorm KeepConversationLogTranscripts = 2).
     pub log_im: bool,
@@ -2168,6 +2172,7 @@ impl Default for Settings {
             toast_group_im: false,
             ims_in_notification_center: false,
             im_toast_seconds: 30.0,
+            notification_options: Default::default(),
             log_im: true,
             log_nearby: false,
             reopen_ims: false,
@@ -3099,6 +3104,7 @@ impl Settings {
             0.5
         };
         self.im_toast_seconds = self.im_toast_seconds.clamp(3.0, 60.0);
+        self.notification_options.sanitize();
         self.name_tag_distance = self.name_tag_distance.clamp(0.0, 128.0);
         self.name_tag_show_seconds = if self.name_tag_show_seconds.is_finite() {
             self.name_tag_show_seconds.clamp(1.0, 60.0)

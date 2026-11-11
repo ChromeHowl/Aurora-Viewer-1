@@ -264,7 +264,10 @@ pub fn page(cx: &mut Cx, tab: usize) {
             gifs(cx);
             super::chat_display::groups(cx);
         }
-        1 => notifications(cx),
+        1 => {
+            notifications(cx);
+            super::notification_options::groups(cx);
+        }
         2 => keyword_alerts(cx),
         3 => history(cx),
         4 => away_and_replies(cx),

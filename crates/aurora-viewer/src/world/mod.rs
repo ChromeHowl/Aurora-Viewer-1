@@ -66,6 +66,7 @@ pub mod names;
 pub mod night_sky;
 pub mod notice_topics;
 pub mod notification_history;
+pub mod notification_options;
 pub mod notifications;
 pub mod object_im_filter;
 pub mod objects;
@@ -3380,6 +3381,8 @@ impl World {
                 // the menu keeps the name for blocking; the card shows it on one line
                 let (object_name, owner_name) = (dialog_names::shown(&object_name).into_owned(), self.dialog_owner(&owner_name));
                 let title = format!("{object_name} ({owner_name})");
+                // ScriptDialogLimitations: the older dialogs it replaces close
+                self.limit_script_dialogs(object_id, channel);
                 let id = self.notifications.push(notifications::Kind::Script, title, message, data);
                 self.link_object_notification(id, object_id, &object_name, &owner_name);
                 // LLScriptFloater ("script_floater") opening
@@ -4539,6 +4542,7 @@ impl World {
                 origin: Origin::Live,
             };
             self.conversation_push(im.from_agent_id, line, true);
+            self.notifications.offline_message(im.offline);
             if rlva_filter != rlva::communication::Received::Masked {
                 self.send_autoresponse(&im, autoresponse);
             }
@@ -4551,7 +4555,7 @@ impl World {
             return;
         }
         // dialog 19 = MessageFromObject
-        if self.object_im_filtered(&im) {
+        if self.object_im_filtered(&im) || self.object_return_hidden(&im) {
             return;
         }
         let kind = if im.dialog == 19 { ChatKind::ObjectIm } else { ChatKind::Im };
@@ -5174,6 +5178,8 @@ impl World {
             Some(n) if matches!(r, notifications::Response::Accept) && n.offered_attachment().is_some() => Some((Uuid::nil(), true)),
             _ => None,
         };
+        // check_offer_throttle names who gives (before the answer removes it)
+        let giver = self.offer_giver(id);
         // a resident's offer: its card in the conversation takes the answer
         let offer_outcome = self
             .notifications
@@ -5195,7 +5201,9 @@ impl World {
         if let Some(outcome) = offer_outcome {
             self.inventory_offer_answered(id, outcome);
         }
-        if let Some((object, task)) = kept {
+        if let Some((object, task)) = kept
+            && self.offer_throttle_passes(&giver)
+        {
             self.reveal_kept_offer(object, task);
         }
         out
@@ -5298,7 +5306,7 @@ impl World {
             // (LLIMModel::proccessOnlineOfflineNotification, llimview.cpp):
             // never opens one
             if self.social.has_session(&id) {
-                self.session_system(id, n.clone());
+                self.friend_status_line(id, n.clone());
             }
             // a contact set with its notices on (FIRE-3522,
             // LGGContactSets::notifyForFriend)

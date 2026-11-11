@@ -381,6 +381,8 @@ pub struct GridStatus {
     first: bool,
     next: Option<Instant>,
     pending: bool,
+    /// AutoQueryGridStatus: the latest news said once per login.
+    login: LoginNews,
     tx: crossbeam_channel::Sender<(String, Result<Vec<Entry>, String>)>,
     rx: crossbeam_channel::Receiver<(String, Result<Vec<Entry>, String>)>,
 }
@@ -399,10 +401,47 @@ impl Default for GridStatus {
             first: true,
             next: None,
             pending: false,
+            login: LoginNews::Idle,
             tx,
             rx,
         }
     }
+}
+
+/// Where the login's news stands (AutoQueryGridStatus, LLStartUp's
+/// STATE_STARTED and downloadGridstatusComplete in llstartup.cpp,
+/// originally LGPL 2.1).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum LoginNews {
+    /// Not logged in, or the option off at login.
+    #[default]
+    Idle,
+    /// Logged in: the feed is asked, the answer awaited.
+    Waiting,
+    /// Said (or nothing to say) for this login.
+    Done,
+}
+
+/// The line of nearby chat for the feed's latest entry: "[ title ] its
+/// newest update [ link ]", as downloadGridstatusComplete writes it.
+pub fn news_line(entries: &[Entry]) -> Option<String> {
+    let e = entries.first()?;
+    let mut line = format!("[ {} ]", e.title);
+    if let Some(u) = e.updates.first() {
+        let text = match (u.status.is_empty(), u.text.is_empty()) {
+            (false, false) => format!("{} - {}", u.status, u.text),
+            (false, true) => u.status.clone(),
+            _ => u.text.clone(),
+        };
+        if !text.is_empty() {
+            line.push(' ');
+            line.push_str(&text);
+        }
+    }
+    if let Some(link) = &e.link {
+        line.push_str(&format!(" [ {link} ]"));
+    }
+    Some(line)
 }
 
 impl GridStatus {
@@ -416,6 +455,38 @@ impl GridStatus {
         self.next = None;
     }
 
+    /// Before `poll`, each frame: at login with the option on, the feed is
+    /// asked at once; whether the login still waits for it (the feed is
+    /// then followed). Out of the world, the next login asks again.
+    pub fn login_wants(&mut self, in_world: bool, enabled: bool) -> bool {
+        if !in_world {
+            self.login = LoginNews::Idle;
+            return false;
+        }
+        if enabled && self.login == LoginNews::Idle {
+            self.login = LoginNews::Waiting;
+            self.refresh();
+        } else if self.login == LoginNews::Idle {
+            // the option off at login: not asked later in the session
+            self.login = LoginNews::Done;
+        }
+        self.login == LoginNews::Waiting
+    }
+
+    /// After `poll`: once the login's answer came, what to say in nearby
+    /// chat (the latest news, or that the feed could not be read).
+    pub fn login_report(&mut self) -> Option<String> {
+        if self.login != LoginNews::Waiting || self.pending {
+            return None;
+        }
+        self.login = LoginNews::Done;
+        match &self.load {
+            Load::Loaded => Some(news_line(&self.entries).unwrap_or_else(|| aurora_i18n::tr!("b5c-grid-status-empty").to_owned())),
+            Load::Failed(_) => Some(aurora_i18n::tr!("b5c-grid-status-failed").to_owned()),
+            Load::NoFeed | Load::Loading => None,
+        }
+    }
+
     /// Each frame: `feed` and `page` the grid's (None: it has none),
     /// `wanted` whether the feed is followed. Returns whether an entry came
     /// or changed (after the first answer): the button flashes.
@@ -424,9 +495,10 @@ impl GridStatus {
             // another grid, or a region of an OpenSim grid naming another
             // feed: what was seen of the old one says nothing of this one
             let (tx, rx) = (self.tx.clone(), self.rx.clone());
-            let flash = self.flash;
+            let (flash, login) = (self.flash, self.login);
             *self = Self {
                 feed: feed.map(str::to_owned),
+                login,
                 load: if feed.is_some() { Load::Loading } else { Load::NoFeed },
                 flash,
                 tx,
@@ -505,3 +577,45 @@ pub fn sources(second_life: bool, extras: Option<(&str, &str)>) -> (Option<Strin
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod login_news_tests {
+    use super::*;
+
+    #[test]
+    fn the_news_line_names_the_latest_entry_its_update_and_link() {
+        let e = Entry {
+            title: "Scheduled maintenance".into(),
+            link: Some("https://status.example/two".into()),
+            updates: vec![Update {
+                when: String::new(),
+                status: "Scheduled".into(),
+                text: "Regions restart in turn.".into(),
+            }],
+            ..Entry::default()
+        };
+        assert_eq!(
+            news_line(&[e]).as_deref(),
+            Some("[ Scheduled maintenance ] Scheduled - Regions restart in turn. [ https://status.example/two ]")
+        );
+        assert_eq!(news_line(&[]), None);
+    }
+
+    #[test]
+    fn the_login_asks_once_and_says_the_answer_once() {
+        let mut g = GridStatus::default();
+        assert!(!g.login_wants(false, true));
+        assert!(g.login_wants(true, true));
+        g.pending = true;
+        assert_eq!(g.login_report(), None, "the answer is awaited");
+        g.pending = false;
+        g.load = Load::Failed("offline".into());
+        assert!(g.login_report().is_some());
+        assert!(!g.login_wants(true, true), "once per login");
+        assert_eq!(g.login_report(), None);
+        // a new login asks again; with the option off it never does
+        assert!(!g.login_wants(false, true));
+        assert!(!g.login_wants(true, false));
+        assert!(!g.login_wants(true, true), "turned on later in the session");
+    }
+}
