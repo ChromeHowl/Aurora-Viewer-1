@@ -94,6 +94,11 @@ pub enum BarAction {
     PhotoToDisk,
     /// The toolbar's Photo roll: the reel's quick view on its newest photo.
     PhotoRoll,
+    /// The toolbar's 360° Snapshot (360capture): the photo window and its
+    /// 360° action.
+    Photo360,
+    /// The toolbar's Omnifilter: Preferences › Chat › Translation and filter.
+    OmnifilterPrefs,
     /// Our profile on its Picks tab, or closed when Picks is shown
     /// (Avatar.TogglePicks, llviewermenu.cpp).
     MyPicks,
@@ -942,6 +947,15 @@ fn main_menus(ui: &mut egui::Ui, p: &Palette, panels: &mut Panels, st: &StatusIn
             aurora_i18n::tr!("ui-bars-appearance"),
             "appearance",
             &mut panels.appearance,
+        );
+        // menu_viewer.xml: Avatar › Favorite Wearables (WearableFavorites)
+        flip_window(
+            ui,
+            p,
+            "hanger-2-filled",
+            aurora_i18n::tr!("toolbar-command-wearable-favorites"),
+            super::wearable_favorites::WINDOW,
+            &mut panels.wearable_favorites,
         );
         if menu::item(ui, p, "user-filled", aurora_i18n::tr!("ui-bars-profile")) {
             *action = BarAction::MyProfile;
@@ -2568,6 +2582,10 @@ pub fn run_command(ctx: &egui::Context, cmd: &str, panels: &mut Panels) -> BarAc
         // without the window (the keyboard's Save to disk)
         "snapshot_to_disk" => return BarAction::PhotoToDisk,
         "photo_roll" => return BarAction::PhotoRoll,
+        // Floater.Toggle 360capture: the photo window's 360° photo
+        "360capture" => return BarAction::Photo360,
+        // Floater.Toggle omnifilter: Aurora keeps the rules in Preferences
+        "omnifilter" => return BarAction::OmnifilterPrefs,
         "beacons" => toggle(super::beacons::WINDOW, &mut panels.beacons),
         // Floater.Toggle quickprefs
         "quickprefs" => toggle(super::quick_prefs::WINDOW, &mut panels.quick_prefs),
@@ -2635,6 +2653,8 @@ pub fn run_command(ctx: &egui::Context, cmd: &str, panels: &mut Panels) -> BarAc
         // Avatar.AlignToggle, Avatar.FaceNearest (commands.xml)
         "avatar_align" => toggle(super::avatar_align::WINDOW, &mut panels.avatar_align),
         "pose_stand" => toggle(super::pose_stand::WINDOW, &mut panels.pose_stand),
+        // Floater.Toggle fs_wearable_favorites
+        "wearable_favorites" => toggle(super::wearable_favorites::WINDOW, &mut panels.wearable_favorites),
         "face_nearest_avatar" => return BarAction::FaceNearestAvatar,
         "vr_view" => return BarAction::ToggleVr,
         "immersive" => return BarAction::ToggleImmersive,
@@ -2678,6 +2698,7 @@ fn command_active(cmd: &str, panels: &Panels, flying: bool, seated: bool, mousel
         "beacons" => panels.beacons,
         "avatar_align" => panels.avatar_align,
         "pose_stand" => panels.pose_stand,
+        "wearable_favorites" => panels.wearable_favorites,
         "quickprefs" => panels.quick_prefs,
         "settings_debug" => panels.debug_settings,
         "preferences" => panels.settings,
@@ -4278,6 +4299,24 @@ mod tests {
         assert!(super::super::toolbar::ready("photo_roll"));
         assert!(matches!(run_command(&ctx, "photo_roll", &mut panels), BarAction::PhotoRoll));
         assert!(!panels.snapshot);
+    }
+
+    /// The commands of features Aurora has under another name: the photo
+    /// window's 360° photo, the Omnifilter's Preferences tab and the
+    /// favourite wearables window.
+    #[test]
+    fn toolbar_commands_reach_their_features() {
+        let ctx = egui::Context::default();
+        let mut panels = Panels::from_settings(&crate::settings::Settings::default());
+        for cmd in ["360capture", "omnifilter", "wearable_favorites"] {
+            assert!(super::super::toolbar::ready(cmd), "{cmd}");
+        }
+        assert!(matches!(run_command(&ctx, "360capture", &mut panels), BarAction::Photo360));
+        assert!(matches!(run_command(&ctx, "omnifilter", &mut panels), BarAction::OmnifilterPrefs));
+        panels.wearable_favorites = false;
+        run_command(&ctx, "wearable_favorites", &mut panels);
+        assert!(panels.wearable_favorites);
+        assert!(command_active("wearable_favorites", &panels, false, false, false));
     }
 
     #[test]

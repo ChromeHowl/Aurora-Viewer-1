@@ -258,7 +258,7 @@ pub struct CameraSettings {
     pub vr_at_start: bool,
     /// The camera on a body part, the roll with the head, the third-person
     /// and mouselook extras (`camera/extra.rs`).
-    pub extra: super::extra::CameraExtra,
+    pub extra: super::CameraExtra,
 }
 
 /// Where the headset view starts on VR entry (Preferences › Camera › VR).

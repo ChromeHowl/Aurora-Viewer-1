@@ -151,19 +151,12 @@ fn command(text: &str, path: &Path) -> Result<(String, Vec<String>), String> {
     Ok((executable, args))
 }
 
-/// Creates the export folder and writes the script into it, readable by its
-/// owner only: the shared temp folder of Linux and macOS is open to every
-/// account, and a script can hold a key or a private URL. The folder's 0700
-/// is what keeps it private once an editor saves by writing a new file (with
-/// the umask's 0644) and renaming it over ours. Windows' temp folder is
-/// already per user.
-fn write_private(directory: &Path, path: &Path, source: &str) -> std::io::Result<()> {
-    create_private_dir(directory)?;
-    write_private_file(path, source, true)
-}
-
 /// A new folder readable by its owner only; one already there (planted by
-/// another account) is refused.
+/// another account) is refused. The shared temp folder of Linux and macOS
+/// is open to every account, and a script can hold a key or a private URL:
+/// the folder's 0700 is what keeps it private once an editor saves by
+/// writing a new file (with the umask's 0644) and renaming it over ours.
+/// Windows' temp folder is already per user.
 fn create_private_dir(directory: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
@@ -199,15 +192,49 @@ fn write_private_file(path: &Path, source: &str, new: bool) -> std::io::Result<(
 /// A fresh name each session, refused if it exists, keeps other accounts
 /// out of it.
 pub(crate) fn session_dir() -> std::io::Result<PathBuf> {
-    static DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
-    let mut dir = DIR.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut dir = SESSION_DIR.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some(dir) = dir.as_ref() {
         return Ok(dir.clone());
     }
-    let made = std::env::temp_dir().join(format!("AuroraScripts-{}", uuid::Uuid::new_v4()));
+    let made = std::env::temp_dir().join(format!("{SESSION_PREFIX}{}", uuid::Uuid::new_v4()));
     create_private_dir(&made)?;
     *dir = Some(made.clone());
     Ok(made)
+}
+
+/// The folder `session_dir` made in this run, if it made one.
+static SESSION_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
+const SESSION_PREFIX: &str = "AuroraScripts-";
+
+/// At exit: this run's folder of external editor files is removed, as the
+/// Legacy Viewer deletes its temporary script files (LLLiveLSLFile's
+/// destructor). Only the folder this run made, never another run's nor
+/// anything else; nothing when none was made or it is already gone.
+pub(crate) fn remove_session_dir() {
+    let made = SESSION_DIR.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+    if let Some(dir) = made
+        && let Err(e) = remove_own_dir(&dir)
+    {
+        log::warn!("script editor: temporary folder {} not removed: {e}", dir.display());
+    }
+}
+
+/// Removes `dir` and what it holds when it is a real folder of ours (no
+/// link to elsewhere, our name); a missing one is fine.
+fn remove_own_dir(dir: &Path) -> std::io::Result<()> {
+    let ours = dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.starts_with(SESSION_PREFIX));
+    if !ours {
+        return Err(std::io::Error::other("not a script editor folder"));
+    }
+    match fs::symlink_metadata(dir) {
+        Ok(meta) if meta.file_type().is_dir() => fs::remove_dir_all(dir),
+        Ok(_) => Err(std::io::Error::other("not a folder")),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
+    }
 }
 
 /// The external editing sessions of each file: the last one to start owns
@@ -382,7 +409,8 @@ mod tests {
     fn external_export_is_private_and_never_reuses_a_path() {
         let directory = std::env::temp_dir().join(format!("aurora-script-export-test-{}", uuid::Uuid::new_v4()));
         let path = directory.join("source.lsl");
-        write_private(&directory, &path, "default {}").unwrap();
+        create_private_dir(&directory).unwrap();
+        write_private_file(&path, "default {}", true).unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), "default {}");
         #[cfg(unix)]
         {
@@ -400,8 +428,38 @@ mod tests {
             assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
         }
         // A folder already there (planted by another account) is refused.
-        assert!(write_private(&directory, &path, "x").is_err());
+        assert!(create_private_dir(&directory).is_err());
+        assert!(write_private_file(&path, "x", true).is_err(), "a new file never replaces one");
         fs::remove_file(path).unwrap();
         fs::remove_dir(directory).unwrap();
+    }
+
+    #[test]
+    fn only_a_real_script_editor_folder_is_removed_at_exit() {
+        let base = std::env::temp_dir().join(format!("aurora-script-exit-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&base).unwrap();
+        // a folder of another name is never removed
+        let other = base.join("Other");
+        fs::create_dir(&other).unwrap();
+        assert!(remove_own_dir(&other).is_err());
+        assert!(other.is_dir());
+        // ours goes with its files; gone already is fine
+        let ours = base.join(format!("{SESSION_PREFIX}{}", uuid::Uuid::new_v4()));
+        create_private_dir(&ours).unwrap();
+        write_private_file(&ours.join("a.lsl"), "default {}", true).unwrap();
+        remove_own_dir(&ours).unwrap();
+        assert!(!ours.exists());
+        remove_own_dir(&ours).unwrap();
+        // a link with our name is not followed: what it points at stays
+        #[cfg(unix)]
+        {
+            let keep = other.join("keep.lsl");
+            fs::write(&keep, "x").unwrap();
+            std::os::unix::fs::symlink(&other, &ours).unwrap();
+            assert!(remove_own_dir(&ours).is_err());
+            assert!(keep.exists());
+            fs::remove_file(&ours).unwrap();
+        }
+        fs::remove_dir_all(base).unwrap();
     }
 }

@@ -103,7 +103,7 @@ pub fn page(cx: &mut Cx) {
 
 /// Teleports, the teleport history and the world map
 /// (settings/teleport.rs): the Legacy Viewer's rows of Move & View ›
-/// Teleports and Map, Firestorm › Login / Teleport, Sound and User
+/// Teleports and Map, Legacy Viewer › Login / Teleport, Sound and User
 /// interface.
 fn teleport_group(cx: &mut Cx) {
     use crate::settings::teleport::HistoryZone;

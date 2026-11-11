@@ -13,6 +13,9 @@ use crate::world::translate::{KeyState, LANGUAGES};
 use aurora_i18n::tr;
 use egui::{RichText, Vec2};
 
+/// The tab of the Chat page that holds this page (`pages::tabs`).
+pub(crate) const TAB: usize = 7;
+
 /// Where each service gives its keys.
 fn key_site(service: Service) -> &'static str {
     match service {

@@ -7,6 +7,29 @@ use std::collections::VecDeque;
 use uuid::Uuid;
 
 impl App {
+    /// Me › Favorite wearables: the starred wearables, worn, added, taken
+    /// off and unstarred through the inventory's own paths (the appearance
+    /// actions and `actions::set_favorites`), so RLVa and the outfit write
+    /// apply as they do from the inventory.
+    pub(super) fn wearable_favorites_window(&mut self, ctx: &egui::Context, p: &crate::theme::Palette) {
+        if !self.panels.wearable_favorites {
+            return;
+        }
+        let facts = ui::inventory::Facts::from_world(&self.world, self.appearance_ui.pending.is_some());
+        let actions = self
+            .wearable_favorites_ui
+            .show(ctx, p, &self.world.inventory, &facts, &mut self.panels.wearable_favorites);
+        for action in actions {
+            match action {
+                ui::wearable_favorites::FavoriteAction::Appearance(wear) => self.apply_appearance_action(wear),
+                ui::wearable_favorites::FavoriteAction::Unstar(ids) => match rules::set_favorites(&self.world.inventory, &ids, false) {
+                    Ok(change) => self.apply_inventory_action(InvAction::Edit(change)),
+                    Err(reason) => log::warn!("wearable favorites: star not removed: {reason}"),
+                },
+            }
+        }
+    }
+
     /// `AURORA_DEMO_INVENTORY=big,toggle=…,churn=…`: open and close the
     /// window, and change one item now and then, once in the world.
     pub(super) fn demo_big_inventory(&mut self, big: &crate::world::inventory::demo::Big) {

@@ -609,6 +609,12 @@ impl OptionsUi {
         self.cancel_capture();
     }
 
+    /// Opens Preferences › Chat › Translation and filter (the toolbar's
+    /// Omnifilter).
+    pub fn open_message_rules(&mut self) {
+        self.open(Page::Chat, pages::message_rules::TAB);
+    }
+
     /// Opens the Chat page on the YouTube player's settings (a player's
     /// cog, #848).
     pub fn open_videos(&mut self) {

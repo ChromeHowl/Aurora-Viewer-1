@@ -15101,3 +15101,11 @@ ss-not-applied-parts = { $effect } : non appliqué (la photo a été rendue en p
 ss-not-applied-screen = { $effect } : non appliqué (absent de l’écran)
 ss-unverified = { $effect } : non vérifié là où les parties de la photo se rejoignent
 ss-and-more = { $first } (et { $count } de plus)
+# Final polish: favourite wearables, toolbar commands
+fpol-favwear-filter = Filtrer les articles à porter
+fpol-favwear-empty = Aucun article à porter favori pour l'instant. Mettez une étoile à des vêtements, parties du corps ou attachements dans l'inventaire pour les voir ici.
+fpol-favwear-no-match = Aucun article correspondant.
+fpol-favwear-wear-tip = Le porter à la place de ce qui est porté au même emplacement.
+fpol-favwear-add-tip = Le porter en plus de ce qui est déjà porté.
+fpol-favwear-unstar = Retirer l'étoile
+fpol-favwear-unstar-tip = Le retirer des favoris de l'inventaire. L'article reste à sa place.

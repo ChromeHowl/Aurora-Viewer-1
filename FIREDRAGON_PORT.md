@@ -133,9 +133,13 @@ Housekeeping after the merges (formatting, one unused constant removed) and the 
 
 ### Open follow-ups
 
+Decided by the owner (2026-11-11), done on `feat/final-polish`:
+
+- Teleport defaults: the map stays open during a teleport and the teleport history is in UTC, as Aurora did before (the Legacy Viewer closes the map and uses SLT).
+- "Turn the avatar toward the selection" is off by default (on in the Legacy Viewer).
+
 Decisions for the owner:
 
-- Teleport defaults: the map now closes on teleport and the teleport history shows SLT, as in the Legacy Viewer; Aurora kept the map open and used UTC. Keep the Legacy defaults or go back to Aurora's?
 - Discord rich presence: needs a Discord application id owned by the project and a new dependency.
 - The render extras are not part of the graphics presets (the Legacy presets hold several of them).
 - Depth of field on blended faces is off by default (always on in the Legacy Viewer): turn it on after a visual check?
@@ -151,7 +155,7 @@ Not built yet:
 - Notifications: animated script dialogs, toast startup and fade times, overflow height, bottom margin, nearby-chat toasts; the corner position covers llDialog and llTextBox only.
 - Build: new-prim default texture, embedded item and new-script template; drag texture offset; selection beam and particle effects; save object back to contents; pathfinding editing; selection level-of-detail override; the rest of the script editor link (object, command and syntax files, Luau, runtime forwarding).
 - Export: backup import (rez-and-apply with the upload cost shown and confirmed); object contents in backups.
-- Inventory: favourite wearables window; inbox display options and ShowNewInventory.
+- Inventory: inbox display options and ShowNewInventory.
 - Preferences: SOCKS5 proxy (UDP wrapping, password in the credential store), line spacing, notecard and script fonts, inspector tooltip delays. The proxy and the UDP port apply at start, not at each login; a fixed UDP port already taken falls back to a system port (the Legacy Viewer fails the login).
 - Worn tab: a separate Hair / Body grouping (needs name rules).
 
@@ -165,4 +169,4 @@ To check against the Legacy Viewer's source or settings:
 - The chat range spheres' per-segment depth test: cost not measured.
 - Hide selected: look at the outline on a hidden object.
 
-Still to write: the POSER.md and ANIMATION_CREATION.md paragraphs for the poser and timeline additions.
+Final polish (`feat/final-polish`): favourite wearables on the inventory stars, the toolbar's 360capture / omnifilter / wearable_favorites, the script editor folder removed at exit, the release-build warnings cleared, the SOCKS relay test fixed, and the POSER.md and ANIMATION_CREATION.md paragraphs for the poser and timeline additions.

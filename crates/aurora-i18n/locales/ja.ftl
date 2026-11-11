@@ -15041,3 +15041,11 @@ ss-not-applied-parts = { $effect }：未適用（写真を分割して描画し�
 ss-not-applied-screen = { $effect }：未適用（画面に表示されていないため）
 ss-unverified = { $effect }：写真の分割部分のつなぎ目では未確認
 ss-and-more = { $first }（ほか{ $count }件）
+# Final polish: favourite wearables, toolbar commands
+fpol-favwear-filter = 着用アイテムを絞り込む
+fpol-favwear-empty = お気に入りの着用アイテムはまだありません。インベントリで衣類、身体部位、アタッチメントに星を付けると、ここに表示されます。
+fpol-favwear-no-match = 一致する着用アイテムはありません。
+fpol-favwear-wear-tip = 同じ部位に着用中のものと置き換えて着用します。
+fpol-favwear-add-tip = 着用中のものに追加して着用します。
+fpol-favwear-unstar = 星を外す
+fpol-favwear-unstar-tip = インベントリのお気に入りから外します。アイテムはその場所に残ります。

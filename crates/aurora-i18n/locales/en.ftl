@@ -15102,3 +15102,11 @@ ss-not-applied-parts = { $effect }: not applied (the photo was drawn in parts)
 ss-not-applied-screen = { $effect }: not applied (not shown on screen)
 ss-unverified = { $effect }: unverified where the photo's parts meet
 ss-and-more = { $first } (and { $count } more)
+# Final polish: favourite wearables, toolbar commands
+fpol-favwear-filter = Filter wearables
+fpol-favwear-empty = No favourite wearables yet. Star clothing, body parts or attachments in the inventory to list them here.
+fpol-favwear-no-match = No matching wearables found.
+fpol-favwear-wear-tip = Wear it in place of what is worn in its slot.
+fpol-favwear-add-tip = Wear it beside what is already worn.
+fpol-favwear-unstar = Unstar
+fpol-favwear-unstar-tip = Remove it from the inventory favourites. The item stays where it is.

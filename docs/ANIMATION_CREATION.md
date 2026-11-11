@@ -52,6 +52,12 @@ keys.
   exported file to time zero.
 - Global priority, loop enable, loop start/end, ease-in and ease-out.
 - Native hand pose and expression.
+- **Interpolation**: how the clip goes from one key to the next. Linear
+  (the default) keeps the keys as they are, which is how every viewer plays
+  a native animation (rotations along the shortest arc). Step holds each
+  key until one frame before the next; Spline curves through the keys on a
+  Catmull-Rom curve. A native file only holds keys, so Step and Spline are
+  written as extra keys on the 30 fps grid and play the same in any viewer.
 
 Loop times are seconds relative to the exported start. The creation preview
 shows exact keyed frames; the ordinary import preview displays final
@@ -65,6 +71,16 @@ controls. In Animations, choose the destination **Frame (.anim)** and
 **Capture current IK pose** to add your contacts, solved on the rest skeleton,
 to the current draft. This bakes the real skeletal pose; the LSL companion
 supplies live target following during play.
+
+**Open .anim…** reads a native animation (up to 4 MiB) into the timeline
+as a new draft, its keys ready to edit; the previous draft stays in the
+selector, as with Create.
+
+While a draft changes, it is written every five seconds as
+`animation_drafts/recovery.anim` in the account's folder (through a
+temporary file, so a crash while writing keeps the previous copy; not in
+demo mode). After a crash, **Open the autosaved draft** appears next to
+Open .anim… and opens it as a new draft.
 
 Creating another animation retains the previous draft in the draft selector.
 Up to sixteen drafts remain available during the viewer session, including

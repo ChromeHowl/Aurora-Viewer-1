@@ -2940,6 +2940,7 @@ Scripts use a shared editor (`ui/scripts.rs`, actions in `app/scripts.rs`) for i
 | `settings/inventory_extras.rs` | Default texture save format (Ask, PNG, TGA) |
 | `ui/inventory/thumbnails_helper.rs` | Inventory thumbnails helper: item images set in bulk by matching names, through the single item editor's AIS patch |
 | `ui/inventory/protected_folders.rs` | Protected folders manager: locked folders listed, filtered and unlocked; showing one in the inventory obeys RLVa `@showinv` |
+| `ui/wearable_favorites.rs` | Favourite wearables window (Me menu, toolbar `wearable_favorites`): the inventory's starred clothing, body parts and attachments, worn, added, taken off and unstarred through the inventory's own wear rules and RLVa locks |
 | `app/env_bulk.rs` | Bulk Windlight import: several skies, waters or day cycles converted into Settings items, failures reported one by one |
 | `aurora-net/src/inventory/operations.rs`, `aurora-net/src/inventory/thumbnail.rs`, `aurora-net/src/session/inventory_upload.rs` | AIS mutations with read-back, remapping of the UUIDs assigned by the server, UDP creations / copies and acknowledgements with expiry, saving of the documents through capabilities; AssetUpload / Xfer upload of clothing before the item is created; free thumbnails through InventoryThumbnailUpload, JPEG2000 POST then AIS and read-back |
 | `aurora-assets/src/j2k/encode.rs` | Memory-bounded OpenJPEG encoder, square RGB / RGBA thumbnails of 64 to 256 pixels and alpha preserved |

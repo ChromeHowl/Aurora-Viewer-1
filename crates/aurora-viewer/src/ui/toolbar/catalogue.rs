@@ -108,10 +108,10 @@ pub const COMMANDS: &[Command] = commands![
     "camera_path", "route", "camtools-path-title", true;
     "camera_lock", "lock-filled", "camtools-lock", true;
     "group_titles", "tags-filled", "toolbar-command-group-titles", true;
-    "wearable_favorites", "hanger-2-filled", "toolbar-command-wearable-favorites", false;
+    "wearable_favorites", "hanger-2-filled", "toolbar-command-wearable-favorites", true;
     "discord", "brand-discord-filled", "toolbar-command-discord", false;
-    "360capture", "panorama-horizontal-filled", "toolbar-command-360-snapshot", false;
-    "omnifilter", "filter-filled", "toolbar-command-omnifilter", false;
+    "360capture", "panorama-horizontal-filled", "toolbar-command-360-snapshot", true;
+    "omnifilter", "filter-filled", "toolbar-command-omnifilter", true;
     "avatar_align", "user-scan", "toolbar-command-avatar-align", true;
     "face_nearest_avatar", "user-search", "toolbar-command-face-nearest", true;
 ];

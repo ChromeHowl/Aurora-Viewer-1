@@ -217,12 +217,29 @@ unlock and the priority. Load's menu holds the four modes, applied to the
 selected library entry while the library is shown or to a file chosen
 otherwise, and "Open a file".
 
-Load accepts Aurora pose documents, native `.anim` files and `.bvh` files,
-up to 4 MiB. Animation imports sample their first frame. The four load modes
+Load accepts Aurora pose documents, native `.anim` files, `.bvh` files and
+Black Dragon pose files (`.xml`), up to 4 MiB. Animation imports sample their first frame. The four load modes
 are All, Rotations only, Unedited joints and Selective rotations. Selective
 loads preserve joints already edited in the current pose. Loading finishes
 on the subject originally chosen, even if the picker changes during I/O.
 World locks are reanchored to the destination subject.
+
+**Black Dragon poses.** "Open a file" reads both Black Dragon layouts: the
+version 3 file (one LLSD map, a joint per key) and the older one (one map
+per joint, its name under `bone`). The pose takes the file's name and goes
+through the chosen load mode. Black Dragon stores every joint's complete
+local rotation, position and scale: positions and scales are taken against
+the rest skeleton, so a file made on an avatar whose shape or rigged mesh
+moves joints carries that difference, which the rotations-only modes leave
+out. A joint switched off in the file, a bone this skeleton lacks and a
+duplicate or unreadable entry are skipped; a file with no usable joint is
+refused with a message. Save's menu (and the settings' Files group) has
+**Also a Black Dragon copy (.xml)**, off by default: Save then also writes
+`black_dragon/<pose name>.xml` in the pose library, version 3, to copy into
+Black Dragon's poses folder. The overwrite confirmation covers that copy
+too. The format was implemented from its description and checked by unit
+tests; loading and saving a real Black Dragon file both ways is part of the
+human checks below.
 
 Files and uploads contain what you authored, as in the Legacy Viewer
 (`FSPoserAnimator::getJointExportRotation`, `FSFloaterPoser::savePoseToXml`):
@@ -242,6 +259,27 @@ scale tracks; BVH also omits collision volumes. The Aurora pose document
 retains those channels. **Upload as animation…** reuses the existing native
 encoder and opens the normal import preview. Upload and the simulator price
 confirmation still require the human's action; saving never uploads.
+A pose staged this way goes, with the default upload folders, to
+**! Created Poses** inside the Animations system folder: the poser makes
+that folder (an inventory folder costs nothing) when it is missing. The
+library's folder-search button shows it in the inventory; it stays greyed,
+with a tooltip saying why, until the folder exists.
+
+## Animations
+
+The play button of the title bar shows the **Animations** panel over the
+joint controls. It plays the IK editor's animation stack (the same
+inventory picker, drop target, order and priorities as Build > IK Edit >
+Animations) on the posed subject, in this viewer only: nothing is started
+on the simulator. The animations follow one clock on the 30 fps authoring
+grid, each looping on its own length; a static pose holds its single frame.
+Play / Pause, Stop and a position slider (seconds) drive it. The animation
+moves the joints it keys and leaves the others as posed. **Manual edits
+override animation** (off by default) keeps the joints edited in the poser
+on their edit while the animation moves the rest; off, the animation wins
+on every joint it animates. **Apply** keeps the frame shown as the pose,
+with an undo step, as loading an animation file does; Stop brings the pose
+back as it was edited.
 
 ## Consent
 
@@ -279,7 +317,8 @@ The gear of the title bar opens the settings as a panel over the joint,
 grouped Window (stop on close, confirm a close that loses the pose, DoF
 while posing), Handling (markers, natural
 alignment, trackball sensitivity) and Files (overwrite confirmation, BVH,
-pelvis unlock, priority), with the note on the formats' limits.
+Black Dragon copy, pelvis unlock, priority), with the note on the formats'
+limits.
 
 The eye next to the gear hides or shows the joint markers and gizmos in one
 click, the same setting as Handling's switch: an open eye while they are
@@ -322,7 +361,11 @@ not a substitute for two-client LSL transport validation.
 
 Human checks: edit each tab and channel, use presets and undo, save/reload
 each load mode, enable BVH and inspect its import, confirm overwrite, prepare
-an animation import, switch subjects, and test both close behaviours. On a
+an animation import, switch subjects, and test both close behaviours. Load a
+real Black Dragon pose file of each layout, save a Black Dragon copy and load
+it in Black Dragon; play, pause, seek, apply and stop an inventory animation
+in the Animations panel with the override on and off; check that a staged
+upload lands in "! Created Poses" and that the library's button shows it. On a
 grid, use two accounts running this build to verify bridge reprovisioning,
 request/accept/refuse/withdraw, mute/privacy, timeout, region departure and
 logout. Also validate owned and unowned ground/worn animesh and mesh/shape

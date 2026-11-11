@@ -10,12 +10,15 @@
 use super::plan::{Plan, PrimInput};
 use aurora_llsd::{Llsd, Map, llsd_map};
 use aurora_prim::te::TextureFace;
-use std::io::{Read, Write};
+use std::io::Write;
 use uuid::Uuid;
 
 /// OXP_FORMAT_VERSION (fsexportperms.h).
 pub const FORMAT_VERSION: i32 = 2;
-/// Largest file read back (a backup holds JPEG 2000 textures).
+/// Largest file read back (a backup holds JPEG 2000 textures). The import
+/// of backups is not built yet: until it is, only the tests read one back
+/// (the round trip that checks the writer).
+#[cfg(test)]
 const MAX_FILE: u64 = 512 << 20;
 
 /// A texture whose data goes into the file, with the name and description
@@ -276,8 +279,11 @@ pub fn encode(manifest: &Llsd) -> std::io::Result<Vec<u8>> {
     z.finish()
 }
 
-/// unzip_llsd, for reading a backup back (bounded).
+/// unzip_llsd, for reading a backup back (bounded). Test-only until the
+/// backup import exists (see `MAX_FILE`).
+#[cfg(test)]
 pub fn decode(bytes: &[u8]) -> Result<Llsd, String> {
+    use std::io::Read;
     let mut raw = Vec::new();
     flate2::read::ZlibDecoder::new(bytes)
         .take(MAX_FILE)
