@@ -16,6 +16,8 @@ use egui::{Align2, Color32, Id, Order, Pos2, Rect, Sense, Stroke, StrokeKind, Ve
 
 /// The ruler of the lens ring.
 const RULER: Vec2 = Vec2::new(600.0, 46.0);
+/// The ring deck's width: the ruler and its two 42-point buttons.
+pub(super) const DECK_WIDTH: f32 = RULER.x + 2.0 * 42.0;
 /// A stick of the pad, and how far its puck goes.
 const STICK: f32 = 96.0;
 const STICK_TRAVEL: f32 = 28.0;
@@ -155,6 +157,34 @@ impl Viewfinder {
                     keys: aurora_i18n::tr!("photo-vf-ring-focus-keys"),
                 }
             }
+            Dial::WhiteBalance => {
+                let g = crate::snapshot::style::grade(&panel.light, &f.prefs_grade);
+                let presets: Vec<i32> = crate::snapshot::style::Wb::ALL
+                    .iter()
+                    .filter_map(|w| w.temperature())
+                    .map(crate::snapshot::style::steps)
+                    .collect();
+                let n = crate::snapshot::style::WB_STEPS;
+                Ring {
+                    u: crate::snapshot::style::steps(g.temperature) as f32,
+                    k: 26.0,
+                    min: -n as f32,
+                    max: n as f32,
+                    marks: (-n..=n)
+                        .map(|t| {
+                            let label = match t {
+                                t if t == -n => aurora_i18n::tr!("pcu-wb-cooler").to_owned(),
+                                t if t == n => aurora_i18n::tr!("pcu-wb-warmer").to_owned(),
+                                t if t % 5 == 0 => super::style::signed(t),
+                                _ => String::new(),
+                            };
+                            (t as f32, label, presets.contains(&t) || t % 5 == 0)
+                        })
+                        .collect(),
+                    title: aurora_i18n::tr!("pcu-wb-ring"),
+                    keys: aurora_i18n::tr!("pcu-wb-ring-keys"),
+                }
+            }
             Dial::Focal => {
                 let mm = focal_of_fov(fov).clamp(10.0, 135.0);
                 let labelled = [10.0, 14.0, 18.0, 24.0, 35.0, 50.0, 70.0, 85.0, 135.0];
@@ -216,6 +246,9 @@ impl Viewfinder {
                 }
                 let d = u.exp();
                 s.dof.distance = if d >= vf::INFINITY { 200.0 } else { d.max(vf::MIN_FOCUS) };
+            }
+            Dial::WhiteBalance => {
+                crate::snapshot::style::set_temperature(&mut panel.light, &f.prefs_grade, u.round() * crate::snapshot::style::WB_STEP);
             }
         }
     }
@@ -310,6 +343,11 @@ impl Viewfinder {
         out: &mut Vec<Out>,
     ) {
         let dial = self.dial;
+        if dial == Dial::WhiteBalance {
+            self.wb_presets(ctx, p, screen, panel, f);
+        } else {
+            self.wb_row_top = None;
+        }
         egui::Area::new(Id::unique("vf_ring"))
             .order(Order::Foreground)
             .fade_in(false)

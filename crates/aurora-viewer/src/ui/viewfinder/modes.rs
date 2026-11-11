@@ -20,9 +20,11 @@ pub(super) const LIST_WIDTH: f32 = 240.0;
 /// vertically centred on the shutter, kept under the top rows' band
 /// (top + 96) and above the ring deck and its preset row (bottom − 170);
 /// the top wins when the screen is too short.
-pub(super) fn list_rect(screen: Rect, dock_left: f32, shutter_y: f32, size: Vec2) -> Rect {
+pub(super) fn list_rect(screen: Rect, dock_left: f32, shutter_y: f32, size: Vec2, floor: Option<f32>) -> Rect {
     let right = dock_left - LIST_GAP;
-    let (lo, hi) = (screen.top() + 96.0, screen.bottom() - 170.0);
+    // (and above the white balance's presets when they wrap higher)
+    let hi = floor.map_or(screen.bottom() - 170.0, |f| (f - 6.0).min(screen.bottom() - 170.0));
+    let lo = screen.top() + 96.0;
     let top = (shutter_y - size.y / 2.0).min(hi - size.y).max(lo);
     Rect::from_min_size(Pos2::new(right - size.x, top), size)
 }
@@ -75,7 +77,7 @@ impl Viewfinder {
             .map_or(screen.right() - 20.0 - 66.0, |r| r.left());
         let shutter_y = self.shutter_at.map_or(screen.center().y, |r| r.center().y);
         let size = ctx.memory(|m| m.area_rect(id)).map_or(Vec2::splat(LIST_WIDTH), |r| r.size());
-        let rect = list_rect(screen, dock_left, shutter_y, size);
+        let rect = list_rect(screen, dock_left, shutter_y, size, self.wb_row_top);
         let now = vf::shown(panel.shot, panel.depth, panel.bank);
         let list = vf::available(f.pano_ok, f.depth_ok, std::array::from_fn(|i| f.banks[i].exists));
         egui::Area::new(id)
@@ -228,7 +230,7 @@ mod tests {
         for (w, h, right) in [(800.0, 560.0, 702.0), (1280.0, 720.0, 1182.0)] {
             let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(w, h));
             for shutter_y in [0.0, h / 2.0, h] {
-                let r = list_rect(screen, dock_left(screen), shutter_y, Vec2::new(LIST_WIDTH, 240.0));
+                let r = list_rect(screen, dock_left(screen), shutter_y, Vec2::new(LIST_WIDTH, 240.0), None);
                 assert_eq!(r.right(), right, "{w}: ends left of the shutter");
                 assert!(r.top() >= screen.top() + 96.0, "{w}: under the top rows");
                 assert!(r.bottom() <= screen.bottom() - 170.0, "{w}: over the ring deck");

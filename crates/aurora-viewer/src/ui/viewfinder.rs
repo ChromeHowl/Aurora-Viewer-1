@@ -22,6 +22,7 @@ mod looks;
 mod modes;
 mod presets;
 mod sheets;
+mod style;
 pub use controls::{CamMode, Pad, roll_text};
 pub use isolate::{Isolate, IsolateRow};
 pub use modes::refused_text;
@@ -38,6 +39,9 @@ pub enum Dial {
     Aperture,
     Exposure,
     Distance,
+    /// The photo's white balance (`snapshot::style`): no value in the
+    /// bottom bar, its line in the light column.
+    WhiteBalance,
 }
 
 /// A sheet over the right of the screen, in the place of the dock's
@@ -80,6 +84,13 @@ pub struct Viewfinder {
     pub presets: bool,
     pub preset_form: PresetForm,
     pub dial: Dial,
+    /// The dial before white balance was chosen (B again goes back to it).
+    pub dial_before_wb: Option<Dial>,
+    /// The top of the ring deck's preset row, as drawn last frame (the mode
+    /// list stays above it).
+    wb_row_top: Option<f32>,
+    /// The camera pad shows this frame.
+    pad_shown: bool,
     /// The shutter half-pressed (Enter or the button held).
     pub pressed: bool,
     /// Released while the lens hunts: the photo goes as it locks.
@@ -214,6 +225,9 @@ pub struct Frame<'a> {
     pub depth_ok: bool,
     /// The custom modes C1 to C3.
     pub banks: [BankView; 3],
+    /// Preferences' colour grade, which the photo's style and white
+    /// balance start from (`snapshot::style::base`).
+    pub prefs_grade: crate::settings::render_extras::Grade,
 }
 
 /// A custom mode's slot as the viewfinder shows it.
@@ -592,6 +606,17 @@ impl Viewfinder {
         }
     }
 
+    /// White balance made the dial, or the dial before it back (B, a click
+    /// on its line).
+    pub fn toggle_wb_dial(&mut self) {
+        if self.dial == Dial::WhiteBalance {
+            self.dial = self.dial_before_wb.take().unwrap_or_default();
+        } else {
+            self.dial_before_wb = Some(self.dial);
+            self.dial = Dial::WhiteBalance;
+        }
+    }
+
     /// The sheet opened, or closed when it is the one open.
     pub(crate) fn toggle_sheet(&mut self, sheet: Sheet, out: &mut Vec<Out>) {
         if self.sheet == Some(sheet) {
@@ -651,6 +676,7 @@ impl Viewfinder {
         // the on-screen controls (lens ring, AF choices, camera pad)
         let ctl = shows && !self.menu && self.controls_shown(ctx, s, screen, f.now);
         let pad = ctl && s.viewfinder.pad;
+        self.pad_shown = pad;
         if full {
             self.top_bar(ctx, p, &back, screen, s, panel, f, &mut out);
         }
@@ -975,6 +1001,31 @@ impl Viewfinder {
                 }
             });
         y += 24.0;
+        // the white balance, a colour of the light: always shown, a click
+        // makes it the dial (B), underlined while it is
+        let wb = egui::Area::new(Id::unique("vf_wb_line"))
+            .order(Order::Foreground)
+            .fade_in(false)
+            .pivot(Align2::LEFT_CENTER)
+            .fixed_pos(Pos2::new(screen.left() + GAP, y))
+            .show(ctx, |ui| {
+                let text = style::wb_text(&panel.light, &f.prefs_grade);
+                let color = if self.dial == Dial::WhiteBalance { p.teal } else { p.ink };
+                let r = icon_text_button(ui, p, "temperature", &text, color, aurora_i18n::tr!("pcu-wb-tip"));
+                if self.dial == Dial::WhiteBalance {
+                    let under = Rect::from_min_size(
+                        Pos2::new(r.rect.left() + 24.0, r.rect.bottom() + 1.0),
+                        Vec2::new(r.rect.width() - 24.0, 2.0),
+                    );
+                    ui.painter().rect_filled(under, 0.0, p.teal);
+                }
+                r.clicked()
+            })
+            .inner;
+        if wb {
+            self.toggle_wb_dial();
+        }
+        y += 24.0;
         if panel.freeze_world {
             line(&mut y, "snowflake", aurora_i18n::tr!("photo-vf-world-frozen"), p.ink);
         }
@@ -993,6 +1044,7 @@ impl Viewfinder {
                 Dial::Aperture => aurora_i18n::tr!("photo-vf-dial-aperture"),
                 Dial::Exposure => aurora_i18n::tr!("photo-vf-dial-exposure"),
                 Dial::Distance => aurora_i18n::tr!("photo-vf-dial-distance"),
+                Dial::WhiteBalance => aurora_i18n::tr!("pcu-wb-dial"),
             };
             let rows: [(&str, String); 10] = [
                 (

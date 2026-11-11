@@ -698,6 +698,12 @@ impl App {
                 let e = vf::exposure_at(ev, base);
                 self.snapshots.ui.light.exposure = if (e - base).abs() < 1e-4 { None } else { Some(e) };
             }
+            Dial::WhiteBalance => {
+                let light = &mut self.snapshots.ui.light;
+                let prefs = self.settings.render_extras.grade;
+                let t = crate::snapshot::style::grade(light, &prefs).temperature;
+                crate::snapshot::style::set_temperature(light, &prefs, crate::snapshot::style::step(t, dir));
+            }
             Dial::Distance => {
                 // direct manual focus: from where the lens is
                 if s.dof.focus != PhotoFocus::Manual {
@@ -902,7 +908,7 @@ impl App {
             _ if free => letter
                 .chars()
                 .next()
-                .filter(|c| matches!(c, 'q' | 'i' | 'n' | 'v' | 'g' | 'h' | 'l' | 'p')),
+                .filter(|c| matches!(c, 'q' | 'i' | 'n' | 'v' | 'g' | 'h' | 'l' | 'p' | 'b')),
             _ => None,
         };
         let Some(which) = which else {
@@ -933,6 +939,7 @@ impl App {
                 self.settings.save();
             }
             'n' => self.vf_cycle_af(),
+            'b' => v.toggle_wb_dial(),
             'p' => {
                 let ui = &self.snapshots.ui;
                 let next = vf::next_choice(vf::shown(ui.shot, ui.depth, ui.bank), &self.vf_shot_list());
@@ -1155,6 +1162,7 @@ impl App {
             pano_ok: !crate::snapshot::pano::rlva_blocks(|b| self.world.rlva.has(b)),
             depth_ok: self.world.rlva.visuals.spheres.is_empty(),
             banks: self.vf_banks(),
+            prefs_grade: self.settings.render_extras.grade,
         };
         // the demo aims at the own avatar's face, then shoots
         let (aim, shoot) = self.photo_demo_viewfinder();

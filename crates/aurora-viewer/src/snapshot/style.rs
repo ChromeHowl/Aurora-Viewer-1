@@ -73,6 +73,102 @@ pub fn sanitize(tonemapper: Option<u8>, grade: Option<Grade>) -> (Option<u8>, Op
     (t, g)
 }
 
+/// The white balance's grid: temperature and tint in steps of 0.1 of the
+/// grade's −1…1 (`Grade::white_balance` shifts red and blue by at most
+/// 20 %: no Kelvin, which would mislead), −10 to +10 steps.
+pub const WB_STEP: f32 = 0.1;
+pub const WB_STEPS: i32 = 10;
+
+/// A value of the grid in steps.
+pub fn steps(v: f32) -> i32 {
+    if v.is_finite() {
+        ((v / WB_STEP).round() as i32).clamp(-WB_STEPS, WB_STEPS)
+    } else {
+        0
+    }
+}
+
+/// A step towards `dir` (−1 or 1), within ±10.
+pub fn step(v: f32, dir: i32) -> f32 {
+    (steps(v) + dir.signum()).clamp(-WB_STEPS, WB_STEPS) as f32 * WB_STEP
+}
+
+/// A camera's white balance presets. Auto is no correction: the viewer's
+/// colours (Preferences' white balance, none by default).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Wb {
+    Auto,
+    Daylight,
+    Cloudy,
+    Shade,
+    Tungsten,
+    Fluorescent,
+}
+
+impl Wb {
+    pub const ALL: [Wb; 6] = [Wb::Auto, Wb::Daylight, Wb::Cloudy, Wb::Shade, Wb::Tungsten, Wb::Fluorescent];
+
+    /// The temperature it pins (Auto: none), on the grid.
+    pub fn temperature(self) -> Option<f32> {
+        match self {
+            Wb::Auto => None,
+            Wb::Daylight => Some(0.0),
+            Wb::Cloudy => Some(0.2),
+            Wb::Shade => Some(0.4),
+            Wb::Tungsten => Some(-0.6),
+            Wb::Fluorescent => Some(-0.3),
+        }
+    }
+}
+
+/// The overlay's grade with one change; the overlay cleared when it comes
+/// back to the start (`base`) with no tone curve of its own.
+fn edit(light: &mut PhotoLight, prefs: &Grade, change: impl FnOnce(&mut Grade)) {
+    let mut g = edit_start(light, prefs);
+    change(&mut g);
+    light.grade = (g != base(prefs) || light.tonemapper.is_some()).then_some(g);
+}
+
+/// The temperature set (a step of the ring, the wheel); only the white
+/// balance changes, never the style's lift, gamma, gain or vibrance.
+pub fn set_temperature(light: &mut PhotoLight, prefs: &Grade, t: f32) {
+    let t = steps(t) as f32 * WB_STEP;
+    edit(light, prefs, |g| g.temperature = t);
+}
+
+pub fn set_tint(light: &mut PhotoLight, prefs: &Grade, u: f32) {
+    let u = steps(u) as f32 * WB_STEP;
+    edit(light, prefs, |g| g.tint = u);
+}
+
+/// A preset chosen: Auto gives back the viewer's white balance (the whole
+/// overlay goes when nothing else of it is set), the others pin their
+/// temperature and no tint.
+pub fn set_wb(light: &mut PhotoLight, prefs: &Grade, wb: Wb) {
+    let b = base(prefs);
+    let (t, u) = match wb.temperature() {
+        Some(t) => (t, 0.0),
+        None => (b.temperature, b.tint),
+    };
+    edit(light, prefs, |g| {
+        g.temperature = t;
+        g.tint = u;
+    });
+}
+
+/// The preset the white balance is on, if any (Auto first: Daylight gives
+/// the same picture when Preferences have no white balance).
+pub fn wb_of(light: &PhotoLight, prefs: &Grade) -> Option<Wb> {
+    let g = grade(light, prefs);
+    let b = base(prefs);
+    if light.grade.is_none() || (steps(g.temperature), steps(g.tint)) == (steps(b.temperature), steps(b.tint)) {
+        return Some(Wb::Auto);
+    }
+    Wb::ALL
+        .into_iter()
+        .find(|w| w.temperature().is_some_and(|t| steps(t) == steps(g.temperature)) && steps(g.tint) == 0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,5 +256,75 @@ mod tests {
         let g = g.expect("kept");
         assert_eq!((g.temperature, g.tint, g.lift), (1.0, 0.0, -1.0));
         assert_eq!(sanitize(Some(2), None), (Some(2), None));
+    }
+
+    #[test]
+    fn the_presets_sit_on_the_grid() {
+        for wb in Wb::ALL {
+            if let Some(t) = wb.temperature() {
+                assert!((t / WB_STEP - (t / WB_STEP).round()).abs() < 1e-4, "{wb:?}");
+                assert_eq!(
+                    wb_of(
+                        &{
+                            let mut l = PhotoLight::default();
+                            set_wb(&mut l, &Grade::default(), wb);
+                            l
+                        },
+                        &Grade::default()
+                    )
+                    .map(|w| w == wb || (wb == Wb::Daylight && w == Wb::Auto)),
+                    Some(true)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn steps_clamp_at_ten() {
+        assert_eq!(step(0.95, 1), 1.0);
+        assert_eq!(step(1.0, 1), 1.0);
+        assert_eq!(step(-1.0, -1), -1.0);
+        assert!((step(0.2, -1) - 0.1).abs() < 1e-6);
+        assert_eq!(steps(f32::NAN), 0);
+        assert_eq!(steps(7.0), 10);
+    }
+
+    #[test]
+    fn auto_with_a_neutral_rest_clears_the_overlay() {
+        let mut light = PhotoLight::default();
+        set_wb(&mut light, &Grade::default(), Wb::Shade);
+        assert!(light.grade.is_some());
+        set_wb(&mut light, &Grade::default(), Wb::Auto);
+        assert_eq!(light.grade, None);
+        // a style of its own: the overlay stays, its white balance neutral
+        let mut light = PhotoLight {
+            tonemapper: Some(5),
+            ..PhotoLight::default()
+        };
+        set_wb(&mut light, &Grade::default(), Wb::Tungsten);
+        set_wb(&mut light, &Grade::default(), Wb::Auto);
+        let g = light.grade.expect("kept with the curve");
+        assert_eq!((g.temperature, g.tint), (0.0, 0.0));
+    }
+
+    #[test]
+    fn a_white_balance_edit_never_touches_the_style() {
+        let mut light = PhotoLight {
+            grade: Some(Grade {
+                enabled: true,
+                lift: 0.25,
+                gamma: -0.5,
+                gain: 0.75,
+                vibrance: 0.5,
+                ..Grade::default()
+            }),
+            ..PhotoLight::default()
+        };
+        set_temperature(&mut light, &prefs(), 0.43);
+        set_tint(&mut light, &prefs(), -0.2);
+        set_wb(&mut light, &prefs(), Wb::Cloudy);
+        let g = light.grade.expect("set");
+        assert_eq!((g.lift, g.gamma, g.gain, g.vibrance), (0.25, -0.5, 0.75, 0.5));
+        assert_eq!((steps(g.temperature), steps(g.tint)), (2, 0));
     }
 }
