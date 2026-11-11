@@ -14402,3 +14402,6 @@ rphoto-view-transparency = Transparency (this session)
 rphoto-view-transparency-help = Off, what others own is drawn opaque, for your view only. Your own objects are untouched. Fully invisible faces stay hidden.
 rphoto-view-fullbright = Fullbright (this session)
 rphoto-view-fullbright-help = Off, fullbright faces of what others own are lit like the rest, for your view only. Your own objects are untouched.
+
+# Photo camera controls (pcu)
+pcu-busy = Still saving the last photo

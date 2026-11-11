@@ -36,12 +36,27 @@ pub enum Dial {
     Distance,
 }
 
+/// A sheet over the right of the screen, in the place of the dock's
+/// panels, one at a time: the shot mode list (left of the shutter), the
+/// picture style, the guide's look, the lens options, a custom mode's slot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Sheet {
+    Modes,
+    Style,
+    Guide,
+    Lens,
+    /// C1 to C3 (0 to 2).
+    Bank(u8),
+}
+
 /// The viewfinder's state for the session (its settings are
 /// `snapshot::viewfinder::Prefs`).
 #[derive(Default)]
 pub struct Viewfinder {
     pub menu: bool,
     pub help: bool,
+    /// The sheet open (`Sheet`), if any.
+    pub sheet: Option<Sheet>,
     /// Every setting of the photo panel, in a drawer on the right.
     pub drawer: bool,
     /// The isolation panel (what the photo shows), on the right.
@@ -498,6 +513,37 @@ impl Viewfinder {
     /// The line at the top for a few seconds.
     pub fn say(&mut self, text: impl Into<String>, error: bool, now: f64) {
         self.message = Some((text.into(), error, now + 2.6));
+    }
+
+    /// Escape: a sheet open closes first, on its own; true when one was.
+    pub fn close_sheet(&mut self) -> bool {
+        self.sheet.take().is_some()
+    }
+
+    /// A sheet opened: the one-panel rule closes the dock's panels (the
+    /// isolation's choosing in the scene stops with its panel), the quick
+    /// menu and the help.
+    pub(crate) fn open_sheet(&mut self, sheet: Sheet, out: &mut Vec<Out>) {
+        self.sheet = Some(sheet);
+        self.menu = false;
+        self.help = false;
+        self.drawer = false;
+        self.looks = false;
+        self.presets = false;
+        self.light = false;
+        if self.isolate {
+            self.isolate = false;
+            out.push(Out::Isolate(Isolate::Picking(false)));
+        }
+    }
+
+    /// The sheet opened, or closed when it is the one open.
+    pub(crate) fn toggle_sheet(&mut self, sheet: Sheet, out: &mut Vec<Out>) {
+        if self.sheet == Some(sheet) {
+            self.sheet = None;
+        } else {
+            self.open_sheet(sheet, out);
+        }
     }
 
     /// The whole viewfinder for this frame; `fov` is the camera's vertical
@@ -1545,6 +1591,7 @@ impl Viewfinder {
                     ) {
                         self.menu = !self.menu;
                         self.help = false;
+                        self.sheet = None;
                     }
                     if dock_button(
                         ui,
@@ -1554,6 +1601,7 @@ impl Viewfinder {
                         self.drawer,
                     ) {
                         self.drawer = !self.drawer;
+                        self.sheet = self.sheet.filter(|_| !self.drawer);
                         self.looks &= !self.drawer;
                         self.presets &= !self.drawer;
                         self.light &= !self.drawer;
@@ -1586,6 +1634,7 @@ impl Viewfinder {
                     // the photo's light, next to the shutter
                     if dock_button(ui, p, Face::Icon("sun-filled"), aurora_i18n::tr!("photo-vf-light-tip"), self.light) {
                         self.light = !self.light;
+                        self.sheet = self.sheet.filter(|_| !self.light);
                         self.drawer &= !self.light;
                         self.looks &= !self.light;
                         self.presets &= !self.light;
@@ -1603,6 +1652,7 @@ impl Viewfinder {
                     let isolating = self.isolate || f.isolation.mode != crate::snapshot::isolate::Mode::Off;
                     if dock_button(ui, p, Face::Icon("user-scan"), aurora_i18n::tr!("photo-isolate-tip"), isolating) {
                         self.isolate = !self.isolate;
+                        self.sheet = self.sheet.filter(|_| !self.isolate);
                         self.drawer &= !self.isolate;
                         self.looks &= !self.isolate;
                         self.presets &= !self.isolate;
@@ -1619,6 +1669,7 @@ impl Viewfinder {
                         self.looks || !s.looks.is_empty(),
                     ) {
                         self.looks = !self.looks;
+                        self.sheet = self.sheet.filter(|_| !self.looks);
                         self.drawer &= !self.looks;
                         self.presets &= !self.looks;
                         self.light &= !self.looks;
@@ -1641,6 +1692,7 @@ impl Viewfinder {
                         self.presets,
                     ) {
                         self.presets = !self.presets;
+                        self.sheet = self.sheet.filter(|_| !self.presets);
                         self.drawer &= !self.presets;
                         self.looks &= !self.presets;
                         self.light &= !self.presets;
@@ -1657,6 +1709,7 @@ impl Viewfinder {
                     if dock_button(ui, p, Face::Text("?"), aurora_i18n::tr!("photo-vf-help-tip"), self.help) {
                         self.help = !self.help;
                         self.menu = false;
+                        self.sheet = None;
                     }
                     if dock_button(ui, p, Face::Icon("x"), aurora_i18n::tr!("photo-vf-exit-tip"), false) {
                         out.push(Out::Exit);
@@ -2485,5 +2538,47 @@ mod cut_short_tests {
         assert!(!cuts_short(Some(2), None, true));
         // the very first photo has nothing to cut short
         assert!(!cuts_short(None, Some(1), true));
+    }
+}
+
+#[cfg(test)]
+mod sheet_tests {
+    use super::{Isolate, Out, Sheet, Viewfinder};
+
+    #[test]
+    fn escape_closes_a_sheet_first_and_alone() {
+        for sheet in [Sheet::Modes, Sheet::Style, Sheet::Guide, Sheet::Lens, Sheet::Bank(1)] {
+            let mut v = Viewfinder {
+                sheet: Some(sheet),
+                ..Viewfinder::default()
+            };
+            assert!(v.close_sheet(), "{sheet:?}");
+            assert_eq!(v.sheet, None);
+            assert!(!v.close_sheet(), "nothing left to close");
+        }
+    }
+
+    #[test]
+    fn a_sheet_opens_alone_on_the_right() {
+        let mut v = Viewfinder {
+            menu: true,
+            drawer: true,
+            looks: true,
+            light: true,
+            presets: true,
+            isolate: true,
+            ..Viewfinder::default()
+        };
+        let mut out = Vec::new();
+        v.open_sheet(Sheet::Style, &mut out);
+        assert_eq!(v.sheet, Some(Sheet::Style));
+        assert!(!(v.menu || v.drawer || v.looks || v.light || v.presets || v.isolate));
+        assert_eq!(out, vec![Out::Isolate(Isolate::Picking(false))]);
+        // the same again: closed; another: replaces it
+        v.toggle_sheet(Sheet::Style, &mut out);
+        assert_eq!(v.sheet, None);
+        v.toggle_sheet(Sheet::Modes, &mut out);
+        v.toggle_sheet(Sheet::Guide, &mut out);
+        assert_eq!(v.sheet, Some(Sheet::Guide));
     }
 }

@@ -14398,3 +14398,6 @@ rphoto-view-transparency = Transparence (cette session)
 rphoto-view-transparency-help = Désactivée, ce que possèdent les autres est dessiné opaque, pour votre vue seulement. Vos propres objets ne changent pas. Les faces entièrement invisibles restent cachées.
 rphoto-view-fullbright = Pleine lumière (cette session)
 rphoto-view-fullbright-help = Désactivée, les faces en pleine lumière de ce que possèdent les autres sont éclairées comme le reste, pour votre vue seulement. Vos propres objets ne changent pas.
+
+# Photo camera controls (pcu)
+pcu-busy = La photo précédente s’enregistre encore

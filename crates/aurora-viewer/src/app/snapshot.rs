@@ -1472,7 +1472,14 @@ impl App {
     /// until the third is written; the first waits for the photo quality's
     /// details as any photo does.
     fn photo_full_save_start(&mut self, renderer: &Renderer) {
-        if self.photo_busy() || self.snapshots.held.is_some() || !self.in_world() {
+        if !self.in_world() {
+            return;
+        }
+        if self.photo_busy() {
+            self.photo_refuse_busy();
+            return;
+        }
+        if self.snapshots.held.is_some() {
             return;
         }
         let s = &self.settings.snapshot;
@@ -1530,11 +1537,16 @@ impl App {
     /// left out if asked, then its six views drawn one after the other
     /// from where the camera is now.
     fn photo_pano_start(&mut self, renderer: &Renderer) {
-        if self.photo_busy() || self.snapshots.pano.is_some() || !self.in_world() {
+        if !self.in_world() {
+            return;
+        }
+        if self.photo_busy() || self.snapshots.pano.is_some() {
+            self.photo_refuse_busy();
             return;
         }
         if snapshot::pano::rlva_blocks(|b| self.world.rlva.has(b)) {
             self.snapshots.message = Some((aurora_i18n::tr!("b1-pano-rlva").to_owned(), true));
+            self.photo_vf_error(aurora_i18n::tr!("b1-pano-rlva"));
             return;
         }
         let s = &self.settings.snapshot;
@@ -2545,6 +2557,18 @@ LUT_3D_SIZE {n}
         }
     }
 
+    /// A Full save or a 360° photo asked while the last photo is still
+    /// being taken or saved: said, in the window and on the viewfinder's
+    /// line, rather than a shutter that seems to do nothing.
+    fn photo_refuse_busy(&mut self) {
+        let text = aurora_i18n::tr!("pcu-busy");
+        self.snapshots.message = Some((text.to_owned(), true));
+        if self.viewfinder_on() {
+            let now = self.egui_ctx.input(|i| i.time);
+            self.snapshots.vf.say(text, true, now);
+        }
+    }
+
     /// An upload's error, on the viewfinder's line too.
     fn photo_vf_error(&mut self, text: &str) {
         let now = self.egui_ctx.input(|i| i.time);
@@ -2782,6 +2806,8 @@ LUT_3D_SIZE {n}
                 self.world.photo_isolation.set_picking(false);
             } else if v.preset_form.picking {
                 v.preset_form.picking = false;
+            } else if v.close_sheet() {
+                // a sheet closes alone: the panel or the list under it stays
             } else if v.menu || v.help || v.drawer || v.isolate || v.presets || v.light {
                 v.menu = false;
                 v.help = false;

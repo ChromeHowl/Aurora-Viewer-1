@@ -14369,3 +14369,6 @@ rphoto-view-transparency = 透明度（このセッション）
 rphoto-view-transparency-help = オフにすると、他人が所有するものを不透明に描画します（自分の表示のみ）。自分のオブジェクトは変わりません。完全に透明な面は隠れたままです。
 rphoto-view-fullbright = フルブライト（このセッション）
 rphoto-view-fullbright-help = オフにすると、他人が所有するもののフルブライトの面を他と同じように照らします（自分の表示のみ）。自分のオブジェクトは変わりません。
+
+# Photo camera controls (pcu)
+pcu-busy = 前の写真を保存中です

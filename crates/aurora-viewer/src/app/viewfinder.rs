@@ -81,9 +81,10 @@ impl App {
             v.ae_lock = false;
             v.countdown = None;
             v.pad = Default::default();
-            if v.menu || v.help || v.drawer || v.presets || v.light || v.pressed || v.pick.is_some() {
+            if v.menu || v.help || v.sheet.is_some() || v.drawer || v.presets || v.light || v.pressed || v.pick.is_some() {
                 v.menu = false;
                 v.help = false;
+                v.sheet = None;
                 v.drawer = false;
                 v.presets = false;
                 v.light = false;
@@ -512,9 +513,10 @@ impl App {
             return true;
         }
         let v = &mut self.snapshots.vf;
-        if v.menu || v.help {
+        if v.menu || v.help || v.sheet.is_some() {
             v.menu = false;
             v.help = false;
+            v.sheet = None;
             return true;
         }
         if !self.build.selection.is_empty() {
@@ -823,10 +825,12 @@ impl App {
             'q' => {
                 v.menu = !v.menu;
                 v.help = false;
+                v.sheet = None;
             }
             'h' => {
                 v.help = !v.help;
                 v.menu = false;
+                v.sheet = None;
             }
             'i' => {
                 s.viewfinder.display = s.viewfinder.display.next();
