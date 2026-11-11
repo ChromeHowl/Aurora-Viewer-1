@@ -13890,3 +13890,5 @@ b7-select-copyable = Ne sélectionner que les objets copiables
 b7-select-group-owned = Inclure les objets cédés au groupe
 b7-light-radius = Afficher le rayon des lumières sélectionnées
 b7-select-group-owned-hint = Désactivé, un rectangle de sélection laisse de côté les objets cédés à un groupe
+b7-hide-selected = Masquer les objets sélectionnés
+b7-hide-selected-hint = Tant que les outils de construction sont ouverts, la sélection n'est pas affichée ; son contour reste

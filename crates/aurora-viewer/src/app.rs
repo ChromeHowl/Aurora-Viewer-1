@@ -16348,6 +16348,22 @@ impl App {
                         ));
                         crate::build::ui::shortcuts(&ctx, &mut self.build, &mut self.world, &mut self.settings.build);
                     }
+                    // HideSelectedObjects: never a HUD (where the Legacy Viewer
+                    // keeps RLVa-locked ones drawn; stricter, all of them)
+                    self.scene.hidden_selected = if self.build.open && self.settings.build.tools.hide_selected {
+                        let mut prims: Vec<usize> = self
+                            .build
+                            .highlighted(&self.world)
+                            .into_iter()
+                            .map(|(i, _)| i)
+                            .filter(|&i| crate::build::select_type(&self.world, i) != crate::build::SelectType::Hud)
+                            .collect();
+                        prims.sort_unstable();
+                        prims.dedup();
+                        prims
+                    } else {
+                        Vec::new()
+                    };
                     self.build
                         .draw_overlay(&ctx, &self.palette, &self.world, &self.scene, &self.settings.build, mods);
                     let mut env = crate::build::ui::Env {

@@ -13894,3 +13894,5 @@ b7-select-copyable = Select only copyable objects
 b7-select-group-owned = Include group-owned objects
 b7-light-radius = Show the light radius of the selection
 b7-select-group-owned-hint = Off, a selection rectangle leaves out the objects owned by a group
+b7-hide-selected = Hide selected objects
+b7-hide-selected-hint = While the build tools are open, the selection is not drawn; its outline stays

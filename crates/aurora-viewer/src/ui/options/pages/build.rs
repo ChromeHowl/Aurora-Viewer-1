@@ -128,5 +128,10 @@ pub fn page(cx: &mut Cx) {
         );
         cx.keywords("RenderLightRadius")
             .toggle(tr!("b7-light-radius"), "", &field!(build.tools.light_radius));
+        cx.keywords("HideSelectedObjects").toggle(
+            tr!("b7-hide-selected"),
+            tr!("b7-hide-selected-hint"),
+            &field!(build.tools.hide_selected),
+        );
     });
 }

@@ -25,6 +25,9 @@ pub struct BuildTools {
     pub pivot: [f32; 3],
     /// RenderLightRadius: the range sphere of the selected lights.
     pub light_radius: bool,
+    /// HideSelectedObjects: the selected objects are not drawn while the
+    /// build tools are open (their outline stays).
+    pub hide_selected: bool,
     /// FSSelectCopyableOnly: rectangle selection takes copyable objects only.
     pub select_copyable: bool,
     /// FSSelectLockedOnly: rectangle selection takes locked objects only.
@@ -42,6 +45,7 @@ impl Default for BuildTools {
             pivot_percent: true,
             pivot: [50.0; 3],
             light_radius: false,
+            hide_selected: false,
             select_copyable: false,
             select_locked: false,
             select_group_owned: true,
@@ -88,7 +92,7 @@ mod tests {
     fn defaults_are_the_legacy_viewers_and_old_files_load() {
         let t: BuildTools = serde_json::from_str("{}").unwrap();
         assert_eq!(t, BuildTools::default());
-        assert!(t.unlink_confirm && t.pivot_percent && !t.light_radius);
+        assert!(t.unlink_confirm && t.pivot_percent && !t.light_radius && !t.hide_selected);
         assert!(!t.select_copyable && !t.select_locked && t.select_group_owned);
         assert_eq!(t.pivot, [50.0; 3]);
     }

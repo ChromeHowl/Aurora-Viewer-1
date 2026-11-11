@@ -13861,3 +13861,5 @@ b7-select-copyable = コピー可能なオブジェクトのみ選択
 b7-select-group-owned = グループ所有のオブジェクトを含める
 b7-light-radius = 選択したライトの範囲を表示
 b7-select-group-owned-hint = オフにすると、範囲選択でグループ所有のオブジェクトを除外します
+b7-hide-selected = 選択したオブジェクトを非表示
+b7-hide-selected-hint = 制作ツールを開いている間、選択範囲は描画されず、輪郭だけが表示されます

@@ -2616,6 +2616,9 @@ impl BuildTool {
             }
             Tool::Create | Tool::Grab | Tool::Focus => {}
         }
+        if s.tools.light_radius {
+            self.light_radius_draw(&p, world, now);
+        }
         if let Some((a, b, _)) = self.rect
             && (a.0 - b.0).abs() + (a.1 - b.1).abs() > 3.0
         {
@@ -2628,6 +2631,33 @@ impl BuildTool {
                 egui::Stroke::new(1.0, draw::rgba(1.0, 1.0, 1.0, 0.8)),
                 egui::StrokeKind::Inside,
             );
+        }
+    }
+
+    /// RenderLightRadius: the range of each selected light, as three
+    /// circles of its radius around it in the light's colour
+    /// (LLPipeline::renderHighlights' light radius).
+    fn light_radius_draw(&self, p: &draw::Painter3d, world: &World, now: Instant) {
+        const SEGMENTS: usize = 48;
+        for (idx, _) in self.highlighted(world) {
+            let Some(light) = world.objects.get(idx).and_then(|o| o.extra.light) else {
+                continue;
+            };
+            let Some((center, _, _)) = crate::scene::Scene::object_transform(world, idx, now, 0) else {
+                continue;
+            };
+            let [r, g, b, _] = light.color;
+            // theme-guard: content — the light's own colour
+            let color = draw::rgba(r.clamp(0.0, 1.0), g.clamp(0.0, 1.0), b.clamp(0.0, 1.0), 0.8);
+            for (u, v) in [(Vec3::X, Vec3::Y), (Vec3::X, Vec3::Z), (Vec3::Y, Vec3::Z)] {
+                let at = |i: usize| {
+                    let a = i as f32 / SEGMENTS as f32 * std::f32::consts::TAU;
+                    center + (u * a.cos() + v * a.sin()) * light.radius
+                };
+                for i in 0..SEGMENTS {
+                    p.line(at(i), at(i + 1), color, 1.0);
+                }
+            }
         }
     }
 
