@@ -343,6 +343,7 @@ fn action_key(action: &CtxAction) -> String {
             ..
         } => "ExportCollada",
         CtxAction::Rebake => "Rebake",
+        CtxAction::ReloadAvatar(..) => "ReloadAvatar",
         CtxAction::Take(..) => "Take",
         CtxAction::TakeCopy(..) => "TakeCopy",
         CtxAction::Delete(..) => "Delete",
@@ -373,6 +374,7 @@ fn action_key(action: &CtxAction) -> String {
         CtxAction::ShowPlaceInfo(..) => "ShowPlaceInfo",
         CtxAction::ShowPlace(..) => "ShowPlace",
         CtxAction::OpenUrl(..) => "OpenUrl",
+        CtxAction::OpenUrlExternal(..) => "OpenUrlExternal",
         CtxAction::AppLink(..) => "AppLink",
         CtxAction::TeleportToPlace(..) => "TeleportToPlace",
         CtxAction::TeleportToPlaceConfirmed(..) => "TeleportToPlaceConfirmed",

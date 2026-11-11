@@ -44,6 +44,7 @@ mod sound_explorer;
 mod alt_graph;
 mod avatar_align;
 mod avatar_health;
+mod avatar_reload;
 mod blender_live;
 mod blender_shape;
 mod buy_currency;
@@ -719,7 +720,7 @@ pub struct App {
     suitcase_passed: bool,
     /// External web link waiting for the warning's answer, with the state of
     /// its "Do not warn me again" box and, for a dangerous link, the reason.
-    url_confirm: Option<(String, bool, Option<&'static str>)>,
+    url_confirm: Option<(String, bool, Option<&'static str>, crate::link_trust::BrowserEntryPoint)>,
     /// The media filter's question on screen.
     media_filter_prompt: ui::media_filter::PromptUi,
     script_dialogs_were: usize,
@@ -924,6 +925,8 @@ pub struct App {
     /// Radio intent and the last known station; neither is an engine status.
     parcel_music: parcel_music::Radio,
     music_status: ui::audio::MusicStatus,
+    /// Stations whose failure was told in the local chat this session.
+    music_error_said: std::collections::HashSet<String>,
     /// Parcel media and media on a prim (web / video plugins).
     media: crate::media::MediaManager,
     media_ui: ui::media::MediaUi,
@@ -1152,6 +1155,8 @@ pub struct App {
     local_bakes: crate::local_bakes::LocalBakes,
     /// Me › Avatar health and the customise animation.
     avatar_health: avatar_health::AvatarHealth,
+    /// "Reload avatar": when each avatar was last reloaded.
+    avatar_reloads: avatar_reload::Reloads,
     last_social_poll: Instant,
     /// Last keyboard / mouse button input (automatic away, AFKTimeout), and
     /// whether the current away status was set by that timer.
@@ -1912,6 +1917,7 @@ impl App {
             app_link_parcels: HashSet::new(),
             parcel_music: Default::default(),
             music_status: Default::default(),
+            music_error_said: Default::default(),
             audio_engine: match aurora_audio::AudioEngine::new_with_device(out_device) {
                 Ok(e) => {
                     let o = e.output_info();
@@ -2057,6 +2063,7 @@ impl App {
             wearable_ui: Default::default(),
             local_bakes: Default::default(),
             avatar_health: Default::default(),
+            avatar_reloads: Default::default(),
             last_social_poll: Instant::now(),
             last_input: Instant::now(),
             auto_away: false,
@@ -3289,6 +3296,7 @@ impl App {
         self.wearable_ui = Default::default();
         self.local_bakes.end_session(&mut self.scene);
         self.reset_avatar_health();
+        self.avatar_reloads = Default::default();
         self.interactions = Default::default();
         self.screen = Screen::Login;
         self.login_form.busy = false;
@@ -3387,7 +3395,7 @@ impl App {
         if let NetEvent::ServerReleaseNotes(page) = ev {
             // LLFloaterAbout::handleServerReleaseNotes, then LLWeb::loadURL
             match page {
-                Ok(url) => self.egui_ctx.open_url(egui::OpenUrl::new_tab(url)),
+                Ok(url) => self.open_web_link(url, None),
                 Err(_) => {
                     self.world.notifications.push(
                         crate::world::notifications::Kind::Alert,
@@ -6136,6 +6144,7 @@ impl App {
                 verdict,
                 None,
             );
+            self.tell_music_error();
             return;
         };
         // Disable before submitting a station; enable only after the authorized
@@ -6199,6 +6208,7 @@ impl App {
             verdict,
             Some(&status),
         );
+        self.tell_music_error();
         // StreamTitleDisplay: metadata follows the actual connection, never the
         // radio toggle. Leave the offline title scenario's metadata in place.
         let title = match status {
@@ -6220,6 +6230,17 @@ impl App {
             self.tell_stream_title(&title);
         }
         self.sync_minimized_mute();
+    }
+
+    /// One local chat line per failing station and session: the tooltip
+    /// keeps the reason, retries and revisits stay quiet.
+    fn tell_music_error(&mut self) {
+        if matches!(&self.music_status, ui::audio::MusicStatus::Error(e) if parcel_music::error_is_told(e))
+            && parcel_music::first_error_notice(&mut self.music_error_said, self.parcel_music.station())
+        {
+            self.world
+                .system_message(aurora_i18n::tr!("music-error-notice", status = self.music_status.text()));
+        }
     }
 
     fn remember_music_choice(&mut self) {
@@ -7333,10 +7354,13 @@ impl App {
                 // pie tool, and only its visual manipulators take scene clicks
                 // (FSFloaterPoser::enableVisualManipulators, FSToolCompPose).
                 // World presses stay the editor's.
-                return !(self.ik_editor.posing()
+                let hud = self.ik_editor.posing()
                     && !self.ik_editor.poser_owns_pointer()
                     && self.huds_shown()
-                    && self.scene.hud_pick(&self.world, self.cursor_pos, false).is_some());
+                    && self.scene.hud_pick(&self.world, self.cursor_pos, false).is_some();
+                // its click leaves the poser's selection as it is
+                self.ik_editor.press_on_hud = hud;
+                return !hud;
             }
         }
         // Report Abuse's object picker takes the click (LLToolObjPicker)
@@ -8493,6 +8517,7 @@ impl App {
         wanted.extend(self.search_ui.wanted_pics.drain());
         wanted.extend(self.group_profile_ui.wanted_pics.drain());
         wanted.extend(self.people_ui.wanted_pics.drain());
+        wanted.extend(self.ik_editor.take_poser_wanted_pictures());
         wanted.extend(self.voice_controls_ui.wanted_pics.drain());
         wanted.extend(self.contacts_people_ui.wanted_pics.drain());
         wanted.extend(self.notif_ui.wanted_pics.drain());
@@ -10956,6 +10981,7 @@ impl App {
                 hour: self.settings.night_sky_hour,
             },
             self.settings.night_sky_gain,
+            self.settings.night_sky_milky_way,
             env.sky.sun_dir,
             // the sky's moment: a photo's held instant for all its parts
             // (snapshot::Hold, Freeze World), the demo's fixed one in the
@@ -11437,6 +11463,19 @@ impl App {
                 }
             }
         }
+        // AURORA_DEMO_POSER=compact-face: Ctrl held over the face while
+        // posing the Body, for its oval tint (`poser::world_hints`)
+        if self.demo
+            && self.frame_count >= 560
+            && std::env::var("AURORA_DEMO_POSER").is_ok_and(|mode| mode == "compact-face")
+            && let Some(pos) = self
+                .ik_editor
+                .poser_focus(&self.world, "mFaceNoseBase")
+                .and_then(|point| self.build.cam.project(point))
+        {
+            raw.events.push(egui::Event::ModifiersChanged(egui::Modifiers::CTRL));
+            raw.events.push(egui::Event::PointerMoved(pos));
+        }
         if self.demo && ui::widgets::demo::rez_mode().is_some() {
             let mode = ui::widgets::demo::rez_mode().unwrap_or("1");
             let point = if matches!(mode, "object" | "contents" | "build-object") {
@@ -11909,6 +11948,26 @@ impl App {
             self.on_build_request(r);
         }
         self.update_avatar_pics(&mut gfx.renderer);
+        if self.ik_editor.posing() {
+            self.ik_editor.set_poser_pictures(&self.avatar_pics);
+            // a few times a second: worn meshes change seldom
+            if self.frame_count.is_multiple_of(10) {
+                let mut joints = self.scene.rigged_joints(&self.world, self.ik_editor.poser_subject());
+                // AURORA_DEMO_POSER=compact-wings / compact-tail: as if a worn
+                // mesh used the wings and the tail, or the tail alone (the demo
+                // wears none)
+                let demo = self.demo.then(|| std::env::var("AURORA_DEMO_POSER").ok()).flatten();
+                if let Some(parts) = demo.as_deref().and_then(|m| match m {
+                    "compact-wings" => Some(&["Wing", "Tail"][..]),
+                    "compact-tail" => Some(&["Tail"][..]),
+                    _ => None,
+                }) {
+                    let rig = &self.world.avatar_lib.rig;
+                    joints.extend((0..rig.len()).filter(|j| parts.iter().any(|part| rig.canonical_names[*j].contains(part))));
+                }
+                self.ik_editor.set_poser_rigged_joints(joints);
+            }
+        }
         self.update_maps();
         self.poll_key_to_name();
 
@@ -12704,6 +12763,7 @@ impl App {
         }
         self.demo_worn_steps();
         self.demo_derender_steps();
+        self.demo_reload_avatar_steps();
         self.demo_friends_only_steps();
         self.demo_social_menu_steps();
         self.demo_land_moderation();
@@ -14271,6 +14331,7 @@ impl App {
                 self.settings.save();
             }
             BarAction::ShowHuds(visible) => self.set_show_huds(visible),
+            BarAction::ToggleHuds => self.set_show_huds(!self.settings.show_huds),
             BarAction::HudZoom(zoom) => self.world.hud_zoom = zoom.clamp(0.1, 1.0),
             BarAction::None => {}
             BarAction::IkEdit => {
@@ -14278,15 +14339,17 @@ impl App {
             }
             BarAction::Poser => {
                 self.ik_editor.open_poser();
-                ui::widgets::open_floater(&self.egui_ctx, "poser", &mut self.ik_editor.open);
+                let window = self.ik_editor.poser_window(&self.settings.poser);
+                ui::widgets::open_floater(&self.egui_ctx, window, &mut self.ik_editor.open);
             }
             // a minimized poser expands, a shown one closes as its cross
             // does (FSFloaterPoser::onClose)
             BarAction::TogglePoser => {
-                if self.ik_editor.open && self.ik_editor.posing() && ui::widgets::floater_minimized(&self.egui_ctx, "poser") {
-                    ui::widgets::expand_floater(&self.egui_ctx, "poser");
+                let window = self.ik_editor.poser_window(&self.settings.poser);
+                if self.ik_editor.open && self.ik_editor.posing() && ui::widgets::floater_minimized(&self.egui_ctx, window) {
+                    ui::widgets::expand_floater(&self.egui_ctx, window);
                 } else if self.ik_editor.toggle_poser() {
-                    ui::widgets::open_floater(&self.egui_ctx, "poser", &mut self.ik_editor.open);
+                    ui::widgets::open_floater(&self.egui_ctx, window, &mut self.ik_editor.open);
                 }
             }
             BarAction::Portals => {
@@ -14396,7 +14459,14 @@ impl App {
                 self.world.set_friends_only(on);
             }
             BarAction::BuyCurrency => self.open_buy_currency(),
-            BarAction::Marketplace => self.marketplace_ui.open(None),
+            // FSLoadSLMarketplace (llviewermenu.cpp): the system browser when
+            // every link goes there, else the Marketplace window
+            BarAction::Marketplace => match self.marketplace_home() {
+                Some(home) if self.settings.browser_behavior == crate::settings::BrowserBehavior::SystemForAll => {
+                    self.open_web_link(home, Some(crate::link_trust::BrowserEntryPoint::MarketplaceLink));
+                }
+                _ => self.marketplace_ui.open(None),
+            },
             BarAction::MarketplaceListings => self.open_marketplace_listings(),
             BarAction::ToggleMarketplaceListings => {
                 let window = ui::marketplace_listings::WINDOW;
@@ -16007,6 +16077,12 @@ impl App {
                         self.ik_editor.show(&ctx, &p, &self.world, projector);
                         self.ik_editor.over_viewfinder = false;
                     }
+                    // the posing consent too, poser open or not: a request
+                    // asked from the poser goes out now, another resident's
+                    // request shows its answer at once (it would time out
+                    // behind the photo mode), and the reminder that someone
+                    // may pose us stays in sight
+                    self.poser_consent_ui(&ctx, &p, true);
                     // Personal Lighting, opened from the light panel, stays
                     // over it too: the photo's light refined without leaving
                     if self.panels.personal_lighting {
@@ -16193,7 +16269,7 @@ impl App {
                 let favorites = self.favorites_view(favorites_shown, here);
                 let location_landmarks = self.world.landmarks.named(&self.world.inventory);
                 let (classic_bars, islands) = self.bars_look();
-                self.poser_consent_ui(&ctx, &p);
+                self.poser_consent_ui(&ctx, &p, false);
                 let own_name = self.world.own_name();
                 // AURORA_DEMO_BARS: the long parcel name of the mockup (the
                 // islands only: Firestorm's bars stay as they were)
@@ -16231,6 +16307,8 @@ impl App {
                     self.settings.reduce_motion,
                 );
                 self.toolbar_ui.show_name_tags = self.settings.show_name_tags;
+                self.toolbar_ui.show_huds = self.settings.show_huds;
+                self.toolbar_ui.interface_hidden = self.interface.hidden;
                 let show_balance = if self.demo {
                     ui::bars::demo::get().show_balance.unwrap_or(self.settings.show_balance)
                 } else {
@@ -17787,17 +17865,17 @@ impl App {
                     self.answer_suitcase(ask, yes);
                 }
                 self.portal_crossing_question(&ctx, &p);
-                if let Some((url, dont_warn, danger)) = self.url_confirm.as_mut()
+                if let Some((url, dont_warn, danger, entry)) = self.url_confirm.as_mut()
                     && let Some(yes) = ui::context::external_link_confirm(&ctx, &p, url, dont_warn, *danger)
                 {
-                    let (url, dont_warn) = (url.clone(), *dont_warn);
+                    let (url, dont_warn, entry) = (url.clone(), *dont_warn, *entry);
                     self.url_confirm = None;
                     if yes {
                         if dont_warn {
                             self.settings.warn_external_links = false;
                             self.settings.save();
                         }
-                        ctx.open_url(egui::OpenUrl::new_tab(url));
+                        self.route_web_link(url, entry);
                     }
                 }
                 ui::media::show(
@@ -18006,7 +18084,7 @@ impl App {
                     }
                     // only web links (llLoadURL / goto URL), opened after the user's click
                     if let Some(u) = url.filter(|u| u.starts_with("https://") || u.starts_with("http://")) {
-                        ctx.open_url(egui::OpenUrl::new_tab(u));
+                        self.open_web_link(u, None);
                     }
                 }
                 self.world.record_notification_history();
@@ -19306,11 +19384,14 @@ impl ApplicationHandler for App {
                 self.settings.night_sky = mode;
                 self.panels.time_of_day = 4;
             }
-            if let Some((latitude, gain)) = crate::demo::night_sky::place() {
+            if let Some((latitude, gain, milky_way)) = crate::demo::night_sky::place() {
                 self.settings.night_sky_place = crate::world::night_sky::SkyPlace::Custom;
                 self.settings.night_sky_latitude = latitude;
                 if let Some(gain) = gain {
                     self.settings.night_sky_gain = gain;
+                }
+                if let Some(milky_way) = milky_way {
+                    self.settings.night_sky_milky_way = milky_way;
                 }
                 self.settings.sync_night_sky();
             }
@@ -21315,7 +21396,10 @@ impl ApplicationHandler for App {
             // on a prim east of the start position, playing at once
             if let Some(v) = std::env::var_os("AURORA_DEMO_MEDIA") {
                 let v = v.to_string_lossy().into_owned();
-                let url = if v == "1" || v.is_empty() {
+                // Mini controls: the same page, with the address hidden
+                // (LLMediaEntry::MINI, LLPanelPrimMediaControls::updateShape).
+                let mini = v == "mini";
+                let url = if v == "1" || v.is_empty() || mini {
                     crate::demo::demo_media_page().to_string()
                 } else {
                     v
@@ -21324,7 +21408,7 @@ impl ApplicationHandler for App {
                 if let Some(e) = self.world.apply(ev) {
                     self.on_app_event(e);
                 }
-                self.media.demo_entry(object, face, &url);
+                self.media.demo_face(object, face, &url, mini);
             }
             // AURORA_DEMO_WORN: an object worn on our avatar's back
             if std::env::var_os("AURORA_DEMO_WORN").is_some() {
@@ -21839,8 +21923,23 @@ impl ApplicationHandler for App {
                         self.down.remove(&Input::key(code));
                         return;
                     }
+                    // a dialog over the photo mode reads its keys through
+                    // egui: Enter is its own, the other keys go on to their
+                    // usual handling without the viewfinder's
+                    // (`viewfinder::behind_dialog`)
+                    let behind = self.viewfinder_behind_dialog(code, pressed);
+                    if matches!(
+                        behind,
+                        Some(viewfinder::BehindDialog::Answer | viewfinder::BehindDialog::ReleaseShutter)
+                    ) {
+                        self.down.remove(&Input::key(code));
+                        return;
+                    }
                     // the photo viewfinder's keys (the shutter, its menu…)
-                    if !self.egui_ctx.egui_wants_keyboard_input() && self.viewfinder_key(code, &ke.logical_key, pressed, ke.repeat) {
+                    if behind.is_none()
+                        && !self.egui_ctx.egui_wants_keyboard_input()
+                        && self.viewfinder_key(code, &ke.logical_key, pressed, ke.repeat)
+                    {
                         self.down.remove(&Input::key(code));
                         return;
                     }

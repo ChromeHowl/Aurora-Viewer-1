@@ -810,6 +810,7 @@ fn avatar_groups(ui: &mut Builder, f: &Facts, id: Uuid, attachment: Option<Uuid>
             ui.item("code", aurora_i18n::tr!("ui-context-script-information"), CtxAction::ScriptInfo(id));
         },
     );
+    reload_avatar_item(ui, id);
     ui.submenu("restore", aurora_i18n::tr!("ui-context-reset-options"), true, |ui| {
         reset_skeleton_items(ui, id);
         ui.item(
@@ -985,6 +986,7 @@ fn self_menu(ui: &mut Builder, f: &Facts, id: Uuid) {
     sit_stand(ui, f);
     take_off_submenu(ui, f);
     appearance_submenu(ui, f);
+    reload_avatar_item(ui, id);
     community_submenu(ui, id);
     // not in Firestorm's menu: kept from Aurora's (fly is in menu_attachment_self.xml)
     ui.item(
@@ -1139,6 +1141,16 @@ fn contact_set_entries(ui: &mut Builder, f: &Facts, id: Uuid) {
             CtxAction::NewContactSet(vec![id]),
         );
     });
+}
+
+/// "Reload avatar" (`app/avatar_reload.rs`), ours or another's: not in the
+/// Legacy Viewer's menus, which spread its steps over several entries.
+fn reload_avatar_item(ui: &mut Builder, avatar: Uuid) {
+    ui.item(
+        "refresh-dot",
+        aurora_i18n::tr!("ui-context-reload-avatar"),
+        CtxAction::ReloadAvatar(avatar),
+    );
 }
 
 /// Avatar.ResetSkeleton / Avatar.ResetSkeletonAndAnimations: enabled for
@@ -1352,6 +1364,23 @@ mod tests {
                     actions.iter().any(
                         |e| matches!(e.kind, Kind::Action(CtxAction::Derender { id, permanent: p }) if id == expected && p == permanent)
                     )
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn reload_avatar_is_offered_on_ourselves_and_on_others() {
+        let id = Uuid::from_u128(7);
+        for own in [true, false] {
+            for attachment in [None, Some(ID)] {
+                let target = Target::Avatar { id, own, attachment };
+                let entries = world_menu(&target, &Facts::default(), Vec3::ZERO);
+                assert!(
+                    entries
+                        .iter()
+                        .any(|e| matches!(e.kind, Kind::Action(CtxAction::ReloadAvatar(a)) if a == id)),
+                    "a top-level row, own {own}, attachment {attachment:?}"
                 );
             }
         }
@@ -1586,6 +1615,7 @@ mod tests {
             expected.extend(tr(&[
                 "ui-context-display-options>",
                 "ui-context-information-options>",
+                "ui-context-reload-avatar",
                 "ui-context-reset-options>",
                 "ui-context-disturbance>",
             ]));
