@@ -427,6 +427,10 @@ mod tests {
         let stats = NetStats::default();
         let mut c = circuit();
         c.relay = Some(relay.local_addr().expect("address"));
+        // `raw_send` uses try_send_to, which reports WouldBlock until the
+        // reactor has seen the new socket writable (as the session's tests
+        // wait for it too)
+        sock.writable().await.expect("viewer socket ready");
         c.send(&sock, &stats, &aurora_msg::msgs::UseCircuitCode::default(), false);
         let mut wire = [0u8; 256];
         let (n, _) = tokio::time::timeout(Duration::from_secs(2), relay.recv_from(&mut wire))
