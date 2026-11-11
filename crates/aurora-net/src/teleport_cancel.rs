@@ -25,7 +25,7 @@ mod tests {
         let session = Uuid::from_u128(0x2222);
         let m = packet(agent, session);
         assert_eq!(TeleportCancel::ID, MsgId::Low(72));
-        assert!(!TeleportCancel::ZEROCODED, "Unencoded in message_template.msg");
+        const { assert!(!TeleportCancel::ZEROCODED, "Unencoded in message_template.msg") };
         let mut wire = Vec::new();
         build_packet(&m, 7, RELIABLE, false, &[], &mut wire);
         assert_eq!(wire[0] & PacketFlags::RELIABLE, PacketFlags::RELIABLE);
