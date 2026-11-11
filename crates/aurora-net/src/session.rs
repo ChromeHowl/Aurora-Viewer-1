@@ -1722,6 +1722,14 @@ impl Session<'_> {
                     self.send_main(&packet, true);
                 }
             }
+            NetCommand::TeleportCancel => {
+                // LLAgent::teleportCancel (indra/newview/llagent.cpp)
+                let mut m = TeleportCancel::default();
+                m.info.agent_id = self.agent_id();
+                m.info.session_id = self.session_id();
+                self.send_main(&m, true);
+                transition::end(Some(transition::Kind::Teleport), "cancelled (TeleportCancel sent)", &self.sh.stats);
+            }
             NetCommand::TeleportHome => {
                 let mut m = TeleportLandmarkRequest::default();
                 m.info.agent_id = self.agent_id();
@@ -5262,7 +5270,13 @@ impl Session<'_> {
                     &self.sh.stats,
                 );
             }
-            emit(self.sh, NetEvent::TeleportStarted);
+            let m: TeleportStart = pkt.decode()?;
+            emit(
+                self.sh,
+                NetEvent::TeleportStarted {
+                    flags: m.info.teleport_flags,
+                },
+            );
         } else if id == TeleportProgress::ID {
             let m: TeleportProgress = pkt.decode()?;
             transition::step(|| format!("TeleportProgress '{}'", field_str(&m.info.message)));
@@ -5270,6 +5284,7 @@ impl Session<'_> {
                 self.sh,
                 NetEvent::TeleportProgress {
                     message: field_str(&m.info.message),
+                    flags: m.info.teleport_flags,
                 },
             );
         } else if id == TeleportFailed::ID {

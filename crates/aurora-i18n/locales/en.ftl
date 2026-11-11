@@ -14461,3 +14461,55 @@ l2s-omnifilter-imported =
        *[other] { $count } rules imported
     }
 l2s-omnifilter-not-notecard = This file is not an Omnifilter notecard.
+
+# Inventory helpers, Windlight import, teleport cancel and logout screen, export additions (L3)
+l3-thumbs-open = Thumbnails helper…
+l3-thumbs-title = Inventory thumbnails helper
+l3-thumbs-help = Copy objects, clothing or body parts in the inventory and press "Paste items", then copy textures and press "Paste textures". An item gets the texture of the same name as its image.
+l3-thumbs-col-item = Item
+l3-thumbs-col-current = Current image
+l3-thumbs-col-new = New image
+l3-thumbs-has-image = Set
+l3-thumbs-missing = missing
+l3-thumbs-paste-items = Paste items
+l3-thumbs-paste-textures = Paste textures
+l3-thumbs-write = Write thumbnails
+l3-thumbs-log-missing = Log items with no image
+l3-thumbs-clear = Clear thumbnails
+l3-thumbs-reset = Clear lists
+l3-thumbs-write-warning = The images of the listed items will be replaced by the textures of the same name. This cannot be undone. Continue?
+l3-thumbs-clear-warning = The images of all the listed items will be removed. This cannot be undone. Continue?
+l3-thumbs-log-paste-items = ==== Pasting items from the inventory ====
+l3-thumbs-log-paste-textures = ==== Pasting textures from the inventory ====
+l3-thumbs-log-item = ITEM { $n }> { $name }
+l3-thumbs-log-texture = TEXTURE { $n }> { $name }
+l3-thumbs-log-loading = { $n } folders were still loading: copy and paste again once they are open.
+l3-thumbs-log-missing-line = No image: { $name }
+l3-thumbs-log-refused = Not changed (no copy and transfer on the texture, or the item cannot be changed): { $name }
+l3-thumbs-log-writing = Writing { $n } images…
+l3-thumbs-log-clearing = Removing { $n } images…
+l3-protected-open = Protected folders…
+l3-protected-title = Protected folders
+l3-protected-filter = Filter protected folders
+l3-protected-remove = Remove
+l3-protected-remove-tip = Remove the selected folders from the protected folders
+l3-protected-unknown = (Unknown folder)
+l3-protected-empty = No folder is protected. Lock a folder from its menu in the inventory.
+l3-hide-empty-system = Hide empty system folders
+l3-hide-empty-system-help = System folders such as Sounds or Gestures are left out of the inventory while they hold nothing.
+l3-env-bulk-menu = Import Windlight
+l3-env-bulk-days = Day cycles…
+l3-env-bulk-skies = Skies…
+l3-env-bulk-water = Water…
+l3-env-bulk-pick = Choose Windlight files to import
+l3-env-bulk-title = Windlight import
+l3-env-bulk-failed-file = { $file } could not be converted.
+l3-env-bulk-finished = Windlight import finished: { $created } settings created in the Settings folder, { $failed } failed.
+l3-tp-cancelled = Teleport cancelled.
+l3-opt-always-cancel = Always allow cancelling a teleport
+l3-opt-always-cancel-help = Shows Cancel even when the region says the teleport cannot be cancelled (the region still ignores it then). RLVa restrictions still hide it.
+l3-opt-no-logout-screen = No logout screen
+l3-opt-no-logout-screen-help = The world stays in view while logging out, with a small progress bar.
+l3-logout-title = Logging out
+l3-logging-out = Logging out…
+l3-export-why-geometry = its shape, or its sculpt map, is not loaded

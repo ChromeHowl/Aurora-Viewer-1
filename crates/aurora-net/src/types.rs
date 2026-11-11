@@ -699,10 +699,16 @@ pub enum NetEvent {
     RegionRemoved {
         handle: RegionHandle,
     },
-    TeleportStarted,
-    /// TeleportProgress from the simulator (LL message key, e.g. "sending_dest").
+    /// TeleportStart, with its TeleportFlags (TELEPORT_FLAGS_DISABLE_CANCEL
+    /// says whether the teleport may still be cancelled).
+    TeleportStarted {
+        flags: u32,
+    },
+    /// TeleportProgress from the simulator (LL message key, e.g. "sending_dest"),
+    /// with its TeleportFlags.
     TeleportProgress {
         message: String,
+        flags: u32,
     },
     /// TeleportFinish: the destination region is known, connecting to it.
     TeleportFinished {
@@ -1622,6 +1628,9 @@ pub enum NetCommand {
         local_ids: Vec<u32>,
     },
     TeleportHome,
+    /// TeleportCancel (LLAgent::teleportCancel): the teleport under way is
+    /// abandoned, while the simulator still allows it.
+    TeleportCancel,
     /// The content rating the agent wants (UpdateAgentInformation,
     /// LLAgent::sendMaturityPreferenceToServer); answered by
     /// `NetEvent::MaturityPreference`.

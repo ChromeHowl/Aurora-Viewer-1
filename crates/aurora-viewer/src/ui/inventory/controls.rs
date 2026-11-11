@@ -45,6 +45,12 @@ pub(super) fn preferences_for_tab(ui: &mut egui::Ui, p: &Palette, prefs: &mut In
         aurora_i18n::tr!("ui-inventory-controls-show-library"),
         &mut prefs.show_library,
     );
+    changed |= check(
+        ui,
+        p,
+        aurora_i18n::tr!("l3-hide-empty-system"),
+        &mut prefs.hide_empty_system_folders,
+    );
     // Separate switches (#3008): pictures on hover must work with tooltips off.
     changed |= check(ui, p, aurora_i18n::tr!("inventory-hover-tooltips"), &mut prefs.show_hover_tooltips);
     changed |= check(ui, p, aurora_i18n::tr!("inventory-hover-pictures"), &mut prefs.thumbnail_tooltips);
@@ -352,6 +358,7 @@ pub fn dialogs(ctx: &egui::Context, p: &Palette, st: &mut InventoryUi, prefs: &m
     // remove: wider than the quick filters' checkboxes
     let filters_w = if st.advanced { 600.0 } else { 410.0 };
     let filters_size = Vec2::new(filters_w, 710.0_f32.min((screen.height() - 90.0).max(180.0)));
+    let (mut protected, mut thumbnails) = (false, false);
     Floater::new(
         &format!("inventory_preferences_{}", st.ui_id),
         aurora_i18n::tr!("ui-inventory-controls-inventory-preferences"),
@@ -366,6 +373,13 @@ pub fn dialogs(ctx: &egui::Context, p: &Palette, st: &mut InventoryUi, prefs: &m
             .show(ui, |ui| {
                 preferences_for_tab(ui, p, prefs, st.tab);
                 ui.add_space(6.0);
+                // menu_inventory_gear_default.xml's Protected Folders, and
+                // the Develop menu's Inventory Thumbnails Helper
+                ui.horizontal_wrapped(|ui| {
+                    protected = flat_button(ui, p, aurora_i18n::tr!("l3-protected-open")).clicked();
+                    thumbnails = flat_button(ui, p, aurora_i18n::tr!("l3-thumbs-open")).clicked();
+                });
+                ui.add_space(6.0);
                 ui.label(
                     RichText::new(aurora_i18n::tr!("ui-inventory-controls-preferences-kept-between-sessions"))
                         .size(12.0)
@@ -373,6 +387,12 @@ pub fn dialogs(ctx: &egui::Context, p: &Palette, st: &mut InventoryUi, prefs: &m
                 );
             });
     });
+    if protected {
+        st.open_protected_folders();
+    }
+    if thumbnails {
+        st.open_thumbnails_helper();
+    }
     // The body edits the whole window state in advanced mode, so the open flag
     // is borrowed on its own.
     let mut filters_open = st.filters_open;

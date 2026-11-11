@@ -495,7 +495,12 @@ impl World {
                     }
                     None
                 }
-                "tpto" => teleport(&c.option),
+                "tpto" => {
+                    // RlvHandler::setCanCancelTp(false) for a forced teleport
+                    let command = teleport(&c.option);
+                    self.tp_cancel_locked |= command.is_some();
+                    command
+                }
                 _ => None,
             };
             if let Some(mut command) = command

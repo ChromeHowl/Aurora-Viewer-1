@@ -35,6 +35,12 @@ pub fn page(cx: &mut Cx) {
     });
     cx.group(tr!("common-display"), |cx| {
         cx.toggle(tr!("ui-inventory-controls-show-library"), "", &field!(inventory.show_library));
+        // DebugHideEmptySystemFolders (panel_preferences_UI.xml)
+        cx.toggle(
+            tr!("l3-hide-empty-system"),
+            tr!("l3-hide-empty-system-help"),
+            &field!(inventory.hide_empty_system_folders),
+        );
         cx.toggle(
             tr!("inventory-hover-tooltips"),
             tr!("inventory-hover-tooltips-help"),

@@ -139,6 +139,7 @@ impl App {
             self.env_editor.wait_item = None;
             self.env_editor_load(item);
         }
+        self.poll_env_bulk();
         if let Some(rx) = &self.env_import
             && let Ok(file) = rx.try_recv()
         {
