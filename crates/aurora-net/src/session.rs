@@ -468,6 +468,7 @@ pub(crate) async fn run_session(sh: &Shared, req: LoginRequest, cmd_rx: &mut mps
                         bad_credentials: false,
                         previous_session: false,
                         network: false,
+                        next_server: None,
                     },
                 );
                 return;
