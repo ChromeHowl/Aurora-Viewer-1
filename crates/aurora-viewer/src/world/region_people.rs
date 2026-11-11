@@ -245,8 +245,8 @@ impl RegionPeople {
                 None => blocks.push((late, entry.block_served, target, key)),
             }
         }
-        blocks.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
-        items.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
+        blocks.sort_by_key(|row| (row.0, row.1));
+        items.sort_by_key(|row| (row.0, row.1));
         for (_, _, target, key) in blocks {
             if !self.blocks.ready(now) {
                 break;
