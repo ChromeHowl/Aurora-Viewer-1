@@ -160,7 +160,6 @@ fn finite_or(v: f32, default: f32) -> f32 {
 pub struct TextStyle(pub u8);
 
 impl TextStyle {
-    pub const NORMAL: TextStyle = TextStyle(0);
     pub const BOLD: TextStyle = TextStyle(1);
     pub const ITALIC: TextStyle = TextStyle(2);
     pub const UNDERLINE: TextStyle = TextStyle(4);
