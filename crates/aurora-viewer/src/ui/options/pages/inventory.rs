@@ -41,6 +41,19 @@ pub fn page(cx: &mut Cx) {
             tr!("l3-hide-empty-system-help"),
             &field!(inventory.hide_empty_system_folders),
         );
+        // FSShowInboxFolder, FSAlwaysShowInboxButton (panel_preferences_UI.xml)
+        cx.keywords("FSShowInboxFolder").toggle(
+            tr!("nb-inbox-folder"),
+            tr!("nb-inbox-folder-help"),
+            &field!(inventory.show_inbox_folder),
+        );
+        cx.subs(!cx.s.inventory.show_inbox_folder, |cx| {
+            cx.keywords("FSAlwaysShowInboxButton").toggle(
+                tr!("nb-inbox-tab"),
+                tr!("nb-inbox-tab-help"),
+                &field!(inventory.always_show_received_tab),
+            );
+        });
         cx.toggle(
             tr!("inventory-hover-tooltips"),
             tr!("inventory-hover-tooltips-help"),
@@ -135,6 +148,13 @@ pub fn page(cx: &mut Cx) {
             tr!("received-show-accepted"),
             tr!("received-show-accepted-help"),
             &field!(show_accepted_in_inventory),
+        );
+        // ShowNewInventory ("Automatically view new notecards, textures and
+        // landmarks", panel_preferences_privacy.xml)
+        cx.keywords("ShowNewInventory").toggle(
+            tr!("nb-show-new-inventory"),
+            tr!("nb-show-new-inventory-help"),
+            &field!(show_new_inventory),
         );
         cx.toggle(
             tr!("received-delivery-notify"),

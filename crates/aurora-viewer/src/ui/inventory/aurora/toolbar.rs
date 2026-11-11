@@ -64,7 +64,12 @@ pub(super) fn tabs(ui: &mut egui::Ui, p: &Palette, inv: &Inventory, st: &mut Inv
         (3, "hanger-2-filled", aurora_i18n::tr!("inventory-tab-worn"), prefs.show_worn),
         (4, "star-filled", aurora_i18n::tr!("inventory-tab-favorites"), prefs.show_favorites),
         // the Received Items in the main window only
-        (RECEIVED_TAB, "inbox", aurora_i18n::tr!("inventory-tab-received"), st.is_main()),
+        (
+            RECEIVED_TAB,
+            "inbox",
+            aurora_i18n::tr!("inventory-tab-received"),
+            st.is_main() && prefs.received_tab_shown(),
+        ),
     ] {
         if shown {
             entries.push((tab, icon, label));

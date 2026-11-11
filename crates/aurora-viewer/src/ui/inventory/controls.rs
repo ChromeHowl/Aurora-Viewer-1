@@ -51,6 +51,14 @@ pub(super) fn preferences_for_tab(ui: &mut egui::Ui, p: &Palette, prefs: &mut In
         aurora_i18n::tr!("l3-hide-empty-system"),
         &mut prefs.hide_empty_system_folders,
     );
+    // FSShowInboxFolder, FSAlwaysShowInboxButton (panel_preferences_UI.xml)
+    changed |= check(ui, p, aurora_i18n::tr!("nb-inbox-folder"), &mut prefs.show_inbox_folder);
+    if prefs.show_inbox_folder {
+        ui.horizontal(|ui| {
+            ui.add_space(12.0);
+            changed |= check(ui, p, aurora_i18n::tr!("nb-inbox-tab"), &mut prefs.always_show_received_tab);
+        });
+    }
     // Separate switches (#3008): pictures on hover must work with tooltips off.
     changed |= check(ui, p, aurora_i18n::tr!("inventory-hover-tooltips"), &mut prefs.show_hover_tooltips);
     changed |= check(ui, p, aurora_i18n::tr!("inventory-hover-pictures"), &mut prefs.thumbnail_tooltips);

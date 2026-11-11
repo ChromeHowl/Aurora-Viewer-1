@@ -14931,3 +14931,11 @@ pcu-help-t = Feuille du style d’image
 pcu-help-arrows = Flèches, Entrée
 pcu-help-arrows-text = Dans le menu rapide, la liste des modes ou une feuille : se déplacer, changer (Entrée fait avancer la tuile ou choisit le mode)
 pcu-cheat-pbt = mode de prise de vue · balance des blancs · style
+
+## Next-B: inventory display, rule sets, tools
+nb-inbox-folder = Afficher les Éléments reçus comme un dossier de l’inventaire
+nb-inbox-folder-help = La boîte de réception du Marketplace figure dans l’arborescence de l’inventaire ; désactivé, elle n’est que dans l’onglet Reçus
+nb-inbox-tab = Garder l’onglet Reçus
+nb-inbox-tab-help = Tant que les Éléments reçus sont affichés comme un dossier, l’onglet Reçus reste aussi
+nb-show-new-inventory = Ouvrir les nouvelles notes, textures et autres objets à leur arrivée
+nb-show-new-inventory-help = Ce qu’un objet donne, la pièce jointe d’une notice de groupe et une offre acceptée automatiquement s’ouvrent dans leur aperçu une fois dans l’inventaire

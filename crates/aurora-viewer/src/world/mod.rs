@@ -5283,7 +5283,7 @@ impl World {
             self.inventory_offer_answered(id, outcome);
         }
         if let Some((object, task)) = kept
-            && self.offer_throttle_passes(&giver)
+            && self.offer_throttle_passes(&giver, task)
         {
             self.reveal_kept_offer(object, task);
         }

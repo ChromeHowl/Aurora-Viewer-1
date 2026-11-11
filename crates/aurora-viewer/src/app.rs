@@ -9390,6 +9390,7 @@ impl App {
         self.world.inventory_offers.auto_accept_chat = self.settings.auto_accept_inventory_chat;
         self.world.inventory_offers.auto_accept_notify = self.settings.auto_accept_inventory_notify;
         self.world.inventory_offers.show_accepted = self.settings.show_accepted_in_inventory;
+        self.world.inventory_offers.preview_new = self.settings.show_new_inventory;
         self.world.payments.open_received = self.settings.payment_received_opens;
         self.world.payments.open_sent = self.settings.payment_sent_opens;
         let ((direct, toast), rows) = match self.demo_money_notices {
@@ -9613,6 +9614,11 @@ impl App {
             {
                 self.inventory_ui.show_original(&self.world.inventory, id);
                 ui::widgets::open_floater(&self.egui_ctx, "inventory", &mut self.panels.inventory);
+            }
+            // ShowNewInventory: its preview (open_inventory_offer), which
+            // keeps the preview's own RLVa and permission checks
+            if let Some(id) = self.world.take_new_inventory_preview(Instant::now()) {
+                self.apply_inventory_action(ui::inventory::InvAction::Preview(id));
             }
             self.contents_copy_tick(Instant::now());
             for change in self.world.take_inventory_edits() {
@@ -19989,6 +19995,7 @@ impl ApplicationHandler for App {
             self.world.inventory_offers.auto_accept_chat = self.settings.auto_accept_inventory_chat;
             self.world.inventory_offers.auto_accept_notify = self.settings.auto_accept_inventory_notify;
             self.world.inventory_offers.show_accepted = self.settings.show_accepted_in_inventory;
+            self.world.inventory_offers.preview_new = self.settings.show_new_inventory;
             for ev in crate::demo::events() {
                 if let Some(e) = self.world.apply(ev) {
                     self.on_app_event(e);

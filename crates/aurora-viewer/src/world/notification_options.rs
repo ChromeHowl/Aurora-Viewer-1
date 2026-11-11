@@ -187,9 +187,10 @@ impl World {
     /// check_offer_throttle for a kept offer about to be shown in the
     /// inventory (ShowInInventory): past the count within 10 seconds (once
     /// logged in), it is not shown and the first one held says so, with the
-    /// giver's name when known. Without ShowInInventory nothing counts.
-    pub(super) fn offer_throttle_passes(&mut self, giver: &str) -> bool {
-        if !self.inventory_offers.show_accepted || !self.notifications.started {
+    /// giver's name when known. Without ShowInInventory, nor ShowNewInventory
+    /// for this offer, nothing counts.
+    pub(super) fn offer_throttle_passes(&mut self, giver: &str, task: bool) -> bool {
+        if !self.kept_offer_shown(task) || !self.notifications.started {
             return true;
         }
         let o = self.notifications.options;

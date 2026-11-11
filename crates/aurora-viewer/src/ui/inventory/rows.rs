@@ -255,6 +255,7 @@ pub(super) fn scroll(
     if st.ui_id.is_nil() && !st.aurora.is_some_and(|frame| frame.explorer) {
         st.plain.persist(ui.ctx(), egui::Id::unique("inventory_open_folders"));
     }
+    st.view.set_display(prefs);
     st.view.prepare(inv, prefs.sort_for(st.tab));
     let collapsed = st.expand_all.take().is_some_and(|open| {
         st.plain.expand(&st.view, inv, root, show_root, prefs.show_library, open);

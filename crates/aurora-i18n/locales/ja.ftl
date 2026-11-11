@@ -14883,3 +14883,11 @@ pcu-help-t = ピクチャースタイルのシート
 pcu-help-arrows = 矢印キー、Enter
 pcu-help-arrows-text = クイックメニュー、モード一覧、シートで：移動、変更（Enter でタイルを進めるかモードを選択）
 pcu-cheat-pbt = 撮影モード · ホワイトバランス · スタイル
+
+## Next-B: inventory display, rule sets, tools
+nb-inbox-folder = 受け取ったアイテムをインベントリのフォルダーとして表示
+nb-inbox-folder-help = マーケットプレイスの受信箱をインベントリのツリーに表示します。オフにすると「受け取ったアイテム」タブにのみ表示されます
+nb-inbox-tab = 「受け取ったアイテム」タブを残す
+nb-inbox-tab-help = 受け取ったアイテムをフォルダーとして表示している間も「受け取ったアイテム」タブを残します
+nb-show-new-inventory = 新しいノートカード、テクスチャなどを受け取ったときに開く
+nb-show-new-inventory-help = オブジェクトから渡されたもの、グループ通知の添付、自動で受け取ったオファーは、インベントリに入るとプレビューで開きます

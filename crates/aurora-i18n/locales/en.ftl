@@ -14932,3 +14932,11 @@ pcu-help-t = Picture style sheet
 pcu-help-arrows = Arrows, Enter
 pcu-help-arrows-text = In the quick menu, the mode list or a sheet: move, change (Enter steps the tile or chooses the mode)
 pcu-cheat-pbt = shot mode · white balance · style
+
+## Next-B: inventory display, rule sets, tools
+nb-inbox-folder = Show Received Items as a folder in the inventory
+nb-inbox-folder-help = The Marketplace inbox is listed in the inventory's tree; off, it is only in the Received tab
+nb-inbox-tab = Keep the Received tab
+nb-inbox-tab-help = While Received Items is shown as a folder, the Received tab stays as well
+nb-show-new-inventory = Open new notecards, textures and other items when they arrive
+nb-show-new-inventory-help = What an object gives, a group notice's attachment and an offer accepted automatically open in their preview once they are in the inventory
