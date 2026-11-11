@@ -309,6 +309,11 @@ impl Voice {
             .then(|| s.participants().into_iter().map(|p| (p.agent_id, p.moderator_muted)).collect())
     }
 
+    /// The session is the nearby (spatial) channel, not a call's.
+    pub fn on_spatial(&self) -> bool {
+        matches!(self.session, Some((ChannelKey::Local { .. }, _)))
+    }
+
     /// Mute the participants we blocked (voice), unmute the others
     /// (LLVoiceClient::muteListChanged); only changes are sent.
     pub fn apply_blocks(&mut self, blocked: impl Fn(&Uuid) -> bool) {

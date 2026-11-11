@@ -366,7 +366,10 @@ fn plate_content(
         render_never: !own && too_complex && settings.render_exception(&id) == 1,
         blocked,
         mark: crate::world::staff::mark_named(&id, &legacy),
-        marked: world.avatar_marks.get(&id),
+        // the Shadow Realm's red over a mark
+        marked: super::colors::shadow_red(world, &id)
+            .map(|red| [red.r(), red.g(), red.b()])
+            .or_else(|| world.avatar_marks.get(&id)),
         // the name in its range's colour too, as `classic_name_color` (not
         // ours, nor over a friend's or a contact set's colour)
         name_band: (!own && !friend && settings.people.tag_distance_colors && world.contact_appearance(&id).nameplate_name.is_none())
@@ -432,7 +435,9 @@ fn classic_name_color(
         let d = position.distance(world.agent.position);
         color = super::colors::band_color(p, crate::world::radar::Band::of(d, crate::world::radar::chat_ranges()));
     }
-    world.avatar_marks.get(&id).map_or(color, |[r, g, b]| Color32::from_rgb(r, g, b))
+    let color = world.avatar_marks.get(&id).map_or(color, |[r, g, b]| Color32::from_rgb(r, g, b));
+    // the Shadow Realm's red beats a mark
+    super::colors::shadow_red(world, &id).unwrap_or(color)
 }
 
 /// What the avatars' name tags show.
@@ -520,7 +525,7 @@ pub fn draw(
     // only the avatars and the objects with a text: a shop has thousands of
     // objects for a few dozen of these
     for (idx, o) in world.objects.avatars().chain(world.objects.texted()) {
-        if !world.parcel_object_visible(idx) || !crate::snapshot::isolate::object_visible(world, idx) {
+        if !world.parcel_object_visible(idx) || !crate::snapshot::isolate::object_visible(world, idx) || world.shadow_hides_index(idx) {
             continue;
         }
         if !o.is_avatar() && !world.rlva.hover_visible(o.full_id, scene.gpu.get(idx).is_some_and(|g| g.hud)) {

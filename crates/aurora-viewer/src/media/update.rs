@@ -567,6 +567,13 @@ impl MediaManager {
                         m.distance = 0.0;
                         continue;
                     }
+                    // a prim of someone the Shadow Realm hides: neither seen
+                    // nor heard (past the roll-off its volume is nil)
+                    if world.shadow_hides_index(om.idx) {
+                        m.interest = 0.0;
+                        m.distance = f32::MAX;
+                        continue;
+                    }
                     match scene.gpu.get(om.idx).filter(|g| g.radius > 0.0) {
                         Some(g) => {
                             m.distance = g.center.distance(f.camera);

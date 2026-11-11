@@ -219,7 +219,9 @@ pub fn avatars(world: &World) -> Vec<(Uuid, Vec3, bool)> {
     let now = Instant::now();
     let mut out: Vec<(Uuid, Vec3, bool)> = Vec::new();
     for (idx, o) in world.objects.avatars() {
+        // (nobody the Shadow Realm hides: `world/shadow_realm.rs`)
         if o.full_id != world.agent_id
+            && !world.shadow_hides(&o.full_id)
             && let Some((p, _, _)) = Scene::object_transform(world, idx, now, 0)
         {
             out.push((o.full_id, p, true));
@@ -230,7 +232,7 @@ pub fn avatars(world: &World) -> Vec<(Uuid, Vec3, bool)> {
             continue;
         };
         for (id, p) in list {
-            if *id == world.agent_id || out.iter().any(|e| e.0 == *id) {
+            if *id == world.agent_id || world.shadow_hides(id) || out.iter().any(|e| e.0 == *id) {
                 continue;
             }
             let known = p.z > 0.0 && p.z < COARSE_MAX_Z;
@@ -625,6 +627,8 @@ impl MiniMap {
             let col = world.contact_appearance(&id).minimap.map(super::colors::set_color).unwrap_or(col);
             // a mark from the radar's or this menu wins (LLNetMap::getAvatarColor)
             let col = world.avatar_marks.get(&id).map_or(col, |[r, g, b]| Color32::from_rgb(r, g, b));
+            // the Shadow Realm's red over a mark
+            let col = super::colors::shadow_red(world, &id).unwrap_or(col);
             // unknown height: shown above while the camera is under 1020 m
             let dz = if known {
                 Some(pos.z - cam.pos.z)
@@ -708,11 +712,16 @@ impl MiniMap {
                 pos.truncate().distance(me.truncate())
             };
             let name = avatar_name(world, &id);
-            resp.clone().on_hover_text_at_pointer(aurora_i18n::tr!(
+            let text = aurora_i18n::tr!(
                 "status-name-distance-d-m",
                 name = name.to_string(),
                 d = aurora_i18n::number_text(&format!("{:.2}", d))
-            ));
+            );
+            // in the Shadow Realm's red when they are one of its residents
+            match super::colors::shadow_red(world, &id) {
+                Some(red) => resp.clone().on_hover_text_at_pointer(egui::RichText::new(text).color(red)),
+                None => resp.clone().on_hover_text_at_pointer(text),
+            };
         } else if let Some(m) = pointer.filter(|_| resp.hovered() && !resp.dragged()) {
             let g = view.to_global(m);
             let mut lines = Vec::new();

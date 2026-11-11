@@ -48,7 +48,21 @@ pub fn set_color(v: [f32; 4]) -> Color32 {
     )
 }
 
+/// A resident of the Shadow Realm in range (`world/shadow_realm.rs`): red
+/// wherever their name is written, over the marks and the contact sets,
+/// never while RLVa hides their name. The theme's danger colour,
+/// daltonised like the others.
+pub fn shadow_red(world: &World, id: &Uuid) -> Option<Color32> {
+    world.shadow_red(id).then(|| {
+        let danger = crate::interface_colors::skin().map_or_else(|| crate::theme::Theme::default().skin_palette().danger, |p| p.danger);
+        crate::colorblind::adapt(danger, crate::colorblind::current())
+    })
+}
+
 pub fn resident_name(world: &World, id: &Uuid, fallback: Color32) -> Color32 {
+    if let Some(red) = shadow_red(world, id) {
+        return crate::interface_colors::on_panel(red);
+    }
     world
         .contact_appearance(id)
         .ui_name
@@ -64,6 +78,11 @@ pub fn contact_chat_color(line: &ChatLine, world: &World) -> Option<Color32> {
 }
 
 pub fn contact_sender_color(line: &ChatLine, world: &World) -> Option<Color32> {
+    if matches!(line.kind, ChatKind::Local(_) | ChatKind::Im)
+        && let Some(red) = shadow_red(world, &line.source)
+    {
+        return Some(crate::interface_colors::on_panel(red));
+    }
     matches!(line.kind, ChatKind::Local(_) | ChatKind::Im | ChatKind::Own(_))
         .then(|| {
             let a = world.contact_appearance(&line.source);
@@ -238,6 +257,9 @@ pub fn band_color(p: &crate::theme::Palette, band: crate::world::radar::Band) ->
 
 /// Minimap marker color of an avatar.
 pub fn map_color(world: &World, id: &Uuid, name: &str) -> Color32 {
+    if let Some(red) = shadow_red(world, id) {
+        return red;
+    }
     if let Some(color) = world.contact_appearance(id).minimap {
         return set_color(color);
     }

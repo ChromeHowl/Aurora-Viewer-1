@@ -324,9 +324,11 @@ fn gather(world: &World, levels: &HashMap<Uuid, (f32, bool)>) -> Gathered {
             own: own_level(levels.get(&me), call.members.iter().find(|m| m.id == me).map(level)),
         };
     }
+    // (the nearby channel without those the Shadow Realm hides; calls list
+    // everyone)
     let mut in_voice: Vec<(Uuid, Level)> = levels
         .iter()
-        .filter(|(id, _)| **id != me)
+        .filter(|(id, _)| **id != me && !world.shadow_hides(id))
         .map(|(id, &(level, speaking))| {
             // shown to everyone; only the moderation actions are gated
             let muted = world

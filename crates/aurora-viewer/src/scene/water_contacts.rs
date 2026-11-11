@@ -381,6 +381,7 @@ pub(super) fn visibility(scene: &super::Scene, world: &crate::world::World, cand
         if world.derender.contains(&object.full_id)
             || !world.parcel_object_visible(idx)
             || !crate::snapshot::isolate::object_visible(world, idx)
+            || world.shadow_hides_index(idx)
         {
             continue;
         }

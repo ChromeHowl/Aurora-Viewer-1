@@ -123,6 +123,7 @@ pub mod rlva;
 pub mod script_queue;
 pub mod scripts;
 pub mod search;
+pub mod shadow_realm;
 pub mod shape;
 pub mod sheet;
 pub mod sim_console;
@@ -214,6 +215,8 @@ pub struct Panels {
     pub avatar_render_settings: bool,
     /// "Asset blacklist" (World menu): the derendered objects and residents.
     pub asset_blacklist: bool,
+    /// "Shadow Realm…" (World menu): its residents, switch and distance.
+    pub shadow_realm: bool,
     /// "Money tracker" (Me menu): the L$ received and paid.
     pub money_tracker: bool,
     /// "Experiences" (Me menu): the agent's experiences by tab.
@@ -293,6 +296,7 @@ impl Panels {
             animation_explorer: false,
             avatar_render_settings: false,
             asset_blacklist: false,
+            shadow_realm: false,
             money_tracker: false,
             experiences: false,
             bumps: false,

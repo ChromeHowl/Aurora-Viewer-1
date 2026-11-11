@@ -86,7 +86,7 @@ fn sightings(world: &World, region: u64, now: Instant) -> Vec<Sighting> {
         }
         let Some(marker) = marked(world, &o.full_id) else { continue };
         seen.insert(o.full_id);
-        if !world.parcel_object_visible(idx) || !crate::snapshot::isolate::object_visible(world, idx) {
+        if !world.parcel_object_visible(idx) || !crate::snapshot::isolate::object_visible(world, idx) || world.shadow_hides_index(idx) {
             continue;
         }
         let Some((position, _, _)) = Scene::object_transform(world, idx, now, 0) else {
@@ -109,7 +109,7 @@ fn sightings(world: &World, region: u64, now: Instant) -> Vec<Sighting> {
             continue;
         }
         let Some(marker) = marked(world, &id) else { continue };
-        if !allowed(&id, position.distance(world.agent.position)) {
+        if world.shadow_hides(&id) || !allowed(&id, position.distance(world.agent.position)) {
             continue;
         }
         out.push(Sighting {
