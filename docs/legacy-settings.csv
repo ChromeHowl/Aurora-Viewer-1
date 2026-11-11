@@ -550,7 +550,7 @@ FSDiskCacheHighWaterPercent,F32,check,,Aurora's cache has its own housekeeping,T
 FSDiskCacheLowWaterPercent,F32,check,,Aurora's cache has its own housekeeping,Level to drain cache to once it goes over the high water limit.
 FSDiskCacheSize,U32,in-aurora,,cache_size_mb,Controls amount of hard drive space reserved for local asset caching in MB
 FSDismissGroupNoticeAttachmentsToTrash,Boolean,to-add,low,,"If enabled, dismissing group notices with attachments will move attachment to trash folder"
-FSDoNotHideMapOnTeleport,Boolean,in-aurora,,"ported (2026-11), `settings/teleport.rs`","If enabled, the world map won't be closed when teleporting"
+FSDoNotHideMapOnTeleport,Boolean,in-aurora,,"ported (2026-11), `settings/teleport.rs`; on by default (Aurora kept the map open)","If enabled, the world map won't be closed when teleporting"
 FSDontIgnoreAdHocFromFriends,Boolean,in-aurora,,autoresponse.adhoc_from_friends,Allow my friends to start conference chats with me.
 FSDontNagWhenPurging,Boolean,to-add,low,,"If enabled, emptying trash will not double check before deleting. WARNING: You should only use this if you are a regular trash emptier and a"
 FSDoubleClickAddInventoryClothing,Boolean,in-aurora,,inventory.double_click_add_clothes,Whether or not to add clothes instead of wearing them
@@ -883,7 +883,7 @@ FSStreamList,LLSD,in-aurora,,"audio.saved_streams (a list, not listed in Debug S
 FSStreamtitleHistoryLength,U32,in-aurora,,audio.stream_title_history,The maximum number of stream titles shown in the history
 FSSupportGroupChatPrefix3,Boolean,not-applicable,,the Legacy Viewer's support groups,Adds (FS 1.2.3) to support group chat
 FSSupportGroupChatPrefixTesting,Boolean,not-applicable,,the Legacy Viewer's support groups,Adds (W 56789f* os) to testing group chat
-FSTPHistoryTZ,String,in-aurora,,"ported (2026-11), `settings/teleport.rs`","Select the timezone to be used with Teleport History. ('utc' = Coordinated Universal Time, 'slt' = Second Life Time (default), 'local' = the"
+FSTPHistoryTZ,String,in-aurora,,"ported (2026-11), `settings/teleport.rs`; UTC by default (Aurora used UTC)","Select the timezone to be used with Teleport History. ('utc' = Coordinated Universal Time, 'slt' = Second Life Time (default), 'local' = the"
 FSTagShowARW,Boolean,in-aurora,,tag_complexity,"If enabled, the avatar complexity will be shown in the nametag for every avatar."
 FSTagShowDistance,Boolean,in-aurora,,"ported (2026-11), `settings/people.rs`","If enabled, show distance to other avatars in their nametag."
 FSTagShowDistanceColors,Boolean,in-aurora,,"ported (2026-11), `settings/people.rs`","If enabled, color other avatars' nametags based on their distance"

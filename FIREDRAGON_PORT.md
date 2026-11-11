@@ -127,9 +127,12 @@ Housekeeping after the merges (formatting, one unused constant removed) and the 
 
 ### Open follow-ups
 
+Decided by the owner (2026-11-11), done on `feat/final-polish`:
+
+- Teleport defaults: the map stays open during a teleport and the teleport history is in UTC, as Aurora did before (the Legacy Viewer closes the map and uses SLT).
+
 Decisions for the owner:
 
-- Teleport defaults: the map now closes on teleport and the teleport history shows SLT, as in the Legacy Viewer; Aurora kept the map open and used UTC. Keep the Legacy defaults or go back to Aurora's?
 - Discord rich presence: needs a Discord application id owned by the project and a new dependency.
 - The render extras are not part of the graphics presets (the Legacy presets hold several of them).
 - Depth of field on blended faces is off by default (always on in the Legacy Viewer): turn it on after a visual check?

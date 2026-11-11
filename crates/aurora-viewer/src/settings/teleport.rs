@@ -5,17 +5,20 @@
 //! FSAdvancedWorldmapRegionInfo, WorldmapFilterDuplicateLandmarks,
 //! FSDoNotHideMapOnTeleport, FSDisableBeaconAfterTeleport, FSShowBackSLURL,
 //! FSDisableTeleportScreens, FSDisableLoginScreens, FSAutoUnmuteSounds and
-//! FSAutoUnmuteAmbient; same defaults.
+//! FSAutoUnmuteAmbient. Same defaults, except two that keep Aurora's own
+//! behaviour from before these options: the world map stays open during a
+//! teleport, and the history is dated in UTC.
 
 use serde::{Deserialize, Serialize};
 
 /// The time of the teleport history: its day sections and its dates
-/// (FSTPHistoryTZ "utc", "slt", "local").
+/// (FSTPHistoryTZ "utc", "slt", "local"). UTC by default, as Aurora dated
+/// the history before the option (the Legacy Viewer's default is SLT).
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub enum HistoryZone {
-    Utc,
-    /// Second Life time, the Legacy Viewer's default.
     #[default]
+    Utc,
+    /// Second Life time.
     Slt,
     /// The computer's time zone.
     Local,
@@ -55,7 +58,8 @@ pub struct Teleport {
     /// the same place (WorldmapFilterDuplicateLandmarks).
     pub map_unique_landmarks: bool,
     /// The world map stays open when a teleport starts
-    /// (FSDoNotHideMapOnTeleport).
+    /// (FSDoNotHideMapOnTeleport). On by default, as the map behaved in
+    /// Aurora before the option (the Legacy Viewer's default is off).
     pub keep_map_open: bool,
     /// The destination's beacon goes away after a teleport to another
     /// region (FSDisableBeaconAfterTeleport).
@@ -80,7 +84,7 @@ impl Default for Teleport {
             history: HistoryView::default(),
             map_region_info: true,
             map_unique_landmarks: false,
-            keep_map_open: false,
+            keep_map_open: true,
             clear_beacon: false,
             back_slurl: true,
             no_teleport_screen: false,
@@ -95,16 +99,27 @@ impl Default for Teleport {
 mod tests {
     use super::*;
 
-    /// A settings file without the block, or with part of it, keeps the
-    /// Legacy Viewer's defaults for the rest.
+    /// A settings file without the block, or with part of it, gets the
+    /// defaults for the rest: the map kept open and the history in UTC.
     #[test]
     fn old_files_keep_the_defaults() {
         let t: Teleport = serde_json::from_str("{}").expect("empty block");
         assert_eq!(t, Teleport::default());
-        assert!(t.map_region_info && t.back_slurl && !t.keep_map_open);
-        assert_eq!(t.history.zone, HistoryZone::Slt);
+        assert!(t.map_region_info && t.back_slurl && t.keep_map_open);
+        assert_eq!(t.history.zone, HistoryZone::Utc);
         let t: Teleport = serde_json::from_str(r#"{"history":{"date":true}}"#).expect("partial block");
         assert!(t.history.date && !t.history.position);
+        assert_eq!(t.history.zone, HistoryZone::Utc);
+        let t: Teleport = serde_json::from_str(r#"{"back_slurl":false}"#).expect("block without the map option");
+        assert!(t.keep_map_open && !t.back_slurl);
+    }
+
+    /// A choice the user saved stays as saved.
+    #[test]
+    fn saved_choices_win_over_the_defaults() {
+        let t: Teleport =
+            serde_json::from_str(r#"{"keep_map_open":false,"history":{"zone":"Slt"}}"#).expect("saved choices");
+        assert!(!t.keep_map_open);
         assert_eq!(t.history.zone, HistoryZone::Slt);
     }
 }
