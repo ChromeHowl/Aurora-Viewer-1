@@ -242,6 +242,9 @@ pub(super) struct Snapshots {
     /// A photo to disk asked while the renderer draws the frame (the
     /// toolbar's Snapshot to disk): taken by the next `photo_update`.
     to_disk: bool,
+    /// A 360° photo asked by the toolbar's 360capture while the renderer
+    /// draws the frame: started by the next `photo_update`.
+    to_pano: bool,
     /// The price to confirm before the upload.
     pub(super) confirm: Option<i32>,
     /// The price the balance cannot pay.
@@ -490,6 +493,7 @@ impl Default for Snapshots {
             look_focus: None,
             quiet: false,
             to_disk: false,
+            to_pano: false,
             confirm: None,
             short: None,
             quality_ask: false,
@@ -1934,11 +1938,29 @@ impl App {
         self.gfx = Some(gfx);
     }
 
+    /// The toolbar's 360capture (LLFloater360Capture, "Capture a 360°
+    /// equirectangular image"): the photo window opens on its disk
+    /// destination, where the 360° options are, and its 360° action runs
+    /// (`photo_pano_start`, which refuses it under RLVa camera limits).
+    pub(super) fn photo_360(&mut self) {
+        crate::ui::widgets::open_floater(&self.egui_ctx, crate::ui::snapshot::WINDOW, &mut self.panels.snapshot);
+        self.snapshots.ui.destination = Destination::Disk;
+        let Some(gfx) = self.gfx.take() else {
+            self.snapshots.to_pano = true;
+            return;
+        };
+        self.photo_action(Action::Pano, &gfx.renderer);
+        self.gfx = Some(gfx);
+    }
+
     /// Every frame: the saves, thumbnails, dialogs and preview to follow.
     pub(super) fn photo_update(&mut self, renderer: &Renderer) {
         if std::mem::take(&mut self.snapshots.to_disk) {
             self.snapshots.quiet = !self.panels.snapshot;
             self.photo_take(renderer, None);
+        }
+        if std::mem::take(&mut self.snapshots.to_pano) {
+            self.photo_action(Action::Pano, renderer);
         }
         self.photo_full_save_update(renderer);
         self.photo_pano_update();

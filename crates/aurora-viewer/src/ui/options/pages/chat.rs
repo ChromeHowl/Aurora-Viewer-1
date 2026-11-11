@@ -272,7 +272,7 @@ pub fn page(cx: &mut Cx, tab: usize) {
         3 => history(cx),
         4 => away_and_replies(cx),
         6 => super::spelling::page(cx),
-        7 => super::message_rules::page(cx),
+        super::message_rules::TAB => super::message_rules::page(cx),
         _ => cx.group(tr!("ui-options-groups-and-blocking"), |cx| {
             cx.toggle(
                 tr!("ui-options-no-group-chats"),

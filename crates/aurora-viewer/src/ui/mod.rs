@@ -153,6 +153,7 @@ pub mod widgets;
 
 #[cfg(test)]
 mod uri_restore_tests;
+pub mod wearable_favorites;
 pub mod worldmap;
 
 /// Which floating panels are open.
@@ -224,6 +225,8 @@ pub struct Panels {
     pub avatar_align: bool,
     /// Avatar › Pose stand (`ui/pose_stand.rs`).
     pub pose_stand: bool,
+    /// Me › Favorite wearables (`ui/wearable_favorites.rs`).
+    pub wearable_favorites: bool,
     /// "Grid status" (Help menu, toolbar): the grid's incidents.
     pub grid_status: bool,
     /// The built-in web browser (toolbar `webbrowser`).
@@ -298,6 +301,7 @@ impl Panels {
             bumps: false,
             avatar_align: false,
             pose_stand: false,
+            wearable_favorites: false,
             grid_status: false,
             web_browser: false,
             quick_prefs: false,

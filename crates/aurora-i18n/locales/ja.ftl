@@ -14782,3 +14782,12 @@ l5-inventory-mono-hint = インベントリから開いたスクリプトは Mon
 l5-turn-to-selection = 選択したオブジェクトにアバターを向ける
 l5-turn-to-selection-hint = カメラがアバターに向いていないときにオブジェクトを選択すると、アバターがそのオブジェクトの方を向きます。
 l5-save-back = オブジェクトのコンテンツに保存し直す
+
+# Final polish: favourite wearables, toolbar commands
+fpol-favwear-filter = 着用アイテムを絞り込む
+fpol-favwear-empty = お気に入りの着用アイテムはまだありません。インベントリで衣類、身体部位、アタッチメントに星を付けると、ここに表示されます。
+fpol-favwear-no-match = 一致する着用アイテムはありません。
+fpol-favwear-wear-tip = 同じ部位に着用中のものと置き換えて着用します。
+fpol-favwear-add-tip = 着用中のものに追加して着用します。
+fpol-favwear-unstar = 星を外す
+fpol-favwear-unstar-tip = インベントリのお気に入りから外します。アイテムはその場所に残ります。

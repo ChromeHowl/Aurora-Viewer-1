@@ -14830,3 +14830,12 @@ l5-inventory-mono-hint = Un script ouvert depuis l'inventaire commence avec Mono
 l5-turn-to-selection = Tourner l'avatar vers l'objet sélectionné
 l5-turn-to-selection-hint = Quand vous sélectionnez un objet alors que la caméra n'est pas sur votre avatar, celui-ci se tourne vers l'objet.
 l5-save-back = Réenregistrer dans le contenu de l'objet
+
+# Final polish: favourite wearables, toolbar commands
+fpol-favwear-filter = Filtrer les articles à porter
+fpol-favwear-empty = Aucun article à porter favori pour l'instant. Mettez une étoile à des vêtements, parties du corps ou attachements dans l'inventaire pour les voir ici.
+fpol-favwear-no-match = Aucun article correspondant.
+fpol-favwear-wear-tip = Le porter à la place de ce qui est porté au même emplacement.
+fpol-favwear-add-tip = Le porter en plus de ce qui est déjà porté.
+fpol-favwear-unstar = Retirer l'étoile
+fpol-favwear-unstar-tip = Le retirer des favoris de l'inventaire. L'article reste à sa place.

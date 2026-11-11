@@ -841,6 +841,8 @@ pub struct App {
     bumps_ui: ui::bumps::BumpsUi,
     avatar_align_ui: ui::avatar_align::AvatarAlignUi,
     pose_stand_ui: ui::pose_stand::PoseStandUi,
+    /// Me › Favorite wearables (`ui/wearable_favorites.rs`).
+    wearable_favorites_ui: ui::wearable_favorites::WearableFavoritesUi,
     /// Appearance to XML waiting for its file (`app/character_tests.rs`).
     appearance_dump: Option<std::sync::mpsc::Receiver<Result<Option<std::path::PathBuf>, String>>>,
     /// The pose stand shows its pose this frame (`app/pose_stand.rs`).
@@ -1864,6 +1866,7 @@ impl App {
             bumps_ui: Default::default(),
             avatar_align_ui: Default::default(),
             pose_stand_ui: Default::default(),
+            wearable_favorites_ui: Default::default(),
             appearance_dump: None,
             pose_stand_held: false,
             pose_stand_capture: None,
@@ -14451,6 +14454,11 @@ impl App {
             BarAction::CreateLandmark => self.open_create_landmark(None),
             BarAction::PhotoToDisk => self.photo_to_disk(),
             BarAction::PhotoRoll => self.photo_reel_show_newest(),
+            BarAction::Photo360 => self.photo_360(),
+            BarAction::OmnifilterPrefs => {
+                ui::widgets::open_floater(&self.egui_ctx, "options", &mut self.panels.settings);
+                self.options_ui.open_message_rules();
+            }
             BarAction::LandmarkStar(star) => self.landmark_star(star),
             BarAction::PlaceBar { stretch, rights_text } => {
                 self.settings.place_bar_stretch = stretch;
@@ -18137,6 +18145,7 @@ impl App {
                 self.bumps_ui.show(&ctx, &p, &self.world, &mut self.panels.bumps);
                 self.avatar_align_window(&ctx, &p);
                 self.pose_stand_window(&ctx, &p);
+                self.wearable_favorites_window(&ctx, &p);
                 self.poll_appearance_dump();
                 self.grid_status_window(&ctx, &p);
                 if let Some(ui::voice_controls::Action::LeaveCall) = self.voice_controls_ui.show(
