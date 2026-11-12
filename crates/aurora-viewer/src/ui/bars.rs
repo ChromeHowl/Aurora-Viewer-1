@@ -1808,7 +1808,15 @@ fn health_menu(ui: &mut egui::Ui, p: &Palette, h: &HealthMenu) {
     });
 }
 
-fn build_menu(ui: &mut egui::Ui, p: &Palette, panels: &mut Panels, action: &mut BarAction, ik_keys: &str, edit_particles: bool, save_back: bool) {
+fn build_menu(
+    ui: &mut egui::Ui,
+    p: &Palette,
+    panels: &mut Panels,
+    action: &mut BarAction,
+    ik_keys: &str,
+    edit_particles: bool,
+    save_back: bool,
+) {
     if menu::check(
         ui,
         p,

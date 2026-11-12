@@ -679,8 +679,8 @@ impl App {
             .objects
             .get(&object)
             .and_then(|inv| inv.items.iter().find(|it| it.item_id == item))
-            .map(|it| (it.owner_id, it.asset_id));
-        let (Some(handle), Some((owner, asset))) = (handle, it) else {
+            .map(|it| (it.owner_id, it.asset_id, it.flags));
+        let (Some(handle), Some((owner, asset, flags))) = (handle, it) else {
             if let Some(queue) = self.object_menu.queue.as_mut() {
                 queue.give_up();
             }
@@ -708,6 +708,7 @@ impl App {
                 // LLQueuedScriptAssetUpload: saved running
                 options: ScriptOptions {
                     mono,
+                    luau: aurora_net::scripts::Luau::from_flags(flags),
                     running: true,
                     experience,
                 },

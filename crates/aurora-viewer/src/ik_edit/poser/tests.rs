@@ -2548,6 +2548,9 @@ fn a_click_after_a_mode_switch_is_judged_on_the_new_handles() {
         pose(&editor).rotations[wrist],
         before.rotations[wrist],
         "the rotation ring turned the wrist"
+    );
+}
+
 /// Bit `joint` of a renderer part mask (`world_hints::mask_joints`).
 fn in_mask(mask: &[u32; 8], joint: usize) -> bool {
     joint < 256 && mask[joint >> 5] & (1 << (joint & 31)) != 0
@@ -2768,6 +2771,9 @@ fn closing_with_stop_posing_off_keeps_others_history_animations_and_the_subject(
     assert!(Config::default().stop_on_close);
     drop(streamer);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn a_mesh_pick_stands_only_for_its_subject_near_where_it_was_read() {
     let (me, other) = (Uuid::from_u128(1), Uuid::from_u128(2));
     let stored = Some((me, 13, [400.0, 300.0]));
