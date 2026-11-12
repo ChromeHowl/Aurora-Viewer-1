@@ -226,11 +226,6 @@ pub fn page(cx: &mut Cx) {
             tr!("l5-inventory-mono-hint"),
             &field!(build.extras.inventory_scripts_mono),
         );
-        cx.keywords("FSTurnAvatarToSelectedObject turn").toggle(
-            tr!("l5-turn-to-selection"),
-            tr!("l5-turn-to-selection-hint"),
-            &field!(build.extras.turn_to_selection),
-        );
     });
 }
 

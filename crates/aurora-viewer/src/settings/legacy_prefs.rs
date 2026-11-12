@@ -17,12 +17,6 @@ pub const HUD_SCALE: std::ops::RangeInclusive<f32> = 1.0..=2.0;
 pub const PROXY_PORT: u16 = 3128;
 /// ConnectionPort's default.
 pub const UDP_PORT: u16 = 13000;
-/// FSAudioMusicFadeIn / FSAudioMusicFadeOut defaults (seconds).
-pub const STREAM_FADE_IN: f32 = 3.0;
-pub const STREAM_FADE_OUT: f32 = 2.0;
-/// Longest fade offered (Preferences › Sound, panel_preferences_sound.xml
-/// stops its spinners at 10 s).
-pub const MAX_STREAM_FADE: f32 = 10.0;
 
 /// The preferences (see the module).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -60,13 +54,6 @@ pub struct LegacyPrefs {
     /// FSStatusbarShowSimulatorVersion (off): the simulator's version after
     /// the region's name in the top bar.
     pub sim_version_in_bar: bool,
-    /// FSFadeAudioStream (on): the parcel music fades out and in when it
-    /// changes.
-    pub stream_fade: bool,
-    /// FSAudioMusicFadeIn (3 s).
-    pub stream_fade_in: f32,
-    /// FSAudioMusicFadeOut (2 s).
-    pub stream_fade_out: f32,
 }
 
 impl Default for LegacyPrefs {
@@ -84,9 +71,6 @@ impl Default for LegacyPrefs {
             scripts_can_show_ui: true,
             release_mic_when_muted: true,
             sim_version_in_bar: false,
-            stream_fade: true,
-            stream_fade_in: STREAM_FADE_IN,
-            stream_fade_out: STREAM_FADE_OUT,
         }
     }
 }
@@ -118,8 +102,6 @@ impl LegacyPrefs {
         if self.udp_port == 0 {
             self.udp_port = UDP_PORT;
         }
-        self.stream_fade_in = finite_or(self.stream_fade_in, STREAM_FADE_IN).clamp(0.0, MAX_STREAM_FADE);
-        self.stream_fade_out = finite_or(self.stream_fade_out, STREAM_FADE_OUT).clamp(0.0, MAX_STREAM_FADE);
     }
 
     /// The web proxy, as `host:port`, when it is on and its host usable
@@ -162,9 +144,8 @@ mod tests {
         assert_eq!(p.tooltip_delay, 0.7);
         assert_eq!(p.hud_scale, 1.0);
         assert!(!p.web_proxy && !p.proxy_other_http && !p.fixed_udp_port && !p.sim_version_in_bar);
-        assert!(p.browser_javascript && p.scripts_can_show_ui && p.release_mic_when_muted && p.stream_fade);
+        assert!(p.browser_javascript && p.scripts_can_show_ui && p.release_mic_when_muted);
         assert_eq!((p.web_proxy_port, p.udp_port), (3128, 13000));
-        assert_eq!((p.stream_fade_in, p.stream_fade_out), (3.0, 2.0));
         assert_eq!(p.http_proxy(), None);
         assert_eq!(p.udp_port(), None);
     }
@@ -174,7 +155,6 @@ mod tests {
         let p: LegacyPrefs = serde_json::from_str(r#"{"hud_scale": 1.5}"#).expect("partial file");
         assert_eq!(p.hud_scale, 1.5);
         assert_eq!(p.tooltip_delay, TOOLTIP_DELAY);
-        assert!(p.stream_fade);
     }
 
     #[test]
@@ -184,8 +164,6 @@ mod tests {
             hud_scale: 9.0,
             web_proxy_port: 0,
             udp_port: 0,
-            stream_fade_in: -1.0,
-            stream_fade_out: f32::INFINITY,
             web_proxy_host: "  proxy.example  ".into(),
             ..LegacyPrefs::default()
         };
@@ -193,7 +171,6 @@ mod tests {
         assert_eq!(p.tooltip_delay, TOOLTIP_DELAY);
         assert_eq!(p.hud_scale, 2.0);
         assert_eq!((p.web_proxy_port, p.udp_port), (PROXY_PORT, UDP_PORT));
-        assert_eq!((p.stream_fade_in, p.stream_fade_out), (0.0, STREAM_FADE_OUT));
         assert_eq!(p.web_proxy_host, "proxy.example");
     }
 

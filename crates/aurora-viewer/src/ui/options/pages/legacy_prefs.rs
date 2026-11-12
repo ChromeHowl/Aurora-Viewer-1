@@ -8,7 +8,7 @@
 
 use super::super::SLIDER_W;
 use super::super::cx::{Cx, field, fields};
-use crate::settings::legacy_prefs::{HUD_SCALE, MAX_STREAM_FADE};
+use crate::settings::legacy_prefs::HUD_SCALE;
 
 /// Layout › Bars and windows.
 pub fn interface(cx: &mut Cx) {
@@ -33,31 +33,6 @@ pub fn interface(cx: &mut Cx) {
             tr!("b9-sim-version-hint"),
             &field!(legacy_prefs.sim_version_in_bar),
         );
-    });
-}
-
-/// Sound › Volumes: the parcel music's fade.
-pub fn music_fade(cx: &mut Cx) {
-    use aurora_i18n::tr;
-    cx.group(tr!("b9-music-fade-group"), |cx| {
-        cx.toggle(tr!("b9-music-fade"), tr!("b9-music-fade-hint"), &field!(legacy_prefs.stream_fade));
-        let off = !cx.s.legacy_prefs.stream_fade;
-        cx.subs(off, |cx| {
-            cx.slider(
-                tr!("b9-music-fade-in"),
-                "",
-                &field!(legacy_prefs.stream_fade_in),
-                0.0..=MAX_STREAM_FADE,
-                " s",
-            );
-            cx.slider(
-                tr!("b9-music-fade-out"),
-                "",
-                &field!(legacy_prefs.stream_fade_out),
-                0.0..=MAX_STREAM_FADE,
-                " s",
-            );
-        });
     });
 }
 

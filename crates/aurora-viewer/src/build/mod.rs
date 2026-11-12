@@ -147,6 +147,8 @@ pub struct BuildSettings {
     /// with `snap` (`snap_mode`); off by default, so moving behaves as the
     /// Legacy Viewer's until it is chosen.
     pub object_snap: bool,
+    /// The inline Snap control remembers its choice while disabled.
+    pub snap_objects_preferred: bool,
     /// "Place on surface" (`place.rs`; Aurora's own): whether it turns the
     /// selection ("Auto rotate") or keeps its rotation, and the side it then
     /// puts against the surface.
@@ -301,8 +303,22 @@ impl BuildSettings {
         }
     }
     pub fn set_snap_mode(&mut self, mode: SnapMode) {
+        let choice = if mode == SnapMode::Off { self.snap_mode() } else { mode };
+        if choice != SnapMode::Off {
+            self.snap_objects_preferred = choice == SnapMode::Objects;
+        }
         self.snap = mode == SnapMode::Grid;
         self.object_snap = mode == SnapMode::Objects;
+    }
+    pub fn snap_choice(&self) -> SnapMode {
+        match self.snap_mode() {
+            SnapMode::Off if self.snap_objects_preferred => SnapMode::Objects,
+            SnapMode::Off => SnapMode::Grid,
+            mode => mode,
+        }
+    }
+    pub fn set_snap_enabled(&mut self, enabled: bool) {
+        self.set_snap_mode(if enabled { self.snap_choice() } else { SnapMode::Off });
     }
     /// `gizmo_scale` within the slider's range; an edited settings file
     /// falls back to the Legacy Viewer's size.
@@ -349,7 +365,7 @@ mod worn_tests;
 /// whole no-modify object is allowed; linked edits and stretching need Modify.
 /// LLViewerObject::permMove / permModify inherit the root's effective flags.
 pub fn can_transform(world: &World, idx: usize, linked: bool, mode: EditMode) -> bool {
-    if !world.rlva_can_edit(idx) {
+    if !world.rlva_can_edit(idx) || linking::permanent(world, idx) || linking::permanent(world, root_of(world, idx)) {
         return false;
     }
     use crate::ui::context::flags::{OBJECT_MODIFY, OBJECT_MOVE};
@@ -647,6 +663,7 @@ impl Default for BuildSettings {
             grid_mode: 0,
             snap: true,
             object_snap: false,
+            snap_objects_preferred: false,
             place_rotate: false,
             place_side: place::Side::Bottom,
             place_offset: 0.0,
@@ -892,9 +909,6 @@ pub struct BuildTool {
     pub caps_lock_held: bool,
     /// FSCommitForSaleOnChange, taken each frame from the settings.
     pub(crate) commit_sale_on_change: bool,
-    /// A click selected this object: the app may turn the avatar toward
-    /// the selection (FSTurnAvatarToSelectedObject).
-    pub turn_request: Option<usize>,
     /// Selection rectangle being dragged (start, current in pixels, extend).
     pub rect: Option<((f32, f32), (f32, f32), bool)>,
     /// Compact section (Rights, Transform, Features, Materials, Contents, Shape).
@@ -957,7 +971,6 @@ impl Default for BuildTool {
             texture_drag: None,
             caps_lock_held: false,
             commit_sale_on_change: false,
-            turn_request: None,
             rect: None,
             tab: 6,
             status: String::new(),
@@ -1325,15 +1338,6 @@ impl BuildTool {
             && select_type(world, i) != self.select_type(world)
         {
             self.deselect_all(world);
-        }
-        // LLToolSelect::handleObjectSelection turns the avatar toward what
-        // it selects: world objects, not avatars nor what we wear
-        if let Some(i) = idx
-            && select_type(world, i) == SelectType::World
-            && world.objects.get(i).is_some_and(|o| !o.is_avatar())
-            && !(extend && self.is_selected(&unit))
-        {
-            self.turn_request = Some(i);
         }
         if extend {
             if self.is_selected(&unit) {
@@ -1706,7 +1710,7 @@ impl BuildTool {
                 not_owned = format!("{}", not_owned)
             )
         } else {
-            aurora_i18n::tr!("build-mod-object-s-sent-to-trash", value0 = format!("{}", roots.len()))
+            String::new()
         };
         self.deselect_all(world);
     }
