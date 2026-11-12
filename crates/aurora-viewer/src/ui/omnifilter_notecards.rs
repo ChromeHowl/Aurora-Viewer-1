@@ -216,6 +216,29 @@ mod tests {
             ..Default::default()
         };
         crate::world::inventory::demo::seed(&mut inv, Uuid::from_u128(2));
+        // the demo inventory has no Notecards folder: add the system one
+        let folder = Uuid::from_u128(9_007);
+        inv.folders.insert(
+            folder,
+            crate::world::inventory::Folder {
+                info: aurora_net::inventory::InvFolder {
+                    id: folder,
+                    parent: inv.root,
+                    name: "Notecards".into(),
+                    type_default: 7,
+                    version: 1,
+                    ..Default::default()
+                },
+                children: Vec::new(),
+                items: Vec::new(),
+                state: crate::world::inventory::FetchState::Fetched,
+                library: false,
+            },
+        );
+        let root = inv.root;
+        if let Some(parent) = inv.folders.get_mut(&root) {
+            parent.children.push(folder);
+        }
         inv
     }
 

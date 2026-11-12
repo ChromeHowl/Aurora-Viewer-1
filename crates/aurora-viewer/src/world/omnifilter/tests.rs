@@ -245,7 +245,10 @@ fn a_file_loads_tolerantly() {
             ..Rule::default()
         }
     );
-    assert_eq!(RuleSet::parse(b"garbage"), (RuleSet::default(), 0));
+    // an unreadable file holds the Default set alone
+    let mut empty = RuleSet::default();
+    empty.normalize();
+    assert_eq!(RuleSet::parse(b"garbage"), (empty, 0));
     // what is written reads back the same
     let (again, skipped) = RuleSet::parse(&set.to_bytes());
     assert_eq!((again, skipped), (set, 0));
@@ -368,6 +371,8 @@ fn rule_sets_survive_the_file_and_hand_edits_are_bounded() {
     };
     set.normalize();
     set.add("Second", vec![rule("b", Action::Hide)]).expect("added");
+    // the file carries the current format version
+    set.version = VERSION;
     let (read, skipped) = RuleSet::parse(&set.to_bytes());
     assert_eq!(skipped, 0);
     assert_eq!(read, set);
