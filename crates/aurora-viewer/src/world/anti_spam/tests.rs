@@ -21,7 +21,7 @@ fn world() -> World {
     w.anti_spam = registry();
     // every dialog let through stays listed: the default ScriptDialogLimitations
     // (one per object and channel) would close each one with the next
-    w.notifications.options.script_dialog_limit = crate::settings::notification_options::DialogLimit::Unconstrained;
+    w.set_script_dialog_limit(crate::world::script_dialog_limit::Limit::Unlimited);
     w
 }
 
