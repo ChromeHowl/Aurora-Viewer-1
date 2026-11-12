@@ -6307,8 +6307,6 @@ impl App {
     }
 
     fn update_audio(&mut self) {
-        // the Music channel's place in AUDIO_CHANNELS (Channel::ALL)
-        const MUSIC: usize = 4;
         let in_world = self.in_world();
         if in_world {
             self.parcel_music.update(

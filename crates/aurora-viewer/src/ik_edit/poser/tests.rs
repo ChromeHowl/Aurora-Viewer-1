@@ -1435,7 +1435,7 @@ fn a_click_beside_the_joints_unselects_and_the_pelvis_is_not_picked_again() {
         }
     };
     assert!(editor.selected.is_some());
-    click(&mut frames, &mut editor, egui::pos2(790.0, 890.0));
+    click(&mut editor, egui::pos2(790.0, 890.0));
     assert_eq!(editor.selected, None, "the ground beside unselects");
     assert!(editor.poser.unselected);
     click(&mut editor, egui::pos2(790.0, 880.0));
