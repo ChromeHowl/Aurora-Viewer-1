@@ -6031,6 +6031,7 @@ impl Scene {
             for m in chunk.iter_mut().take(anim::ANCHOR_BASE).skip(rig.len()) {
                 *m = Mat4::IDENTITY.to_cols_array_2d();
             }
+            motions.debug_eyes = *owner == world.agent_id;
             let frame = motions.ground;
             let native_frame = motions.legacy_ground;
             motions.evaluate_with_support(
@@ -6090,6 +6091,7 @@ impl Scene {
                 .filter_map(|w| chunks.get_mut(w.0).and_then(|c| c.take()).map(|c| (c, w)))
                 .collect();
             frame_par::for_each_mut(&mut jobs, POSES_GRAIN, |(chunk, (_, motions, base, owner, pose_now, physics))| {
+                motions.debug_eyes = *owner == world.agent_id;
                 let frame = motions.ground;
                 let native_frame = motions.legacy_ground;
                 motions.evaluate_with_support(

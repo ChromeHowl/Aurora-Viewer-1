@@ -533,6 +533,9 @@ pub struct Controller {
     /// (skeleton space).
     posed: LookJoints<(Quat, Vec3)>,
     last_eval: Option<Instant>,
+    /// Temporary eye diagnostics (set for our own avatar by the scene).
+    pub debug_eyes: bool,
+    eye_log: Option<(Instant, Instant)>,
     /// Pose frozen since then (LLCharacter::requestPause).
     paused_at: Option<Instant>,
     /// Default motion joint states of the last frame, held during a pause
@@ -1724,6 +1727,68 @@ impl Controller {
             alt_l: pose(lj.alt_l),
             alt_r: pose(lj.alt_r),
         };
+        if self.debug_eyes {
+            self.log_eyes(rig, rest_pos, scale, &lj, now);
+        }
+    }
+
+    /// Temporary diagnostics for the eye bug: one line a second when an eye
+    /// joint of our avatar ends far from its rest, with a scale at or under
+    /// zero, or with a rotation that is not a unit one; and one line every
+    /// ten seconds. Joint, rest rotation and position, the position after
+    /// the mesh overrides, scale, the eye motion's rotation, the final
+    /// rotation, the look-at, the head and the animations playing.
+    fn log_eyes(&mut self, rig: &Rig, rest_pos: &[Vec3], scale: &[Vec3], lj: &LookJoints<usize>, now: Instant) {
+        let long_ago = now.checked_sub(Duration::from_secs(60)).unwrap_or(now);
+        let (last_bad, last_any) = self.eye_log.unwrap_or((long_ago, long_ago));
+        let mut lines = Vec::new();
+        let mut bad = false;
+        for (name, joint) in [
+            ("mEyeLeft", lj.eye_l),
+            ("mEyeRight", lj.eye_r),
+            ("mFaceEyeAltLeft", lj.alt_l),
+            ("mFaceEyeAltRight", lj.alt_r),
+        ] {
+            let Some(j) = joint else {
+                continue;
+            };
+            let fin = self.rot.get(j).copied().unwrap_or(Quat::IDENTITY);
+            let angle = if fin.is_finite() {
+                2.0 * fin.w.abs().min(1.0).acos().to_degrees()
+            } else {
+                f32::NAN
+            };
+            let sc = scale.get(j).copied().unwrap_or(Vec3::ONE);
+            let procedural = self.held_procedural.iter().find(|s| s.0 == j).map(|s| (s.2, s.3));
+            let odd = !angle.is_finite() || angle > 45.0 || (fin.length_squared() - 1.0).abs() > 0.01 || sc.min_element() <= 0.01;
+            bad |= odd;
+            lines.push(format!(
+                "{name}{} rest_rot={:?} rest_pos={:?} pos_now={:?} scale={:?} eye_motion(w,rot)={:?} final={:?} angle={angle:.1}",
+                if odd { " ODD" } else { "" },
+                rig.local_rot[j],
+                rig.local_pos[j],
+                rest_pos.get(j),
+                sc,
+                procedural,
+                fin
+            ));
+        }
+        let due_bad = bad && now.saturating_duration_since(last_bad) >= Duration::from_secs(1);
+        let due_any = now.saturating_duration_since(last_any) >= Duration::from_secs(10);
+        if !due_bad && !due_any {
+            return;
+        }
+        let motions: Vec<String> = self.motions.iter().map(|m| format!("{}:{:.2}", m.id, m.weight)).collect();
+        log::warn!(
+            "eye debug ({}): look={:?} cleared={} head={:?} motions=[{}]\n  {}",
+            if due_bad { "odd" } else { "periodic" },
+            self.look,
+            self.look_cleared,
+            self.posed.head,
+            motions.join(" "),
+            lines.join("\n  ")
+        );
+        self.eye_log = Some((if due_bad { now } else { last_bad }, now));
     }
 
     /// The expression and hand pose morph weights of this frame
