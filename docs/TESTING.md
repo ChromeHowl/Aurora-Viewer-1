@@ -1763,6 +1763,15 @@ when unfocused") is ignored during a screenshot.
 - **`AURORA_DEMO_CHATCMD="calc 2+2;rolld 2 20"`**: lines typed in the chat
   bar at frame 240, separated by `;` (chat bar commands: `calc`, `rolld`,
   `gtp`…).
+  The bulk commands answer without a grid: `zdrop`, `ztake` and `mtake`
+  alone print their help, `ztake on No Such Folder` says the folder is not
+  found, `ztake off` says it is already deactivated, `ktake` alone says
+  nothing, `ztake on <a folder of the demo inventory>` starts the countdown
+  (5 lines, one per 0.66 s) and then takes what is selected: select a demo
+  prim with the build tools first, and the DeRezObject goes to the demo
+  simulator. `zdrop on <demo prim UUID> <folder>` drops that folder's items one
+  per second through the inventory drop rules (a refused item is said, not
+  sent). `key2name <uuid>` answers with the anonymous name under `@shownames`.
 
 ## Objects and building
 

@@ -34,7 +34,7 @@ impl App {
 
     /// FSCommon::report_cmdline_result: a line in the local chat, also
     /// whispered on the announce channel when that option is on.
-    fn report_command(&mut self, text: impl Into<String>) {
+    pub(super) fn report_command(&mut self, text: impl Into<String>) {
         let text = text.into();
         let s = &self.settings.chat_commands;
         if s.announce_to_channel && s.announce_channel != 0 && !text.is_empty() {
@@ -269,6 +269,7 @@ impl App {
                 ));
             }
             Command::PasteCamera(spec) => self.paste_camera(spec),
+            Command::Take(take) => self.run_take_command(take),
         }
         true
     }
@@ -375,7 +376,11 @@ impl App {
         }
         let pending = std::mem::take(&mut self.key_to_name);
         for (id, since) in pending {
-            if let Some(name) = self.world.social.avatar_names.complete(&id).or_else(|| self.world.person_name(&id)) {
+            // key_to_name_callback: RlvActions::canShowName else RlvStrings::getAnonym
+            if !self.world.rlva_can_name(id) {
+                let name = crate::world::rlva::privacy::anonymous(id).display_name.clone();
+                self.report_command(format!("{id}: ({name})"));
+            } else if let Some(name) = self.world.social.avatar_names.complete(&id).or_else(|| self.world.person_name(&id)) {
                 self.report_command(format!("{id}: ({name})"));
             } else if since.elapsed().as_secs() < KEY_TO_NAME_TIMEOUT_SECS {
                 self.key_to_name.push((id, since));

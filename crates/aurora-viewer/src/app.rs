@@ -51,6 +51,7 @@ mod buy_currency;
 mod buy_land;
 mod camera_presets;
 mod chat_commands;
+mod chat_take;
 mod chat_import;
 mod click_pick;
 mod color_picker;
@@ -996,6 +997,8 @@ pub struct App {
     crouch_toggle: crate::movement::crouch_toggle::CrouchToggle,
     /// `key2name` chat commands waiting for a name.
     key_to_name: Vec<(uuid::Uuid, Instant)>,
+    /// The timers of `zdrop`, `ztake`, `mtake`, `ktake` and `kcopy`.
+    chat_take: chat_take::ChatTake,
     /// Voice chat (WebRTC) and the HTTP client it provisions with.
     voice: crate::voice::Voice,
     voice_http: reqwest::Client,
@@ -2000,6 +2003,7 @@ impl App {
             instances: crate::instances::Instances::new(),
             crouch_toggle: Default::default(),
             key_to_name: Vec::new(),
+            chat_take: chat_take::ChatTake::default(),
             media,
             media_ui: Default::default(),
             media_cursor: None,
@@ -12724,6 +12728,7 @@ impl App {
         }
         self.update_maps();
         self.poll_key_to_name();
+        self.poll_chat_take();
 
         self.poll_outfit_photo(&gfx.renderer);
         if let Some(request) = self.inventory_images.capture.take() {
