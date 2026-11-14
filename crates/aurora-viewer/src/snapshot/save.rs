@@ -73,7 +73,18 @@ impl Saving {
 
     /// 0..=1.
     pub fn fraction(&self) -> f32 {
-        self.progress.load(Ordering::Relaxed) as f32 / 10_000.0
+        match self.progress.load(Ordering::Relaxed) {
+            CANCELLED => 0.0,
+            p => p as f32 / 10_000.0,
+        }
+    }
+
+    /// Gives the save up (the session ends, FireDragon's `fdCancelSave`):
+    /// the worker stops at its next band of rows, removes its `.part` file
+    /// and ends with an error nobody reads. A photo already renamed to its
+    /// final name stays.
+    pub fn cancel(&self) {
+        self.progress.store(CANCELLED, Ordering::Relaxed);
     }
 
     pub fn poll(&self) -> Option<Result<Saved, String>> {
@@ -85,8 +96,21 @@ impl Saving {
     }
 }
 
+/// The progress value of a save given up (`Saving::cancel`): the worker's
+/// own updates no longer replace it.
+pub const CANCELLED: u32 = u32::MAX;
+
 fn set(progress: &AtomicU32, f: f32) {
-    progress.store((f.clamp(0.0, 1.0) * 10_000.0) as u32, Ordering::Relaxed);
+    let v = (f.clamp(0.0, 1.0) * 10_000.0) as u32;
+    let _ = progress.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |c| (c != CANCELLED).then_some(v));
+}
+
+fn cancelled(progress: &AtomicU32) -> Result<(), String> {
+    if progress.load(Ordering::Relaxed) == CANCELLED {
+        Err("photo save cancelled".into())
+    } else {
+        Ok(())
+    }
 }
 
 pub fn save(job: Job, progress: &AtomicU32) -> Result<Saved, String> {
@@ -138,6 +162,10 @@ pub fn save(job: Job, progress: &AtomicU32) -> Result<Saved, String> {
         out.into_inner().map_err(|e| e.to_string())?.sync_all().map_err(|e| e.to_string())
     })();
     if let Err(e) = written {
+        let _ = std::fs::remove_file(&part);
+        return Err(e);
+    }
+    if let Err(e) = cancelled(progress) {
         let _ = std::fs::remove_file(&part);
         return Err(e);
     }
@@ -197,6 +225,7 @@ pub fn encode_png_opaque(out: &mut impl Write, width: u32, height: u32, rgba: &[
     for (i, band) in rgba.chunks(row.max(4) * PNG_BAND).enumerate() {
         rgb.clear();
         rgb.extend(band.as_chunks::<4>().0.iter().flat_map(|p| [p[0], p[1], p[2]]));
+        cancelled(progress)?;
         stream.write_all(&rgb).map_err(|e| e.to_string())?;
         let rows = ((i + 1) * PNG_BAND).min(height as usize);
         set(progress, 0.1 + 0.88 * rows as f32 / height.max(1) as f32);
@@ -227,6 +256,7 @@ pub fn encode(
             let row = width as usize * channels;
             // a band of rows at a time, the progress after each
             for (i, band) in rgb.chunks(row * 64).enumerate() {
+                cancelled(progress)?;
                 stream.write_all(band).map_err(|e| e.to_string())?;
                 let rows = ((i + 1) * 64).min(height as usize);
                 set(progress, 0.1 + 0.88 * rows as f32 / height.max(1) as f32);

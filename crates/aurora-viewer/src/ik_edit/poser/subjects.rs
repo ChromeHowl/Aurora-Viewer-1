@@ -22,14 +22,19 @@ pub(super) fn allowed(world: &World, id: Uuid) -> bool {
     object.owner_id == world.agent_id
         && object.key.region == own.key.region
         && Some(object.key.region) == world.main_region
-        && Scene::object_transform(world, index, Instant::now(), 0)
-            .zip(
-                world
-                    .objects
-                    .index_of_uuid(&world.agent_id)
-                    .and_then(|i| Scene::object_transform(world, i, Instant::now(), 0)),
-            )
-            .is_some_and(|(a, b)| a.0.distance(b.0) <= 50.0)
+        && {
+            // Within range of you or of the camera, like an avatar.
+            let now = Instant::now();
+            let here = Scene::object_transform(world, index, now, 0).map(|t| t.0);
+            let agent = world
+                .objects
+                .index_of_uuid(&world.agent_id)
+                .and_then(|i| Scene::object_transform(world, i, now, 0))
+                .zip(here)
+                .map(|(a, h)| a.0.distance(h));
+            let camera = world.poser_camera.zip(here).map(|(c, h)| c.distance(h));
+            poser_consent::in_range(agent, camera)
+        }
         && !world.mutes.is_muted_id(&id)
         && Scene::skeleton_owner(world, index).is_some_and(|(owner, root)| owner == id && root == index)
 }

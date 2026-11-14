@@ -501,6 +501,48 @@ fn saved_photos_read_back_in_every_format() {
 }
 
 #[test]
+fn a_cancelled_save_leaves_no_file_and_ends_with_an_error() {
+    let dir = std::env::temp_dir().join(format!("aurora-photo-cancel-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    for format in FileFormat::ALL {
+        let path = dir.join(format!("c.{}", format.extension()));
+        let job = save::Job {
+            width: 300,
+            height: 170,
+            rgba: vec![200; 300 * 170 * 4].into(),
+            format,
+            jpeg_quality: 90,
+            path: path.clone(),
+            alpha: false,
+            matte: [255; 3],
+            xmp: None,
+        };
+        // the worker waits for the cancel, so that it is never already done
+        let saving = save::Saving::start_with(move |p| {
+            while p.load(std::sync::atomic::Ordering::Relaxed) != save::CANCELLED {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            save::save(job, p)
+        });
+        assert_eq!(saving.fraction(), 0.0);
+        saving.cancel();
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let result = loop {
+            if let Some(r) = saving.poll() {
+                break r;
+            }
+            assert!(std::time::Instant::now() < end, "the cancelled save never ended");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        };
+        assert!(result.is_err(), "{format:?}");
+        assert_eq!(saving.fraction(), 0.0);
+        assert!(!path.exists(), "{format:?}");
+        assert!(!dir.join(format!("c.{}.part", format.extension())).exists(), "{format:?}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn a_wrong_buffer_is_refused_without_a_file() {
     let dir = std::env::temp_dir().join(format!("aurora-photo-bad-{}", std::process::id()));
     let path = dir.join("bad.png");

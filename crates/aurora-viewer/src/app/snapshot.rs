@@ -1644,6 +1644,40 @@ impl App {
         }
     }
 
+    /// The session ends (logout, link lost, relog): a photo under way does
+    /// not carry into the next one. What was drawn is given up with what it
+    /// changed (the isolation and the freeze of the world given back), a
+    /// save on its worker is cancelled and its `.part` file removed, a send
+    /// is dropped. A photo already written stays. FireDragon's
+    /// `fdCancelSave` (`LLFloaterSnapshot`, tag r25c-RelogSnap).
+    pub(super) fn photo_session_ended(&mut self) {
+        let s = &mut self.snapshots;
+        let had = s.job.is_some() || s.pano.is_some() || s.full_save.is_some() || s.saving.is_some() || s.upload.is_some();
+        s.job = None;
+        if let Some(saving) = s.saving.take() {
+            saving.cancel();
+        }
+        s.upload = None;
+        s.detail_wait = None;
+        s.detail_ready = false;
+        s.confirm = None;
+        s.short = None;
+        s.to_disk = false;
+        s.to_pano = false;
+        let pano = s.pano.take();
+        let full = s.full_save.take();
+        if let Some(run) = pano {
+            self.photo_pano_restore(&run);
+        }
+        if let Some(full) = full {
+            full.restore(&mut self.world.photo_isolation);
+            self.snapshots.ui.freeze_world = full.frozen;
+        }
+        if had {
+            log::info!("photo: given up, the session ended");
+        }
+    }
+
     /// A photo is being taken, saved or uploaded, or a Full save is under
     /// way.
     pub(super) fn photo_busy(&self) -> bool {

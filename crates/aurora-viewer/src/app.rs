@@ -3359,6 +3359,8 @@ impl App {
         }
         self.scene.jobs.discard(imports);
         self.record_inventory_logout();
+        // a photo under way ends with the session (a relog must not meet it)
+        self.photo_session_ended();
         // the session's photo reel and its copies
         self.photo_reel_end();
         if !self.demo {
@@ -11174,6 +11176,7 @@ impl App {
             {
                 self.poser_demo(&mode);
             }
+            self.world.poser_camera = Some(self.camera.position);
             self.tick_poser_consent();
             self.tick_portals();
             // Persist a sensitivity drag once it rests, like the other sliders.
