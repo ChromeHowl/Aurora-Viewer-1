@@ -201,6 +201,9 @@ pub enum BarAction {
     WindowSize(u32, u32),
     /// Advanced › Clear Group Cache (LLGroupMgr::debugClearAllGroups).
     ClearGroupCache,
+    /// Advanced › Set Window Size › Custom size…: opens the width and height
+    /// window.
+    WindowSizeCustom,
     /// Advanced › Release Keys (LLAgent::forceReleaseControls).
     ReleaseKeys,
     /// World › Landmark this Place (World.CreateLandmark).
@@ -1656,6 +1659,9 @@ fn main_menus(ui: &mut egui::Ui, p: &Palette, panels: &mut Panels, st: &StatusIn
                     if menu::item(ui, p, "aspect-ratio-filled", &label) {
                         *action = BarAction::WindowSize(w, h);
                     }
+                }
+                if menu::item(ui, p, "edit-filled", aurora_i18n::tr!("ui-bars-window-size-custom")) {
+                    *action = BarAction::WindowSizeCustom;
                 }
             });
             // Advanced › Clear Group Cache, Release Keys (menu_viewer.xml)

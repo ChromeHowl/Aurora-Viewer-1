@@ -172,6 +172,7 @@ mod update_notice;
 mod viewer_stats;
 mod viewfinder;
 mod wearable_editor;
+mod window_size;
 mod world_click_demo;
 mod worn_demo;
 
@@ -418,6 +419,8 @@ pub struct App {
     /// Advanced › Set Window Size: the inside size asked, applied once the
     /// window left full screen.
     pending_window_size: Option<(u32, u32)>,
+    /// Advanced › Set window size › Custom size… (`ui/window_size.rs`).
+    window_size_ui: ui::window_size::WindowSizeUi,
     /// `settings.window_fullscreen` as last applied to the window.
     fullscreen_applied: bool,
     /// The window of a lost GPU device, kept on screen until the new one has
@@ -1713,6 +1716,7 @@ impl App {
             gfx: None,
             fullscreen_restore: None,
             pending_window_size: None,
+            window_size_ui: Default::default(),
             fullscreen_applied: false,
             retired_window: None,
             gpu_losses: Default::default(),
@@ -7048,6 +7052,8 @@ impl App {
         let Some((width, height)) = self.pending_window_size.take() else {
             return;
         };
+        let monitor = window.current_monitor().map(|m| (m.size().width, m.size().height));
+        let (width, height) = crate::ui::window_size::clamp_size(width, height, monitor);
         window.set_maximized(false);
         let _ = window.request_inner_size(winit::dpi::PhysicalSize::new(width, height));
         log::info!("window size: {width} x {height}");
@@ -7691,6 +7697,7 @@ impl App {
         self.object_menu_demo_steps();
         self.object_export_demo_steps();
         self.release_keys_demo_steps();
+        self.window_size_demo_steps();
         if self.frame_count == 400
             && let Ok(mode) = std::env::var("AURORA_DEMO_BEACONS")
         {
@@ -15866,6 +15873,10 @@ impl App {
                 }
             }
             BarAction::WindowSize(width, height) => self.pending_window_size = Some((width, height)),
+            BarAction::WindowSizeCustom => {
+                let current = self.gfx.as_ref().map(|g| g.window.inner_size()).map(|s| (s.width, s.height));
+                self.window_size_ui.open_with(current);
+            }
             BarAction::ClearGroupCache => {
                 self.world.group_data.clear_all();
                 log::info!("group cache cleared");
@@ -19572,6 +19583,7 @@ impl App {
                 self.photo_ui(&ctx, &p, projector, renderer);
                 self.controls_window(&ctx, &p);
                 self.movelock_window(&ctx, &p);
+                self.window_size_window(&ctx, &p);
                 self.follow_window(&ctx, &p);
                 self.portals_window(&ctx, &p);
                 self.report_abuse_ui(&ctx, &p);
