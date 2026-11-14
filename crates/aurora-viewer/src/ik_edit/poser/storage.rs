@@ -31,7 +31,8 @@ impl Entry {
 }
 pub(super) enum Loaded {
     Pose(Document, LoadMode),
-    Animation(aurora_assets::Animation, LoadMode),
+    /// The animation, how it loads, and the name its file gives the field.
+    Animation(aurora_assets::Animation, LoadMode, String),
 }
 enum Output {
     Listed(Vec<Entry>),
@@ -240,12 +241,22 @@ impl Service {
                             }
                         };
                         let bytes = read(&path)?;
+                        // the field's name: the file's, as the field takes it
+                        let stem: String = path
+                            .file_stem()
+                            .map(|s| s.to_string_lossy().into_owned())
+                            .unwrap_or_default()
+                            .chars()
+                            .filter(|c| !c.is_control() && *c != '|')
+                            .take(100)
+                            .collect();
                         if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("anim")) {
                             Output::Loaded(
                                 subject,
                                 Loaded::Animation(
                                     aurora_assets::anim::parse_animation_upload(&bytes).map_err(|e| e.to_string())?,
                                     mode,
+                                    stem,
                                 ),
                             )
                         } else if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("bvh")) {
@@ -257,6 +268,7 @@ impl Service {
                                         .map_err(|e| e.to_string())?
                                         .animation,
                                     mode,
+                                    stem,
                                 ),
                             )
                         } else {

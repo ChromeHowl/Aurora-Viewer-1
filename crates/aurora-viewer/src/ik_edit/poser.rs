@@ -143,6 +143,8 @@ pub(super) struct State {
     preset: usize,
     drag_checkpoint: bool,
     name: String,
+    /// Each subject's own name for the field above (`data::Names`).
+    names: data::Names,
     priority: i32,
     pub(super) group: usize,
     filter: String,
@@ -503,6 +505,7 @@ impl Editor {
         }
         self.leave_clip();
         let clip = std::mem::take(&mut self.clip);
+        let names = std::mem::take(&mut self.poser.names).reopened(&self.poser.name);
         *self = Self {
             clip,
             open: true,
@@ -511,6 +514,7 @@ impl Editor {
             poser: State {
                 active: true,
                 name: aurora_i18n::tr!("poser-new-name").to_string(),
+                names,
                 priority: 4,
                 ..Default::default()
             },
@@ -586,11 +590,14 @@ impl Editor {
             match loaded {
                 storage::Loaded::Pose(document, mode) => {
                     if document.apply(&world.avatar_lib.rig, session, mode, model) {
-                        self.poser.name = document.name;
+                        self.poser.names.set(subject, &mut self.poser.name, document.name.clone());
                         self.poser.priority = document.priority;
                     }
                 }
-                storage::Loaded::Animation(animation, mode) => {
+                storage::Loaded::Animation(animation, mode, name) => {
+                    if !name.is_empty() {
+                        self.poser.names.set(subject, &mut self.poser.name, name);
+                    }
                     let start = ik::LocalPose {
                         rotations: session.pose.rotations.clone(),
                         positions: session.pose.positions.clone(),

@@ -407,6 +407,7 @@ impl Editor {
     /// Name, Save (its menu holds the export options), Load (its modes) and
     /// the upload.
     fn pose_footer_ui(&mut self, ui: &mut egui::Ui, p: &Palette, rig: &Rig, frame: &Frame) {
+        self.follow_name();
         ui.horizontal(|ui| {
             widgets::restricted_text_field(ui, true, &mut self.poser.name, widgets::TextPolicy::PrintableNoPipe, |b, _| {
                 egui::TextEdit::singleline(b)
@@ -510,7 +511,12 @@ impl Editor {
             .map(|e| e.path.clone())
     }
     /// `pick`: Save as…, the file is chosen in the system dialog.
+    /// The name field shows the selected subject's own name.
+    pub(super) fn follow_name(&mut self) {
+        self.poser.names.follow(self.poser.subject, &mut self.poser.name);
+    }
     pub(super) fn save_pose(&mut self, rig: &Rig, frame: &Frame, pick: bool) {
+        self.follow_name();
         let Some(session) = self.poser.sessions.get(&self.poser.subject) else {
             return;
         };
@@ -534,6 +540,7 @@ impl Editor {
     /// changes applied, written as a new `.anim` file (the base is never
     /// modified). Needs a loaded animation.
     pub(super) fn save_total(&mut self, rig: &Rig, frame: &Frame) {
+        self.follow_name();
         let Some(session) = self.poser.sessions.get(&self.poser.subject) else {
             return;
         };

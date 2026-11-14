@@ -71,6 +71,7 @@ impl Editor {
             return Default::default();
         }
         self.poser.sessions.retain(|id, _| allowed(world, *id));
+        self.poser.names.retain(|id| allowed(world, *id));
         if !allowed(world, self.poser.subject) {
             self.poser.subject = world.agent_id;
             self.selected = None;
@@ -85,6 +86,8 @@ impl Editor {
         {
             self.poser.sessions.insert(self.poser.subject, data::Session::new(pose));
         }
+        // the name field follows the subject, also when it changed here
+        self.poser.names.follow(self.poser.subject, &mut self.poser.name);
         self.poser
             .sessions
             .iter()

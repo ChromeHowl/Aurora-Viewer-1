@@ -889,6 +889,7 @@ impl Editor {
 
     /// Save's form: the name, the export options, Save, and Save as….
     fn save_form(&mut self, anchor: &egui::Response, p: &Palette, rig: &Rig, frame: &Frame) {
+        self.follow_name();
         menu::dropdown(anchor, p, egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
             ui.set_width(260.0);
             ui.add_space(4.0);

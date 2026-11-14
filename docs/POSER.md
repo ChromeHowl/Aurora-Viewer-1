@@ -226,6 +226,17 @@ loads preserve joints already edited in the current pose. Loading finishes
 on the subject originally chosen, even if the picker changes during I/O.
 World locks are reanchored to the destination subject.
 
+Each posed subject (your avatar, a consenting nearby avatar, an owned
+animesh) has its own captured pose, loaded base animation and changes, so Save
+diff and Save total animation always act on the selected subject. The name
+field is per subject too, in the full and the compact window: it shows the
+name last saved or loaded for the selected subject (a loaded animation gives
+its file name), an empty one when it has none, and switches back as the
+selection changes; the names survive closing and reopening the poser in the
+session and are dropped when a subject is gone. A name typed but not saved is
+kept with its subject as well. Try it with `AURORA_DEMO_POSER=animesh` (own
+avatar and an owned animesh).
+
 There are exactly two ways out, both saving a file and neither uploading:
 
 1. **Save diff** writes a `*.aurora-pose.json` with only the joints you

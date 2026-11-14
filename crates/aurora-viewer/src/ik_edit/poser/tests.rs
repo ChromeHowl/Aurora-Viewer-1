@@ -2784,3 +2784,121 @@ fn total_animation_keeps_the_motion_and_reloads_as_the_pose_on_screen() {
         "the later keys keep their motion with the same change"
     );
 }
+#[test]
+fn each_subject_keeps_its_own_save_name_when_the_selection_switches_back() {
+    let (a, b) = (Uuid::from_u128(1), Uuid::from_u128(2));
+    let mut names = data::Names::default();
+    let mut field = String::from("New pose");
+    names.follow(a, &mut field);
+    assert_eq!(field, "New pose", "the first subject keeps the field as it is");
+    field = "pose_1".into();
+    names.follow(b, &mut field);
+    assert_eq!(field, "", "a subject with nothing saved or loaded has an empty field");
+    field = "pose_2".into();
+    names.follow(a, &mut field);
+    assert_eq!(field, "pose_1");
+    names.follow(b, &mut field);
+    assert_eq!(field, "pose_2");
+    // a name loaded for the other subject waits for it; for the shown one it shows at once
+    names.set(a, &mut field, "loaded_a".into());
+    assert_eq!(field, "pose_2");
+    names.set(b, &mut field, "loaded_b".into());
+    assert_eq!(field, "loaded_b");
+    names.follow(a, &mut field);
+    assert_eq!(field, "loaded_a");
+    // a subject that is gone loses its name; the others keep theirs
+    names.retain(|id| *id != b);
+    names.follow(b, &mut field);
+    assert_eq!(field, "");
+    names.follow(a, &mut field);
+    assert_eq!(field, "loaded_a");
+    // closed and reopened: the names stay, the field follows again
+    let mut names = names.reopened(&field);
+    let mut field = String::from("New pose");
+    names.follow(a, &mut field);
+    assert_eq!(field, "loaded_a");
+}
+#[test]
+fn the_name_field_follows_the_selected_subject_in_the_editor() {
+    let (mut world, mut editor) = fixture();
+    world.apply(NetEvent::ObjectUpdates {
+        handle: 1,
+        objects: demo::animesh_objects(demo::ANIMESH_MESH),
+    });
+    let (index, id) = world
+        .objects
+        .iter()
+        .find(|(_, o)| o.key.local_id == 9200)
+        .map(|(i, o)| (i, o.full_id))
+        .unwrap();
+    world.objects.get_mut(index).unwrap().owner_id = world.agent_id;
+    world.avatar_poses.insert(id, world.avatar_poses[&world.agent_id].clone());
+    let me = world.agent_id;
+    editor.poser.name = "pose_1".into();
+    editor.pick_subject(&world, id);
+    assert_eq!(editor.poser.name, "");
+    editor.poser.name = "pose_2".into();
+    editor.pick_subject(&world, me);
+    assert_eq!(editor.poser.name, "pose_1");
+    editor.pick_subject(&world, id);
+    assert_eq!(editor.poser.name, "pose_2");
+    editor.close_poser();
+    editor.open_poser();
+    editor.pose_layers(&world);
+    assert_eq!(editor.poser.name, "pose_1", "after a reopen the own avatar has its name");
+    editor.pick_subject(&world, id);
+    assert_eq!(editor.poser.name, "pose_2");
+}
+#[test]
+fn two_subjects_diff_and_total_with_their_own_pose_and_base_animation() {
+    let (world, editor) = fixture();
+    let rig = &world.avatar_lib.rig;
+    let elbow = rig.names["mElbowLeft"];
+    let pose = &editor.poser.sessions[&world.agent_id].pose;
+    // two subjects, each with its own captured elbow and its own loaded animation
+    let make = |captured: Quat, first: Quat| {
+        let mut p = (**pose).clone();
+        p.rotations[elbow] = captured;
+        p.origin[elbow] = captured;
+        let mut session = data::Session::new(p);
+        let start = ik::LocalPose {
+            rotations: session.pose.rotations.clone(),
+            positions: session.pose.positions.clone(),
+        };
+        let (loaded, base) = total::load(rig, elbow_animation(first, first), start);
+        let mut edited = (*session.pose).clone();
+        edited.rotations.clone_from(&loaded.rotations);
+        session.anim_base = Some(Arc::new(base));
+        session.base = Arc::new(edited.clone());
+        session.pose = Arc::new(edited);
+        session
+    };
+    let one = make(
+        rig.local_rot[elbow] * Quat::from_rotation_x(0.9),
+        rig.local_rot[elbow] * Quat::from_rotation_x(0.2),
+    );
+    let two = make(
+        rig.local_rot[elbow] * Quat::from_rotation_y(-0.7),
+        rig.local_rot[elbow] * Quat::from_rotation_y(0.6),
+    );
+    let turn = |session: &data::Session, angle: f32| {
+        let mut p = (*session.pose).clone();
+        p.rotations[elbow] = (p.rotations[elbow] * Quat::from_rotation_z(angle)).normalize();
+        p
+    };
+    let (p1, p2) = (turn(&one, 0.4), turn(&two, -0.5));
+    let t1 = total::total(rig, one.anim_base.as_ref().unwrap(), &p1, &one.base).unwrap();
+    let t2 = total::total(rig, two.anim_base.as_ref().unwrap(), &p2, &two.base).unwrap();
+    let key = |a: &aurora_assets::Animation| a.joints[0].rot_keys[0].rotation;
+    assert!(near(key(&t1), p1.rotations[elbow]));
+    assert!(near(key(&t2), p2.rotations[elbow]));
+    assert!(!near(key(&t1), key(&t2)), "each subject's animation holds its own change");
+    // Save diff of each: its own joints against its own capture
+    let mut s1 = one.clone();
+    s1.pose = Arc::new(p1.clone());
+    assert!(document::Document::diff(rig, &s1, "one".into(), 4).is_some());
+    assert!(
+        document::Document::diff(rig, &two, "two".into(), 4).is_none(),
+        "the other subject changed nothing"
+    );
+}
