@@ -4326,8 +4326,10 @@ impl Session<'_> {
                     None => self.note_rejected_full(from, b),
                 }
             }
-            self.attach_queue
-                .observe(objects.iter().map(|o| o.name_values.as_str()), Instant::now());
+            self.attach_queue.observe(
+                objects.iter().map(|o| (o.name_values.as_str(), o.attachment_point())),
+                Instant::now(),
+            );
             self.sh.stats.objects_full.fetch_add(objects.len() as u64, Ordering::Relaxed);
             crate::probe::objects(crate::probe::ObjectKind::Full, objects.len());
             if !objects.is_empty() {
@@ -4359,8 +4361,10 @@ impl Session<'_> {
                     Some(u)
                 })
                 .collect();
-            self.attach_queue
-                .observe(objects.iter().map(|o| o.name_values.as_str()), Instant::now());
+            self.attach_queue.observe(
+                objects.iter().map(|o| (o.name_values.as_str(), o.attachment_point())),
+                Instant::now(),
+            );
             self.sh.stats.objects_full.fetch_add(objects.len() as u64, Ordering::Relaxed);
             crate::probe::objects(crate::probe::ObjectKind::Compressed, objects.len());
             if !objects.is_empty() {
@@ -4419,7 +4423,7 @@ impl Session<'_> {
             crate::probe::objects(crate::probe::ObjectKind::Cached, m.object_data.len());
             crate::probe::objects(crate::probe::ObjectKind::CacheHit, hits.len());
             self.attach_queue
-                .observe(hits.iter().map(|o| o.name_values.as_str()), Instant::now());
+                .observe(hits.iter().map(|o| (o.name_values.as_str(), o.attachment_point())), Instant::now());
             crate::probe::objects(crate::probe::ObjectKind::CacheMiss, misses.len());
             if !hits.is_empty() {
                 emit(
