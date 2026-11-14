@@ -204,7 +204,7 @@ pub(super) fn draw_list(ui: &mut egui::Ui, p: &crate::theme::Palette, entries: &
 fn object_menu(ui: &mut Builder, f: &Facts, key: ObjKey, id: Uuid, offset: Vec3, point: Vec3) {
     let o = &f.object;
     ui.item_if("click-filled", touch_label(o), o.touch, CtxAction::Touch(key.local_id));
-    ui.item("pencil-filled", aurora_i18n::tr!("common-edit"), CtxAction::Edit(id));
+    ui.item_if("pencil-filled", aurora_i18n::tr!("common-edit"), f.object.edit, CtxAction::Edit(id));
     ui.item_if(
         "paint-filled",
         aurora_i18n::tr!("ui-context-edit-pbr-material"),
@@ -955,7 +955,7 @@ fn derender_items(ui: &mut Builder, id: Uuid, temporary: &str, enabled: bool) {
     );
 }
 
-/// "Save as" (Export Menu) on the prim `id`: Collada and OBJ open the
+/// "Save as" (Export Menu) on the prim `id`: Collada, OBJ and glTF open the
 /// export window, which shows what the rights let through
 /// (Object.EnableExport only asks for a selection). Backup waits for its
 /// own task.
@@ -969,6 +969,7 @@ fn save_as_submenu(ui: &mut Builder, id: Uuid) {
             CtxAction::SaveAs(id, Format::Collada),
         );
         ui.item("box", aurora_i18n::tr!("ui-context-save-obj"), CtxAction::SaveAs(id, Format::Obj));
+        ui.item("box", aurora_i18n::tr!("ui-context-save-gltf"), CtxAction::SaveAs(id, Format::Gltf));
     });
 }
 
@@ -1228,6 +1229,22 @@ fn land_menu(ui: &mut Builder, f: &Facts, point: Vec3) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn object_edit_entry_follows_edit_permission() {
+        for can_edit in [false, true] {
+            let mut facts = Facts::default();
+            facts.object.edit = can_edit;
+
+            let entries = world_menu(&object_target(), &facts, Vec3::ZERO);
+            let edit = entries
+                .iter()
+                .find(|entry| matches!(&entry.kind, Kind::Action(CtxAction::Edit(_))))
+                .expect("object Edit menu entry");
+
+            assert_eq!(edit.enabled, can_edit);
+        }
+    }
 
     fn particle_source(object: u128, owner: u128, name: &str, clicked: bool) -> super::super::ParticleMenuSource {
         super::super::ParticleMenuSource {
@@ -1875,7 +1892,7 @@ mod tests {
     }
 
     #[test]
-    fn save_as_opens_the_collada_and_obj_export_of_the_prim() {
+    fn save_as_opens_the_collada_obj_and_gltf_export_of_the_prim() {
         use crate::build::export::Format;
         let f = Facts::default();
         let menu = || world_menu(&object_target(), &f, Vec3::ZERO);
@@ -1883,6 +1900,8 @@ mod tests {
         assert!(collada.enabled && matches!(collada.kind, Kind::Action(CtxAction::SaveAs(id, Format::Collada)) if id == ID));
         let obj = row(menu(), "ui-context-save-obj");
         assert!(obj.enabled && matches!(obj.kind, Kind::Action(CtxAction::SaveAs(id, Format::Obj)) if id == ID));
+        let gltf = row(menu(), "ui-context-save-gltf");
+        assert!(gltf.enabled && matches!(gltf.kind, Kind::Action(CtxAction::SaveAs(id, Format::Gltf)) if id == ID));
     }
 
     #[test]

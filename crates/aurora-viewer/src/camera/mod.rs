@@ -23,7 +23,7 @@ pub mod vr;
 pub use focus::FocusObject;
 pub use free::FreeCamera;
 pub use settings::{
-    CameraFollowJoint, CameraPreset, CameraSettings, CameraShot, DEFAULT_FOV, FOV_RANGE, SMOOTHING_RANGE, SavedViews, VrView, zoom_lens,
+    CameraFollowJoint, CameraPreset, CameraSettings, CameraShot, DEFAULT_FOV, FOV_RANGE, NEAR_CLIP_RANGE, SMOOTHING_RANGE, SavedViews, VrView, zoom_lens,
 };
 
 /// Reference for a rolled view, shared with flycam handoff and AgentUpdate.
@@ -145,6 +145,8 @@ pub struct CameraKeys {
     pub pan_right: f32,
     pub pan_up: f32,
     pub pan_down: f32,
+    pub roll_left: f32,
+    pub roll_right: f32,
 }
 
 impl CameraKeys {
@@ -160,6 +162,8 @@ impl CameraKeys {
             self.pan_right,
             self.pan_up,
             self.pan_down,
+            self.roll_left,
+            self.roll_right,
         ]
         .iter()
         .any(|r| *r > 0.0)
@@ -411,7 +415,7 @@ impl Default for Camera {
             position: Vec3::new(120.0, 128.0, 30.0),
             target: Vec3::new(128.0, 128.0, 28.0),
             fov_y: DEFAULT_FOV,
-            near: 0.1,
+            near: settings::DEFAULT_NEAR_CLIP,
             vr_mode: None,
             seat_camera_heading: None,
             vr_seat_turn: 0.0,
@@ -807,10 +811,12 @@ impl Camera {
                 self.pitch = 0.0;
             }
         } else if self.focus_on_avatar && !on {
-            // keep the focus point where it was, now unlocked
+            // LLAgentCamera::setFocusOnAvatar (indra/newview/llagentcamera.cpp)
+            // keeps our avatar as the unlocked target, so camera keys still track it.
             let focus = self.avatar.position + self.frame_rotation(agent) * s.focus_offset();
+            let own = (!self.own.is_nil()).then_some(self.own);
             self.focus_on_avatar = false;
-            self.set_focus_global(Some(focus), None, None, s);
+            self.set_focus_global(Some(focus), own, None, s);
             self.joint_follow_unlocked = true;
         }
         if on {
@@ -873,19 +879,20 @@ impl Camera {
     }
 
     fn update_focus_offset(&mut self) {
-        if self.gamepad_follow_avatar && self.focus_object == Some(self.own) {
+        if (self.gamepad_follow_avatar || self.focus_geom.is_none()) && self.focus_object == Some(self.own) {
             self.focus_object_offset = self.focus_target - self.avatar.position;
         } else if let Some(g) = self.focus_geom {
             self.focus_object_offset = self.focus_target - g.position;
         }
     }
 
-    /// LLAgentCamera::unlockView: alt-camera on our head.
+    /// LLAgentCamera::unlockView: alt-camera on our head, without animation.
     fn unlock_view(&mut self, agent: &mut AgentState, s: &CameraSettings) {
         if self.focus_on_avatar {
             let own = (!self.own.is_nil()).then_some(self.own);
             self.set_focus_global(None, own, None, s);
             self.set_focus_on_avatar(false, false, true, agent, s);
+            self.anim = None;
         }
     }
 
@@ -1766,6 +1773,9 @@ impl Camera {
         if pan_y != 0.0 {
             self.pan_up(pan_y * PAN_RATE * dt);
         }
+        // camera_roll_left/right (llviewerinput.cpp), LLAgentCamera::updateCamera
+        // (llagentcamera.cpp, indra/newview): roll at 45 degrees per second.
+        self.roll += (keys.roll_right - keys.roll_left) * 45.0_f32.to_radians() * dt;
     }
 
     /// The joystick's continuous pitch, as LLAgent::pitch updates the
@@ -1984,6 +1994,9 @@ impl Camera {
         }
         let dt = f.dt.max(0.0);
         self.dt = dt;
+        // every view of this camera (flycam and free camera included) keeps
+        // the preference's near plane; the projections read it (`proj`)
+        self.near = s.near_clip;
         self.draw_distance = f.draw_distance;
         self.region_width = f.region_width;
         self.unconstrained = s.disable_constraints;
@@ -2199,10 +2212,14 @@ impl Camera {
             self.focus_geom = None;
             return;
         };
-        if self.gamepad_follow_avatar && id == self.own {
+        if (self.gamepad_follow_avatar || self.focus_geom.is_none()) && id == self.own {
             // The normal player camera uses AvatarFrame too. Its position is
             // available before our object arrives and follows seated motion.
-            self.focus_target = self.avatar.position + self.focus_object_offset;
+            if self.gamepad_follow_avatar || track {
+                self.focus_target = self.avatar.position + self.focus_object_offset;
+            } else {
+                self.focus_object_offset = self.focus_target - self.avatar.position;
+            }
             return;
         }
         match focus_geometry(world, &id, now, self.vr_tracks_other_avatar()) {
@@ -3894,6 +3911,27 @@ mod tests {
     }
 
     #[test]
+    fn the_near_clip_setting_reaches_the_projection_of_every_view() {
+        let mut world = world_at(Vec3::new(128.0, 128.0, 25.0));
+        let mut camera = Camera::default();
+        assert_eq!(camera.near, settings::DEFAULT_NEAR_CLIP);
+        for near_clip in [0.01, 0.1, 0.5, 1.0] {
+            let settings = CameraSettings {
+                near_clip,
+                ..Default::default()
+            };
+            camera.update(&mut world, &settings, &frame(1.0 / 60.0));
+            assert_eq!(camera.near, near_clip);
+            // a point on the near plane has depth 1 (reverse-Z), whatever
+            // the window or photo proportions
+            for proj in [camera.proj(1.6), camera.photo_proj(2.0, 1.6)] {
+                let on_plane = proj * Vec4::new(0.0, 0.0, -near_clip, 1.0);
+                assert!((on_plane.z / on_plane.w - 1.0).abs() < 1e-5, "{near_clip}");
+            }
+        }
+    }
+
+    #[test]
     fn disabling_appearance_movement_stops_mid_turn_and_keeps_manual_camera_controls() {
         for smoothing in [0.0, 1.0] {
             let mut world = world_at(Vec3::new(128.0, 128.0, 25.0));
@@ -5071,6 +5109,156 @@ mod tests {
     }
 
     #[test]
+    fn camera_roll_keys_work_standing_and_seated_with_pan_but_not_in_mouselook() {
+        let settings = CameraSettings::default();
+        for seated in [false, true] {
+            for direction in [-1.0, 1.0] {
+                let mut world = hover_world(seated);
+                assert_eq!(world.agent.is_sitting(), seated);
+                let mut camera = Camera::default();
+                settle(&mut camera, &mut world, &settings);
+                let mut keys = CameraKeys {
+                    roll_left: if direction < 0.0 { 1.0 } else { 0.0 },
+                    roll_right: if direction > 0.0 { 1.0 } else { 0.0 },
+                    ..Default::default()
+                };
+                camera.apply_keys(keys, &mut world.agent, &settings, 0.1);
+                assert!(!camera.focus_on_avatar, "roll unlocks the view like pan");
+                assert!((camera.roll - direction * 4.5_f32.to_radians()).abs() < 1e-6);
+                let focus = camera.focus_target;
+                keys.pan_up = 1.0;
+                camera.apply_keys(keys, &mut world.agent, &settings, 0.1);
+                assert!(camera.focus_target.distance(focus) > 0.01, "pan still moves the focus");
+                assert!((camera.roll - direction * 9.0_f32.to_radians()).abs() < 1e-6);
+                camera.update(&mut world, &settings, &frame(0.1));
+                assert!((camera.roll - direction * 9.0_f32.to_radians()).abs() < 1e-6);
+                let roll = camera.roll;
+                camera.apply_keys(CameraKeys::default(), &mut world.agent, &settings, 0.1);
+                assert_eq!(camera.roll, roll, "release stops rolling");
+                camera.apply_keys(
+                    CameraKeys {
+                        roll_left: 1.0,
+                        roll_right: 1.0,
+                        ..Default::default()
+                    },
+                    &mut world.agent,
+                    &settings,
+                    0.1,
+                );
+                assert_eq!(camera.roll, roll, "equal opposite inputs cancel");
+                camera.change_to_mouselook(&mut world.agent, &settings, false);
+                let roll = camera.roll;
+                camera.apply_keys(keys, &mut world.agent, &settings, 0.1);
+                assert!(camera.mouselook());
+                assert_eq!(camera.roll, roll, "mouselook rejects roll keys");
+            }
+        }
+    }
+
+    #[test]
+    fn unlocked_roll_and_pan_track_the_walking_avatar() {
+        for track in [false, true] {
+            for reset in [false, true] {
+                for (roll_left, roll_right, pan_up) in [(1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)] {
+                    let settings = CameraSettings {
+                        track_focus_object: track,
+                        smoothing: 0.0,
+                        zoom_time: 0.0,
+                        disable_constraints: true,
+                        ..Default::default()
+                    };
+                    let mut world = world_at(Vec3::new(128.0, 128.0, 25.0));
+                    world.agent_id = crate::demo::DEMO_AGENT;
+                    let mut camera = Camera::default();
+                    settle(&mut camera, &mut world, &settings);
+                    let keys = CameraKeys {
+                        roll_left,
+                        roll_right,
+                        pan_up,
+                        ..Default::default()
+                    };
+                    let step = Vec3::X * 0.1;
+                    for _ in 0..20 {
+                        if reset {
+                            camera.reset_view(&mut world.agent, &settings, true, false, true, false);
+                        }
+                        camera.apply_keys(keys, &mut world.agent, &settings, 0.1);
+                        let target = camera.focus_target;
+                        let eye = target + camera.focus_offset_target;
+                        world.agent.position += step;
+                        camera.update(&mut world, &settings, &frame(0.1));
+                        let delta = if track { step } else { Vec3::ZERO };
+                        assert!(
+                            camera.target.abs_diff_eq(target + delta, 1e-4),
+                            "focus follows: track={track}, reset={reset}"
+                        );
+                        assert!(
+                            camera.position.abs_diff_eq(eye + delta, 1e-4),
+                            "eye follows: track={track}, reset={reset}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn held_camera_keys_keep_up_with_walking_using_default_transitions() {
+        for (roll_left, roll_right, pan_up) in [(1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)] {
+            let settings = CameraSettings::default();
+            let mut world = world_at(Vec3::new(128.0, 128.0, 25.0));
+            world.agent_id = crate::demo::DEMO_AGENT;
+            let mut camera = Camera::default();
+            settle(&mut camera, &mut world, &settings);
+            let keys = CameraKeys {
+                roll_left,
+                roll_right,
+                pan_up,
+                ..Default::default()
+            };
+            let dt = 1.0 / 60.0;
+            for _ in 0..180 {
+                camera.reset_view(&mut world.agent, &settings, true, false, true, false);
+                camera.apply_keys(keys, &mut world.agent, &settings, dt);
+                world.agent.position += Vec3::X * (2.0 * dt);
+                camera.update(&mut world, &settings, &frame(dt));
+            }
+            let goal = camera.focus_target + camera.focus_offset_target;
+            assert!(
+                camera.position.distance(goal) < 0.5,
+                "camera lag: {}",
+                camera.position.distance(goal)
+            );
+            assert!(
+                camera.target.distance(camera.focus_target) < 0.5,
+                "focus lag: {}",
+                camera.target.distance(camera.focus_target)
+            );
+        }
+    }
+
+    #[test]
+    fn explicit_focus_on_our_avatar_keeps_refreshing_zoom_geometry() {
+        let settings = CameraSettings::default();
+        let mut world = hover_world(false);
+        let mut camera = Camera::default();
+        settle(&mut camera, &mut world, &settings);
+        let geom = focus_object_geom(&world, &world.agent_id, Instant::now()).unwrap();
+        camera.alt_focus(
+            geom.position,
+            Some((world.agent_id, geom)),
+            (camera.position, camera.forward()),
+            &mut world.agent,
+            &settings,
+        );
+        let index = world.objects.index_of_uuid(&world.agent_id).unwrap();
+        let scale = geom.scale * 1.5;
+        world.objects.get_mut(index).unwrap().scale = scale;
+        camera.update(&mut world, &settings, &frame(1.0 / 60.0));
+        assert_eq!(camera.focus_geom.unwrap().scale, scale);
+    }
+
+    #[test]
     fn reset_to_defaults_drops_orbit_pitch_and_zoom_without_turning_the_avatar() {
         let s = CameraSettings::default();
         let mut w = world_at(Vec3::new(128.0, 128.0, 25.0));
@@ -5216,7 +5404,7 @@ mod tests {
                         let before = world.agent.predicted_position();
                         world.agent.simulate_locally(&input, mode == VrView::FirstPerson, None, 0.016, true);
                         let displacement = (world.agent.predicted_position() - before).truncate().normalize();
-                        world.agent.update(&input, mode == VrView::FirstPerson, 0.016, 5.0);
+                        world.agent.update(&input, mode == VrView::FirstPerson, 0.016, 5.0, false);
                         camera.update_vr(&mut world, &settings, &frame(0.016), rig_yaw);
                         anchor.follow(camera.vr_view(rig_yaw)).expect("rig");
                         let eye = anchor
@@ -5714,7 +5902,7 @@ mod tests {
                 MoveInput::default()
             };
             world.agent.simulate_locally(&input, true, None, 0.016, true);
-            world.agent.update(&input, true, 0.016, 1.0);
+            world.agent.update(&input, true, 0.016, 1.0, false);
             camera.update_vr(&mut world, &settings, &frame(0.016), 0.0);
             camera.vr_body_offset(follow.accepted_root(camera.vr_body_root()));
             anchor.follow_head(camera.vr_view(0.0), head, RigMode::FirstPerson).expect("follow");
@@ -5737,7 +5925,7 @@ mod tests {
             ..Default::default()
         };
         world.agent.simulate_locally(&input, true, None, 0.016, true);
-        world.agent.update(&input, true, 0.016, 1.0);
+        world.agent.update(&input, true, 0.016, 1.0, false);
         camera.update_vr(&mut world, &settings, &frame(0.016), 0.0);
         camera.vr_body_offset(follow.accepted_root(camera.vr_body_root()));
         anchor.follow_head(camera.vr_view(0.0), head, RigMode::FirstPerson).expect("manual");
