@@ -133,12 +133,15 @@ impl App {
             }
             Command::Touch(id) => match self.world.objects.index_of_uuid(&id).and_then(|i| self.world.objects.get(i)) {
                 Some(o) => {
-                    let local_id = o.key.local_id;
-                    self.send(NetCommand::Touch { local_id });
-                    self.report_command(aurora_i18n::tr!(
-                        "app-chat-commands-touched-object-with-key",
-                        id = format!("{}", id)
-                    ));
+                    let touch = NetCommand::Touch { local_id: o.key.local_id };
+                    // RlvActions::canTouch: a refused touch sends and says nothing
+                    if self.world.rlva_allows_command(&touch, Uuid::nil()) {
+                        self.send(touch);
+                        self.report_command(aurora_i18n::tr!(
+                            "app-chat-commands-touched-object-with-key",
+                            id = format!("{}", id)
+                        ));
+                    }
                 }
                 None => self.report_command(aurora_i18n::tr!(
                     "app-chat-commands-object-with-key-not-found",
@@ -147,16 +150,19 @@ impl App {
             },
             Command::SitOn(id) => match self.world.objects.index_of_uuid(&id).and_then(|i| self.world.objects.get(i)) {
                 Some(o) => {
-                    let handle = o.key.region;
-                    self.send(NetCommand::RequestSit {
-                        handle,
+                    let sit = NetCommand::RequestSit {
+                        handle: o.key.region,
                         target: id,
                         offset: Vec3::ZERO,
-                    });
-                    self.report_command(aurora_i18n::tr!(
-                        "app-chat-commands-sitting-on-object-with-key",
-                        id = format!("{}", id)
-                    ));
+                    };
+                    // RlvActions::canSit
+                    if self.world.rlva_allows_command(&sit, Uuid::nil()) {
+                        self.send(sit);
+                        self.report_command(aurora_i18n::tr!(
+                            "app-chat-commands-sitting-on-object-with-key",
+                            id = format!("{}", id)
+                        ));
+                    }
                 }
                 None => self.report_command(aurora_i18n::tr!(
                     "app-chat-commands-object-with-key-not-found",
@@ -164,8 +170,12 @@ impl App {
                 )),
             },
             Command::StandUp => {
-                self.send(NetCommand::OneShotControl(aurora_net::control::STAND_UP));
-                self.report_command(aurora_i18n::tr!("app-chat-commands-standing"));
+                // RlvActions::canStand: nothing is said when @unsit refuses
+                let stand = NetCommand::OneShotControl(aurora_net::control::STAND_UP);
+                if self.world.rlva_allows_command(&stand, Uuid::nil()) {
+                    self.send(stand);
+                    self.report_command(aurora_i18n::tr!("app-chat-commands-standing"));
+                }
             }
             Command::OfferTeleport(to) => {
                 // "Join me!" stays in English: it is what the other avatar reads.
