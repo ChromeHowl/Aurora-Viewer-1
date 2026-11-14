@@ -106,9 +106,8 @@ impl Default for Config {
         }
     }
 }
-/// What the poser window asks of the app, which owns the consent state and
-/// the Preferences: the subject menu lists the nearby avatars with their
-/// consent action.
+/// Work the poser window asks of the app, which owns consent, preferences,
+/// and simulator object-property requests.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Request {
     Ask(Uuid),
@@ -116,6 +115,8 @@ pub enum Request {
     OpenPrivacy,
     /// The bridge's Repair, offered when its query service is silent or failed.
     RepairBridge,
+    /// Fetch the simulator name for an owned animesh shown in the subject picker.
+    ObjectName(Uuid),
 }
 /// Which side of the paired joints the window edits: the Côté selector. In
 /// `Mirror` the left joint is edited and its counterpart follows (the
@@ -134,6 +135,9 @@ pub(super) struct State {
     settings_loaded: bool,
     subject: Uuid,
     sessions: HashMap<Uuid, data::Session>,
+    subject_names: HashMap<Uuid, String>,
+    subject_name_requested: HashMap<Uuid, Instant>,
+    subject_skip_logged: HashMap<Uuid, Instant>,
     pub(super) transform: usize,
     delta: bool,
     settings_open: bool,
@@ -308,6 +312,12 @@ impl Editor {
     pub fn take_poser_focus(&mut self, world: &World) -> Option<(Vec3, crate::camera::AutoCameraMove)> {
         let (bone, cause) = self.take_poser_focus_request()?;
         Some((self.editor_frame(world)?.joints.get(bone)?.w_axis.truncate(), cause))
+    }
+    pub(crate) fn update_poser_subject_names(&mut self, props: &[aurora_net::build::ObjectProps]) {
+        for prop in props.iter().filter(|p| !p.name.trim().is_empty()) {
+            self.poser.subject_names.insert(prop.object_id, prop.name.clone());
+            self.poser.subject_name_requested.remove(&prop.object_id);
+        }
     }
     pub(super) fn poser_edited(&self, bone: usize) -> bool {
         self.poser.active && self.poser.sessions.get(&self.poser.subject).is_some_and(|s| s.edited(bone))

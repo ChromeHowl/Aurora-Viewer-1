@@ -5,57 +5,88 @@ use crate::{
     world::{bridge::QueryState, poser_consent},
 };
 
-pub(super) fn allowed(world: &World, id: Uuid) -> bool {
+pub(super) fn eligibility_reason(world: &World, id: Uuid) -> Option<&'static str> {
     if id == world.agent_id {
-        return !id.is_nil();
+        return id.is_nil().then_some("not-owned");
     }
     let Some(index) = world.objects.index_of_uuid(&id) else {
-        return false;
+        return Some("not-owned");
     };
-    let Some(object) = world.objects.get(index) else { return false };
+    let Some(object) = world.objects.get(index) else {
+        return Some("not-owned");
+    };
     if object.is_avatar() {
-        return world.poser_consent.can_pose(world, id);
+        return (!world.poser_consent.can_pose(world, id)).then_some("no-consent");
+    }
+    // the simulator leaves OwnerID empty in most object updates and fills
+    // it only with ObjectProperties (a selection): the update flags say
+    // "you own this" for every prim, as permYouOwner (llviewerobject.cpp)
+    let you_own = object.update_flags & crate::ui::context::flags::OBJECT_YOU_OWNER != 0;
+    if object.owner_id != world.agent_id && !(you_own && object.owner_id.is_nil()) {
+        return Some("not-owned");
     }
     let Some(own) = world.objects.index_of_uuid(&world.agent_id).and_then(|i| world.objects.get(i)) else {
-        return false;
+        return Some("not-owned");
     };
-    object.owner_id == world.agent_id
-        && object.key.region == own.key.region
-        && Some(object.key.region) == world.main_region
-        && Scene::object_transform(world, index, Instant::now(), 0)
-            .zip(
-                world
-                    .objects
-                    .index_of_uuid(&world.agent_id)
-                    .and_then(|i| Scene::object_transform(world, i, Instant::now(), 0)),
-            )
-            .is_some_and(|(a, b)| a.0.distance(b.0) <= 50.0)
-        && !world.mutes.is_muted_id(&id)
-        && Scene::skeleton_owner(world, index).is_some_and(|(owner, root)| owner == id && root == index)
+    if object.key.region != own.key.region || Some(object.key.region) != world.main_region {
+        return Some("other-region");
+    }
+    if world.mutes.is_muted_id(&id) {
+        return Some("muted");
+    }
+    if !Scene::object_transform(world, index, Instant::now(), 0)
+        .zip(
+            world
+                .objects
+                .index_of_uuid(&world.agent_id)
+                .and_then(|i| Scene::object_transform(world, i, Instant::now(), 0)),
+        )
+        .is_some_and(|(a, b)| a.0.distance(b.0) <= 50.0)
+    {
+        return Some("too-far");
+    }
+    if !Scene::skeleton_owner(world, index).is_some_and(|(owner, root)| owner == id && root == index) {
+        return Some("not-root");
+    }
+    // no pose of its own yet is fine: a still animesh is posed only once
+    // it animates, and the poser does not need that pose to start
+    None
 }
-pub(super) fn subject_name(world: &World, id: Uuid) -> String {
+pub(super) fn allowed(world: &World, id: Uuid) -> bool {
+    eligibility_reason(world, id).is_none()
+}
+/// Legacy Viewer names owned animesh through `FSFloaterPoser::getControlAvatarName`
+/// (indra/newview/fsfloaterposer.cpp), preferring its worn inventory item.
+pub(super) fn subject_name(world: &World, names: &HashMap<Uuid, String>, id: Uuid) -> String {
     if id == world.agent_id {
         return aurora_i18n::tr!("poser-you").to_string();
     }
     if let Some(object) = world.objects.index_of_uuid(&id).and_then(|i| world.objects.get(i))
         && !object.is_avatar()
     {
-        return format!("{} {}", aurora_i18n::text("poser-animesh"), object.key.local_id);
+        if let Some(item) = object.attachment_item_id().and_then(|item| world.inventory.items.get(&item)) {
+            return item.name.clone();
+        }
+        return names
+            .get(&id)
+            .cloned()
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or_else(|| aurora_i18n::tr!("poser-animesh").to_string());
     }
     poser_consent::name(world, id)
 }
 /// The short name of a subject, for a narrow place (the compact window's
 /// head, a picture's initials): a resident's display name alone, without
 /// the account that `subject_name` adds.
-pub(super) fn subject_short_name(world: &World, id: Uuid) -> String {
+pub(super) fn subject_short_name(world: &World, names: &HashMap<Uuid, String>, id: Uuid) -> String {
     if id == world.agent_id {
         return world.own_name();
     }
-    let names = &world.social.avatar_names;
-    names
+    let avatars = &world.social.avatar_names;
+    avatars
         .get(&id)
-        .map(|n| n.display(&names.options))
-        .unwrap_or_else(|| subject_name(world, id))
+        .map(|n| n.display(&avatars.options))
+        .unwrap_or_else(|| subject_name(world, names, id))
 }
 impl Editor {
     pub(in crate::ik_edit) fn editor_frame(&self, world: &World) -> Option<Frame> {
@@ -224,7 +255,7 @@ impl Editor {
     /// (you and your animesh, then the nearby avatars with their consent
     /// action; the consent itself is the app's, through `Request`).
     pub(super) fn subject_button(&mut self, ui: &mut egui::Ui, p: &Palette, world: &World) {
-        let name = subject_name(world, self.poser.subject);
+        let name = subject_name(world, &self.poser.subject_names, self.poser.subject);
         let kind = if self.poser.subject == world.agent_id {
             world.own_name()
         } else if world
@@ -282,6 +313,12 @@ impl Editor {
     /// distance and a square button for the consent (Ask, Asked, Accepted,
     /// Refused), and the privacy setting.
     pub(super) fn subject_menu(&mut self, ui: &mut egui::Ui, p: &Palette, world: &World) {
+        self.poser
+            .subject_name_requested
+            .retain(|_, at| at.elapsed() < std::time::Duration::from_secs(300));
+        self.poser
+            .subject_skip_logged
+            .retain(|_, at| at.elapsed() < std::time::Duration::from_secs(300));
         use crate::world::poser_consent::Status;
         ui.set_width(MENU_W);
         let now = ui.input(|i| i.time);
@@ -314,25 +351,53 @@ impl Editor {
             pick = Some(world.agent_id);
         }
         for (_, object) in world.objects.iter() {
-            if object.full_id != world.agent_id && !object.is_avatar() && allowed(world, object.full_id) {
-                let count = aurora_i18n::tr!("poser-edited-count", count = edited(self, object.full_id)).to_string();
-                let current = self.poser.subject == object.full_id;
-                let name = subject_name(world, object.full_id);
-                let count = Detail { text: count, end: None };
-                if person_row(
-                    ui,
-                    p,
-                    object.full_id,
-                    Avatar::Icon("accessible-filled"),
-                    &name,
-                    &count,
-                    current,
-                    None,
-                )
-                .0
-                {
-                    pick = Some(object.full_id);
+            let id = object.full_id;
+            if id == world.agent_id || object.is_avatar() {
+                continue;
+            }
+            match eligibility_reason(world, id) {
+                None => {
+                    if !self.poser.subject_names.contains_key(&id)
+                        && self
+                            .poser
+                            .subject_name_requested
+                            .get(&id)
+                            .is_none_or(|at| at.elapsed() >= std::time::Duration::from_secs(30))
+                    {
+                        self.poser.subject_name_requested.insert(id, Instant::now());
+                        self.poser.requests.push(Request::ObjectName(id));
+                    }
+                    let count = aurora_i18n::tr!("poser-edited-count", count = edited(self, object.full_id)).to_string();
+                    let current = self.poser.subject == object.full_id;
+                    let name = subject_name(world, &self.poser.subject_names, id);
+                    let count = Detail { text: count, end: None };
+                    if person_row(
+                        ui,
+                        p,
+                        object.full_id,
+                        Avatar::Icon("accessible-filled"),
+                        &name,
+                        &count,
+                        current,
+                        None,
+                    )
+                    .0
+                    {
+                        pick = Some(object.full_id);
+                    }
                 }
+                Some(reason)
+                    if object.extra.extended_mesh_flags.unwrap_or(0) & aurora_prim::extra::EXTENDED_MESH_ANIMATED != 0
+                        && self
+                            .poser
+                            .subject_skip_logged
+                            .get(&id)
+                            .is_none_or(|at| at.elapsed() >= std::time::Duration::from_secs(30)) =>
+                {
+                    log::debug!("poser animesh {} not offered: {reason}", object.key.local_id);
+                    self.poser.subject_skip_logged.insert(id, Instant::now());
+                }
+                _ => {}
             }
         }
         ui.add_space(4.0);
