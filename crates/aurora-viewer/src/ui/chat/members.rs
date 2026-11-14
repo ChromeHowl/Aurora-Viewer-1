@@ -159,11 +159,6 @@ pub(super) fn show(
                 );
                 ui.add_space(4.0);
                 for m in list.iter() {
-                    // a moderator may allow or forbid the others' text
-                    // (menu_participant_view.xml "Allow text chat")
-                    let text = info
-                        .filter(|i| !dim && m.id != world.agent_id && i.moderators.contains(&world.agent_id))
-                        .map(|i| (conversation, !i.muted_text.contains(&m.id)));
                     row(
                         ui,
                         p,
