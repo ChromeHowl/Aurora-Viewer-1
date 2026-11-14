@@ -1468,7 +1468,10 @@ monotonic sequence numbers so a reused slot cannot deliver an older answer
 over a newer one. `renderer::part_tests` exercises the production shaders
 and shared pipeline states on the GPU; `part_pick` also tests slot reuse.
 `world/poser_consent.rs` owns region-scoped request/accept/refuse/cancel/withdraw
-state, privacy, nonces, timeouts and cooldowns. `app/poser.rs` drives transport
+state, privacy, nonces, timeouts and cooldowns: 2 minutes after no answer,
+10 minutes after explicit refusal, and no peer cooldown after an accepted
+session ends. Ended nonces remain invalid independently of that retry policy.
+`app/poser.rs` drives transport
 and the independent target modal/reminder. Bridge 1.34 adds authenticated
 attachment-to-attachment consent relay to `world/bridge/query.lsl`, using the
 existing private HTTPS query service. It sends no IM or viewer probe.

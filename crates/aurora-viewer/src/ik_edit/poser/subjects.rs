@@ -425,6 +425,12 @@ impl Editor {
                 end: Some((away, range_color(p, *distance))),
             };
             let ready = self.poser.bridge == QueryState::Ready;
+            // the time left of the refusal or the missing answer, as m:ss
+            let left = world.poser_consent.retry_after(peer, std::time::Instant::now());
+            let seconds = left.as_secs() + u64::from(left.subsec_nanos() != 0);
+            let time = format!("{}:{:02}", seconds / 60, seconds % 60);
+            let refused_tip = aurora_i18n::tr!("poser-consent-refused", time = time.clone()).to_string();
+            let no_answer_tip = aurora_i18n::tr!("poser-consent-no-answer", time = time).to_string();
             let consent = match status {
                 Status::Ask => Consent {
                     icon: "user-plus",
@@ -450,14 +456,14 @@ impl Editor {
                 Status::Refused => Consent {
                     icon: "x",
                     label: aurora_i18n::text("poser-refused"),
-                    tip: aurora_i18n::text("poser-consent-refused"),
+                    tip: &refused_tip,
                     accent: false,
                     enabled: false,
                 },
                 Status::NoAnswer => Consent {
                     icon: "clock-filled",
                     label: aurora_i18n::text("poser-no-answer"),
-                    tip: aurora_i18n::text("poser-consent-no-answer"),
+                    tip: &no_answer_tip,
                     accent: false,
                     enabled: false,
                 },
