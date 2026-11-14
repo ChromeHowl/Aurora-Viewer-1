@@ -2180,6 +2180,7 @@ fn exported_animation_matches_editor_preview_between_keyframes() {
         document::Interpolation::Smooth,
         document::Interpolation::Stepped,
         document::Interpolation::Curve,
+        document::Interpolation::Spline,
     ] {
         let mut document = Document::new();
         document.range(0, 45);
@@ -3352,4 +3353,82 @@ fn studio_hover_height_stays_out_of_the_frame_the_editors_read() {
     document.record(rig, &hovering, 10, &[pelvis], &[pelvis]).unwrap();
     let keys = &document.tracks[0].motion.pos_keys;
     assert!(keys.iter().all(|key| key.position.abs_diff_eq(Vec3::ZERO, 1e-4)), "{keys:?}");
+}
+
+#[test]
+fn spline_interpolation_goes_through_the_keys_and_survives_a_project_round_trip() {
+    let lib = AvatarLibrary::load();
+    let rig = &lib.rig;
+    let head = rig.names["mHead"];
+    let mut document = Document::new();
+    document.range(0, 90);
+    let mut rotations = rig.local_rot.clone();
+    for (frame_number, angle) in [(0, 0.0_f32), (30, 0.8), (60, 0.0), (90, 0.4)] {
+        rotations[head] = Quat::from_rotation_z(angle) * rig.local_rot[head];
+        document
+            .record(
+                rig,
+                &frame(&lib, &rotations, &rig.local_pos, &rig.scale),
+                frame_number,
+                &[head],
+                &[],
+            )
+            .unwrap();
+    }
+    document.tracks[0].interpolation = document::Interpolation::Spline;
+    let track = &document.tracks[0];
+    // through every key, and not the straight line between two of them
+    for (time, angle) in [(0.0_f32, 0.0_f32), (1.0, 0.8), (2.0, 0.0), (3.0, 0.4)] {
+        let at_key = track.rotation_at(time).expect("key sample");
+        assert!(
+            at_key.dot(Quat::from_rotation_z(angle) * rig.local_rot[head]).abs() > 0.9999,
+            "{time}"
+        );
+    }
+    let halfway = track.rotation_at(0.5).expect("spline sample");
+    let straight = track.motion.rot_keys[0].rotation.slerp(track.motion.rot_keys[1].rotation, 0.5);
+    assert!(halfway.dot(straight).abs() < 0.99999);
+    // written as a key on every frame, like the other eased modes
+    let exported = document.animation().unwrap();
+    assert!(exported.joints[0].rot_keys.len() > 91);
+    // and kept by the project file
+    let reopened = Document::from_project_json(&document.project_json().unwrap(), rig).unwrap();
+    assert_eq!(reopened.tracks[0].interpolation, document::Interpolation::Spline);
+}
+
+#[test]
+fn the_draft_is_autosaved_after_a_change_at_most_every_five_seconds() {
+    let now = Instant::now();
+    assert!(autosave_due(1, None, None, now));
+    assert!(!autosave_due(1, Some(1), None, now), "nothing changed");
+    assert!(!autosave_due(2, Some(1), Some(now), now), "written a moment ago");
+    assert!(autosave_due(2, Some(1), Some(now), now + std::time::Duration::from_secs(5)));
+}
+
+#[test]
+fn the_autosaved_draft_is_a_project_file_that_reopens_with_its_track_settings() {
+    let lib = AvatarLibrary::load();
+    let rig = &lib.rig;
+    let head = rig.names["mHead"];
+    let mut document = Document::new();
+    document.range(0, 30);
+    let mut rotations = rig.local_rot.clone();
+    for (at, angle) in [(0, 0.0_f32), (30, 0.6)] {
+        rotations[head] = Quat::from_rotation_z(angle) * rig.local_rot[head];
+        document
+            .record(rig, &frame(&lib, &rotations, &rig.local_pos, &rig.scale), at, &[head], &[])
+            .unwrap();
+    }
+    document.tracks[0].interpolation = document::Interpolation::Spline;
+    document.tracks[0].motion.priority = 4;
+    let dir = std::env::temp_dir().join(format!("aurora-autosave-{}", uuid::Uuid::new_v4()));
+    let path = dir.join(files::RECOVERY);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(&path, document.project_json().unwrap()).unwrap();
+    let bytes = std::fs::read(&path).unwrap();
+    let reopened = Document::from_project_json(&bytes, rig).unwrap();
+    assert_eq!(reopened.tracks[0].interpolation, document::Interpolation::Spline);
+    assert_eq!(reopened.tracks[0].motion.priority, 4);
+    assert!(reopened.tracks[0].authored);
+    let _ = std::fs::remove_dir_all(&dir);
 }
