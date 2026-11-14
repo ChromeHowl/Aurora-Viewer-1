@@ -5694,10 +5694,6 @@ impl World {
             if self.social.has_session(&id) {
                 self.friend_status_line(id, n.clone());
             }
-            // a contact set with its notices on (FIRE-3522,
-            // LGGContactSets::notifyForFriend)
-            let set = self.contact_sets.notify_for(&id);
-            let toasts = self.notifications.toasts;
             // the toast of LLNotificationTipHandler (ChatOnlineNotification),
             // never during login, in do not disturb nor for a blocked resident
             if toast && self.notifications.started && !self.status.dnd && !self.mutes.is_muted_id(&id) {
