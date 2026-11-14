@@ -241,7 +241,6 @@ pub fn page(cx: &mut Cx) {
             });
         });
     });
-    stay_online(cx);
     // the questions of other pages, their own rows: one list of them all
     cx.group(tr!("ui-options-asked-elsewhere"), |cx| {
         cx.borrow(
@@ -290,6 +289,8 @@ pub fn page(cx: &mut Cx) {
             |ui, s| show_again(ui, &p, &mut s.ignored_update),
         );
     });
+    // last, so that it does not push the rows above it down
+    stay_online(cx);
     // the rest of these two, as the former Interface page reset them whole
     cx.track(&fields!(region_restart, collisions));
 }
