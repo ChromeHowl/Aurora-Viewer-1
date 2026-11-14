@@ -6079,8 +6079,6 @@ impl App {
             // or click them
             im_in_bell: self.settings.ims_in_notification_center
                 || (self.demo && crate::demo::toasts::mode().is_some_and(|m| matches!(m.as_str(), "bell" | "click" | "minimized"))),
-            set_presence: self.settings.people.set_notice_toast,
-            set_presence_in_chat: self.settings.people.set_notice_chat,
         };
         w.notifications.options = self.settings.notification_options;
         if w.notifications.take_open_conversations() {

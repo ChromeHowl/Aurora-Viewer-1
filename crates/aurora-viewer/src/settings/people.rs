@@ -36,12 +36,6 @@ pub struct People {
     /// The radar's tracking beacon goes away once within 3 m of the
     /// resident (FSDisableAvatarTrackerAtCloseIn).
     pub track_clear_close_in: bool,
-    /// A friend of a contact set with its notices on gets the online /
-    /// offline toast even with the friends' toasts off
-    /// (FSContactSetsNotificationToast).
-    pub set_notice_toast: bool,
-    /// The same, as a line of nearby chat (FSContactSetsNotificationNearbyChat).
-    pub set_notice_chat: bool,
     /// The distance to the resident on their name tag (FSTagShowDistance).
     pub tag_distance: bool,
     /// Name tags coloured by the chat range the resident is in
@@ -80,8 +74,6 @@ impl Default for People {
     fn default() -> Self {
         People {
             track_clear_close_in: true,
-            set_notice_toast: false,
-            set_notice_chat: true,
             tag_distance: false,
             tag_distance_colors: false,
             tag_z_offset: 0,
@@ -146,7 +138,7 @@ mod tests {
     #[test]
     fn the_defaults_are_the_legacy_viewer_s() {
         let d = People::default();
-        assert!(d.track_clear_close_in && !d.set_notice_toast && d.set_notice_chat);
+        assert!(d.track_clear_close_in);
         assert!(!d.tag_distance && !d.tag_distance_colors && d.tag_z_offset == 0 && !d.tag_autorespond);
         assert_eq!((d.text_fade_distance, d.text_fade_range), (8.0, 4.0));
         assert_eq!(d.text_background, TextBackground::Off);
@@ -158,7 +150,7 @@ mod tests {
         let p: People = serde_json::from_str("{}").expect("empty object");
         assert_eq!(p, People::default());
         let p: People = serde_json::from_str(r#"{"tag_distance": true}"#).expect("one field");
-        assert!(p.tag_distance && p.set_notice_chat);
+        assert!(p.tag_distance);
     }
 
     #[test]
