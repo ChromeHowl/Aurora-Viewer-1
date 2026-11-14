@@ -14,6 +14,8 @@ pub(crate) struct Pose {
     /// undo restores it with the rotations. Port of FSJointState::mBaseRotation
     /// (indra/newview/fsjointpose.h).
     pub origin: Vec<Quat>,
+    /// True for posed joints; false leaves rotation and position to live animation.
+    pub enabled: Vec<bool>,
 }
 impl Pose {
     pub fn capture(rig: &Rig, frame: &Frame) -> Option<Self> {
@@ -24,6 +26,7 @@ impl Pose {
             positions: pose.positions,
             scales,
             locks: HashMap::new(),
+            enabled: vec![true; rig.len()],
         })
     }
     pub fn valid(&self, rig: &Rig) -> bool {
@@ -31,6 +34,7 @@ impl Pose {
             && self.positions.len() == rig.len()
             && self.scales.len() == rig.len()
             && self.origin.len() == rig.len()
+            && self.enabled.len() == rig.len()
             && self
                 .rotations
                 .iter()
@@ -51,6 +55,7 @@ impl Pose {
             scales: self.scales.clone(),
             locks: HashMap::new(),
             origin: self.origin.clone(),
+            enabled: self.enabled.clone(),
         };
         for bone in self.locks.keys() {
             pose.locks.insert(*bone, joints[*bone]);
@@ -63,6 +68,29 @@ impl Pose {
         }
         let pose = self.resolved(rig, model);
         rig.world_with(&pose.rotations, Vec3::ZERO, &pose.positions, &self.scales)
+    }
+    /// Compose switched-off joints from the live animation before applying
+    /// this pose, following FSPosingMotion::removeJointFromState.
+    pub fn matrices_with_animation(
+        &self,
+        rig: &Rig,
+        model: Mat4,
+        rotations: &[Quat],
+        positions: &[Vec3],
+        pelvis_offset: Vec3,
+    ) -> Vec<Mat4> {
+        // Live channels take priority over pins. A pinned child can drift below
+        // an animated ancestor: solving again could pose that off ancestor or
+        // detach the shaped parent offsets. See docs/POSER.md.
+        let mut pose = self.resolved(rig, model);
+        for bone in 0..rig.len() {
+            if !self.enabled[bone] && bone < rotations.len() && bone < positions.len() {
+                pose.rotations[bone] = rotations[bone];
+                pose.positions[bone] = positions[bone];
+            }
+        }
+        let pelvis_offset = if self.enabled[rig.pelvis] { Vec3::ZERO } else { pelvis_offset };
+        rig.world_with(&pose.rotations, pelvis_offset, &pose.positions, &self.scales)
     }
 }
 
@@ -139,6 +167,19 @@ impl Session {
         self.undo.push(self.pose.clone());
         self.redo.clear();
     }
+    pub fn toggle_joint(&mut self, bone: usize, counterpart: Option<usize>) {
+        if bone >= self.pose.enabled.len() {
+            return;
+        }
+        self.checkpoint();
+        let pose = Arc::make_mut(&mut self.pose);
+        pose.enabled[bone] = !pose.enabled[bone];
+        pose.locks.remove(&bone);
+        if let Some(other) = counterpart.filter(|other| *other < pose.enabled.len()) {
+            pose.enabled[other] = pose.enabled[bone];
+            pose.locks.remove(&other);
+        }
+    }
     pub fn history(&mut self, redo: bool) {
         let (from, to) = if redo {
             (&mut self.redo, &mut self.undo)
@@ -150,7 +191,8 @@ impl Session {
         }
     }
     pub fn edited(&self, bone: usize) -> bool {
-        self.pose.rotations[bone].dot(self.base.rotations[bone]).abs() < 0.9999999
+        self.pose.enabled[bone] != self.base.enabled[bone]
+            || self.pose.rotations[bone].dot(self.base.rotations[bone]).abs() < 0.9999999
             || self.pose.positions[bone].distance_squared(self.base.positions[bone]) > 1e-10
             || self.pose.scales[bone].distance_squared(self.base.scales[bone]) > 1e-10
     }
@@ -171,6 +213,7 @@ impl Session {
             scales: rig.scale.clone(),
             locks: HashMap::new(),
             origin: rig.local_rot.clone(),
+            enabled: self.pose.enabled.clone(),
         };
         pose.valid(rig).then_some(pose)
     }
