@@ -44,6 +44,7 @@ pub mod main_thread;
 mod motion_debug;
 mod motion_history;
 mod occlusion;
+pub mod oit_stochastic;
 pub mod pacing;
 mod packet;
 pub mod panorama;
@@ -64,8 +65,10 @@ mod rlva;
 mod selection;
 pub mod shadow_cull;
 mod shadow_merge;
+mod soft_shadows;
 #[cfg(test)]
 mod specular_aa;
+pub mod spirv_fix;
 pub mod stars;
 pub mod start_progress;
 pub mod stereo_view;
@@ -128,6 +131,8 @@ pub use hud::HudView;
 pub use label_depth::{world_label_at, world_line_at};
 pub use main_thread::{GpuInfo, Renderer, VulkanLimits};
 pub use renderer::{CASCADES, RenderError};
+// What a tile of a photo draws around what it keeps for the soft shadows.
+pub use soft_shadows::tile_reach as soft_shadow_tile_reach;
 pub use textures::{MASK_CUTOFF, MipLevel, alpha_coverage, build_mips, build_mips_alpha_weighted, preserve_alpha_coverage};
 pub use types::*;
 pub use ui_blur::blurred_backdrop;
@@ -1095,6 +1100,30 @@ fn probe(@builtin(global_invocation_id) id:vec3<u32>) {{
     #[test]
     fn ssr_shader_is_valid() {
         validate(&format!("{}\n{}", crate::COMMON_SHADER, include_str!("shaders/ssr.wgsl")));
+    }
+
+    /// The variants compiled while the soft shadows are off (`SOFT_PATH`
+    /// false in common.wgsl) are valid too.
+    #[test]
+    fn scene_and_ssr_shaders_without_the_soft_path_are_valid() {
+        let common = crate::renderer::common_shader_for(false);
+        validate(&format!(
+            "{}\n{}\n{}",
+            common,
+            include_str!("shaders/object.wgsl"),
+            include_str!("shaders/env.wgsl")
+        ));
+        validate(&format!("{}\n{}", common, include_str!("shaders/ssr.wgsl")));
+    }
+
+    #[test]
+    fn volumetric_shader_is_valid() {
+        validate(&format!(
+            "{}
+{}",
+            crate::COMMON_SHADER,
+            include_str!("shaders/volumetric.wgsl")
+        ));
     }
 
     #[test]

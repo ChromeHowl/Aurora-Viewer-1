@@ -713,6 +713,22 @@ pub struct Settings {
     pub bloom: bool,
     /// The share of the light over the threshold it spreads (0.05 to 1).
     pub bloom_strength: f32,
+    /// Light shafts from the sun through the bright parts of the image
+    /// (Aurora's own, the Legacy Viewer has none): off by default.
+    pub god_rays: bool,
+    /// How bright the sun rays are (0.1 to 2, 0.5 by default).
+    pub god_rays_strength: f32,
+    /// How thick the air of the sun rays is (0.1 to 3, 0.5 by default).
+    pub god_rays_haze: f32,
+    /// How tightly their glow gathers around the sun (0 to 0.9, 0.6 by
+    /// default).
+    pub god_rays_glow: f32,
+    /// The resolution the sun rays draw at, a share of the image's size
+    /// (0.25 to 1, 1 by default): lower is cheaper and blockier.
+    pub god_rays_resolution: f32,
+    /// How bright the beams are away from the sun, from the side and behind
+    /// (0 to 2, 1 by default).
+    pub god_rays_side: f32,
     /// GPU occlusion culling: objects hidden behind others are not drawn
     /// (Firestorm UseOcclusion, on by default). Renamed from `gpu_occlusion`
     /// (off while it cost more than it saved) so that saved settings take
@@ -1562,6 +1578,18 @@ pub struct Settings {
     /// Legacy Viewer (contact_shadows.rs): what the shadow map is too coarse
     /// to show, where things touch. Off by default; only with the shadows.
     pub contact_shadows: bool,
+    /// Soft sun shadows, experimental (aurora-render `soft_shadows.rs`): the
+    /// penumbra widens with the distance of the caster, like the sun's in
+    /// real life. Beyond the Legacy Viewer, off by default and in every
+    /// graphics level; only with the shadows.
+    pub soft_shadows: bool,
+    /// With soft shadows, the size of the light: 1 = 2.3 degrees across (the
+    /// real sun, 0.53 degrees, is a softness of 0.23), 0 = no size, up to 2. Without soft
+    /// shadows it has no effect.
+    pub shadow_softness: f32,
+    /// How dark the sun's shadows are, 0 to 1: 1 = as the Legacy Viewer's,
+    /// less lets the light through. Works with or without soft shadows.
+    pub shadow_intensity: f32,
     /// 0 none, 1 FXAA, 2 MSAA 2x, 3 MSAA 4x, 4 MSAA 8x, 5 TAA, 6 SMAA (the
     /// default, RenderFSAAType 2 of Firestorm's High to Ultra levels in
     /// featuretable.txt), 7 AMD FSR 3.1 (beyond the Legacy Viewer)
@@ -1640,6 +1668,9 @@ pub struct Settings {
     /// by another program), a new window and device instead of closing
     /// (app/gpu_recovery.rs). On by default; the Legacy Viewer closes.
     pub gpu_recovery: bool,
+    /// Gaming mode (app/gaming_mode.rs) ends by itself when the window
+    /// comes back in front. On by default; not in the Legacy Viewer.
+    pub gaming_mode_leave_on_focus: bool,
     /// Maximum live particles (0 = particles off).
     pub max_particles: u32,
     /// RenderAttachedParticles: the particles of what avatars wear (on;
@@ -1731,6 +1762,11 @@ pub struct Settings {
     pub display_name_notices: bool,
     /// Screen-space reflections.
     pub ssr: bool,
+    /// Order-independent transparency (aurora-render oit_stochastic.rs):
+    /// the blended faces drawn with depth-based stochastic transparency
+    /// rather than in the sorted order. An Aurora addition, off by
+    /// default (an opt-in); in every anti-aliasing mode.
+    pub oit: bool,
     /// Anisotropic filtering: 1 (off), 2, 4, 8, 16.
     pub anisotropy: u16,
     /// Disk cache size (MB) for textures, meshes, animations, objects and inventory.
@@ -1806,6 +1842,13 @@ pub struct Settings {
 /// bounce) it hardly shows in the demo's coloured corner, at 2 a glow starts
 /// around the foot of objects, at 4 it is grainy (captures of 2026-10-17).
 pub(crate) const SCREEN_INDIRECT_INTENSITY: f32 = 1.5;
+
+/// The default shadow softness, 0.25 (a light about 0.6 degrees across, close
+/// to the real sun (0.53 degrees, a softness of 0.23); 1 is 2.3 degrees), and the range of the slider.
+pub(crate) const SHADOW_SOFTNESS: f32 = 0.25;
+pub(crate) const SHADOW_SOFTNESS_MAX: f32 = 2.0;
+/// The shadows as the Legacy Viewer draws them.
+pub(crate) const SHADOW_INTENSITY: f32 = 1.0;
 
 pub(crate) const DEFAULT_GROUND_FEET_HEIGHT: f32 = 0.4;
 pub(crate) const DEFAULT_GROUND_FEET_AVATARS: u32 = 5;
@@ -2261,6 +2304,12 @@ impl Default for Settings {
             glow: true,
             bloom: false,
             bloom_strength: BLOOM_STRENGTH,
+            god_rays: false,
+            god_rays_strength: 0.5,
+            god_rays_haze: 0.5,
+            god_rays_glow: 0.6,
+            god_rays_resolution: 1.0,
+            god_rays_side: 1.0,
             occlusion_culling: true,
             lod_factor: 2.0,
             tree_lod_factor: 0.5,
@@ -2571,6 +2620,9 @@ impl Default for Settings {
             local_light_count: crate::scene::lights::MAX_LIGHTS as u32,
             projector_shadow_limit: 2,
             contact_shadows: false,
+            soft_shadows: false,
+            shadow_softness: SHADOW_SOFTNESS,
+            shadow_intensity: SHADOW_INTENSITY,
             antialiasing: 6,
             blend_order: crate::graphics_presets::BLEND_ORDER_FULL,
             fsr_quality: 1,
@@ -2593,6 +2645,7 @@ impl Default for Settings {
             background_fps_limit: 15,
             background_gpu_pause: true,
             gpu_recovery: true,
+            gaming_mode_leave_on_focus: true,
             max_particles: 4096,
             attached_particles: true,
             tracker_beacon: true,
@@ -2627,6 +2680,9 @@ impl Default for Settings {
             display_name_notices: true,
             mirrors: 1,
             ssr: false,
+            // an opt-in: the Legacy Viewer sorts its blended faces, and the
+            // method's targets take video memory while it is on
+            oit: false,
             anisotropy: 8,
             cache_size_mb: 20480,
             cache_location: String::new(),
@@ -3397,6 +3453,16 @@ impl Settings {
         } else {
             SCREEN_INDIRECT_INTENSITY
         };
+        self.shadow_softness = if self.shadow_softness.is_finite() {
+            self.shadow_softness.clamp(0.0, SHADOW_SOFTNESS_MAX)
+        } else {
+            SHADOW_SOFTNESS
+        };
+        self.shadow_intensity = if self.shadow_intensity.is_finite() {
+            self.shadow_intensity.clamp(0.0, 1.0)
+        } else {
+            SHADOW_INTENSITY
+        };
         self.sharpen = if self.sharpen.is_finite() {
             self.sharpen.clamp(0.0, 1.0)
         } else {
@@ -3406,6 +3472,31 @@ impl Settings {
             self.bloom_strength.clamp(0.05, 1.0)
         } else {
             BLOOM_STRENGTH
+        };
+        self.god_rays_strength = if self.god_rays_strength.is_finite() {
+            self.god_rays_strength.clamp(0.1, 2.0)
+        } else {
+            0.5
+        };
+        self.god_rays_haze = if self.god_rays_haze.is_finite() {
+            self.god_rays_haze.clamp(0.1, 3.0)
+        } else {
+            0.5
+        };
+        self.god_rays_glow = if self.god_rays_glow.is_finite() {
+            self.god_rays_glow.clamp(0.0, 0.9)
+        } else {
+            0.6
+        };
+        self.god_rays_resolution = if self.god_rays_resolution.is_finite() {
+            self.god_rays_resolution.clamp(0.25, 1.0)
+        } else {
+            1.0
+        };
+        self.god_rays_side = if self.god_rays_side.is_finite() {
+            self.god_rays_side.clamp(0.0, 2.0)
+        } else {
+            1.0
         };
         self.lod_factor = self.lod_factor.clamp(0.5, 4.0);
         let area = |v: f32, default: f32| if v.is_finite() { v.clamp(0.0, 1.0e6) } else { default };
@@ -3742,6 +3833,7 @@ impl Settings {
             screen_indirect: self.ao_method == 1 && self.screen_indirect_light,
             screen_indirect_intensity: self.screen_indirect_intensity,
             contact_shadows: self.contact_shadows,
+            soft_shadows: self.soft_shadows,
             specular_aa: self.specular_aa,
             water_reflection_scale: Self::reflection_scale(self.water_reflections),
             mirror_scale: Self::reflection_scale(self.mirrors),
@@ -3751,6 +3843,7 @@ impl Settings {
             rain_surfaces: false,
             anisotropy: self.anisotropy,
             occlusion: self.occlusion_culling,
+            oit: self.oit,
         }
     }
 

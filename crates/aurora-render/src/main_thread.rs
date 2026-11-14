@@ -223,6 +223,8 @@ pub struct Renderer {
     /// The device can draw the GPU lists (and AURORA_CPU_CULL is not set).
     gpu_cull: bool,
     size: (u32, u32),
+    /// The window is 0 x 0 (minimised): `size` keeps the last real size.
+    minimised: bool,
     vsync: bool,
     settings: RenderSettings,
     msaa_supported: Vec<u32>,
@@ -699,6 +701,8 @@ impl Renderer {
             adapter_specific,
             gpu_cull,
             tex_layout: textures.layout.clone(),
+            tex_layout_entries: textures.layout_entries.clone(),
+            instance_flags: desc().flags,
             scene: scene_gpu(
                 &records,
                 &cull,
@@ -756,6 +760,7 @@ impl Renderer {
             bind_generation: 0,
             gpu_cull,
             size: (width.max(1), height.max(1)),
+            minimised: width == 0 || height == 0,
             vsync,
             settings: RenderSettings::default(),
             msaa_supported,
@@ -1042,12 +1047,10 @@ impl Renderer {
     }
 
     /// The window was resized: the swapchain and the render targets follow
-    /// with the next frame.
+    /// with the next frame. Minimised (0 x 0), the last real size stays and
+    /// the frames stop asking the swapchain for an image until it is back.
     pub fn resize(&mut self, width: u32, height: u32) {
-        if width == 0 || height == 0 {
-            return;
-        }
-        self.size = (width, height);
+        (self.size, self.minimised) = follow_window(self.size, width, height);
     }
 
     /// The draw lists can be culled on the GPU (`DrawLists::gpu`).
@@ -1517,6 +1520,7 @@ impl Renderer {
                 width: self.size.0,
                 height: self.size.1,
                 vsync: self.vsync,
+                minimised: self.minimised,
             },
             settings: self.settings,
             hover: self.hover_request.take(),
@@ -1602,6 +1606,7 @@ impl Renderer {
                 gpu_ssao: self.last_stats.gpu_ssao,
                 gpu_contact: self.last_stats.gpu_contact,
                 gpu_clouds: self.last_stats.gpu_clouds,
+                gpu_soft: self.last_stats.gpu_soft,
                 gpu_bloom: self.last_stats.gpu_bloom,
                 gpu_effects: self.last_stats.gpu_effects,
                 gpu_weather: self.last_stats.gpu_weather,
@@ -1976,6 +1981,11 @@ fn open_device(
     if afeat.contains(wgpu::Features::TEXTURE_COMPRESSION_BC) {
         features |= wgpu::Features::TEXTURE_COMPRESSION_BC;
     }
+    // depth-based stochastic transparency (oit_stochastic.rs): the triangle
+    // in the seed of a fragment's mask
+    if afeat.contains(wgpu::Features::PRIMITIVE_INDEX) {
+        features |= wgpu::Features::PRIMITIVE_INDEX;
+    }
     // GPU draw lists (gpu_cull.rs): draw counts written by the GPU
     if afeat.contains(wgpu::Features::MULTI_DRAW_INDIRECT_COUNT) {
         features |= wgpu::Features::MULTI_DRAW_INDIRECT_COUNT;
@@ -1989,6 +1999,8 @@ fn open_device(
     features |= afeat & crate::blend_exact::WIDE_RANGE;
     // Aurora's own pipeline cache on disk (pipeline_cache.rs)
     features |= crate::pipeline_cache::feature(afeat);
+    // naga's SampleMask built-in fixed on Vulkan (spirv_fix.rs)
+    features |= crate::spirv_fix::feature(afeat);
     let in_all_pools = descriptors_in_all_pools(adapter);
     let max_textures = texture_page_limit(&alim, in_all_pools);
     if max_textures < texture_page_limit(&alim, None) {
@@ -2213,6 +2225,16 @@ fn gpu_instance_flags(validation: bool) -> wgpu::InstanceFlags {
     }
 }
 
+/// The size to draw at and whether the window is minimised, for a window
+/// now `width` x `height`: 0 x 0 (minimised) keeps the last real size.
+fn follow_window(size: (u32, u32), width: u32, height: u32) -> ((u32, u32), bool) {
+    if width == 0 || height == 0 {
+        (size, true)
+    } else {
+        ((width, height), false)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2270,6 +2292,18 @@ mod tests {
         assert_eq!(gpu_memory_label(Some(8192), None, false, Some(8192)), "8192 MB dedicated");
         assert_eq!(gpu_memory_label(Some(16_000), None, true, Some(16_000)), "16000 MB video memory");
         assert_eq!(gpu_memory_label(None, None, false, None), "memory unknown");
+    }
+
+    /// Minimised (0 x 0), the window keeps its last real size and is marked
+    /// minimised, so frames stop asking for a swapchain image; restored, it
+    /// takes its size back and the mark goes.
+    #[test]
+    fn a_minimised_window_keeps_its_size_and_is_marked() {
+        let size = (1920, 1009);
+        assert_eq!(follow_window(size, 0, 0), (size, true));
+        assert_eq!(follow_window(size, 0, 600), (size, true));
+        assert_eq!(follow_window(size, 1920, 1009), (size, false));
+        assert_eq!(follow_window(size, 1280, 720), ((1280, 720), false));
     }
 
     #[test]

@@ -5172,6 +5172,8 @@ both open states and the selection count. Capture at frame 620.
 | `AURORA_DEMO_ARRIVAL=<folder>[,net=<ms>][,bw=<Mb/s>][,n=<objects>][,turn=<s>][,avatars=<n>][,worn=<m>][,pbr=1][,meshfail=<s>]` | Arrival test: objects, meshes and animated avatars all around, every asset downloaded from a local server |
 | `AURORA_DEMO_HAIR=<layers>[,<segments>[,<empty>[,<period>]]]` | Transparent face load: stacked shells on the avatars |
 | `AURORA_DEMO_HALO=1` | A wide translucent pane 3 m ahead of the start position, facing the camera (#556) |
+| `AURORA_DEMO_ALPHA_PLANES=<n>[,<alpha>[,<spacing>]]` | `n` translucent panes filling the view ahead of the start position: `n` blended layers on every pixel; spacing 0: coplanar |
+| `AURORA_DEMO_OIT_COLUMN=<tubes>[,<alpha>]` | A tall translucent column of nested tubes with a fine woven texture, left of the start view: many curved blended layers for the transparency in each anti-aliasing mode |
 | `AURORA_DEMO_BLEND_AO=1` | A face whose two halves differ in alpha mode, under a hat brim, ahead and left of the start position (#882) |
 | `AURORA_DEMO_WET_LAYER=1` | Three spheres under transparent shells, two with a shiny blended legacy material: the wet layers of mesh bodies (#1420) |
 | `AURORA_DEMO_MIRROR=1` | A closed room with a mirror, our avatar facing it, lace, red glass and a black shiny ball between them (#3479) |
@@ -5191,6 +5193,7 @@ both open states and the selection count. Capture at frame 620.
 | `AURORA_DEMO_PLANTS=1`, `far` or `dense` | Linden trees and grass: every species near or far along the start view, or a forest |
 | `AURORA_DEMO_PARTICLE_GLASS=1`, `sparse` or `dense` | Fountains behind, in front of and through three glass panes (one fullbright, one glowing; the emitters show red: the particle-source beacon highlight); 60 spread-out panes and 6 emitters; or 300 thin panes and 36 emitters (the cap of 256 particle runs) |
 | `AURORA_PARTICLE_INTERLEAVE=0` | Particles as before the interleave: all after the blended faces and the overlays, radial sort, not clipped at the water, none of its pipelines or targets made (A/B; read at launch, not live) |
+| `AURORA_DEMO_SOFT_SHADOWS=1`, `near` or `slope` | A pergola, a 14 m pole, a table, a thin post and a sphere on a pale receiving plate in a 35 degree sun, soft shadows on (`near`: at 0.4 of the distance) |
 | `AURORA_DEMO_BLEND_SHADOWS=1` or `dense` | Alpha-blended panels in the sun (greenhouse pane, face and texture alpha), or 400 greenhouse panes |
 | `AURORA_DEMO_FEET=opaque` or `blend` | A shoe on each foot of our avatar and of the crowd, and two blocks on the ground (contact shadows) |
 | `AURORA_DEMO_LIGHTS=<n>` | Local light load: n small lights in the crowd |
@@ -5515,6 +5518,27 @@ both open states and the selection count. Capture at frame 620.
   of `:alpha`: the particles under the surface are refracted and fogged like
   the box, those above it are not, a fountain crossing the surface is cut at
   it. `AURORA_PARTICLE_INTERLEAVE=0` brings back the former order and no clip.
+- **`AURORA_DEMO_SOFT_SHADOWS=1|near|slope`**: things standing on a pale receiving plate (level whatever the terrain) in the sun to see how
+  the penumbra of a shadow grows with the distance of its caster
+  (`demo_soft_shadows.rs`), from `AURORA_DEMO_POS="132,126"`: a pergola
+  (a 6 m roof 3 m up), a pole 14 m high, a table (top 0.75 m up) and a
+  sphere on the ground. The sun is fixed 35 degrees up
+  (`AURORA_DEMO_SUN` overrides it), the soft shadows are on at the
+  Preferences' softness, and the shadows are on at least at High.
+  `AURORA_SOFT_SHADOWS=0` shows the shadows of before; compare the pole's
+  shadow, sharp at its foot and blurred at its tip, and the roof's, with
+  `AURORA_SHADOW_SOFTNESS=1` (a light 2.3 degrees across) and `2`. `AURORA_SHADOW_INTENSITY=0.5`
+  lets half the light into every shadow. `AURORA_DEMO_CROWD=1` adds a
+  standing avatar. Look for acne on the sphere, none on the faces of the
+  table, and no halo at the avatars' edges with `AURORA_AA=3` (MSAA 4x).
+  A thin lamp post (9 cm, 3.5 m) stands flush on the plate in both modes
+  (`1` puts it 8 m ahead, `near` 3.2 m): `near` with `AURORA_DEMO_SUN=27,5`
+  (shadow towards the camera) shows its shadow, which must be darkest and
+  sharpest where it touches the post and, with `AURORA_SHADOW_SOFTNESS=1`,
+  only lighten further out, at 5, 15, 30 and 60 degrees; it must not fade
+  in from the contact (a 5 degree sun did that at 0.25 and, at 1, lost the
+  post's, the table legs' and the pergola legs' shadows). `slope` adds a
+  ramp tilted 35 degrees away from the sun with a second post on it.
 - **`AURORA_DEMO_BLEND_SHADOWS=1|dense`**: alpha-blended prims that cast
   sun shadows (`demo_blend_shadows.rs`), best from
   `AURORA_DEMO_POS="80,100"`. `1`: six 2 m panels lying 1.3 m above the
@@ -6173,6 +6197,7 @@ before (`amis`, `groupes`, `repere`, `historique`…) are still accepted.
 | `AURORA_DEMO_CONV_BUTTON=1\|mute\|still\|menu` | The Conversations button flashing for nearby chat and an IM, nearby chat left out, Reduce motion, its right-click menu |
 | `AURORA_DEMO_ATTENTION=1\|front\|capture` | Taskbar flashes and system notifications for messages, mentions and offers arriving in the background |
 | `AURORA_DEMO_BUSY_PAUSE=<frame>` | From that frame, the window counts as behind on a busy card: the Render pauses, with its notice and window title, until a click |
+| `AURORA_DEMO_GAMING_MODE=<frame>` | From that frame, gaming mode is on as from its toolbar button: the Render pauses, the loop slows, with its notice and window title, until the window comes back in front |
 | `AURORA_DEMO_IM_ANNOUNCE=1\|prefs` | Residents start typing IMs to us, then send them: the conversation announced before the message, and the unread count in the window title |
 | `AURORA_DEMO_MENTION=list\|names` | The chat bar's `@` list of residents to mention, or the prediction of a nearby resident's name |
 | `AURORA_DEMO_KEYWORDS=1\|prefs` | Keyword alerts on for the run: nearby chat, IM, group chat and object lines holding a keyword, coloured and with their sound; or the preferences' settings, the lines sent again and again |
@@ -7456,6 +7481,17 @@ failure. Grid validation and any paid upload are performed by the human.
   Render when the card is overloaded" off, nothing pauses. A capture run
   pauses too (a real one never does): `AURORA_FPS_LIMIT=60`,
   `AURORA_DEMO_BUSY_PAUSE=900` and `AURORA_CAPTURE_FRAMES=1000`.
+- **`AURORA_DEMO_GAMING_MODE=<frame>`**: at that frame gaming mode turns
+  on, as from the toolbar's Gaming mode button: the world is no longer
+  drawn and what is left of it is blurred and darkened, the amber notice
+  "Gaming mode: Aurora is resting…" shows in the middle, the window title
+  ends with "— Gaming mode", the loop runs at 5 fps (2 fps minimised or
+  covered) and in-world media stop drawing. The log says `gaming mode on`.
+  Focus another window, then click back into Aurora: with Preferences ›
+  Graphics › "Leave gaming mode when Aurora comes back in front" on (the
+  default), it ends at once (`gaming mode off`); off, only the button ends
+  it, and the notice says so. A capture run pauses too but keeps its frame
+  rate: `AURORA_DEMO_GAMING_MODE=900` and `AURORA_CAPTURE_FRAMES=1000`.
 - **`AURORA_DEMO_ATTENTION=1|front|capture`**: the window goes to the
   taskbar at frame 700, then an IM (760), a mention in nearby chat (820), a
   mention in a group chat (880), an object's message (940), a teleport offer
@@ -11887,6 +11923,9 @@ What the inventory must show with these scenarios:
 | `AURORA_SSIL=1`, `0` or `alt` | GTAO's screen-space indirect light forced on or off for this launch |
 | `AURORA_SSIL_INTENSITY=<0-8>` | Strength of GTAO's indirect light for this launch |
 | `AURORA_CONTACT_SHADOWS=0`, `1`, `alt`, `prepass`, `shell` or `deep` | Sun contact shadows off, on, by turns, cast by the depth prepass alone, by thin shells, or with every occluder 5 cm deep |
+| `AURORA_SOFT_SHADOWS=0`, `1` or `alt` | Soft sun shadows off, on or one second in two for this launch |
+| `AURORA_SHADOW_SOFTNESS=<0-2>`, `AURORA_SHADOW_INTENSITY=<0-1>` | Size of the light of the soft shadows (1 = 2.3 degrees across; the real sun, 0.53 degrees, is a softness of 0.23) and darkness of the sun's shadows (1 = as before) for this launch |
+| `AURORA_SOFT_PROJECTORS=0` | With the soft shadows, the projectors keep their 5-tap shadows (to measure their cost apart) |
 | `AURORA_PROJECTOR_TRACE=1` | Log projector shadow selection and fades each frame |
 | `AURORA_CONTACT_SOFT=0` | Contact shadows with hard pixel edges (no softening) |
 | `AURORA_CONTACT_VARIANT=bend`, `no-early-out`, `no-shared`, `short` or `skip` | Diagnostic: the contact shadows' shader without one of its constructs (GPU hangs of the AMD RX 9000 cards) |
@@ -11899,6 +11938,7 @@ What the inventory must show with these scenarios:
 | `AURORA_COLORED_AMBIENT=0`, `1` or `alt` | Sky ambient softened, grey under linear and HDR skies (Legacy Viewer), coloured at full strength like the first PBR release, or one second in two |
 | `AURORA_RIGGED_BLEND=exact`, `layers` or `exact-alt` | The order of the blended faces whatever the setting says: composed in the order of their fragments at each pixel; sorted, as the Standard choice of the setting; or the sorted order one second in three |
 | `AURORA_RIGGED_BLEND=split`, `runs`, `copy`, `depth05`, `write`, `sorted` or `alt` | Depth of the blended faces of rigged meshes: object by object, what is half covered writing its depth as drawn, then the fainter texels, then their depth from 1/255 on a copy (`layers`, the Standard order of the setting); the same without the fainter texels' depth (#1024); where nearly opaque before their colour, then point by point where half covered (#966); from 1/255 on a copy (#948); where half covered before their colour; from 1/255; none (sorted with the others); or `split` by turns |
+| `AURORA_OIT=0` or `1` | Order-independent transparency (stochastic) off or on for this launch, whatever the setting (`stochastic` is the same as `1`) |
 | `AURORA_MESH_ORDER=asset` | Mesh faces keep the triangle order of the asset instead of the Legacy Viewer's vertex cache order |
 | `AURORA_DEBUG_GEOM_DELAY=<seconds>` | Every built geometry reaches the GPU that long after its job ended, as on a slow PC in a busy region |
 | `AURORA_BLEND_AO=new`, `none`, `old` or `alt` | Which blended faces take the screen-space occlusion and indirect light: those at least half covered (default), none, all, or `none` by turns |
@@ -12402,6 +12442,35 @@ What the inventory must show with these scenarios:
   `perf summary` is their GPU time, the copy of the depth and its extra
   casters included (same crowd with `AURORA_DEMO_FEET=blend`,
   2560 × 1369, RTX 4090, 120 fps cap: about 0.17 to 0.26 ms).
+- **`AURORA_SOFT_SHADOWS=0|1|alt`**: the soft sun shadows (Preferences ›
+  Graphics › Soft shadows, experimental; `soft_shadows.rs`) for this
+  launch, without changing the saved setting: `0` off, `1` on, `alt` off and
+  on by turns, one second each (on in odd seconds), the mask kept ready.
+  Percentage-closer soft shadows in compute, once per pixel of the depth
+  prepass: a search of the shadow map finds the casters and their mean
+  distance (read in the minimum depths of blocks of 4, 8 and 16 texels of
+  the atlas, rebuilt each frame, so that no thin caster slips between the texels of a block), the
+  light's size (2.3 degrees across at a softness of 1) gives the
+  penumbra, and 12 rotated taps take the light (32 in a photo), then a
+  bilateral blur in the world's metres removes their noise. The penumbra is
+  never narrower than the filter of before (3 cm across): where it would be, the shadow takes that filter (the same taps for every pixel, so no grain and nothing that crawls with the camera; it ignores the `AURORA_SHADOW_FILTER=gaps` and `AURORA_SHADOW_BIAS=legacy` comparisons), fading into the rotated taps over three times the half width that filter spans in the cascade, and the two cascades of a split are mixed as before where both take it. At the default softness (0.25) a caster less than about 9 m above the receiver gives that filter, so the default is close to the previous shadows by design. A softness of 0 draws no mask at all: exactly the shadows of before. The shading reads the mask where its surface is the one of the
+  prepass; blended faces in front of it, water, reflections and probes keep
+  the filter of before. Off, nothing is created or drawn, the scene's shaders are compiled without the soft path (a variant built in the background when the setting changes, like the samples and SSR) and the casters'
+  culling planes are those of before. **`AURORA_SHADOW_SOFTNESS=<0-2>`**
+  (the slider, active with the soft shadows only; the default is 0.25, a light about 0.6 degrees across, close to the real sun (0.53 degrees, a softness of 0.23); 1 is a light 2.3 degrees
+  across, the look of PR 2288; 0 a light with no
+  size) and
+  **`AURORA_SHADOW_INTENSITY=<0-1>`** (how dark the sun's shadows are, with
+  or without the soft shadows; 1 is as before) override the settings.
+  **`AURORA_SOFT_PROJECTORS=0`** keeps the 5 taps of the projectors' shadows
+  while the sun's are soft (the projectors' soft shadows search their map
+  and filter 32 taps, only under the projectors' cones). `g_soft` of `perf
+  summary` is the mask's GPU time. To measure (the protocol of the PR):
+  `AURORA_DEMO=1 AURORA_DEMO_CROWD=40 AURORA_AUTO_EXPOSURE=0
+  AURORA_PROFILE=1`, a 2560 × 1369 window, five alternated runs of main,
+  the branch with the soft shadows off, on and at softness 2, and the
+  median of each run's medians of `gpu`, `g_objects`, `g_terrain_sky`,
+  `g_transparent`, `g_contact` and `g_soft`.
 - **`AURORA_BLOOM=0|1|alt`**: Aurora's bloom (Preferences › Graphics ›
   Bloom, off by default) for this launch, without changing the saved
   setting: `0` off, `1` on (at the setting's strength, 0.5 when it is off),
@@ -12592,44 +12661,109 @@ What the inventory must show with these scenarios:
   `split`; with `AURORA_DEMO_HAIR=1` (one mesh per avatar), 0.076 and
   0.082 ms. By default, against `split` (60 fps cap, `alt`): 0.52 → 0.66 ms
   with eight meshes each, 0.083 → 0.131 ms with one.
-- **`AURORA_MESH_ORDER=asset`**: the triangles of every mesh face are drawn
-  in the order the Legacy Viewer draws them, reordered for the vertex cache
-  when the mesh is loaded (`LLVolumeFace::cacheOptimize`,
-  `meshopt_optimizeVertexCache`): without a depth sort, the strand cards of
-  a blended mesh hair blend and hide one another in that order, the one
-  its creator saw. `asset` keeps the order of the asset, as before, to
-  compare.
-- **`AURORA_BLEND_AO=new|none|old|alt`**: the occlusion (both methods)
-  reads a copy of the depth prepass with the blended faces at least half
-  covered drawn over it (`fs_depth_contact`, the rule of the contact
-  shadows), and those faces take the screen-space ambient occlusion and
-  GTAO's indirect light like the opaque ones (#882: a mesh head whose two
-  halves differ in alpha mode showed a line down the middle with the
-  occlusion on); more transparent ones take neither, as the Legacy
-  Viewer's alpha pass. `none`: no blended face takes them and the
-  occlusion reads the prepass alone (#556 to #882); `old`: every blended
-  face takes those of what lies behind it (before #556); `alt`: `none` one
-  second in two. With the contact shadows on, their pass copies that depth
-  instead of drawing the blended faces a second time. See
-  `AURORA_DEMO_BLEND_AO`.
-- **`AURORA_DEMO_HALO=1`**: a wide translucent pane (35 % opaque) 3 m
-  ahead of the start position (`AURORA_DEMO_POS`), facing the camera, so
-  that our avatar stands between the camera and the pane. With
-  `AURORA_DEMO_HAIR=8,24,60,16` and `AURORA_RIGGED_BLEND=write`, the ring
-  of #556 (the pane missing around the hair) appears; by default it does
-  not.
-- **`AURORA_DEMO_WET_LAYER=1`**: three skin-coloured spheres 2.5 m ahead
-  of the start position (`AURORA_DEMO_POS`) and to the left of our avatar,
-  from the avatar outwards, each under a slightly larger shell: a
-  transparent texture (alpha 0) with a blended legacy material whose
-  specular map holds drips, as a body's wet layer; the built-in transparent
-  texture with the same material, as the shine layers of heads and eyes;
-  the transparent texture with no material, a control. With
-  `AURORA_DEMO_POS=100,100` the spheres stand on the right of the screen.
-  The first two show the drips reflecting the sky and nothing else of their
-  shell; the control shows nothing (#1420, the alpha max(texture alpha,
-  glare) of class3/deferred/materialF.glsl). Before the fix, no shell
-  showed anything.
+- **`AURORA_OIT=0|1`**: order-independent transparency off or on
+  (`oit_stochastic.rs`; Preferences › Aurora, or Graphics › Image ›
+  Transparency; off by default, the sorted order of the Legacy Viewer, per
+  face as `scene/blend_order.rs` sorts it): the blended faces drawn with
+  depth-based stochastic transparency (Enderton et al., "Stochastic
+  Transparency", I3D 2010, section 3.4): the total alpha of every sample,
+  then each fragment covering a stratified random subset of its samples of
+  size alpha x S into a copy of the opaque depth (GreaterEqual for the
+  faces of non-rigged meshes, as the sorted order, so that a decal at the
+  depth of its surface stays; Greater for rigged ones), then the
+  accumulation of the fragments at or in front of that depth, composited
+  per sample with the alpha correction; the glow of the blended faces that
+  have some is accumulated the same way (each face's glow where it is at or
+  in front of the stochastic depth: on average its glow dimmed by the
+  layers in front of it, as with `AURORA_OIT=0`), corrected by the same
+  ratio and added to the scene's glow (check with
+  `AURORA_DEMO_GLOW_LAYERS=1` or `shell`, `AURORA_DEBUG_GLOW=1`: the same
+  glow as `AURORA_OIT=0`). The method is made the first frame it is on and
+  not before (the log's `oit stochastic: made` and `pipelines for <n>
+  sample(s) made in <ms>` lines: the first frame with it on pays them once);
+  off, nothing of it exists and the scene module does not hold its shaders.
+  Every anti-aliasing mode (`AURORA_AA`): the two stochastic passes run at
+  their own sample count, the most the device takes up to 8, whatever the
+  scene's: their depth starts as the opaque depth spread over those samples
+  (each takes the scene sample nearest to it); 8 samples per pixel, their
+  noise averaged over the frames by the temporal blend (the resolved colour
+  blended 1/8 with the last frame's, reprojected through the nearest
+  transparent depth and clamped to the 3 x 3 neighbourhood; the seeds
+  change every frame). With MSAA (`AURORA_AA=2`, `3`, `4`) the total alpha
+  and the composite stay at the scene's samples, each dimmed by its own
+  transparency. Without (`AURORA_AA=0` none, `1` FXAA, `5` TAA, `6` SMAA,
+  `7` FSR) the total alpha runs at the passes' samples against that spread
+  depth, the composite dims each pixel by its resolved transparency, and the
+  anti-aliasing then runs over the result as with `AURORA_OIT=0`: check the
+  edges of opaque objects in front of and behind the panes of
+  `AURORA_DEMO_ALPHA_PLANES=8,0.4,0.5` (no halo, the same edge as with
+  `AURORA_OIT=0`). Under TAA the temporal blend is off (logged once as
+  `oit stochastic: temporal blend off, the scene's TAA accumulates`): TAA
+  accumulates already, the grain is the same every frame, so TAA neither
+  averages it out nor ghosts it. Under FSR (`AURORA_AA=7`,
+  `AURORA_FSR_QUALITY`) the passes and their targets are at the render
+  size, before the upscale (the log's `targets` line gives it), FSR's
+  reactive mask compares the scene copy with the composited colour as it
+  does with the sorted order, and the temporal blend stays on (FSR takes
+  this frame's colour on the blended faces, so a static grain would show,
+  enlarged and sharpened): check the 8 panes (as smooth as `AURORA_OIT=0`)
+  and the coplanar panes of `AURORA_DEMO_ALPHA_PLANES=2,0.5,0` across
+  frames. The history starts again (this frame's colour alone) when the
+  targets are new or the camera jumped. A photo, its tiles and a snapshot
+  draw the sorted order whatever the setting (their size and history are
+  their own, and the targets are freed before them: the snapshot's memory
+  plan counts none). The targets are freed too when the method is turned off
+  and after 120 frames without a blended face; when the memory refuses them
+  (`oit stochastic: the memory refused the targets`) the frame draws the
+  sorted order and the size is not tried again. The log gives the counts the
+  device takes (`oit stochastic: made; pass sample counts the device takes:
+  [2, 4, 8]`), the route (`oit stochastic: the sample mask route`, or `the
+  sample index route` when `spirv_fix.rs` cannot make the module or the
+  pipelines made from it are refused: the same image, about four times the
+  invocations of that pass) and the targets (`oit stochastic: targets
+  <w>x<h>, the scene at <n> samples, the passes at <p>, <m> MB`: about 198
+  MB at 1600 x 900 and 506 MB at 2560 x 1440 with MSAA 4x). With
+  `AURORA_PROFILE=1`, `oit stochastic gpu ms: alpha=… depth=… accum=…
+  resolve_composite=… total=…` every 120 frames. Grain: compare a capture
+  with `AURORA_OIT=0` of the same frame where one layer covers the pixel
+  (exact there): the panes of `AURORA_DEMO_ALPHA_PLANES=8,0.4,0.5` show it
+  most. Decals: `AURORA_DEMO_COPLANAR_DECAL` (a decal at the depth of the
+  surface under it) must show with the method on as it does off.
+- **`AURORA_DEMO_OIT_COLUMN=<tubes>[,<alpha>]`**: `tubes` nested hollow
+  cylinders (1 to 5, 3 when the value is not a number), 8 m tall, from
+  2.2 m across, 1.5 m ahead and 2 m to the left of the start position
+  (`AURORA_DEMO_POS`), filling the left of the start view at a slant: each
+  tube an outer and an inner wall, so a pixel crosses up to four layers per
+  tube. Their texture is a 64 x 64 weave (stripes of two shades both ways,
+  alpha 0.3 to 0.6 with a texel-scale grain), repeated 12 x 24 times, its
+  texels a few pixels wide and finer towards the edges; `alpha` multiplies
+  it (1 by default). For the order-independent transparency under each
+  anti-aliasing mode (`AURORA_AA`, `AURORA_OIT`): with the method on, the
+  column must look the same under SMAA, no anti-aliasing and MSAA (the
+  beats of the tubes' weaves against each other are the scene's own and
+  show in every mode; FXAA and TAA soften the weave as they do with the
+  method off); with it off, the sorted order shows as seams and bands
+  where the walls' order flips.
+
+- **`AURORA_DEMO_ALPHA_PLANES=<n>[,<alpha>[,<spacing>]]`**: `n` translucent
+  panes (1 to 64, 8 when the value is not a number; `alpha` their opacity,
+  0.3 by default) ahead of the start position (`AURORA_DEMO_POS`), facing
+  the camera, one every `spacing` metres (0.25 by default, up to 2) from
+  3 m on, each large enough to fill the view at its distance, their hue
+  running from the nearest to the farthest: the fog planes, glass walls and
+  skybox panes of a club, `n` blended layers over nearly every pixel. A
+  spacing of `0` puts them all in the same place, exactly coplanar
+  (`2,0.5,0`: two panes of the same depth on every pixel): with the
+  stochastic method both layers pass the depth test where either won a
+  sample (oit_stochastic.rs), so the two are averaged, the same on every
+  frame and every launch; consecutive captures
+  (`AURORA_CAPTURE_FRAMES=2000,2001,2002`) must be identical over the
+  panes, frame after frame, and the same again in another session, with
+  other content loaded first (`AURORA_DEMO_HAIR_CARDS`, `AURORA_DEMO_CROWD`). The load of the order-independent transparency
+  (`AURORA_OIT=1`): the grain of 20 layers against 8. In `perf summary`, compare
+  1600 × 900 and the frame is drawn again in the sorted order (the image
+  stays the same as with `AURORA_OIT=0`). In `perf summary`, compare
+  `g_transparent` with `AURORA_OIT=0` and `1`, `AURORA_AA=3` and `6`.
 - **`AURORA_DEMO_MIRROR=1`**: a closed room on the open patch at
   (100, 100), lit by a warm lamp under its roof, with a manual box probe
   filling it and a dark mirror on its east wall; our avatar starts 3 m in
@@ -13403,8 +13537,10 @@ parts, against the scene without weather. `--scenes` picks some,
     also counted in `g_effects`;
   - `g_contact`: the sun's contact shadows alone (`AURORA_CONTACT_SHADOWS`),
     also counted in `g_effects`;
+  - `g_soft`: the soft sun shadows alone (`AURORA_SOFT_SHADOWS`, 0 while
+    off), also counted in `g_effects`;
   - `g_planar`, `g_probe`, `g_copy`, `g_ssr`: the rest of `g_effects`,
-    after the occlusion and the contact shadows: the planar reflections
+    after the occlusion, the contact shadows and the soft shadows: the planar reflections
     (water, mirrors; the refracted water light is counted with them), the
     reflection probe face with its filtering, the copy of the scene for
     refraction and SSR (the cut-out pass and the submerged water particles
