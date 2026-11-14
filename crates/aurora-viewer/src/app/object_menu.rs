@@ -707,8 +707,15 @@ impl App {
                 handle,
                 // LLQueuedScriptAssetUpload: saved running
                 options: ScriptOptions {
-                    mono,
-                    luau: aurora_net::scripts::Luau::from_flags(flags),
+                    compile: {
+                        use aurora_net::scripts::CompileTarget;
+                        match CompileTarget::for_item(flags) {
+                            // an SLua script, or LSL on the Luau VM, keeps its target
+                            kept @ (CompileTarget::Luau | CompileTarget::LslLuau) => kept,
+                            _ if mono => CompileTarget::Mono,
+                            _ => CompileTarget::Lsl2,
+                        }
+                    },
                     running: true,
                     experience,
                 },

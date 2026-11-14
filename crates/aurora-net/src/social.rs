@@ -2,7 +2,7 @@
 //! types shared with the viewer and the LLSD parsers of the ChatterBox
 //! event-queue messages (`newview/llimview.cpp`, `llspeakers.cpp`,
 //! `llagent.cpp` in Firestorm).
-
+use aurora_llsd::Llsd;
 use aurora_llsd::{Llsd, llsd_map};
 use uuid::Uuid;
 

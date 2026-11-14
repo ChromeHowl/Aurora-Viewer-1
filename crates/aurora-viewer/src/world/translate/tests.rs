@@ -151,6 +151,7 @@ fn rlva_with(command: &str) -> Rlva {
         chat_type: ChatType::OwnerSay,
         position: glam::Vec3::ZERO,
         message: command.to_owned(),
+        region: None,
     };
     assert!(r.receive(&c));
     r

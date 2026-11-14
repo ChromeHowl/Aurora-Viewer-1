@@ -1817,10 +1817,6 @@ pub(crate) fn tonemapper_of(setting: u8) -> aurora_render::Tonemapper {
     }
 }
 
-/// The nearest the automatic reflection probes may stop (m): never under
-/// 64 m, whatever the setting or the draw distance.
-pub(crate) const PROBE_RANGE_MIN: f32 = 64.0;
-
 /// RenderTonemapMix's default (settings.xml).
 pub(crate) const TONEMAP_MIX: f32 = 0.7;
 

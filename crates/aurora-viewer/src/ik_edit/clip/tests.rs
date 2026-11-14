@@ -1927,6 +1927,7 @@ fn returning_from_upload_preparation_resumes_the_same_studio_draft() {
         name: "Wave".into(),
         bytes: Arc::new(Vec::new()),
         animation: Arc::new(editor.clip.document.as_ref().unwrap().animation().unwrap()),
+        pose: false,
     });
 
     assert_eq!(editor.take_clip_imports().len(), 1);

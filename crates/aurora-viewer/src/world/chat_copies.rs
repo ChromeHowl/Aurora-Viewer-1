@@ -220,6 +220,7 @@ mod tests {
             chat_type: ChatType::Normal,
             position: glam::Vec3::ZERO,
             message: text.into(),
+            region: None,
         };
         w.keep_muted_chat(said("hidden"));
         assert!(w.chat.is_empty(), "dropped by default");

@@ -4264,10 +4264,6 @@ impl World {
             // group list again, the group's data forgotten, its profile
             // asked again
             // processEjectGroupMemberReply: a failure refreshes the group
-            NetEvent::GroupBanDone { group, action, ids, ok } => {
-                self.on_group_ban_done(group, action, &ids, ok);
-                None
-            }
             NetEvent::GroupEjected { group, success } => {
                 if !success {
                     log::warn!("group {group}: ejection refused, the group is asked again");
@@ -4758,7 +4754,9 @@ impl World {
                 slurl,
             });
         }
-        self.push_chat(ChatLine {
+        self.omnifilter_mark(time, c.source_id, highlight);
+        self.note_chat_range(time, c.source_id, c.position);
+        let line = ChatLine {
             time,
             from,
             text: c.message,
@@ -4939,7 +4937,7 @@ impl World {
                 self.keyword_alert(im.from_agent_id, &from, &text, true, attention::Open::NearbyChat);
             }
         }
-        self.push_chat(ChatLine {
+        let line = ChatLine {
             time,
             from,
             text,

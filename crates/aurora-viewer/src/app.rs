@@ -43,7 +43,6 @@ mod sound_explorer;
 // Bug report form (disabled, see main.rs):
 // mod bug_report;
 mod alt_graph;
-mod avatar_align;
 mod avatar_health;
 mod avatar_reload;
 mod blender_live;
@@ -912,7 +911,6 @@ pub struct App {
     group_titles_ui: ui::group_titles::GroupTitlesUi,
     /// "Bumps, pushes & hits" (Help menu).
     bumps_ui: ui::bumps::BumpsUi,
-    avatar_align_ui: ui::avatar_align::AvatarAlignUi,
     pose_stand_ui: ui::pose_stand::PoseStandUi,
     /// Me › Favorite wearables (`ui/wearable_favorites.rs`).
     wearable_favorites_ui: ui::wearable_favorites::WearableFavoritesUi,
@@ -2006,7 +2004,6 @@ impl App {
             blacklist_ui: Default::default(),
             group_titles_ui: Default::default(),
             bumps_ui: Default::default(),
-            avatar_align_ui: Default::default(),
             pose_stand_ui: Default::default(),
             wearable_favorites_ui: Default::default(),
             pose_stand_held: false,
@@ -10683,6 +10680,7 @@ impl App {
                 eye_offset: None,
                 joint_offset: None,
                 head_rotation: None,
+                follow_joint_offset: None,
                 draw_distance: self.settings.draw_distance,
                 region_width: self.world.main().map_or(256.0, |r| r.heightmap.size_x as f32),
             };
@@ -11362,7 +11360,7 @@ impl App {
                 frame.joint_offset = extra
                     .follow_joint
                     .joint()
-                    .and_then(|joint| crate::scene::Scene::joint_offset(&self.world, &self.world.agent_id, joint));
+                    .and_then(|joint| crate::scene::Scene::joint_offset_from_pelvis(&self.world, &self.world.agent_id, joint));
                 if extra.uses_pose() {
                     frame.head_rotation = self.scene.head_rotation(&self.world.agent_id);
                 }
@@ -15850,7 +15848,6 @@ impl App {
             BarAction::Controls { movement, toggle } => self.request_controls(movement, toggle),
             BarAction::ToggleMoveLock => self.toggle_move_lock(),
             BarAction::ToggleFlyOverride => self.toggle_fly_override(),
-            BarAction::FaceNearestAvatar => self.face_nearest_avatar(),
             BarAction::ToggleQuickjump => {
                 self.settings.quickjump = !self.settings.quickjump;
                 self.settings.save();
@@ -15904,7 +15901,7 @@ impl App {
             BarAction::CustomizeBars => self.toolbar_ui.open = true,
             BarAction::StopAnimations => self.stop_current_animations(),
             BarAction::ResyncAnimations => self.scene.resync_animations(Instant::now()),
-            BarAction::FaceNearestAvatar => self.avatar_align(ui::avatar_align::Action::FaceNearest),
+            BarAction::FaceNearestAvatar => self.face_nearest_avatar(),
         }
     }
 
@@ -17268,6 +17265,7 @@ impl App {
                         critical_required: false,
                         bad_credentials: false,
                         previous_session: false,
+                        network: false,
                         next_server: None,
                     });
                 } else if self.demo_mfa_challenge.is_some_and(|at| std::time::Instant::now() >= at)
@@ -19618,7 +19616,6 @@ impl App {
                 self.avatar_render_settings_window(&ctx, &p);
                 self.shadow_realm_window(&ctx, &p);
                 self.bumps_ui.show(&ctx, &p, &self.world, &mut self.panels.bumps);
-                self.avatar_align_window(&ctx, &p);
                 self.pose_stand_window(&ctx, &p);
                 self.wearable_favorites_window(&ctx, &p);
                 self.grid_status_window(&ctx, &p);

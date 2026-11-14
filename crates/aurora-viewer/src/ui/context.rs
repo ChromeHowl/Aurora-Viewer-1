@@ -339,9 +339,6 @@ pub enum CtxAction {
     MarkAvatars(Vec<Uuid>, Option<[u8; 3]>),
     /// "Clear all Marks" (LLNetMap::clearAvatarMarkColors()).
     ClearAllMarks,
-    /// "Ban from all my groups" (true) or "Unban from all my groups": asked
-    /// first (LLGroupActions::banFromAllGroups, unbanFromAllGroups).
-    GroupBanAll(Uuid, bool),
     /// Avatar.Kick / Avatar.TeleportHome / Avatar.EstateBan of the estate's
     /// owner and managers: asked first (LLAvatarActions::estateKick,
     /// estateTeleportHome, estateBan).
@@ -449,10 +446,6 @@ pub enum CtxAction {
     /// Mute or unmute a resident (or everyone, None) in nearby voice for
     /// everyone, as its moderator (LLFloaterIMContainer::moderateVoice).
     ModerateVoice(Option<Uuid>, bool),
-    /// Mute or give back a participant's text in a group chat or a
-    /// conference (session, participant, mute), as its moderator
-    /// (LLIMSpeakerMgr::toggleAllowTextChat).
-    ModerateText(Uuid, Uuid, bool),
     /// Toggle the local owner particle filter, without creating a mute entry.
     ToggleOwnerParticleFilter(Uuid),
     /// One persistent owner category in the sound blacklist (ON blocks it).
@@ -680,22 +673,6 @@ pub fn mark_submenu(ui: &mut egui::Ui, p: &Palette, world: &World, ids: &[Uuid])
             act(CtxAction::ClearAllMarks);
         }
     });
-}
-
-/// "Ban from all my groups" and, with `unban`, "Unban from all my groups",
-/// only when we manage bans in one of our groups at least
-/// (can_ban_from_all_groups: LLGroupActions::canBanFromAnyGroup).
-pub fn group_ban_items(ui: &mut egui::Ui, p: &Palette, world: &World, id: Uuid, unban: bool) {
-    if world.group_ban_targets(id).is_empty() {
-        return;
-    }
-    let running = world.group_ban_all.is_some();
-    if menu::item_if(ui, p, "ban", aurora_i18n::tr!("l2s-ban-all"), !running) {
-        request(ui.ctx(), CtxAction::GroupBanAll(id, true));
-    }
-    if unban && menu::item_if(ui, p, "circle-check-filled", aurora_i18n::tr!("l2s-unban-all"), !running) {
-        request(ui.ctx(), CtxAction::GroupBanAll(id, false));
-    }
 }
 
 pub fn contact_set_submenu(ui: &mut egui::Ui, p: &Palette, world: &World, ids: &[Uuid], label: &str) {
@@ -1170,7 +1147,6 @@ fn avatar_menu_reporting(
                     },
                 );
             }
-            group_ban_items(ui, p, world, id, false);
             // menu_fs_radar.xml / menu_mini_map.xml: Avatar.Derender and
             // Avatar.DerenderPermanent (LLAvatarActions::derender), always enabled
             for (icon, label, permanent) in [
@@ -1245,7 +1221,6 @@ fn avatar_menu_reporting(
             block(ui);
             shadow_realm_item(ui, p, world, id);
             // menu_url_agent.xml BanFromAllGroups
-            group_ban_items(ui, p, world, id, false);
             menu::separator(ui, p);
             copy(ui);
         }

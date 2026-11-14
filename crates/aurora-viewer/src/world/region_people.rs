@@ -775,6 +775,7 @@ mod tests {
             chat_type: aurora_net::ChatType::OwnerSay,
             position: glam::Vec3::ZERO,
             message: "@showloc=n".into(),
+            region: None,
         }));
         assert!(w.rlva.has("showloc"));
         w.take_map_commands();

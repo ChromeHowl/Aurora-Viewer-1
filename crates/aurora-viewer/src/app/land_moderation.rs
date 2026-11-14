@@ -61,13 +61,6 @@ pub(super) enum Ask {
         /// A god's label names that owner ("All estates owned by [OWNER]").
         owner_name: Option<String>,
     },
-    /// "Ban from all my groups" (`ban`) or "Unban from all my groups"
-    /// (app/people_actions.rs).
-    GroupBanAll {
-        target: Uuid,
-        name: String,
-        ban: bool,
-    },
 }
 
 impl App {
@@ -161,10 +154,6 @@ impl App {
         let Some(ask) = self.moderation_ask.as_ref() else {
             return;
         };
-        if matches!(ask, Ask::GroupBanAll { .. }) {
-            self.group_ban_ask_ui(ctx, p);
-            return;
-        }
         let answer = match ask {
             Ask::Freeze { name, .. } => {
                 let question = aurora_i18n::tr!("ui-context-freeze-question", name = name.as_str());
@@ -201,7 +190,6 @@ impl App {
                 owner_name,
                 ..
             } => estate_question(ctx, p, *act, name, *owner, owner_name.as_deref()),
-            Ask::GroupBanAll { .. } => return,
         };
         let Some(choice) = answer else {
             return;
@@ -217,7 +205,6 @@ impl App {
         let second = choice == 1;
         let target = match &ask {
             Ask::Freeze { target, .. } | Ask::Eject { target, .. } | Ask::Estate { target, .. } => *target,
-            Ask::GroupBanAll { .. } => return,
         };
         let Some((handle, _)) = self.world.resident_place(target) else {
             log::warn!("land moderation: {target} is no longer in a region we are connected to");
@@ -248,7 +235,7 @@ impl App {
                 target,
                 ban: second,
             },
-            Ask::Estate { .. } | Ask::GroupBanAll { .. } => return,
+            Ask::Estate { .. } => return,
         };
         log::info!("land moderation: {cmd:?}");
         self.send(NetCommand::Land(cmd));

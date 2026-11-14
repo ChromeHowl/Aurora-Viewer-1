@@ -327,7 +327,6 @@ fn action_key(action: &CtxAction) -> String {
         CtxAction::SetVoiceVolume(..) => "SetVoiceVolume",
         CtxAction::ToggleVoiceMute(..) => "ToggleVoiceMute",
         CtxAction::ModerateVoice(..) => "ModerateVoice",
-        CtxAction::ModerateText(..) => "ModerateText",
         CtxAction::ToggleOwnerParticleFilter(..) => "ToggleOwnerParticleFilter",
         CtxAction::SetOwnerSoundBlock { .. } => "SetOwnerSoundBlock",
         CtxAction::InviteToGroup(..) => "InviteToGroup",
@@ -411,7 +410,6 @@ fn action_key(action: &CtxAction) -> String {
         CtxAction::Share(..) => "Share",
         CtxAction::MarkAvatars(..) => "MarkAvatars",
         CtxAction::ClearAllMarks => "ClearAllMarks",
-        CtxAction::GroupBanAll(..) => "GroupBanAll",
     };
     match action {
         CtxAction::TakeOffClothing(kind) | CtxAction::DetachAt(kind) => format!("{base}:{kind}"),

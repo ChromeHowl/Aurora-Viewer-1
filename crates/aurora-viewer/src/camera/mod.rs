@@ -2272,7 +2272,7 @@ impl Camera {
         self.time_in_air = if in_air { self.time_in_air + dt } else { 0.0 };
 
         let mut camera_target = self.calc_camera_target(world, s, f);
-        let mut focus_target = self.calc_focus_target(world, s, f.now, camera_target);
+        let mut focus_target = self.calc_focus_target(world, s, f, camera_target);
         if let Some(joint) = self.followed_joint(world, s, f) {
             // the camera keeps its offset from the point it looks at, that
             // point now on the body part as it is animated
@@ -7014,6 +7014,7 @@ mod tests {
             chat_type: aurora_net::ChatType::OwnerSay,
             position: w.agent.position,
             message: rule.to_owned(),
+            region: None,
         }));
     }
 

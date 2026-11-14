@@ -276,6 +276,7 @@ mod tests {
         Sample {
             animation: Arc::new(crate::scene::anim::BoundAnim::bind(animation, rig)),
             frame: 0,
+            time_seconds: None,
         }
     }
 

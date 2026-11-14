@@ -547,7 +547,6 @@ impl App {
             CtxAction::Share(id) => self.share_with(id),
             CtxAction::MarkAvatars(ids, color) => self.world.avatar_marks.set(&ids, color),
             CtxAction::ClearAllMarks => self.world.avatar_marks.clear_all(),
-            CtxAction::GroupBanAll(id, ban) => self.ask_group_ban_all(id, ban),
             CtxAction::EstateKick(id) => self.ask_estate(id, land_moderation::EstateAct::Kick),
             CtxAction::EstateTeleportHome(id) => self.ask_estate(id, land_moderation::EstateAct::TeleportHome),
             CtxAction::EstateBan(id) => self.ask_estate(id, land_moderation::EstateAct::Ban),
@@ -716,7 +715,6 @@ impl App {
                 let target = target.map_or(Target::Everyone, Target::Resident);
                 self.send(NetCommand::ModerateVoice { target, mute });
             }
-            CtxAction::ModerateText(session, agent, mute) => self.send(NetCommand::ModerateText { session, agent, mute }),
             CtxAction::ToggleOwnerParticleFilter(id) => {
                 let blocked = !self.settings.particle_filters.blocked(id, true);
                 if self.settings.particle_filters.set(id, true, blocked) {

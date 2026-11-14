@@ -339,22 +339,6 @@ impl ContactSets {
         }
     }
 
-    /// "Show online / offline notices for this set" (setNotifyForSet).
-    pub fn set_notify(&mut self, name: &str, on: bool) {
-        if let Some(s) = self.sets.get_mut(name)
-            && s.notify != on
-        {
-            s.notify = on;
-            self.changed();
-        }
-    }
-
-    /// LGGContactSets::notifyForFriend: one of the resident's sets wants
-    /// their online / offline notices.
-    pub fn notify_for(&self, id: &Uuid) -> bool {
-        self.sets.values().any(|s| s.notify && s.friends.contains(id))
-    }
-
     pub fn set_separate_chats(&mut self, name: &str, on: bool) {
         if let Some(s) = self.sets.get_mut(name)
             && s.separate_chats != on

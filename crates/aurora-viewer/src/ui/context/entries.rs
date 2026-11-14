@@ -984,7 +984,14 @@ fn shadow_realm_item(ui: &mut Builder, f: &Facts, id: Uuid) {
 fn save_as_submenu(ui: &mut Builder, id: Uuid) {
     use crate::build::export::Format;
     ui.submenu("device-floppy-filled", aurora_i18n::tr!("common-save-as"), true, |ui| {
-        ui.todo("device-floppy-filled", aurora_i18n::tr!("ui-context-save-backup"));
+        ui.item(
+            "device-floppy-filled",
+            aurora_i18n::tr!("ui-context-save-backup"),
+            CtxAction::Export {
+                id,
+                format: crate::world::inventory::actions::ExportFormat::Backup,
+            },
+        );
         ui.item(
             "box",
             aurora_i18n::tr!("ui-context-save-collada"),

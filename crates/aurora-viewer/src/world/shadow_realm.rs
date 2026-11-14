@@ -648,6 +648,7 @@ mod tests {
             chat_type: aurora_net::ChatType::Normal,
             position: Vec3::ZERO,
             message: "hello".to_owned(),
+            region: None,
         }
     }
 

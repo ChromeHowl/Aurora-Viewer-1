@@ -6281,13 +6281,13 @@ impl Scene {
     pub fn joint_world(&self, world: &World, id: &Uuid, name: &str, now: Instant) -> Option<Vec3> {
         let index = world.objects.index_of_uuid(id)?;
         let (position, rotation, _) = Self::object_transform(world, index, now, 0)?;
-        Some(position + rotation * Self::joint_offset(world, id, name)?)
+        Some(position + rotation * Self::joint_offset_from_pelvis(world, id, name)?)
     }
 
     /// Where joint `name` of avatar `id` is as posed last frame, relative to
     /// the pelvis in the skeleton's frame (as `eyes_offset`): the body part
     /// the camera follows (`camera::FollowJoint`).
-    pub fn joint_offset(world: &World, id: &Uuid, name: &str) -> Option<Vec3> {
+    pub fn joint_offset_from_pelvis(world: &World, id: &Uuid, name: &str) -> Option<Vec3> {
         let rig = &world.avatar_lib.rig;
         let joint = *rig.names.get(name)?;
         let rest = rig.default_world_inv[joint].inverse().w_axis.truncate();
@@ -7386,7 +7386,7 @@ mod tests {
             ..Default::default()
         };
         let head = scene.joint_world(&world, &owner, "mHead", now).unwrap();
-        let (eye_offset, joint_offset) = (scene.eyes_offset(&world, &owner), Scene::joint_offset(&world, &owner, "mHead"));
+        let (eye_offset, joint_offset) = (scene.eyes_offset(&world, &owner), Scene::joint_offset_from_pelvis(&world, &owner, "mHead"));
         let input = |head_rotation| FrameInput {
             dt: 1.0,
             now,
@@ -7396,6 +7396,7 @@ mod tests {
             eye_offset,
             joint_offset,
             head_rotation,
+            follow_joint_offset: None,
             draw_distance: 128.0,
             region_width: 256.0,
             aspect: 1.0,

@@ -231,8 +231,6 @@ pub struct Panels {
     pub experiences: bool,
     /// "Bumps, pushes & hits" (Help menu): who bumped, pushed or hit us.
     pub bumps: bool,
-    /// Me › Movement › Avatar alignment (`ui/avatar_align.rs`).
-    pub avatar_align: bool,
     /// Avatar › Pose stand (`ui/pose_stand.rs`).
     pub pose_stand: bool,
     /// Me › Favorite wearables (`ui/wearable_favorites.rs`).
@@ -317,7 +315,6 @@ impl Panels {
             money_tracker: false,
             experiences: false,
             bumps: false,
-            avatar_align: false,
             pose_stand: false,
             wearable_favorites: false,
             grid_status: false,

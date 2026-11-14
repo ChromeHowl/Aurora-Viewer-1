@@ -6696,6 +6696,7 @@ mod tests {
                         menu: None,
                         bubbles: (renderer == 2).then_some(true),
                         previews: None,
+                        moderators: None,
                     };
                     let look = view::Look {
                         header: true,

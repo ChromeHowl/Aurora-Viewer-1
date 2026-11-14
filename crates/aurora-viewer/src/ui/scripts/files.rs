@@ -283,11 +283,34 @@ impl Drop for Watch {
     }
 }
 
-pub(super) fn external(name: String, source: String, command_line: String, convert_tabs: bool, lua: bool) -> Job {
+pub(super) fn external(
+    name: String,
+    target: aurora_net::scripts::ScriptTarget,
+    source: String,
+    command_line: String,
+    convert_tabs: bool,
+    lua: bool,
+) -> Job {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let directory = std::env::temp_dir().join(format!("AuroraScript-{}", uuid::Uuid::new_v4()));
-        let path = directory.join(format!("{}.{}", safe_name(&name), extension(lua)));
+        let directory = match session_dir() {
+            Ok(directory) => directory,
+            Err(e) => {
+                let _ = tx.send(failure(e.to_string()));
+                return;
+            }
+        };
+        // The Legacy Viewer's name (getTmpFileName): the script id in it
+        // tells an external editor which script the file is, for the script
+        // editor link (script_ws.rs). An SLua script has the Lua extension.
+        let mut file = crate::script_ws::protocol::file_name(&safe_name(&name), target.object, target.item);
+        if lua {
+            file.truncate(file.len() - ".lsl".len());
+            file.push('.');
+            file.push_str(extension(lua));
+        }
+        let path = directory.join(file);
+        let owner = claim(&path, None);
         let command_line = if command_line.trim().is_empty() {
             std::env::var("LL_SCRIPT_EDITOR").unwrap_or_default()
         } else {

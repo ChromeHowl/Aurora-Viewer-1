@@ -524,6 +524,7 @@ mod tests {
             chat_type: ChatType::OwnerSay,
             position: glam::Vec3::ZERO,
             message: "@remoutfit:shirt=n,addoutfit:pants=n".to_owned(),
+            region: None,
         };
         assert!(w.rlva.receive(&message));
         let facts = Facts {
