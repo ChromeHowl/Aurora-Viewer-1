@@ -56,6 +56,7 @@ pub mod land;
 pub mod land_buy;
 pub mod land_moderation;
 pub mod landmarks;
+pub mod legacy_lists;
 pub mod lookat;
 pub mod lsl_syntax;
 pub mod lslbridge;

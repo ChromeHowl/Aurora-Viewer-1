@@ -14689,6 +14689,25 @@ ui-weather-source-use-mine = 自分の天気を使う
 ui-weather-source-none = 天気はリージョンが決めますが、このリージョンは天気を決めていないため、ここは晴れです。自分の天気を使うとこの設定に戻ります。
 ui-weather-region-tip = 環境に Aurora の天気コードがあるリージョンや区画が、雨、雪、風、雷を決めます。許可した人は全員、同じ時に同じ天気を見ます。天気を決めていないリージョンでは晴れになります
 
+ui-options-legacy-lists = Legacy Viewer からリストをインポート
+ui-options-legacy-lists-help = このアカウントのテレポート履歴、アセットのブロックリスト、メディアフィルターのリスト、コンタクトセットを追加します。Legacy Viewer のファイルは読み取るだけです。
+ui-options-legacy-lists-button = Legacy Viewer からインポート…
+ui-options-legacy-lists-title = Legacy Viewer からインポート
+ui-options-legacy-lists-text = すべてこのアカウントのリストに追加され、ここにあるものは削除されません。アセットのブロックリストの対象はすぐにワールドから消えます。再度インポートすると、ここで削除した項目が戻ります。
+ui-options-legacy-lists-searching = Legacy Viewer のフォルダーを探しています…
+ui-options-legacy-lists-none = このアカウントのリストがある Legacy Viewer のフォルダーは見つかりませんでした。
+ui-options-legacy-lists-teleports = テレポート履歴（{ $count }）
+ui-options-legacy-lists-derender = アセットのブロックリスト（{ $count }）
+ui-options-legacy-lists-media = メディアフィルターのリスト（{ $count }）
+ui-options-legacy-lists-contact-sets = コンタクトセット（{ $count }）
+ui-options-legacy-lists-confirm = インポート
+ui-options-legacy-lists-imported = 追加または更新：テレポート履歴 { $teleports }、ブロックリスト { $derender }、メディアフィルター { $media }、コンタクトセット { $sets }。
+ui-options-legacy-lists-nothing = 新しい項目はありません。このアカウントにはすでにこれらのリストがあります。
+ui-options-legacy-lists-not-saved = コンタクトセットを保存できませんでした。
+ui-options-legacy-lists-failed = 読み取れません：{ $files }。
+ui-options-legacy-lists-unsaved = 保存できず、変更しませんでした：{ $files }。
+ui-options-legacy-lists-other-grid = このグリッドでは、同じ名前のフォルダーが別のグリッドのものである場合があります。正しいフォルダーか確認してください。
+
 picker-pipette-hint = オブジェクトの面をクリックして、インベントリからそのテクスチャまたはマテリアルを選択します。
 
 picker-pipette-no-texture = コピー可能なテクスチャがインベントリにありません。

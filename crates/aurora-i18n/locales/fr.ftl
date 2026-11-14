@@ -14788,6 +14788,25 @@ ui-weather-source-use-mine = Utiliser ma propre météo
 ui-weather-source-none = Les régions fixent la météo, et celle-ci n’en fixe aucune : le ciel est dégagé ici. Ces réglages reprennent si vous utilisez la vôtre.
 ui-weather-region-tip = Les régions et parcelles dont l'environnement porte un code Météo Aurora choisissent la pluie, la neige, le vent et l'orage ; tous ceux qui les laissent faire voient la même météo au même moment. Là où une région n’en fixe aucune, le ciel est dégagé
 
+ui-options-legacy-lists = Importer les listes du Legacy Viewer
+ui-options-legacy-lists-help = Ajoute l'historique des téléportations, la liste noire des ressources, la liste du filtre média et les cercles de ce compte. Les fichiers du Legacy Viewer sont seulement lus.
+ui-options-legacy-lists-button = Importer depuis le Legacy Viewer…
+ui-options-legacy-lists-title = Importer depuis le Legacy Viewer
+ui-options-legacy-lists-text = Tout est ajouté aux listes de ce compte et rien n'est retiré ici. Ce que nomme la liste noire des ressources quitte le monde aussitôt. Importer à nouveau ramène ce que vous avez retiré ici.
+ui-options-legacy-lists-searching = Recherche des dossiers du Legacy Viewer…
+ui-options-legacy-lists-none = Aucun dossier du Legacy Viewer contenant des listes n'a été trouvé pour ce compte.
+ui-options-legacy-lists-teleports = Historique des téléportations ({ $count })
+ui-options-legacy-lists-derender = Liste noire des ressources ({ $count })
+ui-options-legacy-lists-media = Liste du filtre média ({ $count })
+ui-options-legacy-lists-contact-sets = Cercles ({ $count })
+ui-options-legacy-lists-confirm = Importer
+ui-options-legacy-lists-imported = Ajouté ou mis à jour : { $teleports } historique, { $derender } liste noire, { $media } filtre média, { $sets } cercles.
+ui-options-legacy-lists-nothing = Rien de nouveau : ce compte a déjà ces listes.
+ui-options-legacy-lists-not-saved = Impossible d'enregistrer les cercles.
+ui-options-legacy-lists-failed = Illisible : { $files }.
+ui-options-legacy-lists-unsaved = Enregistrement impossible, inchangé : { $files }.
+ui-options-legacy-lists-other-grid = Sur cette grille, un dossier du même nom peut appartenir à une autre grille : vérifiez que c'est le bon.
+
 picker-pipette-hint = Cliquez sur une face pour sélectionner sa texture ou son matériau dans votre inventaire.
 
 picker-pipette-no-texture = Aucune texture copiable trouvée dans votre inventaire.
