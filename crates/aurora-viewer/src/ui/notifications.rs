@@ -1570,15 +1570,17 @@ mod tests {
             mute_rect.min.y > accept_rect.max.y + 1.0,
             "Mute Owner wraps under the first row: {mute_rect:?} above {accept_rect:?}"
         );
-        // Label glyphs sit a couple of pixels inside each button face, so
-        // allow a small inset difference while still catching the old bug
-        // that dropped the whole 22 px Legacy indent on the wrapped row.
+        // Label glyphs sit inside each button face, and the English labels
+        // differ in width (the French ones were all wider than the faces'
+        // minimum), so allow an inset difference of up to 10 px while still
+        // catching the old bug that dropped the whole 22 px Legacy indent
+        // on the wrapped row (it put Mute Owner about 30 px to the left).
         assert!(
-            (mute_rect.min.x - accept_rect.min.x).abs() < 4.0,
+            (mute_rect.min.x - accept_rect.min.x).abs() < 10.0,
             "wrapped Mute Owner keeps Accept's left edge: mute={mute_rect:?} accept={accept_rect:?}"
         );
         assert!(
-            mute_rect.min.x > accept_rect.min.x - 8.0,
+            mute_rect.min.x > accept_rect.min.x - 10.0,
             "wrapped Mute Owner must not lose the Legacy indent: mute={mute_rect:?} accept={accept_rect:?}"
         );
     }
