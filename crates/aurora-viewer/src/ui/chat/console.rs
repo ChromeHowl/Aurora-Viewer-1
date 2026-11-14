@@ -34,11 +34,6 @@ pub(super) fn width(ctx: &egui::Context) -> f32 {
     }
 }
 
-/// The background's opacity (ConsoleBackgroundOpacity).
-pub(super) fn opacity() -> f32 {
-    super::display::get().console_opacity
-}
-
 /// Side of the sender's picture.
 const PICTURE: f32 = 26.0;
 /// Between the picture and the text.

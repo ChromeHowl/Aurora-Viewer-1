@@ -343,6 +343,7 @@ pub fn ll_crc(data: &[u8]) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aurora_llsd::llsd_map;
 
     #[test]
     fn a_mute_update_says_the_new_state() {
