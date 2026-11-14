@@ -195,6 +195,8 @@ pub enum InvAction {
     /// A sky, water or day for myself: its asset, flags and item.
     Environment(Uuid, u32, Uuid),
     EnvironmentParcel(Uuid),
+    /// Apply to myself and keep it for the parcel under the agent.
+    EnvironmentSaveParcel(Uuid, u32),
     ExportTextures {
         items: Vec<Uuid>,
         png: bool,
