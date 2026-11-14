@@ -34,6 +34,7 @@ mod audio_mute;
 mod avatar_render_settings;
 mod bridge;
 mod busy_pause;
+mod follow_system;
 mod movelock;
 mod object_export;
 mod particle_editor;
@@ -1436,13 +1437,17 @@ fn wanted_high_contrast(settings: &Settings) -> bool {
     settings.high_contrast
 }
 
-/// The interface colours: the preferences', or in demo mode
-/// `AURORA_DEMO_COLORS` (a capture's, never saved).
+/// The interface colours: the preferences', with the system's when they
+/// are followed, or in demo mode `AURORA_DEMO_COLORS` (a capture's, never
+/// saved).
 fn wanted_interface_colors(settings: &Settings) -> crate::interface_colors::InterfaceColors {
     if std::env::var_os("AURORA_DEMO").is_some()
         && let Some(colors) = crate::interface_colors::demo_override()
     {
         return colors;
+    }
+    if crate::system_theme::following(settings) {
+        return crate::system_theme::colors(crate::system_theme::current(), &settings.interface_colors);
     }
     settings.interface_colors.clone()
 }
@@ -1701,6 +1706,9 @@ impl App {
         // before the skin's palette is built and applied
         crate::colorblind::set(wanted_vision(&settings));
         crate::high_contrast::set(wanted_high_contrast(&settings));
+        if crate::system_theme::following(&settings) {
+            crate::system_theme::start(true);
+        }
         crate::interface_colors::set(wanted_interface_colors(&settings));
         ui::surface_opacity::set(wanted_opacity(&settings));
         let skin = Skin::load(&egui_ctx, "aurora", text_scale(&settings));
@@ -10449,6 +10457,7 @@ impl App {
             self.cursors.set_palette(&self.palette);
             self.egui_ctx.set_zoom_factor(ui_scale(&self.settings));
         }
+        self.follow_system_theme();
 
         self.frame_profile.lap(Lap::Start);
         // ---- network events (time-boxed)
@@ -23842,6 +23851,7 @@ impl ApplicationHandler for App {
                     self.build.reset_selection_wheel();
                 }
             }
+            WindowEvent::ThemeChanged(theme) => crate::system_theme::window_theme(Some(*theme)),
             WindowEvent::Occluded(hidden) => {
                 self.occluded = *hidden;
             }
