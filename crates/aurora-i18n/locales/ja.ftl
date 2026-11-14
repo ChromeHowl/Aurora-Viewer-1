@@ -15614,3 +15614,11 @@ joystick-layout-auto = 自動
 joystick-layout-xinput = XInput
 
 
+
+ui-bars-window-size-custom = カスタムサイズ…
+window-size-title = ウィンドウサイズ
+window-size-width = 幅
+window-size-height = 高さ
+window-size-apply = 適用
+window-size-range = 整数のピクセル、{ $min_w } × { $min_h } から { $max_w } × { $max_h }まで。
+window-size-invalid = 幅と高さには整数のピクセル数を入力してください。

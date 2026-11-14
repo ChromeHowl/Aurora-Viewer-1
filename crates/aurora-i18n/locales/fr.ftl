@@ -15705,3 +15705,11 @@ joystick-layout-auto = Automatique
 joystick-layout-xinput = XInput
 
 
+
+ui-bars-window-size-custom = Taille personnalisée…
+window-size-title = Taille de la fenêtre
+window-size-width = Largeur
+window-size-height = Hauteur
+window-size-apply = Appliquer
+window-size-range = Pixels entiers, de { $min_w } × { $min_h } à { $max_w } × { $max_h }.
+window-size-invalid = Saisissez un nombre entier de pixels pour la largeur et la hauteur.
