@@ -1,10 +1,18 @@
-//! Advanced › Set Window Size › Custom size…: the window.
-//! floater_window_size.xml, in pixels. Port of
-//! LLFloaterWindowSize::onClickSet and LLViewerWindow::movieSize
-//! (indra/newview/llfloaterwindowsize.cpp, llviewerwindow.cpp, originally
-//! LGPL 2.1). The window keeps the size at the next start
-//! (`record_window_geometry`, as WindowWidth and WindowHeight).
+//! Advanced › Set Window Size › Custom size…: the width and height window
+//! (`ui/window_size.rs`); Apply asks the size like a menu entry does
+//! (LLFloaterWindowSize::onClickSet, indra/newview/llfloaterwindowsize.cpp,
+//! originally LGPL 2.1).
 use super::*;
+
+/// The size `AURORA_DEMO_WINDOW_SIZE=<width>x<height>` asks for.
+fn demo_size() -> Option<(u32, u32)> {
+    static SIZE: std::sync::OnceLock<Option<(u32, u32)>> = std::sync::OnceLock::new();
+    *SIZE.get_or_init(|| {
+        let v = std::env::var("AURORA_DEMO_WINDOW_SIZE").ok()?;
+        let (w, h) = v.split_once('x')?;
+        Some((w.trim().parse().ok()?, h.trim().parse().ok()?))
+    })
+}
 
 impl App {
     /// The Custom size window: Apply asks the size like a menu entry does.
