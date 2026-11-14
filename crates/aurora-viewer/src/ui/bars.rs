@@ -2711,11 +2711,9 @@ pub fn run_command(ctx: &egui::Context, cmd: &str, panels: &mut Panels) -> BarAc
         "stop_animations" => return BarAction::StopAnimations,
         "resync_animations" => return BarAction::ResyncAnimations,
         // Avatar.AlignToggle, Avatar.FaceNearest (commands.xml)
-        "avatar_align" => toggle(super::avatar_align::WINDOW, &mut panels.avatar_align),
         "pose_stand" => toggle(super::pose_stand::WINDOW, &mut panels.pose_stand),
         // Floater.Toggle fs_wearable_favorites
         "wearable_favorites" => toggle(super::wearable_favorites::WINDOW, &mut panels.wearable_favorites),
-        "face_nearest_avatar" => return BarAction::FaceNearestAvatar,
         "immersive" => return BarAction::ToggleImmersive,
         // Avatar.AlignToggle: the Compass in its saved layout
         "avatar_align" => toggle(super::avatar_align::window(panels.avatar_align_mini), &mut panels.avatar_align),
@@ -2760,7 +2758,6 @@ fn command_active(cmd: &str, panels: &Panels, flying: bool, seated: bool, mousel
         "performance" | "statistics" => panels.perf,
         "snapshot" => panels.snapshot,
         "beacons" => panels.beacons,
-        "avatar_align" => panels.avatar_align,
         "pose_stand" => panels.pose_stand,
         "wearable_favorites" => panels.wearable_favorites,
         "quickprefs" => panels.quick_prefs,
