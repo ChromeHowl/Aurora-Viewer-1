@@ -66,6 +66,13 @@ pub fn can_eject(d: Option<&GroupData>, powers: u64, member: Uuid, me: Uuid) -> 
     !m.is_owner
 }
 
+/// "Allow / Forbid text chat" (can_allow_text_chat,
+/// LLFloaterIMContainer::enableModerateContextMenuItem): greyed out on
+/// ourselves. Offered in a group's chat only, as isGroupModerator asks.
+pub fn can_moderate_text(member: Uuid, me: Uuid) -> bool {
+    member != me
+}
+
 /// canBanSelectedMember: never ourselves, not while a ban waits, never an
 /// owner once the roles are known; the removal from roles and the ban
 /// powers. A group whose data was never asked is loaded by the ban itself
@@ -124,7 +131,13 @@ pub fn menu(ui: &mut egui::Ui, p: &Palette, world: &World, session: Uuid, id: Uu
             menu::separator(ui, p);
             // two plain entries, not a toggle (the Legacy Viewer's choice,
             // against unmuting someone by accident)
-            if menu::item(ui, p, "message-circle-filled", aurora_i18n::tr!("ui-chat-allow-text-chat")) {
+            if menu::item_if(
+                ui,
+                p,
+                "message-circle-filled",
+                aurora_i18n::tr!("ui-chat-allow-text-chat"),
+                can_moderate_text(id, me),
+            ) {
                 request(
                     &ctx,
                     CtxAction::ModerateGroupText {
@@ -134,7 +147,13 @@ pub fn menu(ui: &mut egui::Ui, p: &Palette, world: &World, session: Uuid, id: Uu
                     },
                 );
             }
-            if menu::item(ui, p, "message-off", aurora_i18n::tr!("ui-chat-forbid-text-chat")) {
+            if menu::item_if(
+                ui,
+                p,
+                "message-off",
+                aurora_i18n::tr!("ui-chat-forbid-text-chat"),
+                can_moderate_text(id, me),
+            ) {
                 request(
                     &ctx,
                     CtxAction::ModerateGroupText {
@@ -335,6 +354,13 @@ mod tests {
     const OWNER: Uuid = Uuid::from_u128(3);
     const OFFICER_ROLE: Uuid = Uuid::from_u128(40);
     const ALL: u64 = powers::MEMBER_EJECT | powers::ROLE_REMOVE_MEMBER | powers::GROUP_BAN_ACCESS;
+
+    #[test]
+    fn text_chat_moderation_is_greyed_out_on_ourselves_only() {
+        let (me, other) = (ME, BOB);
+        assert!(!can_moderate_text(me, me));
+        assert!(can_moderate_text(other, me));
+    }
 
     fn member(id: Uuid, is_owner: bool) -> GroupMember {
         GroupMember {
