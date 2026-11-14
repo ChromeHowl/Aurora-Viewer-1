@@ -95,6 +95,7 @@ pub mod notification_center;
 pub mod notifications;
 pub(crate) mod numeric_drag;
 pub mod object_actions;
+pub mod omnifilter;
 pub mod options;
 pub mod owned_land;
 pub mod parcel_icons;
@@ -230,6 +231,8 @@ pub struct Panels {
     /// The conversation log (toolbar `conversation_log`, Communicate ›
     /// Conversation log…).
     pub conversation_log: bool,
+    /// The Omnifilter Rules Editor (Communicate menu, toolbar `omnifilter`).
+    pub omnifilter: bool,
     /// "About Aurora Viewer" (Help menu): the version, the system
     /// information and the licences.
     pub about: bool,
@@ -300,6 +303,7 @@ impl Panels {
             quick_prefs: false,
             voice_controls: false,
             conversation_log: false,
+            omnifilter: false,
             about: false,
             stream_title: settings.audio.stream_title_window,
             stream_title_history: false,
