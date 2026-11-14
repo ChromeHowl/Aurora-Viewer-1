@@ -842,6 +842,28 @@ fn notifications(cx: &mut Cx) {
         // the Legacy Viewer's other script dialog options
         super::notification_options::script_dialog_rows(cx);
     });
+    // FSRadar's RadarReport{ChatRange,SimRange}{Enter,Leave} and
+    // FSMilkshakeRadarToasts: the same settings as the radar's options menu
+    // (People › Near you), all off as in the Legacy Viewer
+    cx.group(tr!("ui-options-radar-reports"), |cx| {
+        cx.toggle(
+            tr!("ui-options-radar-region-enter"),
+            tr!("ui-options-radar-region-enter-hint"),
+            &field!(radar.region_enter),
+        );
+        cx.toggle(tr!("ui-options-radar-region-leave"), "", &field!(radar.region_leave));
+        cx.toggle(
+            tr!("ui-options-radar-chat-enter"),
+            tr!("ui-options-radar-chat-enter-hint"),
+            &field!(radar.chat_enter),
+        );
+        cx.toggle(tr!("ui-options-radar-chat-leave"), "", &field!(radar.chat_leave));
+        cx.toggle(
+            tr!("ui-options-radar-as-toasts"),
+            tr!("ui-options-radar-as-toasts-hint"),
+            &field!(radar.toasts),
+        );
+    });
     cx.group(tr!("ui-options-attention"), |cx| {
         cx.toggle(
             tr!("ui-options-flash-on-message"),

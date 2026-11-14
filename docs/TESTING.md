@@ -8664,7 +8664,7 @@ Human grid validation: remember MFA for account A and B, restart the viewer, the
   for the session: an offer and a request arrive, nothing is shown (each
   sender gets the automatic answer). The demo writes transcripts only with
   `AURORA_DEMO_CHATLOG`.
-- **`AURORA_DEMO_RADAR=1|tp|walk|friends|groups|profile`**: the People window.
+- **`AURORA_DEMO_RADAR=1|tp|walk|friends|groups|profile`**: the People window. With `walk`, the resident crosses the chat range and the region border every 30 s: turn the chat range and region entries on in Preferences › Chat › Residents coming and going (or in the radar's options menu) and watch the nearby chat; all are off by default.
   `1`: residents at every range in "Near you" (with
   `AURORA_DEMO_TAGS=1`, those of the name plates, several of whom have a
   profile picture). `tp`: three more residents in a region 10 km away, which
