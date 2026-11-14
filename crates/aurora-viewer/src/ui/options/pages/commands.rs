@@ -46,6 +46,11 @@ pub fn page(cx: &mut Cx) {
                 },
             );
         });
+        cx.toggle(
+            tr!("ui-options-commands-key2name-ignores-rlva"),
+            tr!("ui-options-commands-key2name-ignores-rlva-hint"),
+            &field!(chat_commands.key_to_name_ignores_rlva),
+        );
     });
     let off = !cx.s.chat_commands.enabled;
     cx.group(tr!("common-teleport-commands"), |cx| {

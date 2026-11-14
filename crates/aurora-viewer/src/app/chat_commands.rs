@@ -34,7 +34,7 @@ impl App {
 
     /// FSCommon::report_cmdline_result: a line in the local chat, also
     /// whispered on the announce channel when that option is on.
-    fn report_command(&mut self, text: impl Into<String>) {
+    pub(super) fn report_command(&mut self, text: impl Into<String>) {
         let text = text.into();
         let s = &self.settings.chat_commands;
         if s.announce_to_channel && s.announce_channel != 0 && !text.is_empty() {
@@ -133,12 +133,15 @@ impl App {
             }
             Command::Touch(id) => match self.world.objects.index_of_uuid(&id).and_then(|i| self.world.objects.get(i)) {
                 Some(o) => {
-                    let local_id = o.key.local_id;
-                    self.send(NetCommand::Touch { local_id });
-                    self.report_command(aurora_i18n::tr!(
-                        "app-chat-commands-touched-object-with-key",
-                        id = format!("{}", id)
-                    ));
+                    let touch = NetCommand::Touch { local_id: o.key.local_id };
+                    // RlvActions::canTouch: a refused touch sends and says nothing
+                    if self.world.rlva_allows_command(&touch, Uuid::nil()) {
+                        self.send(touch);
+                        self.report_command(aurora_i18n::tr!(
+                            "app-chat-commands-touched-object-with-key",
+                            id = format!("{}", id)
+                        ));
+                    }
                 }
                 None => self.report_command(aurora_i18n::tr!(
                     "app-chat-commands-object-with-key-not-found",
@@ -147,16 +150,19 @@ impl App {
             },
             Command::SitOn(id) => match self.world.objects.index_of_uuid(&id).and_then(|i| self.world.objects.get(i)) {
                 Some(o) => {
-                    let handle = o.key.region;
-                    self.send(NetCommand::RequestSit {
-                        handle,
+                    let sit = NetCommand::RequestSit {
+                        handle: o.key.region,
                         target: id,
                         offset: Vec3::ZERO,
-                    });
-                    self.report_command(aurora_i18n::tr!(
-                        "app-chat-commands-sitting-on-object-with-key",
-                        id = format!("{}", id)
-                    ));
+                    };
+                    // RlvActions::canSit
+                    if self.world.rlva_allows_command(&sit, Uuid::nil()) {
+                        self.send(sit);
+                        self.report_command(aurora_i18n::tr!(
+                            "app-chat-commands-sitting-on-object-with-key",
+                            id = format!("{}", id)
+                        ));
+                    }
                 }
                 None => self.report_command(aurora_i18n::tr!(
                     "app-chat-commands-object-with-key-not-found",
@@ -164,8 +170,12 @@ impl App {
                 )),
             },
             Command::StandUp => {
-                self.send(NetCommand::OneShotControl(aurora_net::control::STAND_UP));
-                self.report_command(aurora_i18n::tr!("app-chat-commands-standing"));
+                // RlvActions::canStand: nothing is said when @unsit refuses
+                let stand = NetCommand::OneShotControl(aurora_net::control::STAND_UP);
+                if self.world.rlva_allows_command(&stand, Uuid::nil()) {
+                    self.send(stand);
+                    self.report_command(aurora_i18n::tr!("app-chat-commands-standing"));
+                }
             }
             Command::OfferTeleport(to) => {
                 // "Join me!" stays in English: it is what the other avatar reads.
@@ -259,6 +269,7 @@ impl App {
                 ));
             }
             Command::PasteCamera(spec) => self.paste_camera(spec),
+            Command::Take(take) => self.run_take_command(take),
         }
         true
     }
@@ -365,7 +376,19 @@ impl App {
         }
         let pending = std::mem::take(&mut self.key_to_name);
         for (id, since) in pending {
-            if let Some(name) = self.world.social.avatar_names.complete(&id).or_else(|| self.world.person_name(&id)) {
+            // key_to_name_callback: RlvActions::canShowName else RlvStrings::getAnonym
+            let answer = cmdline::key_name_answer(!self.world.rlva_can_name(id), self.settings.chat_commands.key_to_name_ignores_rlva);
+            let name = match answer {
+                cmdline::KeyNameAnswer::Anonymous => Some(crate::world::rlva::privacy::anonymous(id).display_name.clone()),
+                cmdline::KeyNameAnswer::RealName => self
+                    .world
+                    .social
+                    .avatar_names
+                    .complete_real(&id)
+                    .or_else(|| self.world.social.names.get(&id).cloned()),
+                cmdline::KeyNameAnswer::Lookup => self.world.social.avatar_names.complete(&id).or_else(|| self.world.person_name(&id)),
+            };
+            if let Some(name) = name {
                 self.report_command(format!("{id}: ({name})"));
             } else if since.elapsed().as_secs() < KEY_TO_NAME_TIMEOUT_SECS {
                 self.key_to_name.push((id, since));

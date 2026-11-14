@@ -11,6 +11,7 @@
 pub mod calc;
 pub mod dice;
 mod scan;
+pub mod take;
 
 use glam::Vec3;
 use scan::Scanner;
@@ -53,6 +54,9 @@ pub struct ChatCommandSettings {
     /// the command output on a script channel.
     pub announce_to_channel: bool,
     pub announce_channel: i32,
+    /// Aurora only: `key2name` prints the real name even when RLVa
+    /// `@shownames` hides names (the Legacy Viewer prints the anonymous one).
+    pub key_to_name_ignores_rlva: bool,
 }
 
 impl Default for ChatCommandSettings {
@@ -84,6 +88,7 @@ impl Default for ChatCommandSettings {
             map_to_keep_pos: false,
             announce_to_channel: false,
             announce_channel: 362_395,
+            key_to_name_ignores_rlva: false,
         }
     }
 }
@@ -175,6 +180,28 @@ pub fn partial_name_match<'a>(partial: &str, candidates: impl IntoIterator<Item 
         .map(|(id, _)| id)
 }
 
+/// How `key2name` answers for an avatar (key_to_name_callback,
+/// indra/newview/chatbar_as_cmdline.cpp).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyNameAnswer {
+    /// RLVa hides the name (`!RlvActions::canShowName`): the anonymous name,
+    /// at once, with no lookup of the real one.
+    Anonymous,
+    /// The name from the name cache, once known.
+    Lookup,
+    /// The real name from the name cache even though RLVa hides it (the
+    /// Aurora-only option `key_to_name_ignores_rlva`).
+    RealName,
+}
+
+pub fn key_name_answer(name_hidden: bool, ignore_rlva: bool) -> KeyNameAnswer {
+    match (name_hidden, ignore_rlva) {
+        (true, false) => KeyNameAnswer::Anonymous,
+        (true, true) => KeyNameAnswer::RealName,
+        (false, _) => KeyNameAnswer::Lookup,
+    }
+}
+
 /// A recognised command, to be run by the app.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
@@ -235,6 +262,8 @@ pub enum Command {
     ClearChat,
     CopyCamera,
     PasteCamera(CameraSpec),
+    /// `zdrop`, `ztake`, `mtake`, `ktake`, `kcopy`.
+    Take(take::TakeCommand),
 }
 
 fn hover_unavailable() -> &'static str {
@@ -301,6 +330,9 @@ pub fn parse(text: &str, s: &ChatCommandSettings, mut roll: impl FnMut(u32) -> u
     }
     if is(&s.key_to_name) {
         return Some(i.uuid().map_or(Command::Report(Vec::new()), Command::KeyToName));
+    }
+    if let Some(take) = take::parse(command, &mut i) {
+        return Some(Command::Take(take));
     }
     match command {
         "/touch" => return Some(i.uuid().map_or(Command::Report(Vec::new()), Command::Touch)),
@@ -548,6 +580,36 @@ mod tests {
         assert_eq!(cmd("key2name nope"), Some(Command::Report(Vec::new())));
         assert_eq!(cmd(&format!("offertp {id}")), Some(Command::OfferTeleport(id)));
         assert_eq!(cmd(&format!("/siton {id}")), Some(Command::SitOn(id)));
+    }
+
+    #[test]
+    fn inventory_commands_are_recognised() {
+        assert!(matches!(
+            cmd("zdrop"),
+            Some(Command::Take(take::TakeCommand::Help(take::Verb::Zdrop)))
+        ));
+        assert!(matches!(
+            cmd("ztake off"),
+            Some(Command::Take(take::TakeCommand::Off(take::Verb::Ztake)))
+        ));
+        assert!(matches!(
+            cmd("kcopy Box"),
+            Some(Command::Take(take::TakeCommand::Packager { copy: true, .. }))
+        ));
+        let off = ChatCommandSettings {
+            enabled: false,
+            ..Default::default()
+        };
+        assert_eq!(parse("ztake on Box", &off, |_| 0), None);
+    }
+
+    #[test]
+    fn key2name_hides_names_like_rlva_unless_the_option_is_on() {
+        assert_eq!(key_name_answer(true, false), KeyNameAnswer::Anonymous);
+        assert_eq!(key_name_answer(true, true), KeyNameAnswer::RealName);
+        assert_eq!(key_name_answer(false, false), KeyNameAnswer::Lookup);
+        assert_eq!(key_name_answer(false, true), KeyNameAnswer::Lookup);
+        assert!(!ChatCommandSettings::default().key_to_name_ignores_rlva);
     }
 
     #[test]

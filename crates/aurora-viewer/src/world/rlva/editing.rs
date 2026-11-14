@@ -111,6 +111,26 @@ impl World {
         }
     }
 
+    /// The RLVa part of taking the root `index` into the inventory with the
+    /// chat bar commands `ztake`, `mtake`, `ktake` and `kcopy`. A take
+    /// follows `rlvCanDeleteOrReturn` (indra/newview/rlvcommon.cpp, the
+    /// check of `enable_take`): `canEdit`, no `@edit` or `@rez` on an object
+    /// we own or may modify (every object a take accepts is one of them), and
+    /// no seat under `@unsit`. A copy follows `handle_take_copy`
+    /// (indra/newview/llviewermenu.cpp): only the seat under `@unsit`
+    /// (`RlvActions::canStand`).
+    pub fn rlva_can_take_object(&self, index: usize, copy: bool) -> bool {
+        if !self.rlva.enabled() {
+            return true;
+        }
+        let Some(object) = self.objects.get(index) else { return false };
+        let seat = self.rlva.has("unsit") && self.rlva_sit_id() == object.full_id;
+        if copy {
+            return !seat;
+        }
+        self.rlva_can_edit(index) && !self.rlva.has("edit") && !self.rlva.has("rez") && !seat
+    }
+
     /// LLAttachmentDrop::handleEvent (llviewermenu.cpp): dropping takes the
     /// attachment off, so a locked one stays worn, and @rez forbids putting
     /// it in-world. The menus grey Drop on the same answer.

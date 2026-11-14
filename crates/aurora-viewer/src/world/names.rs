@@ -405,6 +405,13 @@ impl AvatarNames {
             .map(|(id, _)| *id)
     }
 
+    /// The complete name of the cached record, whatever RLVa hides; queues
+    /// a refresh like `get`. Only for what the user asked to see unhidden.
+    pub fn complete_real(&self, id: &Uuid) -> Option<String> {
+        self.want(id);
+        self.cache.get(id).map(|n| n.complete(&self.options))
+    }
+
     /// Complete name ("Jane Doe (janedoe)") if known.
     pub fn complete(&self, id: &Uuid) -> Option<String> {
         self.get(id).map(|n| n.complete(&self.options))
