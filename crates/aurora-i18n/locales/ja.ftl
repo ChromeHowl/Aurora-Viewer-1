@@ -15622,3 +15622,6 @@ window-size-height = 高さ
 window-size-apply = 適用
 window-size-range = 整数のピクセル、{ $min_w } × { $min_h } から { $max_w } × { $max_h }まで。
 window-size-invalid = 幅と高さには整数のピクセル数を入力してください。
+
+ui-options-aurora-people-in-region = 場所の横にリージョン内の人数を表示
+ui-options-aurora-people-in-region-help = 場所の詳細、土地情報、検索結果、場所、お気に入り、ミニマップで、リージョン内の人数を場所の横に表示します。オフにすると、ビューアはマップに何も問い合わせません。

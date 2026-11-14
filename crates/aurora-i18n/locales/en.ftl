@@ -15712,3 +15712,6 @@ window-size-height = Height
 window-size-apply = Apply
 window-size-range = Whole pixels, from { $min_w } × { $min_h } to { $max_w } × { $max_h }.
 window-size-invalid = Enter a whole number of pixels for the width and the height.
+
+ui-options-aurora-people-in-region = People in region beside places
+ui-options-aurora-people-in-region-help = Show how many people are in a region beside its places: place details, About Land, search results, Places, favorites and the mini-map. Off, the viewer asks the map for nothing.

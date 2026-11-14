@@ -222,6 +222,11 @@ pub fn page(cx: &mut Cx, tab: usize) {
                 tr!("ui-options-aurora-places-classic"),
                 &field!(classic_places),
             );
+            cx.toggle(
+                tr!("ui-options-aurora-people-in-region"),
+                tr!("ui-options-aurora-people-in-region-help"),
+                &field!(show_region_people),
+            );
             cx.wide().choice(
                 tr!("ui-options-aurora-destinations"),
                 tr!("ui-options-aurora-destinations-help"),

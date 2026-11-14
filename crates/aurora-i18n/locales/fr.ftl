@@ -15713,3 +15713,6 @@ window-size-height = Hauteur
 window-size-apply = Appliquer
 window-size-range = Pixels entiers, de { $min_w } × { $min_h } à { $max_w } × { $max_h }.
 window-size-invalid = Saisissez un nombre entier de pixels pour la largeur et la hauteur.
+
+ui-options-aurora-people-in-region = Personnes dans la région à côté des lieux
+ui-options-aurora-people-in-region-help = Affiche le nombre de personnes d’une région à côté de ses lieux : détails du lieu, À propos du terrain, résultats de recherche, Lieux, favoris et mini-carte. Désactivé, le viewer ne demande rien à la carte.

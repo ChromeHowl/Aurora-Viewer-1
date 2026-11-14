@@ -299,7 +299,7 @@ impl super::World {
     /// there is nothing to show: no name, or RLVa @showloc, which hides the
     /// figure wherever a place is shown (and asks nothing).
     pub fn people_in_region(&self, name: &str) -> Option<People> {
-        if self.rlva.has("showloc") {
+        if !self.show_region_people || self.rlva.has("showloc") {
             return None;
         }
         self.region_people.by_name(&self.map, name, self.own_grid(), Instant::now())
@@ -307,7 +307,7 @@ impl super::World {
 
     /// The same for a place known by its global position (metres).
     pub fn people_at_global(&self, x: f64, y: f64) -> Option<People> {
-        if self.rlva.has("showloc") || x < 0.0 || y < 0.0 {
+        if !self.show_region_people || self.rlva.has("showloc") || x < 0.0 || y < 0.0 {
             return None;
         }
         let grid = ((x / 256.0) as u32, (y / 256.0) as u32);
@@ -321,7 +321,7 @@ impl super::World {
     /// turn of a list's rows. The same rule as everywhere (the Region
     /// Tracker's), and nothing under RLVa @showloc.
     pub fn people_on_map(&self, key: (u32, u32)) -> Option<People> {
-        if self.rlva.has("showloc") {
+        if !self.show_region_people || self.rlva.has("showloc") {
             return None;
         }
         Some(
