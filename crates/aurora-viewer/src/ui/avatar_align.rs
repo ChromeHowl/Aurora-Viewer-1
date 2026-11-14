@@ -1,297 +1,330 @@
-//! "Avatar alignment": a compass that turns our avatar to a cardinal or
-//! intercardinal direction, by steps of 1 to 90°, or to face the nearest
-//! avatar (Me › Movement, the toolbar's avatar_align and face_nearest_avatar).
+//! The Compass window (toolbar `avatar_align`, Me › Avatar alignment): the
+//! Legacy Viewer's FSFloaterAvatarAlign and FSFloaterAvatarAlignMini
+//! (indra/newview/fsfloateravataralign.cpp, floater_avatar_align.xml and
+//! floater_avatar_align_mini.xml, originally LGPL 2.1). A compass shows the
+//! heading; a click on its ring turns to that octant, on its centre to the
+//! nearest avatar; buttons turn by steps. "Mini" / "Full" in the compass's
+//! corner switches between the two layouts (AvatarAlignMini). The turns
+//! themselves are the app's (`app/avatar_align.rs`), their maths
+//! `crate::avatar_align`.
 //!
-//! Port of FSAvatarAlignBase and FSFloaterAvatarAlign
-//! (indra/newview/fsfloateravataralign.cpp, floater_avatar_align.xml,
-//! originally LGPL 2.1): a click in the ring turns to the nearest 45°
-//! octant, a click in its centre (a quarter of the radius) faces the nearest
-//! avatar within 20 m, the needle shows where we face and the bearing is
-//! written under it, north up and clockwise.
-//!
-//! Differences: one window that keeps its size instead of the Legacy
-//! Viewer's full and mini floaters; nothing turns while we sit (the seat
-//! holds the avatar) and the nearest avatar is not looked for while RLVa
-//! hides the nearby residents (@shownearby).
+//! The compact layout keeps Aurora's title bar and its close button, where
+//! the Legacy mini window has neither: every window here is a `Floater`.
+
 use super::widgets::{self, Floater};
+use crate::avatar_align::Zone;
 use crate::theme::Palette;
-use egui::{Pos2, Sense, Stroke, Vec2};
-use glam::Vec3;
-use uuid::Uuid;
+use egui::{Color32, Pos2, Rect, Sense, Stroke, Vec2, pos2, vec2};
 
-/// The window's id (Avatar.AlignToggle "avatar_align").
+/// The full window's id (floater name `avatar_align`).
 pub const WINDOW: &str = "avatar_align";
-/// MAX_FACE_DISTANCE (fsfloateravataralign.h), in any direction (m).
-pub const FACE_DISTANCE: f32 = 20.0;
-/// The ring's steps (floater_avatar_align.xml), negative to the left.
-const FINE: [f32; 4] = [-10.0, -1.0, 1.0, 10.0];
-const COARSE: [f32; 4] = [-90.0, -45.0, 45.0, 90.0];
-const COMPASS: f32 = 200.0;
+/// The compact window's id (`avatar_align_mini`).
+pub const WINDOW_MINI: &str = "avatar_align_mini";
 
-/// What the window asks of the app.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// The window of the current layout.
+pub fn window(mini: bool) -> &'static str {
+    if mini { WINDOW_MINI } else { WINDOW }
+}
+
+/// What the window asks the app to do.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Action {
-    /// Face this compass bearing (degrees, north 0, east 90).
+    /// Turn to this compass bearing (a click on the ring).
     Bearing(f32),
-    /// Turn by this many degrees, positive to the right.
+    /// Turn by these degrees, negative to the left (the step buttons).
     Rotate(f32),
-    /// Face the nearest 45° direction (onClickNearest).
+    /// "To nearest cardinal".
     NearestCardinal,
-    /// Face the nearest avatar (onClickFaceNearestAvatar).
+    /// "Face nearest avatar" (and a click on the centre).
     FaceNearest,
+    /// "Mini" / "Full": the other layout.
+    ToggleMode,
 }
 
-/// Why the avatar does not turn.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Blocked {
-    Sitting,
-    /// RLVa hides the nearby residents: the nearest one is not looked for.
-    Rlva,
-}
+const FULL_SIZE: Vec2 = vec2(240.0, 420.0);
+const MINI_SIZE: Vec2 = vec2(150.0, 210.0);
 
-impl Blocked {
-    pub fn message(self) -> &'static str {
-        match self {
-            Blocked::Sitting => aurora_i18n::tr!("b4-align-sitting"),
-            Blocked::Rlva => aurora_i18n::tr!("b4-align-rlva"),
-        }
+/// The window; `yaw` is the agent's heading, for the needle and the
+/// bearing. Returns what was clicked.
+pub fn show(ctx: &egui::Context, p: &Palette, open: &mut bool, mini: bool, yaw: f32) -> Option<Action> {
+    let id = window(mini);
+    let mut floater = Floater::new(
+        id,
+        aurora_i18n::tr!("avatar-align-title"),
+        pos2(60.0, 160.0),
+        if mini { MINI_SIZE } else { FULL_SIZE },
+    );
+    floater.min_size = if mini { MINI_SIZE } else { FULL_SIZE };
+    let action = floater
+        .show(ctx, p, open, |ui| if mini { mini_body(ui, p, yaw) } else { full_body(ui, p, yaw) })
+        .flatten();
+    if action == Some(Action::ToggleMode) {
+        swap_layout(ctx, mini);
     }
+    action
 }
 
-/// Whether `action` may turn us: never seated (on an object or the ground),
-/// and the nearest avatar not under @shownearby.
-pub fn blocked(action: Action, sitting: bool, shownearby: bool) -> Option<Blocked> {
-    if sitting {
-        Some(Blocked::Sitting)
-    } else if action == Action::FaceNearest && shownearby {
-        Some(Blocked::Rlva)
+/// repositionOnToggle: the other window takes the place of this one, held
+/// by the side of the screen it is nearest to.
+fn swap_layout(ctx: &egui::Context, mini: bool) {
+    let (from, to) = (window(mini), window(!mini));
+    widgets::close_floater(ctx, from);
+    let Some(old) = ctx.memory(|m| m.area_rect(egui::Id::unique(from))) else {
+        return;
+    };
+    let size = ctx
+        .memory(|m| m.area_rect(egui::Id::unique(to)))
+        .map_or(if mini { FULL_SIZE } else { MINI_SIZE }, |r| r.size());
+    let screen = ctx.content_rect();
+    let x = if old.center().x < screen.center().x {
+        old.left()
     } else {
-        None
-    }
-}
-
-/// The compass bearing (degrees in [0, 360), north 0, east 90) of the
-/// agent's yaw (radians from east, counterclockwise).
-pub fn bearing(yaw: f32) -> f32 {
-    (90.0 - yaw.to_degrees()).rem_euclid(360.0)
-}
-
-/// The yaw (radians) that faces a compass bearing.
-pub fn yaw(bearing: f32) -> f32 {
-    (90.0 - bearing).to_radians()
-}
-
-/// The bearing after a turn of `delta` degrees, positive to the right
-/// (onClickRotate).
-pub fn rotated(bearing: f32, delta: f32) -> f32 {
-    (bearing + delta).rem_euclid(360.0)
-}
-
-/// The nearest multiple of 45° (onClickNearest, ll_round).
-pub fn nearest_cardinal(bearing: f32) -> f32 {
-    ((bearing / 45.0 + 0.5).floor() * 45.0).rem_euclid(360.0)
-}
-
-/// The bearing toward `target` on the ground plane, None straight above.
-pub fn bearing_to(from: Vec3, target: Vec3) -> Option<f32> {
-    let d = (target - from).truncate();
-    (d.length_squared() > 1e-6).then(|| d.x.atan2(d.y).to_degrees().rem_euclid(360.0))
-}
-
-/// The nearest avatar within FACE_DISTANCE of `me`, in 3D like the Legacy
-/// Viewer (our own avatar is not in `others`).
-pub fn nearest(me: Vec3, others: impl IntoIterator<Item = (Uuid, Vec3)>) -> Option<(Uuid, Vec3)> {
-    others
-        .into_iter()
-        .filter(|(_, p)| p.is_finite())
-        .map(|(id, p)| (id, p, p.distance_squared(me)))
-        .filter(|(_, _, d)| *d <= FACE_DISTANCE * FACE_DISTANCE)
-        .min_by(|a, b| a.2.total_cmp(&b.2))
-        .map(|(id, p, _)| (id, p))
-}
-
-/// Where a click lands on the compass, as the offset from its centre with
-/// y up: the centre (a quarter of the radius), an octant's bearing, or out.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Zone {
-    Center,
-    Octant(f32),
-}
-
-pub fn zone(offset: Vec2, radius: f32) -> Option<Zone> {
-    let dist = offset.length();
-    if dist > radius {
-        None
-    } else if dist < radius * 0.25 {
-        Some(Zone::Center)
+        old.right() - size.x
+    };
+    let y = if old.center().y > screen.center().y {
+        old.bottom() - size.y
     } else {
-        Some(Zone::Octant(nearest_cardinal(offset.x.atan2(offset.y).to_degrees())))
-    }
+        old.top()
+    };
+    widgets::move_floater(ctx, to, pos2(x, y));
 }
 
-#[derive(Default)]
-pub struct AvatarAlignUi;
-
-impl AvatarAlignUi {
-    /// `facing`: our bearing, None before our avatar is known.
-    pub fn show(
-        &mut self,
-        ctx: &egui::Context,
-        p: &Palette,
-        facing: Option<f32>,
-        blocked: Option<Blocked>,
-        open: &mut bool,
-    ) -> Option<Action> {
-        let mut action = None;
-        Floater::new(
-            WINDOW,
-            aurora_i18n::tr!("toolbar-command-avatar-align"),
-            egui::pos2(80.0, 140.0),
-            egui::vec2(250.0, 390.0),
-        )
-        .fixed()
-        .show(ctx, p, open, |ui| {
-            let enabled = facing.is_some() && blocked != Some(Blocked::Sitting);
-            ui.add_enabled_ui(enabled, |ui| {
-                action = compass(ui, p, facing.unwrap_or(0.0));
-                for row in [FINE, COARSE] {
-                    ui.horizontal(|ui| {
-                        let width = (ui.available_width() - 3.0 * ui.spacing().item_spacing.x) / 4.0;
-                        for delta in row {
-                            let label = format!("{delta:+}°");
-                            let tip = if delta < 0.0 {
-                                aurora_i18n::tr!("b4-align-left", degrees = delta.abs())
-                            } else {
-                                aurora_i18n::tr!("b4-align-right", degrees = delta)
-                            };
-                            if widgets::flat_button_sized(ui, p, &label, egui::vec2(width, 26.0))
-                                .on_hover_text(tip)
-                                .clicked()
-                            {
-                                action = Some(Action::Rotate(delta));
-                            }
-                        }
-                    });
-                }
-                let size = egui::vec2(ui.available_width(), 28.0);
-                if widgets::action_button(
-                    ui,
-                    p,
-                    "compass-filled",
-                    aurora_i18n::tr!("b4-align-nearest-cardinal"),
-                    widgets::ActionKind::Flat,
-                    size,
-                )
-                .on_hover_text(aurora_i18n::tr!("b4-align-nearest-cardinal-tip"))
-                .clicked()
-                {
-                    action = Some(Action::NearestCardinal);
-                }
-                if widgets::action_button(
-                    ui,
-                    p,
-                    "user-search",
-                    aurora_i18n::tr!("toolbar-command-face-nearest"),
-                    widgets::ActionKind::Flat,
-                    size,
-                )
-                .on_hover_text(aurora_i18n::tr!("b4-align-face-tip"))
-                .clicked()
-                {
-                    action = Some(Action::FaceNearest);
+fn full_body(ui: &mut egui::Ui, p: &Palette, yaw: f32) -> Option<Action> {
+    let row = 26.0;
+    // floater_avatar_align.xml: the compass, then two rows of four steps and
+    // two wide buttons. The buttons are the footer, measured from their
+    // content (large text or a taller font cannot grow the window); the
+    // compass takes the room that is left, both of buildCompassLayout's
+    // limits met.
+    let (mut above, footer) = widgets::above_footer(ui);
+    let width = above.available_width();
+    let area = vec2(width, above.available_height().max(width + 24.0));
+    let mut action = compass(&mut above, p, area, yaw, false);
+    footer.show(ui, |ui| {
+        let step = (width - 3.0 * ui.spacing().item_spacing.x) / 4.0;
+        for steps in [[-10.0, -1.0, 1.0, 10.0], [-90.0, -45.0, 45.0, 90.0]] {
+            ui.horizontal(|ui| {
+                for delta in steps {
+                    let label = if delta < 0.0 { format!("{delta}°") } else { format!("+{delta}°") };
+                    if ui
+                        .add_sized(vec2(step, row), egui::Button::new(label))
+                        .on_hover_text(rotate_tip(delta))
+                        .clicked()
+                    {
+                        action = Some(Action::Rotate(delta));
+                    }
                 }
             });
-            if let Some(blocked) = blocked {
-                ui.label(egui::RichText::new(blocked.message()).color(p.muted));
-            }
-        });
-        action
+        }
+        let nearest = ui
+            .add_sized(
+                vec2(width, row),
+                egui::Button::new(aurora_i18n::tr!("avatar-align-nearest-cardinal")),
+            )
+            .on_hover_text(aurora_i18n::tr!("avatar-align-nearest-cardinal-tip"));
+        if nearest.clicked() {
+            action = Some(Action::NearestCardinal);
+        }
+        let face = widgets::action_button(
+            ui,
+            p,
+            "user-search",
+            aurora_i18n::tr!("toolbar-command-face-nearest"),
+            widgets::ActionKind::Flat,
+            vec2(width, row),
+        )
+        .on_hover_text(aurora_i18n::tr!("avatar-align-face-nearest-tip"));
+        if face.clicked() {
+            action = Some(Action::FaceNearest);
+        }
+    });
+    action
+}
+
+fn mini_body(ui: &mut egui::Ui, p: &Palette, yaw: f32) -> Option<Action> {
+    let mut action = None;
+    // pnl_toolbar: 1° left, 1° right, face the nearest avatar
+    ui.horizontal(|ui| {
+        if widgets::icon_button(ui, p, "caret-left-filled", &rotate_tip(-1.0), true) {
+            action = Some(Action::Rotate(-1.0));
+        }
+        if widgets::icon_button(ui, p, "caret-right-filled", &rotate_tip(1.0), true) {
+            action = Some(Action::Rotate(1.0));
+        }
+        if widgets::icon_button(ui, p, "user-search", aurora_i18n::tr!("avatar-align-face-nearest-tip"), true) {
+            action = Some(Action::FaceNearest);
+        }
+    });
+    let width = ui.available_width();
+    let area = vec2(width, ui.available_height().max(width + 13.0));
+    compass(ui, p, area, yaw, true).or(action)
+}
+
+fn rotate_tip(delta: f32) -> String {
+    let degrees = delta.abs().to_string();
+    if delta < 0.0 {
+        aurora_i18n::tr!("avatar-align-rotate-left", degrees = degrees.as_str())
+    } else {
+        aurora_i18n::tr!("avatar-align-rotate-right", degrees = degrees.as_str())
     }
 }
 
-/// The compass (FSAvatarAlignBase::drawCompass): ring, hovered zone, the
-/// four cardinal arms (north in the danger colour) and the intercardinal
-/// ones, the needle of our facing and the bearing under it.
-fn compass(ui: &mut egui::Ui, p: &Palette, facing: f32) -> Option<Action> {
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(ui.available_width(), COMPASS + 24.0), Sense::click());
-    let painter = ui.painter_at(rect);
-    let r = (COMPASS * 0.5 - 18.0).max(30.0);
-    let c = Pos2::new(rect.center().x, rect.top() + COMPASS * 0.5);
-    // north up, clockwise: a bearing to a point on screen
-    let at = |bearing: f32, radius: f32| {
+/// The compass's geometry in `rect` (buildCompassLayout): its radius and
+/// centre, and what it has room for.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Layout {
+    radius: f32,
+    centre: Pos2,
+    /// Mini and too small for the bearing and the intercardinal arms.
+    compact: bool,
+    /// Full and large enough for the N / S / E / W letters.
+    letters: bool,
+    /// Half the side of the square the toggle sits in the corner of.
+    square: f32,
+}
+
+impl Layout {
+    fn new(rect: Rect, mini: bool) -> Layout {
+        // full: 27 above (the N), 80 in all (the S, the bearing); mini: 7
+        // and 29; full keeps 28 on the sides for the E and W
+        let (top, overhead, side) = if mini { (7.0, 29.0, 8.0) } else { (27.0, 80.0, 28.0) };
+        let radius = (rect.width() / 2.0 - side).min((rect.height() - overhead) / 2.0).max(30.0);
+        Layout {
+            radius,
+            centre: pos2(rect.center().x, rect.top() + top + radius),
+            compact: mini && radius < 50.0,
+            letters: !mini && radius >= 50.0,
+            square: if mini { radius } else { radius + 20.0 },
+        }
+    }
+
+    /// A point at `bearing` degrees, `distance` from the centre.
+    fn at(&self, bearing: f32, distance: f32) -> Pos2 {
         let a = bearing.to_radians();
-        c + Vec2::new(a.sin(), -a.cos()) * radius
-    };
-    let to_zone = |pos: Pos2| zone(Vec2::new(pos.x - c.x, c.y - pos.y), r);
+        self.centre + vec2(a.sin(), -a.cos()) * distance
+    }
+
+    /// The zone under `pos` (the screen's y goes down, the compass's north up).
+    fn zone(&self, pos: Pos2) -> Option<Zone> {
+        let d = pos - self.centre;
+        Zone::at(glam::Vec2::new(d.x, -d.y), self.radius)
+    }
+}
+
+/// The compass (drawCompass) in a space of `size`, with its Mini / Full
+/// toggle; a click on it is an action.
+fn compass(ui: &mut egui::Ui, p: &Palette, size: Vec2, yaw: f32, mini: bool) -> Option<Action> {
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    let lo = Layout::new(rect, mini);
+    let hover = response.hover_pos().and_then(|pos| lo.zone(pos));
+    let mut action = response
+        .clicked()
+        .then(|| response.interact_pointer_pos())
+        .flatten()
+        .and_then(|pos| lo.zone(pos))
+        .map(|zone| zone.bearing().map_or(Action::FaceNearest, Action::Bearing));
+    let painter = ui.painter_at(rect);
+    let (c, r) = (lo.centre, lo.radius);
     painter.circle_filled(c, r, p.field);
     painter.circle_stroke(c, r, Stroke::new(1.0, p.muted));
     painter.circle_stroke(c, r * 0.5, Stroke::new(1.0, p.muted_dim));
-    let hovered = response.hover_pos().and_then(to_zone);
-    match hovered {
-        Some(Zone::Center) => {
-            painter.circle_filled(c, r * 0.25, p.violet.gamma_multiply(0.3));
+    for i in 0..8 {
+        let b = i as f32 * 45.0;
+        painter.line_segment([lo.at(b, r - 7.0), lo.at(b, r)], Stroke::new(1.0, p.muted_dim));
+    }
+    match hover {
+        Some(Zone::Centre) => {
+            painter.circle_filled(c, r * 0.25, p.ink.gamma_multiply(0.18));
         }
-        Some(Zone::Octant(b)) => {
-            // the slice between the centre zone and the rim, in eight
-            // convex strips (the triangle fan of the Legacy Viewer)
-            for i in 0..8 {
-                let a0 = b - 22.5 + i as f32 * 45.0 / 8.0;
-                let a1 = a0 + 45.0 / 8.0;
-                let strip = vec![at(a0, r), at(a1, r), at(a1, r * 0.25), at(a0, r * 0.25)];
-                painter.add(egui::Shape::convex_polygon(strip, p.violet.gamma_multiply(0.25), Stroke::NONE));
-            }
+        Some(Zone::Octant(i)) => {
+            painter.add(sector(&lo, f32::from(i) * 45.0, p.ink.gamma_multiply(0.13)));
         }
         None => {}
     }
-    let kite = |bearing: f32, tip: f32, side: f32, color: egui::Color32| {
-        let left = at(bearing - 90.0, side);
-        let right = at(bearing + 90.0, side);
-        painter.add(egui::Shape::convex_polygon(
-            vec![at(bearing, tip), right, c, left],
+    // the cardinal arms (north red, south light, east and west grey), then
+    // the shorter intercardinals: a kite whose base crosses the centre
+    let arm = |bearing: f32, reach: f32, half: f32, color: Color32| {
+        let shape = egui::Shape::convex_polygon(
+            vec![lo.at(bearing, reach), lo.at(bearing + 90.0, half), lo.at(bearing - 90.0, half)],
             color,
             Stroke::NONE,
-        ));
+        );
+        painter.add(shape);
     };
-    for b in [45.0, 135.0, 225.0, 315.0] {
-        kite(b, r * 0.62, r * 0.10, p.muted_dim);
+    for (bearing, color) in [(0.0, p.danger), (180.0, p.ink), (90.0, p.muted), (270.0, p.muted)] {
+        arm(bearing, r - 4.0, r * 0.245, color);
     }
-    for (b, color) in [(0.0, p.danger), (180.0, p.ink), (90.0, p.muted), (270.0, p.muted)] {
-        kite(b, r - 4.0, r * 0.245 * 0.5, color);
+    if !lo.compact {
+        for bearing in [45.0, 135.0, 225.0, 315.0] {
+            arm(bearing, r * 0.62, r * 0.10, p.muted_dim);
+        }
     }
-    // the needle of our facing
-    painter.line_segment([c, at(facing, (r - 4.0) * 0.88)], Stroke::new(3.0, p.amber));
-    painter.circle_filled(c, 4.0, p.raised);
-    let font = egui::FontId::proportional(13.0);
-    for (b, key, color) in [
-        (0.0, "b4-align-n", p.danger),
-        (90.0, "b4-align-e", p.ink),
-        (180.0, "b4-align-s", p.ink),
-        (270.0, "b4-align-w", p.ink),
-    ] {
+    painter.circle_filled(c, 5.0, p.raised);
+    painter.circle_stroke(c, 5.0, Stroke::new(1.0, p.muted));
+    // the heading needle
+    let heading = crate::avatar_align::bearing(yaw);
+    let reach = (r - 4.0) * 0.88;
+    let needle = vec![lo.at(heading, reach), lo.at(heading + 90.0, 4.0), lo.at(heading - 90.0, 4.0)];
+    painter.add(egui::Shape::convex_polygon(needle, p.amber, Stroke::NONE));
+    let font = egui::FontId::proportional(12.0);
+    if lo.letters {
+        let d = r + 10.0;
+        let letter = |bearing: f32, align: egui::Align2, text: &str, color: Color32| {
+            painter.text(lo.at(bearing, d), align, text, font.clone(), color);
+        };
+        letter(0.0, egui::Align2::CENTER_BOTTOM, "N", p.rose);
+        letter(180.0, egui::Align2::CENTER_TOP, "S", p.ink);
+        letter(90.0, egui::Align2::LEFT_CENTER, "E", p.ink);
+        letter(270.0, egui::Align2::RIGHT_CENTER, "W", p.ink);
+    }
+    if !lo.compact {
+        let below = if mini { 10.0 } else { 25.0 };
         painter.text(
-            at(b, r + 10.0),
-            egui::Align2::CENTER_CENTER,
-            aurora_i18n::text(key),
-            font.clone(),
-            color,
+            pos2(c.x, c.y + r + below),
+            egui::Align2::CENTER_TOP,
+            format!("{heading:03.0}°"),
+            font,
+            p.ink,
         );
     }
-    painter.text(
-        Pos2::new(c.x, rect.bottom() - 8.0),
-        egui::Align2::CENTER_CENTER,
-        format!("{:03.0}°", facing.round().rem_euclid(360.0)),
-        font,
-        p.ink,
-    );
-    let zone = response
-        .clicked()
-        .then(|| response.interact_pointer_pos().and_then(to_zone))
-        .flatten();
-    match zone {
-        Some(Zone::Center) => Some(Action::FaceNearest),
-        Some(Zone::Octant(b)) => Some(Action::Bearing(b)),
-        None => None,
+    // the toggle, in the top right corner of the compass's square
+    let label = if mini {
+        aurora_i18n::tr!("avatar-align-full")
+    } else {
+        aurora_i18n::tr!("avatar-align-mini")
+    };
+    let text = egui::RichText::new(label).size(11.0);
+    let width = ui.fonts_mut(|f| f.layout_no_wrap(label.to_owned(), egui::FontId::proportional(11.0), p.ink).size().x)
+        + 2.0 * ui.spacing().button_padding.x
+        + 4.0;
+    let corner = pos2(c.x + lo.square, c.y - lo.square);
+    let toggle = Rect::from_min_size(pos2(corner.x - width, corner.y), vec2(width, 16.0));
+    // a child, not `ui.put`: put moves the cursor back up to the toggle,
+    // and the buttons under the compass would cover it
+    let mut corner_ui = ui.new_child(egui::UiBuilder::new().max_rect(toggle));
+    if corner_ui.add_sized(toggle.size(), egui::Button::new(text)).clicked() {
+        action = Some(Action::ToggleMode);
     }
+    action
+}
+
+/// The hovered octant: the 45° slice of the ring between a quarter of the
+/// radius and the rim.
+fn sector(lo: &Layout, bearing: f32, color: Color32) -> egui::Shape {
+    let mut mesh = egui::Mesh::default();
+    let (inner, outer) = (lo.radius * 0.25, lo.radius);
+    const STEPS: u32 = 8;
+    for i in 0..=STEPS {
+        let b = bearing - 22.5 + 45.0 * i as f32 / STEPS as f32;
+        mesh.colored_vertex(lo.at(b, inner), color);
+        mesh.colored_vertex(lo.at(b, outer), color);
+    }
+    for i in 0..STEPS {
+        let k = 2 * i;
+        mesh.add_triangle(k, k + 1, k + 3);
+        mesh.add_triangle(k, k + 3, k + 2);
+    }
+    egui::Shape::mesh(mesh)
 }
 
 #[cfg(test)]
@@ -299,64 +332,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bearings_are_north_up_and_clockwise() {
-        // yaw 0 faces east (+X), pi/2 north (+Y)
-        assert!((bearing(0.0) - 90.0).abs() < 1e-4);
-        assert!(bearing(std::f32::consts::FRAC_PI_2).abs() < 1e-4);
-        assert!((bearing(std::f32::consts::PI) - 270.0).abs() < 1e-3);
-        for b in [0.0, 45.0, 90.0, 200.0, 359.0] {
-            assert!((bearing(yaw(b)) - b).abs() < 1e-3, "{b}");
-        }
-        // a turn to the left lowers the bearing
-        assert_eq!(rotated(5.0, -10.0), 355.0);
-        assert_eq!(rotated(350.0, 45.0), 35.0);
+    fn the_compass_fits_its_space_like_the_legacy_layout() {
+        let full = Layout::new(Rect::from_min_size(Pos2::ZERO, vec2(230.0, 260.0)), false);
+        // the width less 28 on each side, below 27 for the N
+        assert_eq!(full.radius, 87.0);
+        assert_eq!(full.centre, pos2(115.0, 27.0 + 87.0));
+        assert!(full.letters && !full.compact);
+        // the Legacy mini window's 74 × 98: the 30 floor, too small for
+        // the bearing and the intercardinals
+        let mini = Layout::new(Rect::from_min_size(Pos2::ZERO, vec2(74.0, 98.0)), true);
+        assert_eq!(mini.radius, 30.0);
+        assert!(mini.compact && !mini.letters);
+        let mini = Layout::new(Rect::from_min_size(Pos2::ZERO, vec2(120.0, 160.0)), true);
+        assert_eq!(mini.radius, 52.0);
+        assert!(!mini.compact && !mini.letters);
+        // never below 30
+        assert_eq!(Layout::new(Rect::from_min_size(Pos2::ZERO, vec2(10.0, 10.0)), true).radius, 30.0);
     }
 
     #[test]
-    fn the_nearest_cardinal_rounds_to_45_degrees() {
-        assert_eq!(nearest_cardinal(22.0), 0.0);
-        assert_eq!(nearest_cardinal(23.0), 45.0);
-        assert_eq!(nearest_cardinal(350.0), 0.0);
-        assert_eq!(nearest_cardinal(181.0), 180.0);
-        assert_eq!(nearest_cardinal(-10.0), 0.0);
-    }
-
-    #[test]
-    fn compass_clicks_choose_the_centre_or_an_octant() {
-        let r = 80.0;
-        assert_eq!(zone(Vec2::new(5.0, 5.0), r), Some(Zone::Center));
-        assert_eq!(zone(Vec2::new(0.0, 60.0), r), Some(Zone::Octant(0.0)));
-        assert_eq!(zone(Vec2::new(60.0, 0.0), r), Some(Zone::Octant(90.0)));
-        assert_eq!(zone(Vec2::new(40.0, -40.0), r), Some(Zone::Octant(135.0)));
-        assert_eq!(zone(Vec2::new(-60.0, 0.0), r), Some(Zone::Octant(270.0)));
-        assert_eq!(zone(Vec2::new(90.0, 0.0), r), None);
-    }
-
-    #[test]
-    fn the_nearest_avatar_is_the_closest_within_20_metres() {
-        let me = Vec3::new(100.0, 100.0, 20.0);
-        let a = Uuid::from_u128(1);
-        let b = Uuid::from_u128(2);
-        let far = Uuid::from_u128(3);
-        let others = [
-            (a, me + Vec3::new(10.0, 0.0, 0.0)),
-            (b, me + Vec3::new(0.0, -6.0, 3.0)),
-            (far, me + Vec3::new(0.0, 0.0, 25.0)),
-        ];
-        assert_eq!(nearest(me, others).map(|n| n.0), Some(b));
-        assert_eq!(nearest(me, [(far, others[2].1)]), None);
-        assert_eq!(nearest(me, [(a, Vec3::NAN)]), None);
-        // facing it: south
-        let (_, at) = nearest(me, others).expect("nearest");
-        assert!((bearing_to(me, at).expect("bearing") - 180.0).abs() < 1e-3);
-        assert_eq!(bearing_to(me, me + Vec3::Z), None);
-    }
-
-    #[test]
-    fn nothing_turns_seated_and_rlva_hides_the_nearest_avatar() {
-        assert_eq!(blocked(Action::Bearing(90.0), true, false), Some(Blocked::Sitting));
-        assert_eq!(blocked(Action::FaceNearest, false, true), Some(Blocked::Rlva));
-        assert_eq!(blocked(Action::Rotate(10.0), false, true), None);
-        assert_eq!(blocked(Action::NearestCardinal, false, false), None);
+    fn a_click_above_the_centre_is_north_on_screen() {
+        let lo = Layout::new(Rect::from_min_size(Pos2::ZERO, vec2(230.0, 260.0)), false);
+        assert_eq!(lo.zone(lo.centre), Some(Zone::Centre));
+        assert_eq!(lo.zone(lo.centre - vec2(0.0, 60.0)), Some(Zone::Octant(0)));
+        assert_eq!(lo.zone(lo.centre + vec2(60.0, 0.0)), Some(Zone::Octant(2)));
+        assert_eq!(lo.zone(lo.centre + vec2(0.0, 60.0)), Some(Zone::Octant(4)));
+        assert_eq!(lo.zone(lo.centre + vec2(-50.0, -50.0)), Some(Zone::Octant(7)));
+        assert!((lo.at(90.0, 10.0) - (lo.centre + vec2(10.0, 0.0))).length() < 1e-4);
     }
 }

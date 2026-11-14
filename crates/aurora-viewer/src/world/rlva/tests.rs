@@ -679,6 +679,7 @@ fn chat(text: &str) -> ChatMessage {
         owner_id: TARGET,
         source_type: ChatSourceType::Object,
         chat_type: ChatType::OwnerSay,
+        region: None,
         position: glam::Vec3::ZERO,
         message: text.to_owned(),
     }

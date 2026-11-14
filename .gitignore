@@ -51,3 +51,5 @@ Thumbs.db
 
 # The Windows installer compiled by hand (docs/INSTALLER.md)
 /installer/output/
+# Python's bytecode caches (scripts/*.py)
+__pycache__/

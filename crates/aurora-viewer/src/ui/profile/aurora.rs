@@ -1004,6 +1004,7 @@ fn more_menu(resp: &Response, env: &Env, w: &Window, f: &Facts, compact: bool) {
     let display = names.get(&id).map(|n| n.display(&names.options));
     let legacy = world.legacy_name(&id);
     let mappable = world.can_locate_avatar(id);
+    crate::ui::chat::moderation::demo_mark(&resp.ctx, crate::ui::chat::moderation::DemoMark::ProfileMore, resp.rect);
     menu::dropdown(resp, p, egui::PopupCloseBehavior::CloseOnClick, |ui| {
         let ctx = ui.ctx().clone();
         let act = |a: CtxAction| context::request(&ctx, a);
@@ -1028,6 +1029,12 @@ fn more_menu(resp: &Response, env: &Env, w: &Window, f: &Facts, compact: bool) {
             act(CtxAction::UnhideFriend(id));
         }
         context::shadow_realm_item(ui, p, world, id);
+        // menu_profile_other.xml: separator_group_bans, then the ban and its
+        // lifting in all our groups (Profile.EnableItem: canBanFromAnyGroup)
+        if crate::world::group_ban_all::can_ban_anywhere(&world.groups.groups, id, world.agent_id) {
+            menu::separator(ui, p);
+            crate::ui::chat::moderation::ban_all_entries(ui, p, world, id, true);
+        }
         menu::separator(ui, p);
         if menu::item_if(
             ui,

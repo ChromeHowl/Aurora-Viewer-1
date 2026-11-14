@@ -348,6 +348,8 @@ impl App {
             f.hud_move_locked = w.hud_locks.locked(root.full_id);
         }
         self.object_menu_facts(idx, &mut f);
+        // the right click selected the object (or kept the selection)
+        f.save_to_contents = self.build.save_to_contents_target(w).is_some();
         f.local_preview = o.is_editable_preview();
         if f.local_preview {
             f.wear = true;
@@ -441,6 +443,7 @@ impl App {
     pub(super) fn on_ctx_action(&mut self, act: CtxAction) {
         match act {
             CtxAction::ObjectProfile(id) => self.open_object_profile(id),
+            CtxAction::SaveAs(id, format) => self.open_object_export(id, format),
             CtxAction::Pathfinding { id, characters } => {
                 if let Some(index) = self.world.objects.index_of_uuid(&id)
                     && let Some(object) = self.world.objects.get(linkset_root(&self.world, index))
@@ -680,6 +683,18 @@ impl App {
                     self.world.system_message(e);
                 }
             }
+            CtxAction::ModerateGroupText { session, agent, allow } => {
+                self.send(aurora_net::NetCommand::ModerateText { session, agent, allow });
+            }
+            CtxAction::GroupChatEject { group, agent } => {
+                self.group_chat_confirm = Some(ui::chat::moderation::Confirm::Eject { group, agent });
+            }
+            CtxAction::GroupChatBan { group, agent } => {
+                self.group_chat_confirm = Some(ui::chat::moderation::Confirm::Ban { group, agent });
+            }
+            CtxAction::BanFromAllGroups { agent, ban } => {
+                self.group_chat_confirm = Some(ui::chat::moderation::Confirm::BanAll { agent, ban });
+            }
             // the volumes of the call's participants: applied live, saved
             // once the slider rests
             CtxAction::SetVoiceVolume(id, v) => {
@@ -728,6 +743,11 @@ impl App {
                     self.world.unblock(root, &name, 0);
                 } else if let Err(e) = self.world.block(root, &name, crate::world::mutes::MuteType::Object) {
                     self.world.system_message(e);
+                }
+            }
+            CtxAction::BlockObjectOwner { owner, group_owned } => {
+                if let Err(error) = self.world.block_object_owner(owner, group_owned) {
+                    self.world.system_message(error);
                 }
             }
             CtxAction::Edit(id) => {
@@ -817,6 +837,10 @@ impl App {
                     }
                     self.flush_build();
                 }
+            }
+            CtxAction::SaveToObjectContents => {
+                self.build.save_to_contents(&mut self.world);
+                self.flush_build();
             }
             CtxAction::Link(id) => self.menu_link(id),
             CtxAction::TakeSeparate { id, copy } => self.take_separate(id, copy),

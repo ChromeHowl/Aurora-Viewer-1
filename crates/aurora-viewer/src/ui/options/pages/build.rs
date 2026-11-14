@@ -83,6 +83,17 @@ pub fn page(cx: &mut Cx) {
             tr!("ui-options-build-auto-material-tab-hint"),
             &field!(build.auto_material_tab),
         );
+        // ShowSelectionBeam (on); EffectColor of Preferences › Colors
+        cx.keywords("ShowSelectionBeam beam").toggle(
+            tr!("ui-options-build-show-beams"),
+            tr!("ui-options-build-show-beams-hint"),
+            &field!(beams.show),
+        );
+        cx.keywords("EffectColor beam").color(
+            tr!("ui-options-build-beam-color"),
+            tr!("ui-options-build-beam-color-hint"),
+            &field!(beams.color),
+        );
     });
     // the Legacy Viewer's Build 1 and Build 2 tabs and Build menu options
     // (settings/build_tools.rs)

@@ -3,7 +3,8 @@
 //! invited who have not joined yet, each with their picture and status,
 //! the speaker of who speaks in our call and the struck microphone of who a
 //! moderator muted. A click opens the profile, a right click the resident's
-//! menu. Firestorm's participant list of a session (LLParticipantList,
+//! menu, with a group chat's moderator options (`moderation`). The Legacy
+//! Viewer's participant list of a session (LLParticipantList,
 //! FSParticipantList), as a column.
 //!
 //! A conference also lists who is not in it: the residents it was started
@@ -173,7 +174,7 @@ pub(super) fn show(
                         m,
                         dim,
                         info.is_some_and(|i| i.moderators.contains(&m.id)),
-                        text,
+                        conversation,
                     );
                 }
             }
@@ -199,10 +200,13 @@ fn row(
     m: &Member,
     dim: bool,
     moderator: bool,
-    text: Option<(Uuid, bool)>,
+    conversation: Uuid,
 ) {
     st.wanted_pics.insert(m.id);
     let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), ROW_H), egui::Sense::hover());
+    if m.id == crate::demo::DEMO_NOVA {
+        super::moderation::demo_mark(ui.ctx(), super::moderation::DemoMark::Row, rect);
+    }
     let resp = ui.interact(rect, member_id(m.id), egui::Sense::click());
     if resp.hovered() {
         ui.painter()
@@ -246,23 +250,7 @@ fn row(
         egui::FontId::proportional(12.5),
         color,
     );
-    match text {
-        // the resident's menu, then the moderator's switch of their text
-        // (LLIMSpeakerMgr::toggleAllowTextChat)
-        Some((session, allowed)) => {
-            crate::ui::contacts::drag::person_source(&resp, m.id);
-            crate::ui::menu::context_menu(&resp, p, |ui| {
-                crate::ui::context::avatar_list_menu(ui, p, world, m.id, crate::ui::context::AvatarList::Name);
-                crate::ui::menu::separator(ui, p);
-                let label = aurora_i18n::tr!("chat-extras-allow-text");
-                if crate::ui::menu::check(ui, p, "message-off", label, allowed, true) {
-                    crate::ui::context::request(ui.ctx(), crate::ui::context::CtxAction::ModerateText(session, m.id, allowed));
-                }
-            });
-            super::line_menu::inline(&resp);
-        }
-        None => super::name_menu(&resp, p, world, m.id),
-    }
+    super::member_menu(&resp, p, world, conversation, m.id);
     let tip = if moderator {
         aurora_i18n::tr!("ui-chat-moderator-click-profile")
     } else {

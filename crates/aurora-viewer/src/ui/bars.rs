@@ -53,7 +53,7 @@ pub enum BarAction {
     /// Build › Edit particles (Object.EditParticles).
     EditParticles,
     /// Build › Save back to object contents (Tools.SaveToObjectInventory).
-    SaveBackToContents,
+    SaveToObjectContents,
     Portals,
     CheckUpdates,
     ReportBug,
@@ -115,7 +115,8 @@ pub enum BarAction {
     ToggleMoveLock,
     /// Me › Quickjump (Self.toggleIgnorePreJump, FSIgnoreFinishAnimation).
     ToggleQuickjump,
-    /// Me › Movement › Face nearest avatar (Avatar.FaceNearest).
+    /// Toolbar `face_nearest_avatar`, Me › Face nearest avatar
+    /// (Avatar.FaceNearest).
     FaceNearestAvatar,
     /// Advanced › Quiet snapshots (PlayModeUISndSnapshot).
     ToggleQuietSnapshots,
@@ -432,9 +433,9 @@ pub struct StatusInfo<'a> {
     /// Build › Edit particles applies: an object we own is selected
     /// (Object.EnableEditParticles).
     pub edit_particles: bool,
-    /// Build › Save back to object contents applies: the selected object
-    /// was rezzed from an object's contents (Tools.EnableSaveToObjectInventory).
-    pub save_back: bool,
+    /// Build › Save back to object contents applies: the selection was
+    /// rezzed from an object's contents (Tools.EnableSaveToObjectInventory).
+    pub save_to_contents: bool,
     pub health: HealthMenu,
     pub hover_tips: HoverTipsMenu,
     pub world_overlays: crate::world::beacons::Overlays,
@@ -500,7 +501,11 @@ pub fn maturity_name(sim_access: u8) -> &'static str {
 /// opacity, over the windows' blur (`widgets::finish_bar_glass`).
 fn bar_frame(p: &Palette) -> egui::Frame {
     egui::Frame::new()
-        .fill(Color32::from_rgba_unmultiplied(p.bar.r(), p.bar.g(), p.bar.b(), p.panel_alpha))
+        .fill(super::surface_opacity::frame_fill(
+            p,
+            Color32::from_rgba_unmultiplied(p.bar.r(), p.bar.g(), p.bar.b(), p.panel_alpha),
+            super::surface_opacity::bars(),
+        ))
         .inner_margin(egui::Margin::symmetric(6, 0))
 }
 
@@ -1038,12 +1043,20 @@ fn main_menus(ui: &mut egui::Ui, p: &Palette, panels: &mut Panels, st: &StatusIn
         if menu::check(ui, p, "arrow-big-up-lines-filled", quickjump, st.quickjump, true) {
             *action = BarAction::ToggleQuickjump;
         }
-        // menu_viewer.xml: Avatar › Movement › Face nearest avatar, Avatar alignment
+        // menu_viewer.xml: Avatar › Movement › Face nearest avatar and
+        // Avatar alignment (Avatar.FaceNearest, Avatar.AlignToggle), after
+        // Quickjump
         if menu::item(ui, p, "user-search", aurora_i18n::tr!("toolbar-command-face-nearest")) {
             *action = BarAction::FaceNearestAvatar;
         }
         let align = aurora_i18n::tr!("toolbar-command-avatar-align");
-        flip_window(ui, p, "user-scan", align, super::avatar_align::WINDOW, &mut panels.avatar_align);
+        if menu::check(ui, p, "user-scan", align, panels.avatar_align, true) {
+            super::widgets::toggle_floater(
+                ui.ctx(),
+                super::avatar_align::window(panels.avatar_align_mini),
+                &mut panels.avatar_align,
+            );
+        }
         if menu::item(ui, p, "swimming", aurora_i18n::tr!("movement-title")) {
             *action = BarAction::MovementEnhancer;
         }
@@ -1563,7 +1576,7 @@ fn main_menus(ui: &mut egui::Ui, p: &Palette, panels: &mut Panels, st: &StatusIn
         );
     });
     menu::submenu(ui, p, "box", aurora_i18n::tr!("common-build"), true, |ui| {
-        build_menu(ui, p, panels, action, &st.ik_keys, st.edit_particles, st.save_back);
+        build_menu(ui, p, panels, action, &st.ik_keys, st.edit_particles, st.save_to_contents);
     });
     menu::submenu(ui, p, "briefcase-filled", aurora_i18n::tr!("common-contents"), true, |ui| {
         contents_menu(ui, p, panels, action, st.marketplace, st.motd);
@@ -1815,7 +1828,7 @@ fn build_menu(
     action: &mut BarAction,
     ik_keys: &str,
     edit_particles: bool,
-    save_back: bool,
+    save_to_contents: bool,
 ) {
     if menu::check(
         ui,
@@ -1859,9 +1872,21 @@ fn build_menu(
     ) {
         *action = BarAction::EditParticles;
     }
-    // menu_viewer.xml: Build › Object › Save Back to Object Contents
-    if menu::item_if(ui, p, "package-import", aurora_i18n::tr!("l5-save-back"), save_back) {
-        *action = BarAction::SaveBackToContents;
+    // menu_viewer.xml: Build › Object › Save Back to Object Contents, right
+    // after Edit Particles
+    if menu::item_tip(
+        ui,
+        p,
+        "package-import",
+        aurora_i18n::tr!("ui-bars-save-to-object-contents"),
+        save_to_contents,
+        if save_to_contents {
+            ""
+        } else {
+            aurora_i18n::tr!("ui-bars-save-to-object-contents-tip")
+        },
+    ) {
+        *action = BarAction::SaveToObjectContents;
     }
     menu::separator(ui, p);
     if menu::item(ui, p, "file-upload-filled", aurora_i18n::tr!("import-menu")) {
@@ -2686,6 +2711,9 @@ pub fn run_command(ctx: &egui::Context, cmd: &str, panels: &mut Panels) -> BarAc
         "wearable_favorites" => toggle(super::wearable_favorites::WINDOW, &mut panels.wearable_favorites),
         "face_nearest_avatar" => return BarAction::FaceNearestAvatar,
         "immersive" => return BarAction::ToggleImmersive,
+        // Avatar.AlignToggle: the Compass in its saved layout
+        "avatar_align" => toggle(super::avatar_align::window(panels.avatar_align_mini), &mut panels.avatar_align),
+        "face_nearest_avatar" => return BarAction::FaceNearestAvatar,
         _ => {}
     }
     BarAction::None
@@ -2719,6 +2747,7 @@ fn command_active(cmd: &str, panels: &Panels, flying: bool, seated: bool, mousel
         "camera_path" => panels.camera_path,
         "phototools_view" => panels.cameratools,
         "gridstatus" => panels.grid_status,
+        "avatar_align" => panels.avatar_align,
         "webbrowser" => panels.web_browser,
         "destinations" => panels.destinations,
         "voice" => panels.voice_controls,

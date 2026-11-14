@@ -669,6 +669,8 @@ impl World {
                 self.groups.active = id;
                 self.groups.active_title = title.clone();
                 self.groups.active_received = true;
+                // A blank worn title leaves the name tag without a title.
+                // The Group titles window still lists that role (#3147).
                 let active_title = (!id.is_nil() && !title.is_empty()).then_some(title.as_str());
                 if let Some(i) = self.objects.index_of_uuid(&self.agent_id)
                     && let Some(o) = self.objects.get_mut(i)
@@ -770,6 +772,12 @@ impl World {
                     aurora_i18n::tr!("world-groups-action-denied")
                 };
                 self.session_system(session, format!("{what}{}", reason(&error)));
+            }
+            // moderationActionCoro → showSessionEventError("mute", …): the
+            // notice shows the event alone, its reason is left out
+            NetEvent::SessionModerationFailed { session, forbidden } => {
+                log::warn!("session {session}: moderation refused (not a moderator: {forbidden})");
+                self.session_system(session, aurora_i18n::tr!("world-groups-error-while-moderating"));
             }
             NetEvent::SessionClosed { session, reason: r } => {
                 self.cancel_saved_im(session);

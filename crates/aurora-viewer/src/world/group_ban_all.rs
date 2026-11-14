@@ -1,247 +1,205 @@
-//! "Ban from all my groups" and "Unban from all my groups" of a resident's
-//! menus: one GroupAPIv1 request per group where we hold the power to
-//! manage bans, one group at a time with a pause between them, then a
-//! report of where it worked and where it failed. A resident banned from a
-//! group they are (or may be) a member of is ejected too, where we may eject.
+//! Ban a resident from every group where we may manage bans, or lift the
+//! ban in all of them. Port of LLGroupActions::canBanFromAnyGroup,
+//! confirmBanFromAllGroups, callbackBanFromAllGroups and
+//! banFromAllGroupsCoro (indra/newview/llgroupactions.cpp), with the
+//! muting of the server's ejection alerts of process_alert_core
+//! (indra/newview/llviewermessage.cpp).
 //!
-//! Port of LLGroupActions::canBanFromAnyGroup, confirmBanFromAllGroups and
-//! banFromAllGroupsCoro (indra/newview/llgroupactions.cpp, originally LGPL
-//! 2.1), with their FSBanFromAllGroups, FSUnbanFromAllGroups,
-//! FSBanFromAllGroupsStarted, FSBanFromAllGroupsReport and
-//! FSUnbanFromAllGroupsReport messages (notifications.xml). The requests
-//! are the group window's own (`group_data`: `NetCommand::GroupBans`, the
-//! ejection's EjectGroupMemberRequest).
+//! The network sends one group after the other (`NetCommand::BanInGroups`);
+//! each answer comes back here, which keeps our copy of the group's bans,
+//! ejects a banned member, and reports once every group has answered.
 
-use super::World;
+use super::{World, attention, notifications};
 use aurora_net::NetCommand;
-use aurora_net::groups::{ban, powers};
+use aurora_net::groups::powers;
+use aurora_net::social::GroupMembership;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
-/// The pause between two groups (suspendUntilTimeout(0.5)), so that the
-/// requests never look like a flood.
-const PAUSE: Duration = Duration::from_millis(500);
-/// A request the server never answered counts as failed after this.
-const GIVE_UP: Duration = Duration::from_secs(60);
+/// How long the ejection alerts stay muted after the last answer: the
+/// ejection replies trail the last request (suspendUntilTimeout(5.f)).
+const QUIET_AFTER: Duration = Duration::from_secs(5);
 
-/// A run over the groups, one at a time.
-#[derive(Debug, Clone, PartialEq)]
-pub struct BanAll {
-    pub resident: Uuid,
-    pub name: String,
-    pub ban: bool,
-    /// The groups to do, in the order of the question (by name).
+/// The groups where we may manage bans (GP_GROUP_BAN_ACCESS), by name in
+/// dictionary order: (id, name).
+pub fn ban_groups(groups: &[GroupMembership]) -> Vec<(Uuid, String)> {
+    let mut v: Vec<(Uuid, String)> = groups
+        .iter()
+        .filter(|g| g.powers & powers::GROUP_BAN_ACCESS != 0)
+        .map(|g| (g.id, g.name.clone()))
+        .collect();
+    v.sort_by_cached_key(|(_, name)| crate::natural_order::key(name));
+    v
+}
+
+/// canBanFromAnyGroup: someone else, and one group at least where we may
+/// manage bans.
+pub fn can_ban_anywhere(groups: &[GroupMembership], agent: Uuid, me: Uuid) -> bool {
+    !agent.is_nil() && agent != me && groups.iter().any(|g| g.powers & powers::GROUP_BAN_ACCESS != 0)
+}
+
+/// One ban (or lifting) sent to several groups.
+#[derive(Debug, Clone)]
+struct Run {
+    agent: Uuid,
+    ban: bool,
     groups: Vec<(Uuid, String)>,
-    next: usize,
-    /// The group asked and since when.
-    waiting: Option<(Uuid, Instant)>,
-    /// When the last answer came: the next request waits `PAUSE` after it.
-    answered: Option<Instant>,
+    answered: Vec<Uuid>,
+    succeeded: Vec<String>,
+    failed: Vec<String>,
+}
+
+/// What a finished run tells (FSBanFromAllGroupsReport /
+/// FSUnbanFromAllGroupsReport).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Report {
+    pub agent: Uuid,
+    pub ban: bool,
+    pub count: usize,
     pub succeeded: Vec<String>,
     pub failed: Vec<String>,
 }
 
-/// What a step of the run asks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Step {
-    /// Nothing now.
-    Wait,
-    /// The request for this group.
-    Send(Uuid),
-    /// Every group was done: the report.
-    Done,
+/// The runs on their way, and the end of the alerts' muting.
+#[derive(Debug, Default)]
+pub struct BanAll {
+    runs: Vec<Run>,
+    quiet_until: Option<Instant>,
 }
 
 impl BanAll {
-    pub fn new(resident: Uuid, name: String, ban: bool, groups: Vec<(Uuid, String)>) -> BanAll {
-        BanAll {
-            resident,
-            name,
+    /// A run starts; the command that sends it.
+    pub fn start(&mut self, agent: Uuid, ban: bool, groups: Vec<(Uuid, String)>) -> NetCommand {
+        let ids = groups.iter().map(|(id, _)| *id).collect();
+        self.runs.push(Run {
+            agent,
             ban,
             groups,
-            next: 0,
-            waiting: None,
-            answered: None,
+            answered: Vec::new(),
             succeeded: Vec::new(),
             failed: Vec::new(),
-        }
+        });
+        NetCommand::BanInGroups { agent, groups: ids, ban }
     }
 
-    pub fn count(&self) -> usize {
-        self.groups.len()
-    }
-
-    /// The next step at `now`: a request once the previous one was answered
-    /// and the pause is over; a request left unanswered fails after
-    /// `GIVE_UP`.
-    pub fn step(&mut self, now: Instant) -> Step {
-        if let Some((group, since)) = self.waiting {
-            if now.duration_since(since) < GIVE_UP {
-                return Step::Wait;
-            }
-            log::warn!("group bans: no answer for group {group}");
-            self.answer(group, false, now);
-        }
-        if self.answered.is_some_and(|at| now.duration_since(at) < PAUSE) {
-            return Step::Wait;
-        }
-        match self.groups.get(self.next) {
-            Some((group, _)) => {
-                let group = *group;
-                self.next += 1;
-                self.waiting = Some((group, now));
-                Step::Send(group)
-            }
-            None => Step::Done,
-        }
-    }
-
-    /// The server's answer for `group`; false when the run was not waiting
-    /// for it (another window's request).
-    pub fn answer(&mut self, group: Uuid, ok: bool, now: Instant) -> bool {
-        if self.waiting.map(|(g, _)| g) != Some(group) {
-            return false;
-        }
-        self.waiting = None;
-        self.answered = Some(now);
-        let name = self
+    /// The answer of one group; the report once the run's last group
+    /// answered. An answer no run waits for is dropped.
+    pub fn answer(&mut self, group: Uuid, agent: Uuid, ban: bool, ok: bool, now: Instant) -> Option<Report> {
+        let i = self
+            .runs
+            .iter()
+            .position(|r| r.agent == agent && r.ban == ban && !r.answered.contains(&group) && r.groups.iter().any(|(g, _)| *g == group))?;
+        let run = &mut self.runs[i];
+        run.answered.push(group);
+        let name = run
             .groups
             .iter()
             .find(|(g, _)| *g == group)
             .map(|(_, n)| n.clone())
             .unwrap_or_default();
         if ok {
-            self.succeeded.push(name);
+            run.succeeded.push(name);
         } else {
-            self.failed.push(name);
+            run.failed.push(name);
         }
-        true
+        if run.answered.len() < run.groups.len() {
+            return None;
+        }
+        let run = self.runs.remove(i);
+        if self.runs.is_empty() {
+            self.quiet_until = Some(now + QUIET_AFTER);
+        }
+        Some(Report {
+            agent: run.agent,
+            ban: run.ban,
+            count: run.groups.len(),
+            succeeded: run.succeeded,
+            failed: run.failed,
+        })
     }
-}
 
-/// The groups where we may manage bans (GP_GROUP_BAN_ACCESS), sorted by
-/// name as the question lists them; none for ourselves or nobody
-/// (canBanFromAnyGroup).
-pub fn ban_groups(groups: &[aurora_net::GroupMembership], me: Uuid, resident: Uuid) -> Vec<(Uuid, String)> {
-    if resident.is_nil() || resident == me {
-        return Vec::new();
+    /// process_alert_core while a run is on its way (and 5 s after): the
+    /// server answers every ejection of a non-member with an alert.
+    pub fn mutes_alert(&self, message: &str, now: Instant) -> bool {
+        let running = !self.runs.is_empty() || self.quiet_until.is_some_and(|t| now < t);
+        if !running {
+            return false;
+        }
+        let m = message.to_lowercase();
+        m.contains("unable to eject") || m.contains("ejectee")
     }
-    let mut list: Vec<(Uuid, String)> = groups
-        .iter()
-        .filter(|g| g.powers & powers::GROUP_BAN_ACCESS != 0)
-        .map(|g| (g.id, g.name.clone()))
-        .collect();
-    list.sort_by(|a, b| crate::natural_order::cmp(&a.1, &b.1));
-    list
-}
-
-/// The names in a report: "-" for none, as the Legacy report.
-pub fn names(list: &[String]) -> String {
-    if list.is_empty() { "-".to_owned() } else { list.join(", ") }
 }
 
 impl World {
-    /// The groups where "Ban from all my groups" would act on `resident`.
-    pub fn group_ban_targets(&self, resident: Uuid) -> Vec<(Uuid, String)> {
-        ban_groups(&self.groups.groups, self.agent_id, resident)
-    }
-
-    /// The question was answered: the run starts, and says so.
-    pub fn start_group_ban_all(&mut self, resident: Uuid, name: String, ban: bool) {
-        let groups = self.group_ban_targets(resident);
-        if groups.is_empty() || self.group_ban_all.is_some() {
+    /// callbackBanFromAllGroups, once confirmed: the groups asked again (a
+    /// power may have gone since the question), the notice, then the run.
+    pub fn ban_in_all_groups(&mut self, agent: Uuid, ban: bool) {
+        if !can_ban_anywhere(&self.groups.groups, agent, self.agent_id) {
             return;
         }
-        let count = groups.len().to_string();
+        let groups = ban_groups(&self.groups.groups);
+        let name = self.social.name_of(&agent);
         self.notifications.push(
-            super::notifications::Kind::Info,
-            aurora_i18n::tr!("l2s-ban-all-title"),
-            aurora_i18n::tr!("l2s-ban-all-started", name = name.as_str(), count = count.as_str()),
-            super::notifications::Data::None,
+            notifications::Kind::Group,
+            aurora_i18n::tr!("world-ban-all-title"),
+            aurora_i18n::tr!("world-ban-all-started", name = name, count = groups.len()),
+            notifications::Data::None,
         );
-        self.group_ban_all = Some(BanAll::new(resident, name, ban, groups));
+        let cmd = self.ban_all.start(agent, ban, groups);
+        self.group_data.out.push(cmd);
     }
 
-    /// Each frame: the next request, or the report at the end.
-    pub fn tick_group_ban_all(&mut self, now: Instant) {
-        let Some(run) = self.group_ban_all.as_mut() else {
-            return;
-        };
-        match run.step(now) {
-            Step::Wait => {}
-            Step::Send(group) => {
-                let (resident, ban) = (run.resident, run.ban);
-                self.groups.out.push(NetCommand::GroupBans {
-                    group,
-                    action: Some(if ban { ban::CREATE } else { ban::DELETE }),
-                    ids: vec![resident],
-                    refresh: false,
-                });
-            }
-            Step::Done => {
-                let Some(run) = self.group_ban_all.take() else {
-                    return;
-                };
-                let (count, done) = (run.count().to_string(), run.succeeded.len().to_string());
-                let (succeeded, failed) = (names(&run.succeeded), names(&run.failed));
-                let body = if run.ban {
-                    aurora_i18n::tr!(
-                        "l2s-ban-all-report",
-                        name = run.name.as_str(),
-                        done = done.as_str(),
-                        count = count.as_str(),
-                        succeeded = succeeded.as_str(),
-                        failed = failed.as_str()
-                    )
-                } else {
-                    aurora_i18n::tr!(
-                        "l2s-unban-all-report",
-                        name = run.name.as_str(),
-                        done = done.as_str(),
-                        count = count.as_str(),
-                        succeeded = succeeded.as_str(),
-                        failed = failed.as_str()
-                    )
-                };
-                self.notifications.push(
-                    super::notifications::Kind::Info,
-                    aurora_i18n::tr!("l2s-ban-all-title"),
-                    body,
-                    super::notifications::Data::None,
-                );
+    /// One group's answer: our copy of its bans (createBanEntry /
+    /// removeBanEntry), the ejection of a banned member (a ban alone does
+    /// not remove them; not when the members' list says they are not
+    /// one), then the report once all have answered.
+    pub(super) fn on_group_ban_in_group(&mut self, group: Uuid, agent: Uuid, ban: bool, ok: bool) {
+        if ok {
+            self.group_data.note_ban(group, agent, ban);
+            let known_non_member = self
+                .group_data
+                .get(&group)
+                .is_some_and(|g| g.members_complete && !g.members.contains_key(&agent));
+            let can_eject = self.groups.group(&group).is_some_and(|g| g.powers & powers::MEMBER_EJECT != 0);
+            if ban && !known_non_member && can_eject {
+                self.group_data.eject(group, vec![agent], self.agent_id);
             }
         }
-    }
-
-    /// GroupBanDone: the run's answer, then, after a ban, the ejection where
-    /// we may eject and the resident is not known to be outside the group
-    /// (a ban alone does not remove a member); our copy of the ban list
-    /// follows.
-    pub(super) fn on_group_ban_done(&mut self, group: Uuid, action: i32, ids: &[Uuid], ok: bool) {
-        let Some(run) = self.group_ban_all.as_mut() else {
+        let Some(r) = self.ban_all.answer(group, agent, ban, ok, Instant::now()) else {
             return;
         };
-        if ids != [run.resident] || action != if run.ban { ban::CREATE } else { ban::DELETE } {
-            return;
-        }
-        if !run.answer(group, ok, Instant::now()) || !ok {
-            return;
-        }
-        let (resident, banned) = (run.resident, run.ban);
-        if !banned {
-            self.group_data.forget_ban(group, resident);
-            return;
-        }
-        self.group_data.note_ban(group, resident);
-        let may_eject = self.groups.group(&group).is_some_and(|g| g.powers & powers::MEMBER_EJECT != 0);
-        let known_outside = self
-            .group_data
-            .get(&group)
-            .is_some_and(|g| g.members_complete && !g.members.contains_key(&resident));
-        if may_eject && !known_outside {
-            let me = self.agent_id;
-            self.group_data.eject(group, vec![resident], me);
-        }
+        let list = |v: &[String]| if v.is_empty() { "-".to_owned() } else { v.join(", ") };
+        let (name, count, done) = (self.social.name_of(&r.agent), r.count, r.succeeded.len());
+        let (succeeded, failed) = (list(&r.succeeded), list(&r.failed));
+        let text = if r.ban {
+            aurora_i18n::tr!(
+                "world-ban-all-report",
+                name = name,
+                done = done,
+                count = count,
+                succeeded = succeeded,
+                failed = failed
+            )
+        } else {
+            aurora_i18n::tr!(
+                "world-unban-all-report",
+                name = name,
+                done = done,
+                count = count,
+                succeeded = succeeded,
+                failed = failed
+            )
+        };
+        log::info!("group bans of {}: {done} of {count} groups", r.agent);
+        let id = self.notifications.push(
+            notifications::Kind::Group,
+            aurora_i18n::tr!("world-ban-all-title"),
+            text,
+            notifications::Data::None,
+        );
+        // the Legacy report is an alert: it asks for attention
+        let notice = self.notice_of(id, attention::Open::Notifications);
+        self.ask_attention(attention::Cause::Notice, notice);
     }
 }
 
@@ -249,9 +207,15 @@ impl World {
 mod tests {
     use super::*;
 
-    fn group(id: u128, name: &str, powers: u64) -> aurora_net::GroupMembership {
-        aurora_net::GroupMembership {
-            id: Uuid::from_u128(id),
+    const ME: Uuid = Uuid::from_u128(1);
+    const BOB: Uuid = Uuid::from_u128(2);
+    const G1: Uuid = Uuid::from_u128(10);
+    const G2: Uuid = Uuid::from_u128(11);
+    const G3: Uuid = Uuid::from_u128(12);
+
+    fn group(id: Uuid, name: &str, powers: u64) -> GroupMembership {
+        GroupMembership {
+            id,
             name: name.into(),
             insignia: Uuid::nil(),
             powers,
@@ -261,49 +225,62 @@ mod tests {
         }
     }
 
-    #[test]
-    fn only_the_groups_where_we_manage_bans_by_name() {
-        let me = Uuid::from_u128(1);
-        let jane = Uuid::from_u128(2);
-        let groups = [
-            group(10, "Zebra Club", powers::GROUP_BAN_ACCESS),
-            group(11, "No power", powers::MEMBER_EJECT),
-            group(12, "art gallery", powers::GROUP_BAN_ACCESS | powers::MEMBER_EJECT),
-        ];
-        let list = ban_groups(&groups, me, jane);
-        assert_eq!(
-            list.iter().map(|(_, n)| n.as_str()).collect::<Vec<_>>(),
-            ["art gallery", "Zebra Club"]
-        );
-        assert!(ban_groups(&groups, me, me).is_empty(), "never ourselves");
-        assert!(ban_groups(&groups, me, Uuid::nil()).is_empty());
+    fn mine() -> Vec<GroupMembership> {
+        vec![
+            group(G1, "zebra club", powers::GROUP_BAN_ACCESS),
+            group(G2, "Builders 10", powers::GROUP_BAN_ACCESS | powers::MEMBER_EJECT),
+            group(G3, "builders 2", 0),
+        ]
     }
 
     #[test]
-    fn one_group_at_a_time_with_a_pause_then_the_report() {
-        let (a, b) = (Uuid::from_u128(10), Uuid::from_u128(11));
-        let mut run = BanAll::new(Uuid::from_u128(2), "Jane".into(), true, vec![(a, "A".into()), (b, "B".into())]);
-        let t0 = Instant::now();
-        assert_eq!(run.step(t0), Step::Send(a));
-        assert_eq!(run.step(t0 + Duration::from_secs(1)), Step::Wait, "until it is answered");
-        assert!(!run.answer(b, true, t0), "not the group asked");
-        assert!(run.answer(a, true, t0 + Duration::from_secs(1)));
-        assert_eq!(run.step(t0 + Duration::from_millis(1200)), Step::Wait, "the pause");
-        assert_eq!(run.step(t0 + Duration::from_millis(1500)), Step::Send(b));
-        assert!(run.answer(b, false, t0 + Duration::from_secs(2)));
-        assert_eq!(run.step(t0 + Duration::from_secs(3)), Step::Done);
-        assert_eq!((names(&run.succeeded), names(&run.failed)), ("A".to_owned(), "B".to_owned()));
+    fn only_the_groups_where_we_manage_bans_in_dictionary_order() {
+        let v = ban_groups(&mine());
+        assert_eq!(v, vec![(G2, "Builders 10".into()), (G1, "zebra club".into())]);
+        let mut all = mine();
+        all.push(group(Uuid::from_u128(13), "Builders 9", powers::GROUP_BAN_ACCESS));
+        let names: Vec<String> = ban_groups(&all).into_iter().map(|(_, n)| n).collect();
+        assert_eq!(names, ["Builders 9", "Builders 10", "zebra club"]);
     }
 
     #[test]
-    fn a_request_never_answered_fails() {
-        let a = Uuid::from_u128(10);
-        let mut run = BanAll::new(Uuid::from_u128(2), "Jane".into(), false, vec![(a, "A".into())]);
-        let t0 = Instant::now();
-        assert_eq!(run.step(t0), Step::Send(a));
-        assert_eq!(run.step(t0 + GIVE_UP), Step::Wait, "failed, then the pause");
-        assert_eq!(run.step(t0 + GIVE_UP + PAUSE), Step::Done);
-        assert_eq!(run.failed, ["A"]);
-        assert_eq!(names(&run.succeeded), "-");
+    fn never_ourselves_nobody_or_without_a_ban_power() {
+        assert!(can_ban_anywhere(&mine(), BOB, ME));
+        assert!(!can_ban_anywhere(&mine(), ME, ME));
+        assert!(!can_ban_anywhere(&mine(), Uuid::nil(), ME));
+        assert!(!can_ban_anywhere(&[group(G3, "builders 2", powers::MEMBER_EJECT)], BOB, ME));
+        assert!(!can_ban_anywhere(&[], BOB, ME));
+    }
+
+    #[test]
+    fn the_report_comes_once_every_group_answered() {
+        let mut b = BanAll::default();
+        let cmd = b.start(BOB, true, ban_groups(&mine()));
+        assert!(matches!(cmd, NetCommand::BanInGroups { agent: BOB, ref groups, ban: true } if *groups == [G2, G1]));
+        let now = Instant::now();
+        assert_eq!(b.answer(G2, BOB, true, true, now), None);
+        // an answer no run waits for, twice the same group, the other way
+        assert_eq!(b.answer(G3, BOB, true, true, now), None);
+        assert_eq!(b.answer(G2, BOB, true, true, now), None);
+        assert_eq!(b.answer(G1, BOB, false, true, now), None);
+        let r = b.answer(G1, BOB, true, false, now).expect("the report");
+        assert_eq!(r.count, 2);
+        assert_eq!(r.succeeded, ["Builders 10"]);
+        assert_eq!(r.failed, ["zebra club"]);
+        assert_eq!(b.answer(G1, BOB, true, true, now), None);
+    }
+
+    #[test]
+    fn ejection_alerts_are_muted_while_it_runs_and_five_seconds_after() {
+        let mut b = BanAll::default();
+        let now = Instant::now();
+        let alert = "Unable to eject the ejectee: not a member";
+        assert!(!b.mutes_alert(alert, now));
+        b.start(BOB, true, vec![(G1, "zebra club".into())]);
+        assert!(b.mutes_alert(alert, now));
+        assert!(!b.mutes_alert("The region is restarting", now));
+        b.answer(G1, BOB, true, true, now);
+        assert!(b.mutes_alert(alert, now + Duration::from_secs(4)));
+        assert!(!b.mutes_alert(alert, now + Duration::from_secs(6)));
     }
 }

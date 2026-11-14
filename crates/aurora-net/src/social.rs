@@ -86,17 +86,16 @@ impl SessionMethod {
     }
 }
 
-/// The body of a moderator's "mute update" (LLIMSpeakerMgr::
-/// toggleAllowTextChat, indra/newview/llspeakers.cpp, originally LGPL 2.1):
-/// `mute` is the participant's new state, "text" false gives them their
-/// text back.
-pub fn mute_update_body(session: Uuid, agent: Uuid, mute: bool) -> Llsd {
-    llsd_map! {
+/// The body of a moderator's "mute update" (LLIMSpeakerMgr::allowTextChat):
+/// `mute_info.text` is true to forbid the text, as a plain value and not a
+/// toggle (the Legacy Viewer's choice, against accidental unmuting).
+pub fn mute_update_body(session: Uuid, agent: Uuid, allow: bool) -> Llsd {
+    aurora_llsd::llsd_map! {
         "method" => "mute update",
         "session-id" => session,
-        "params" => llsd_map! {
+        "params" => aurora_llsd::llsd_map! {
             "agent_id" => agent,
-            "mute_info" => llsd_map! { "text" => mute },
+            "mute_info" => aurora_llsd::llsd_map! { "text" => !allow },
         },
     }
 }
@@ -355,6 +354,20 @@ mod tests {
         assert_eq!(body["params"]["agent_id"].as_uuid(), agent);
         assert!(body["params"]["mute_info"]["text"].as_bool());
         assert!(!mute_update_body(session, agent, false)["params"]["mute_info"]["text"].as_bool());
+    }
+
+    #[test]
+    fn a_mute_update_forbids_or_allows_the_text_as_a_value() {
+        let (session, agent) = (Uuid::from_u128(1), Uuid::from_u128(2));
+        let forbid = mute_update_body(session, agent, false);
+        assert_eq!(forbid["method"].as_str(), "mute update");
+        assert_eq!(forbid["session-id"].as_uuid(), session);
+        assert_eq!(forbid["params"]["agent_id"].as_uuid(), agent);
+        assert!(forbid["params"]["mute_info"]["text"].as_bool());
+        let allow = mute_update_body(session, agent, true);
+        assert!(!allow["params"]["mute_info"]["text"].as_bool());
+        // the text only: the voice is left as it is
+        assert!(allow["params"]["mute_info"].as_map().is_some_and(|m| m.len() == 1));
     }
 
     #[test]
