@@ -54,9 +54,9 @@ pub mod picking;
 mod plants;
 pub mod portals;
 pub mod probes;
-pub mod render_time;
 mod rain_ground;
 pub mod rain_sound;
+pub mod render_time;
 pub mod render_types;
 pub mod rez;
 mod sculpt_watch;
@@ -7388,7 +7388,10 @@ mod tests {
             ..Default::default()
         };
         let head = scene.joint_world(&world, &owner, "mHead", now).unwrap();
-        let (eye_offset, joint_offset) = (scene.eyes_offset(&world, &owner), Scene::joint_offset_from_pelvis(&world, &owner, "mHead"));
+        let (eye_offset, joint_offset) = (
+            scene.eyes_offset(&world, &owner),
+            Scene::joint_offset_from_pelvis(&world, &owner, "mHead"),
+        );
         let input = |head_rotation| FrameInput {
             dt: 1.0,
             now,

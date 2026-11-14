@@ -8,7 +8,6 @@ pub mod area_search;
 pub mod audio;
 pub mod aurora_bg;
 pub mod avatar_align;
-pub mod window_size;
 pub mod avatar_picker;
 pub mod avatar_render_settings;
 pub mod backdrop;
@@ -20,6 +19,7 @@ pub mod bumps;
 pub mod pose_stand;
 pub mod sound_explorer;
 pub mod voice_controls;
+pub mod window_size;
 // Bug report form (disabled, see main.rs):
 // pub mod bug_report;
 pub mod auto_relogin;
