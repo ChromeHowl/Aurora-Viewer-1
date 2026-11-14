@@ -541,7 +541,7 @@ pub(super) fn balance_menu(ui: &mut egui::Ui, p: &Palette, st: &StatusInfo, acti
             ..rows
         });
     }
-    if menu::item(ui, p, "coin-filled", aurora_i18n::tr!("currency-menu")) {
+    if menu::command(ui, p, "buy_currency") {
         *action = BarAction::BuyCurrency;
     }
 }
@@ -913,12 +913,11 @@ fn main_menus(ui: &mut egui::Ui, p: &Palette, panels: &mut Panels, st: &StatusIn
             super::appearance::wearable_favorites::WINDOW,
             &mut panels.wearable_favorites,
         );
-        if menu::item(ui, p, "coin-filled", aurora_i18n::tr!("currency-menu")) {
+        if menu::command(ui, p, "buy_currency") {
             *action = BarAction::BuyCurrency;
         }
         // menu_viewer.xml: Avatar › Money Tracker
-        let tracker = aurora_i18n::tr!("money-tracker-title");
-        if menu::check(ui, p, "receipt-filled", tracker, panels.money_tracker, true) {
+        if menu::command_check(ui, p, "money_tracker", panels.money_tracker) {
             super::money_tracker::toggle(ui.ctx(), &mut panels.money_tracker);
         }
         // menu_viewer.xml: Pose Stand... (Floater.Show fs_posestand, enabled
@@ -930,14 +929,9 @@ fn main_menus(ui: &mut egui::Ui, p: &Palette, panels: &mut Panels, st: &StatusIn
         }
         // menu_viewer.xml: Me › Experiences (Picks, before it there, has
         // no entry in this menu)
-        flip_window(
-            ui,
-            p,
-            "flask-filled",
-            aurora_i18n::tr!("ui-experiences-title"),
-            super::experiences::WINDOW,
-            &mut panels.experiences,
-        );
+        if menu::command_check(ui, p, "experiences", panels.experiences) {
+            super::widgets::toggle_floater(ui.ctx(), super::experiences::WINDOW, &mut panels.experiences);
+        }
         // menu_viewer.xml: Avatar Welcome Pack… (Floater.Toggle
         // avatar_welcome_pack), after the attachments, which this menu does
         // not hold; on a grid with the page
@@ -955,7 +949,7 @@ fn main_menus(ui: &mut egui::Ui, p: &Palette, panels: &mut Panels, st: &StatusIn
         if menu::item_if(ui, p, "armchair", aurora_i18n::tr!("ui-bars-sit-on-ground"), st.seated || !locked) {
             *action = BarAction::SitGround;
         }
-        if menu::item_if(ui, p, "man-filled", aurora_i18n::tr!("common-stand-up"), !st.seated || !locked) {
+        if menu::command_tip(ui, p, "stand_up", !st.seated || !locked, "") {
             *action = BarAction::StandUp;
         }
         let fly = if st.flying {
@@ -967,8 +961,7 @@ fn main_menus(ui: &mut egui::Ui, p: &Palette, panels: &mut Panels, st: &StatusIn
             *action = BarAction::ToggleFly;
         }
         // menu_viewer.xml: Fly Override (FSAlwaysFly), beside the flight
-        let fly_override = aurora_i18n::tr!("ui-bars-fly-override");
-        if menu::check(ui, p, "plane-departure-filled", fly_override, st.fly_override, true) {
+        if menu::command_check(ui, p, "fly_override", st.fly_override) {
             *action = BarAction::ToggleFlyOverride;
         }
         // Firestorm keeps its double-click teleport beside its movement
@@ -979,12 +972,11 @@ fn main_menus(ui: &mut egui::Ui, p: &Palette, panels: &mut Panels, st: &StatusIn
         if menu::check(ui, p, "lock-filled", aurora_i18n::tr!("movelock-title"), locked, true) {
             *action = BarAction::ToggleMoveLock;
         }
-        if menu::item(ui, p, "settings-filled", aurora_i18n::tr!("movelock-options")) {
+        if menu::command(ui, p, "movelock_options") {
             *action = BarAction::MoveLockOptions;
         }
         // menu_viewer.xml: Avatar › Movement › Quickjump, after Movelock
-        let quickjump = aurora_i18n::tr!("ui-bars-quickjump");
-        if menu::check(ui, p, "arrow-big-up-lines-filled", quickjump, st.quickjump, true) {
+        if menu::command_check(ui, p, "quickjump", st.quickjump) {
             *action = BarAction::ToggleQuickjump;
         }
         // menu_viewer.xml: Avatar › Movement › Face nearest avatar and
@@ -1001,7 +993,7 @@ fn main_menus(ui: &mut egui::Ui, p: &Palette, panels: &mut Panels, st: &StatusIn
                 &mut panels.avatar_align,
             );
         }
-        if menu::item(ui, p, "swimming", aurora_i18n::tr!("movement-title")) {
+        if menu::command(ui, p, "movement_enhancer") {
             *action = BarAction::MovementEnhancer;
         }
         // Firestorm keeps its double-click teleport beside its movement
@@ -1693,26 +1685,23 @@ fn build_menu(
     if menu::item(ui, p, "wand", aurora_i18n::tr!("poser-title")) {
         *action = BarAction::Poser;
     }
-    if menu::item_keys(ui, p, "bone-filled", aurora_i18n::tr!("ik-edit-title"), ik_keys) {
+    if menu::command_keys(ui, p, "ik_edit", ik_keys) {
         *action = BarAction::IkEdit;
     }
-    for (mode, icon, label) in [
-        (0, "box", aurora_i18n::tr!("ui-bars-build-ctrl-b")),
-        (1, "pencil-filled", aurora_i18n::tr!("ui-bars-edit-objects-ctrl-3")),
-        (2, "circle-plus-filled", aurora_i18n::tr!("ui-bars-create-prims-ctrl-4")),
-        (3, "mountain-filled", aurora_i18n::tr!("ui-bars-edit-land-ctrl-5")),
-    ] {
-        if menu::item(ui, p, icon, label) {
+    if menu::item(ui, p, "box", aurora_i18n::tr!("ui-bars-build-ctrl-b")) {
+        *action = BarAction::Build(0);
+    }
+    for (mode, id) in [(1, "build_edit"), (2, "build_create"), (3, "build_land")] {
+        if menu::command(ui, p, id) {
             *action = BarAction::Build(mode);
         }
     }
     // menu_viewer.xml: Build › Object › Edit Particles, greyed out until an
     // object we own is selected (LLEnableEditParticleSource)
-    if menu::item_tip(
+    if menu::command_tip(
         ui,
         p,
-        "sparkles-filled",
-        aurora_i18n::tr!("ui-bars-edit-particles"),
+        "edit_particles",
         edit_particles,
         if edit_particles {
             ""
@@ -1739,10 +1728,10 @@ fn build_menu(
         *action = BarAction::SaveToObjectContents;
     }
     menu::separator(ui, p);
-    if menu::item(ui, p, "file-upload-filled", aurora_i18n::tr!("import-menu")) {
+    if menu::command(ui, p, "import") {
         *action = BarAction::Import;
     }
-    if menu::item(ui, p, "cube-3d-sphere", aurora_i18n::tr!("blender-live-title")) {
+    if menu::command(ui, p, "blender_live") {
         *action = BarAction::BlenderLive;
     }
 }
@@ -2215,6 +2204,12 @@ pub fn top_bars(
     notif: &mut super::notifications::NotifUi,
     bell: BellState,
 ) -> (BarAction, super::audio::AudioAction) {
+    ui.ctx().data_mut(|d| {
+        d.insert_temp(
+            egui::Id::unique("toolbar_menu_availability"),
+            (st.edit_particles, st.fly_override, st.quickjump),
+        )
+    });
     if !st.classic_bars {
         return islands::top(ui, p, icons, panels, st, audio, audio_ui, media, notif, bell);
     }
@@ -2594,6 +2589,20 @@ pub fn run_command(ctx: &egui::Context, cmd: &str, panels: &mut Panels) -> BarAc
         }
         "build" => return BarAction::Build(0),
         "ik_edit" => return BarAction::IkEdit,
+        "build_edit" => return BarAction::Build(1),
+        "build_create" => return BarAction::Build(2),
+        "build_land" => return BarAction::Build(3),
+        "edit_particles" => return BarAction::EditParticles,
+        "import" => return BarAction::Import,
+        "blender_live" => return BarAction::BlenderLive,
+        "buy_currency" => return BarAction::BuyCurrency,
+        "money_tracker" => super::money_tracker::toggle(ctx, &mut panels.money_tracker),
+        "experiences" => toggle(super::experiences::WINDOW, &mut panels.experiences),
+        "stand_up" => return BarAction::StandUp,
+        "fly_override" => return BarAction::ToggleFlyOverride,
+        "movelock_options" => return BarAction::MoveLockOptions,
+        "quickjump" => return BarAction::ToggleQuickjump,
+        "movement_enhancer" => return BarAction::MovementEnhancer,
         "poser" => return BarAction::TogglePoser,
         "profile" => return BarAction::ToggleMyProfile,
         "reporter" => return BarAction::ToggleReportAbuse,
@@ -2626,6 +2635,8 @@ fn command_active(cmd: &str, panels: &Panels, flying: bool, seated: bool, mousel
         "gestures" => panels.gestures,
         "appearance" => panels.appearance,
         "avatar_studio" => panels.avatar_studio,
+        "money_tracker" => panels.money_tracker,
+        "experiences" => panels.experiences,
         "minimap" => panels.minimap,
         "worldmap" => panels.world_map,
         "places" => panels.places,
@@ -3354,7 +3365,15 @@ pub(crate) fn toolbar_row(
             }
             continue;
         }
-        let active = if b.command == "ao" {
+        let (edit_particles, fly_override, quickjump) = ui
+            .ctx()
+            .data(|d| d.get_temp::<(bool, bool, bool)>(egui::Id::unique("toolbar_menu_availability")))
+            .unwrap_or_default();
+        let active = if b.command == "fly_override" {
+            fly_override
+        } else if b.command == "quickjump" {
+            quickjump
+        } else if b.command == "ao" {
             row.ao_active || toolbar.ao_quick.open
         } else if matches!(b.command.as_str(), "movelock" | "move_lock") {
             toolbar.movelock_active
@@ -3398,6 +3417,7 @@ pub(crate) fn toolbar_row(
         let no_pack = b.command == "avatar" && !toolbar.avatar_welcome;
         let no_guide = b.command == "destinations" && !toolbar.destinations;
         let usable = !(b.command == "photo_roll" && toolbar.photo_roll_empty)
+            && !(b.command == "edit_particles" && !edit_particles)
             && !no_pack
             && !no_guide
             && !(b.command == "pose_stand" && row.seated);
@@ -3435,7 +3455,15 @@ pub(crate) fn toolbar_row(
         } else if no_guide {
             format!("{}\n{}", super::toolbar::label(b), aurora_i18n::tr!("destinations-unavailable"))
         } else if !usable {
-            format!("{}\n{}", super::toolbar::label(b), aurora_i18n::tr!("photo-reel-none"))
+            format!(
+                "{}\n{}",
+                super::toolbar::label(b),
+                if b.command == "edit_particles" {
+                    aurora_i18n::tr!("particle-editor-menu-tip")
+                } else {
+                    aurora_i18n::tr!("photo-reel-none")
+                }
+            )
         } else {
             super::toolbar::label(b).to_owned()
         };
@@ -3447,7 +3475,8 @@ pub(crate) fn toolbar_row(
         // the Favorites button: its grid of favourites opens upwards
         let grid_id = egui::Id::unique("bars_favorites_grid_open");
         let active = active || (b.command == "favorites" && ui.ctx().data(|d| d.get_temp::<bool>(grid_id)).unwrap_or(false));
-        let rlva_locked = b.command == "sit" && ui.ctx().data(|d| d.get_temp::<bool>(rlva_sit_locked_id())).unwrap_or(false);
+        let rlva_locked = (b.command == "sit" || b.command == "stand_up" && row.seated)
+            && ui.ctx().data(|d| d.get_temp::<bool>(rlva_sit_locked_id())).unwrap_or(false);
         let response = tool_button(
             ui,
             p,

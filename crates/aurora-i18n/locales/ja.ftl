@@ -14758,6 +14758,9 @@ music-error-format = 音声形式が無効、または未対応です
 music-error-interrupted = 音声ストリームが中断されました
 music-error-notice = 区画の音楽：{ $status }
 music-error-worker = 音楽プレーヤーを起動できません
+# Menu commands can be added to or removed from a toolbar.
+toolbar-add-from-menu = ツールバーに追加
+toolbar-remove-from-menu = ツールバーから削除
 # Object linking: LLSelectMgr::linkObjects
 build-link-error-title = オブジェクトをリンクできません
 build-link-downloading = オブジェクト情報をダウンロード中です。しばらく待ってから再度リンクしてください。

@@ -14848,6 +14848,9 @@ music-error-format = Unsupported or invalid audio format
 music-error-interrupted = Audio stream interrupted
 music-error-notice = Parcel music: { $status }
 music-error-worker = Cannot start the music player
+# Menu commands can be added to or removed from a toolbar.
+toolbar-add-from-menu = Add to toolbar
+toolbar-remove-from-menu = Remove from toolbar
 # Object linking: LLSelectMgr::linkObjects
 build-link-error-title = Unable to link objects
 build-link-downloading = Object information is still downloading. Please wait and try linking again.

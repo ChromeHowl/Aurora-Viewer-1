@@ -14857,6 +14857,9 @@ music-error-format = Format audio invalide ou non pris en charge
 music-error-interrupted = Flux audio interrompu
 music-error-notice = Musique de la parcelle : { $status }
 music-error-worker = Impossible de démarrer le lecteur audio
+# Menu commands can be added to or removed from a toolbar.
+toolbar-add-from-menu = Ajouter à la barre d’outils
+toolbar-remove-from-menu = Retirer de la barre d’outils
 # Object linking: LLSelectMgr::linkObjects
 build-link-error-title = Impossible de lier les objets
 build-link-downloading = Les informations des objets sont en cours de téléchargement. Veuillez patienter puis réessayer.
