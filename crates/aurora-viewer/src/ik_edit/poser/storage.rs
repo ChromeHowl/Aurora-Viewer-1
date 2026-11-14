@@ -36,11 +36,12 @@ pub(super) enum Loaded {
 enum Output {
     Listed(Vec<Entry>),
     Loaded(Uuid, Loaded),
-    Overwrite(Document, Arc<SubjectPose>, bool, bool),
+    Overwrite(Document),
     Saved(PathBuf),
     /// Saved outside the library by Save as…
     SavedTo(PathBuf),
-    Prepared(clip::Prepared),
+    /// A total animation written to the chosen file.
+    TotalSaved(PathBuf),
     Failed(String),
     Cancelled,
 }
@@ -48,7 +49,8 @@ pub(super) enum Job {
     List,
     Load(Option<PathBuf>, LoadMode, Uuid),
     Save(Save),
-    Import(Arc<SubjectPose>, Vec<usize>, String, i32),
+    /// Save total animation: the animation and the name its file starts with.
+    Total(aurora_assets::Animation, String),
 }
 /// Whether a library entry named `name` shows under the search `filter`
 /// (case-insensitive, anywhere in the name).
@@ -60,9 +62,6 @@ pub(super) fn filter_matches(name: &str, filter: &str) -> bool {
 /// `confirm` only applies to the library.
 pub(super) struct Save {
     pub document: Document,
-    pub pose: Arc<SubjectPose>,
-    pub bvh: bool,
-    pub unlock: bool,
     pub confirm: bool,
     pub pick: bool,
 }
@@ -79,17 +78,6 @@ fn pose_file(path: PathBuf) -> PathBuf {
         path.with_file_name(name)
     }
 }
-/// The `.bvh` written next to a pose file: its name without
-/// `.aurora-pose.json` (or `.json`).
-fn bvh_file(pose: &Path) -> PathBuf {
-    let name = pose.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let lower = name.to_lowercase();
-    let stem = [".aurora-pose.json", ".json"]
-        .iter()
-        .find(|ext| lower.ends_with(*ext))
-        .map_or(name.as_str(), |ext| &name[..name.len() - ext.len()]);
-    pose.with_file_name(format!("{stem}.bvh"))
-}
 pub(super) struct Service {
     pub entries: Vec<Entry>,
     pub busy: bool,
@@ -101,8 +89,7 @@ pub(super) struct Service {
     pub scroll_to_selected: bool,
     pub job: Option<Job>,
     pub ready: bool,
-    pub prepared: Vec<clip::Prepared>,
-    pub overwrite: Option<(Document, Arc<SubjectPose>, bool, bool)>,
+    pub overwrite: Option<Document>,
     tx: crossbeam_channel::Sender<Output>,
     rx: crossbeam_channel::Receiver<Output>,
 }
@@ -119,7 +106,6 @@ impl Default for Service {
             scroll_to_selected: false,
             job: None,
             ready: false,
-            prepared: Vec::new(),
             overwrite: None,
             tx,
             rx,
@@ -137,27 +123,6 @@ fn read(path: &Path) -> Result<Vec<u8>, String> {
         return Err(aurora_i18n::tr!("poser-file-too-large").to_string());
     }
     Ok(bytes)
-}
-pub(super) fn native(rig: &Rig, pose: &SubjectPose, translations: &[usize], name: String, priority: i32) -> Result<clip::Prepared, String> {
-    let mut document = clip::document::Document::new();
-    document.name = name;
-    document.meta.base_priority = priority;
-    let frame = Frame {
-        model: Mat4::IDENTITY,
-        joints: pose.matrices(rig, Mat4::IDENTITY),
-        at: Instant::now(),
-    };
-    document
-        .record(rig, &frame, 0, &(0..rig.len()).collect::<Vec<_>>(), translations)
-        .map_err(|k| aurora_i18n::text(k).to_owned())?;
-    let animation = document.animation().map_err(|k| aurora_i18n::text(k).to_owned())?;
-    let bytes = aurora_assets::import_animation::encode(&animation).map_err(|e| e.to_string())?;
-    let animation = aurora_assets::anim::parse_animation_upload(&bytes).map_err(|e| e.to_string())?;
-    Ok(clip::Prepared {
-        name: document.name,
-        bytes: Arc::new(bytes),
-        animation: Arc::new(animation),
-    })
 }
 fn list(root: &Path, rig: &Rig) -> Result<Vec<Entry>, String> {
     let mut out = Vec::new();
@@ -220,8 +185,10 @@ impl Service {
                     self.ready = true;
                 }
                 Output::Loaded(subject, value) => loaded.push((subject, value)),
-                Output::Overwrite(document, pose, bvh, unlock) => self.overwrite = Some((document, pose, bvh, unlock)),
-                Output::Prepared(value) => self.prepared.push(value),
+                Output::Overwrite(document) => self.overwrite = Some(document),
+                Output::TotalSaved(path) => {
+                    self.message = Some(aurora_i18n::tr!("poser-total-saved-to", path = path.display().to_string()).to_string());
+                }
                 Output::Saved(path) => {
                     self.ready = false;
                     self.selected = None;
@@ -300,14 +267,7 @@ impl Service {
                             Output::Loaded(subject, Loaded::Pose(document, mode))
                         }
                     }
-                    Job::Save(Save {
-                        document,
-                        pose,
-                        bvh,
-                        unlock,
-                        confirm,
-                        pick,
-                    }) => {
+                    Job::Save(Save { document, confirm, pick }) => {
                         if !document.valid(&rig) {
                             return Err(aurora_i18n::tr!("anim-edit-invalid").to_string());
                         }
@@ -327,12 +287,10 @@ impl Service {
                         } else {
                             root.join(format!("{name}.aurora-pose.json"))
                         };
-                        let bvh_path = bvh_file(&path);
-                        if confirm && !pick && (path.exists() || bvh && bvh_path.exists()) {
-                            return Ok(Output::Overwrite(document, pose, bvh, unlock));
+                        if confirm && !pick && path.exists() {
+                            return Ok(Output::Overwrite(document));
                         }
                         let bytes = serde_json::to_vec_pretty(&document).map_err(|e| e.to_string())?;
-                        let bvh = if bvh { Some(bvh::encode(&rig, &pose, unlock)?) } else { None };
                         let dir = path.parent().unwrap_or(&root);
                         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
                         let temp = dir.join(format!("{}.tmp", Uuid::new_v4()));
@@ -341,17 +299,32 @@ impl Service {
                             let _ = std::fs::remove_file(&temp);
                             return Err(e.to_string());
                         }
-                        if let Some(bvh) = bvh {
-                            std::fs::write(&bvh_path, bvh).map_err(|e| e.to_string())?;
-                        }
                         if pick && dir != root {
                             Output::SavedTo(path)
                         } else {
                             Output::Saved(path)
                         }
                     }
-                    Job::Import(pose, translations, name, priority) => {
-                        Output::Prepared(native(&rig, &pose, &translations, name, priority)?)
+                    Job::Total(animation, name) => {
+                        let bytes = total::encode(&animation)?;
+                        let _ = std::fs::create_dir_all(&root);
+                        let Some(path) = rfd::FileDialog::new()
+                            .set_directory(&root)
+                            .set_file_name(format!("{}.anim", clip::files::basename(&name)))
+                            .add_filter(aurora_i18n::tr!("poser-total-filter"), &["anim"])
+                            .save_file()
+                        else {
+                            return Ok(Output::Cancelled);
+                        };
+                        let path = if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("anim")) {
+                            path
+                        } else {
+                            let mut name = path.file_name().unwrap_or_default().to_os_string();
+                            name.push(".anim");
+                            path.with_file_name(name)
+                        };
+                        std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+                        Output::TotalSaved(path)
                     }
                 })
             };
@@ -363,7 +336,7 @@ impl Service {
 }
 #[cfg(test)]
 mod save_as_tests {
-    use super::{bvh_file, pose_file};
+    use super::pose_file;
     use std::path::{Path, PathBuf};
 
     #[test]
@@ -375,12 +348,5 @@ mod save_as_tests {
             Path::new("/d/Wave.aurora-pose.json")
         );
         assert_eq!(pose_file(PathBuf::from("/d/Wave.JSON")), Path::new("/d/Wave.JSON"));
-    }
-
-    #[test]
-    fn bvh_sits_next_to_the_pose_without_its_extension() {
-        assert_eq!(bvh_file(Path::new("/d/Wave.aurora-pose.json")), Path::new("/d/Wave.bvh"));
-        assert_eq!(bvh_file(Path::new("/d/Wave.Aurora-Pose.JSON")), Path::new("/d/Wave.bvh"));
-        assert_eq!(bvh_file(Path::new("/d/Wave.json")), Path::new("/d/Wave.bvh"));
     }
 }
