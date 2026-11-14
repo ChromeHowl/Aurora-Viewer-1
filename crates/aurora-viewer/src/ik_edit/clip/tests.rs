@@ -3432,3 +3432,17 @@ fn the_autosaved_draft_is_a_project_file_that_reopens_with_its_track_settings() 
     assert!(reopened.tracks[0].authored);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn the_first_autosave_of_a_session_keeps_an_unopened_recovery_file() {
+    let dir = std::env::temp_dir().join(format!("aurora-rotate-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    // nothing to keep: no error, nothing created
+    files::rotate_recovery(&dir).unwrap();
+    assert!(!dir.join(files::RECOVERY_PREVIOUS).exists());
+    std::fs::write(dir.join(files::RECOVERY), b"crashed draft").unwrap();
+    files::rotate_recovery(&dir).unwrap();
+    assert!(!dir.join(files::RECOVERY).exists());
+    assert_eq!(std::fs::read(dir.join(files::RECOVERY_PREVIOUS)).unwrap(), b"crashed draft");
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -512,7 +512,8 @@ impl State {
                 && autosave_due(self.revision, self.autosaved, self.autosave_at, now)
             {
                 self.autosave_at = Some(now);
-                files::autosave(jobs, self.tx.clone(), document.clone(), self.revision, dir.clone());
+                let first = self.autosaved.is_none();
+                files::autosave(jobs, self.tx.clone(), document.clone(), self.revision, dir.clone(), first);
             }
             let dt = self.at.map_or(0.0, |at| now.saturating_duration_since(at).as_secs_f64());
             self.at = Some(now);

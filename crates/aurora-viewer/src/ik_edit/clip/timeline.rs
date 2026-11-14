@@ -954,6 +954,7 @@ impl Editor {
                 && menu::item_tip(
                     ui,
                     palette,
+                    // outline: Tabler has no filled "history" icon
                     "history",
                     aurora_i18n::tr!("anim-edit-recover"),
                     self.can_recover(),

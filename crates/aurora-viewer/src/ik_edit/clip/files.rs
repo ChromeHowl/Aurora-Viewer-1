@@ -188,10 +188,35 @@ pub(super) fn start(
 /// The account's autosaved draft, a project file in its recovery folder.
 pub(super) const RECOVERY: &str = "recovery.auroraanim";
 
+/// The recovery file the first autosave of a session moved aside.
+pub(super) const RECOVERY_PREVIOUS: &str = "recovery.previous.auroraanim";
+
+/// Keep a recovery file the user has not opened: the first write of a
+/// session moves it to `RECOVERY_PREVIOUS` (replacing the one before), so
+/// the new draft never overwrites it.
+pub(super) fn rotate_recovery(dir: &std::path::Path) -> std::io::Result<()> {
+    let current = dir.join(RECOVERY);
+    if current.is_file() {
+        std::fs::rename(&current, dir.join(RECOVERY_PREVIOUS))?;
+    }
+    Ok(())
+}
+
 /// Write the draft as a project file in `dir`, atomically: a crash while
 /// writing keeps the previous one. A failure is logged, never shown.
-pub(super) fn autosave(jobs: &Jobs, tx: crossbeam_channel::Sender<Output>, document: Arc<Document>, revision: u64, dir: PathBuf) {
+pub(super) fn autosave(
+    jobs: &Jobs,
+    tx: crossbeam_channel::Sender<Output>,
+    document: Arc<Document>,
+    revision: u64,
+    dir: PathBuf,
+    first: bool,
+) {
     jobs.execute(move || {
+        if first && let Err(error) = rotate_recovery(&dir) {
+            log::warn!("animation draft autosave: keeping the previous draft: {error}");
+            return;
+        }
         let bytes = match document.project_json() {
             Ok(bytes) => bytes,
             Err(key) => {
