@@ -227,3 +227,26 @@ fn the_reply_demo_asks_nothing_and_accepts_what_the_user_asked_two_seconds_later
     assert!(state.can_pose(&world, peer), "two seconds later, accepted");
     assert!(state.outgoing.is_empty());
 }
+#[test]
+fn in_range_counts_the_agent_or_the_camera() {
+    assert!(in_range(Some(10.0), None), "agent near");
+    assert!(in_range(Some(200.0), Some(20.0)), "camera near");
+    assert!(in_range(Some(50.0), Some(90.0)), "exactly 50 m counts");
+    assert!(!in_range(Some(200.0), Some(90.0)), "neither near");
+    assert!(!in_range(None, None), "nothing known");
+}
+#[test]
+fn an_avatar_far_from_you_is_nearby_when_the_camera_is_over_them() {
+    let (mut world, peer, _) = fixture();
+    assert!(nearby(&world, peer));
+    let index = world.objects.index_of_uuid(&peer).unwrap();
+    let far = world.objects.get(index).unwrap().position + glam::Vec3::new(200.0, 0.0, 0.0);
+    world.objects.get_mut(index).unwrap().position = far;
+    world.poser_camera = None;
+    assert!(!nearby(&world, peer), "far from you, no camera");
+    let at = crate::scene::Scene::object_transform(&world, index, Instant::now(), 0).unwrap().0;
+    world.poser_camera = Some(at + glam::Vec3::new(10.0, 0.0, 0.0));
+    assert!(nearby(&world, peer), "camera over them");
+    world.poser_camera = Some(at + glam::Vec3::new(120.0, 0.0, 0.0));
+    assert!(!nearby(&world, peer), "camera elsewhere");
+}

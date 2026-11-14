@@ -89,8 +89,24 @@ pub fn distance(world: &World, peer: Uuid) -> Option<f32> {
     let b = crate::scene::Scene::object_transform(world, other, now, 0)?;
     Some(a.0.distance(b.0))
 }
+/// How far from us or from the camera an avatar may stand and still be
+/// poseable, in metres (FireDragon's PoserCamera rule, `isNearby` in
+/// fsfloaterposer.cpp).
+pub const NEARBY_RANGE: f32 = 50.0;
+/// Distance from the camera to a peer (render space), when the camera is known.
+pub fn camera_distance(world: &World, peer: Uuid) -> Option<f32> {
+    let camera = world.poser_camera?;
+    let other = world.objects.index_of_uuid(&peer)?;
+    let b = crate::scene::Scene::object_transform(world, other, Instant::now(), 0)?;
+    Some(camera.distance(b.0))
+}
+/// Within range of the agent or of the camera: panning the camera over to
+/// someone lets you pose them, like an avatar next to you.
+pub fn in_range(agent: Option<f32>, camera: Option<f32>) -> bool {
+    [agent, camera].into_iter().flatten().any(|d| d <= NEARBY_RANGE)
+}
 pub fn nearby(world: &World, peer: Uuid) -> bool {
-    present(world, peer) && distance(world, peer).is_some_and(|d| d <= 50.0)
+    present(world, peer) && in_range(distance(world, peer), camera_distance(world, peer))
 }
 pub fn name(world: &World, peer: Uuid) -> String {
     world

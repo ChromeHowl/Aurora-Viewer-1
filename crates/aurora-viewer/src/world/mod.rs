@@ -404,6 +404,9 @@ pub struct World {
     pub hand_contacts: hand_ik::Contacts,
     pub ik_targets: rig_targets::Targets,
     pub(crate) scripted_camera: crate::camera::follow::Sources,
+    /// Where the camera is (render space), set each frame by the app: the
+    /// poser counts avatars near it as nearby (`poser_consent::nearby`).
+    pub poser_camera: Option<Vec3>,
     /// When the clocks of the regions were last advanced (`advance_motion`).
     motion_tick: Instant,
     /// GLTF material overrides by object, (face, override) pairs. Kept apart
@@ -915,6 +918,7 @@ impl World {
             main_region: None,
             objects: ObjectStore::default(),
             scripted_camera: Default::default(),
+            poser_camera: None,
             motion_tick: Instant::now(),
             gltf_overrides: HashMap::new(),
             chat: VecDeque::new(),
