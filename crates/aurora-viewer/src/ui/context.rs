@@ -1147,6 +1147,9 @@ fn avatar_menu_reporting(
                     },
                 );
             }
+            // menu_fs_radar.xml / menu_mini_map.xml: BanFromAllGroups, asked
+            // first (`ui::chat::moderation`)
+            crate::ui::chat::moderation::ban_all_entries(ui, p, world, id, false);
             // menu_fs_radar.xml / menu_mini_map.xml: Avatar.Derender and
             // Avatar.DerenderPermanent (LLAvatarActions::derender), always enabled
             for (icon, label, permanent) in [
@@ -1221,6 +1224,7 @@ fn avatar_menu_reporting(
             block(ui);
             shadow_realm_item(ui, p, world, id);
             // menu_url_agent.xml BanFromAllGroups
+            crate::ui::chat::moderation::ban_all_entries(ui, p, world, id, false);
             menu::separator(ui, p);
             copy(ui);
         }
