@@ -31,6 +31,7 @@ fn world_lut(cx: &mut Cx) {
     use crate::snapshot::looks;
     use aurora_i18n::tr;
 
+    let p = cx.p;
     let files = &cx.st.world_lut_files;
     let imported = looks::lut_list(files);
     let selected = if cx.s.world_lut.is_empty() {
@@ -58,14 +59,14 @@ fn world_lut(cx: &mut Cx) {
                         .selectable_value(&mut s.world_lut, String::new(), tr!("photo-look-none"))
                         .changed();
                     for (creator, entries) in looks::pack_list() {
-                        ui.separator();
+                        crate::ui::menu::separator(ui, &p);
                         ui.label(creator);
                         for entry in entries {
                             changed |= ui.selectable_value(&mut s.world_lut, entry.id, entry.name.as_ref()).changed();
                         }
                     }
                     if !imported.is_empty() {
-                        ui.separator();
+                        crate::ui::menu::separator(ui, &p);
                         ui.label(tr!("photo-lut-mine"));
                         for entry in &imported {
                             changed |= ui
