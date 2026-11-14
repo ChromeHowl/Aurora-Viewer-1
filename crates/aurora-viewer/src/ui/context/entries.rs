@@ -1893,14 +1893,9 @@ mod tests {
             .filter(|e| matches!(e.kind, Kind::Unavailable))
             .map(|e| e.label)
             .collect();
-        // The backup exporter is a separate subsystem. Script info is
-        // available through the Aurora bridge.
-        let expected = tr(&["ui-context-save-backup"]);
-        let mut left_sorted = left.clone();
-        left_sorted.sort();
-        let mut expected_sorted = expected;
-        expected_sorted.sort();
-        assert_eq!(left_sorted, expected_sorted, "{left:?}");
+        // Save as > Backup runs the backup exporter, and script info is
+        // available through the Aurora bridge: nothing is left unavailable.
+        assert!(left.is_empty(), "{left:?}");
     }
 
     #[test]

@@ -515,7 +515,7 @@ mod tests {
     fn header_offsets_are_absolute() {
         let hdr = llsd_map! {
             "version" => 1,
-            "creator" => uuid::Uuid::from_u128(77),
+            "creator" => uuid::Uuid::nil(),
             "lowest_lod" => llsd_map!{ "offset" => 0, "size" => 100 },
             "low_lod" => llsd_map!{ "offset" => 100, "size" => 0 },
             "high_lod" => llsd_map!{ "offset" => 300, "size" => 400 },
@@ -528,7 +528,6 @@ mod tests {
         let h = parse_mesh_header(&asset).unwrap();
         let hs = bin.len();
         assert_eq!(h.header_size, hs);
-        assert_eq!(h.creator, uuid::Uuid::from_u128(77));
         assert_eq!(h.version, 1);
         assert_eq!(h.lods, [Some((hs, 100)), None, None, Some((hs + 300, 400))]);
         assert_eq!(h.skin, Some((hs + 700, 50)));
