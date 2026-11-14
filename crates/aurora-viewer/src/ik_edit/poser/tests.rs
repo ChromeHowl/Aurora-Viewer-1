@@ -2497,8 +2497,10 @@ fn a_marker_click_selects_its_joint_right_after_switching_avatars_even_with_none
             pressed,
             modifiers: egui::Modifiers::NONE,
         };
-        // one frame over the marker, then the press
-        frames.run(vec![egui::Event::PointerMoved(at)], |ui| editor.show(ui.ctx(), &p, &world, &proj));
+        // the pointer rests on the marker a moment before the press, as a hand does
+        for _ in 0..2 {
+            frames.run(vec![egui::Event::PointerMoved(at)], |ui| editor.show(ui.ctx(), &p, &world, &proj));
+        }
         let on_marker = editor.poser.marker_hover && !editor.poser.gizmo_hover;
         for events in [vec![button(true)], vec![button(false)], vec![]] {
             frames.run(events, |ui| editor.show(ui.ctx(), &p, &world, &proj));
