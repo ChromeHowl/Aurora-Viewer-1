@@ -174,6 +174,29 @@ fn list(ui: &mut egui::Ui, c: &mut Ctx, data: &super::RadarData, st: &mut People
     let all = lines(c, &filter, st.friend_set.as_deref());
     let order: Vec<Uuid> = all.iter().map(|l| l.friend.id).collect();
     st.sel.retain(|id| order.contains(id));
+    // A click anywhere in the list takes the keyboard, then the first letters
+    // of a name jump to that friend (LLScrollListCtrl::handleUnicodeCharHere).
+    let focus = ui.make_persistent_id("people-friends-type-ahead");
+    let background = ui.interact(ui.available_rect_before_wrap(), focus, Sense::click());
+    if background.clicked() {
+        background.request_focus();
+    }
+    let entries: Vec<super::type_ahead::Entry<'_>> = all
+        .iter()
+        .map(|l| super::type_ahead::Entry {
+            id: l.friend.id,
+            names: [l.name.as_str(), l.username.as_str(), l.full.as_str()],
+        })
+        .collect();
+    let current = st.sel.first().copied().or(st.sheet);
+    if let Some(id) = super::type_ahead::keys(ui, focus, &entries, current) {
+        st.sel = vec![id];
+        st.anchor = Some(id);
+        if c.contact_sheet_on_click {
+            st.sheet = Some(id);
+            st.sheet_grow = false;
+        }
+    }
     if c.contact_sheet_on_click {
         let selected = st
             .sheet
@@ -214,22 +237,36 @@ fn list(ui: &mut egui::Ui, c: &mut Ctx, data: &super::RadarData, st: &mut People
                     };
                     super::nearby::section_header(ui, c.p, &title);
                 }
-                row(ui, c, data, st, line, &order);
+                row(ui, c, data, st, line, &order, focus);
             }
         });
 }
 
-/// Search and "Add" (the friendship offer to a resident chosen in the picker).
+/// Search and "Add" (the friendship offer to a resident chosen in the picker),
+/// and in Conversations › Contacts the button that expands the sheet at the
+/// end while the sheet is collapsed or has no room (its head has the one
+/// that collapses it, `sheet::toggle_ui`).
 fn toolbar(ui: &mut egui::Ui, c: &mut Ctx, st: &mut PeopleUi) {
     let line = Vec2::new(ui.available_width(), rows::TOOLBAR_H);
+    let toggle = c.embedded_contacts && !c.contact_sheet_on_click;
+    let toggle_w = if toggle { rows::TOOLBAR_H + 6.0 } else { 0.0 };
     let add_label = aurora_i18n::tr!("common-add");
-    let add_label = if line.x < widgets::action_button_fit(ui, "user-plus", add_label) + 6.0 + 100.0 {
+    let add_label = if line.x - toggle_w < widgets::action_button_fit(ui, "user-plus", add_label) + 6.0 + 100.0 {
         ""
     } else {
         add_label
     };
     ui.allocate_ui_with_layout(line, egui::Layout::right_to_left(egui::Align::Center), |ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
+        // the toggle's place is kept first and the button drawn last, so that
+        // its coming and going does not shift the automatic ids of the search
+        // field (which would drop its focus when the pane is resized)
+        let slot = toggle.then(|| {
+            let right = ui.max_rect().right();
+            let top = ui.max_rect().center().y - rows::TOOLBAR_H / 2.0;
+            ui.add_space(toggle_w);
+            Rect::from_min_size(Pos2::new(right - rows::TOOLBAR_H, top), Vec2::splat(rows::TOOLBAR_H))
+        });
         let add = widgets::action_button(
             ui,
             c.p,
@@ -244,7 +281,43 @@ fn toolbar(ui: &mut egui::Ui, c: &mut Ctx, st: &mut PeopleUi) {
         }
         let w = ui.available_width();
         widgets::clearable_search_box(ui, c.p, &mut st.filter, aurora_i18n::tr!("people-friends-filter"), w);
+        if let Some(slot) = slot {
+            ui.scope_builder(egui::UiBuilder::new().max_rect(slot), |ui| sheet_toggle(ui, c));
+        }
     });
+}
+
+/// The button that collapses and expands the contact sheet of Conversations ›
+/// Contacts, kept with the friends' options (`FriendsSettings::sheet_collapsed`):
+/// in the sheet's head while it is shown, at the end of the list's toolbar
+/// otherwise. An Aurora addition, the right-hand twin of the conversation
+/// list's button (`chat::sidebar::column_toggle`): the Legacy Viewer's
+/// contact list has no sheet. Greyed out in a pane too narrow for the list
+/// and the sheet.
+pub(super) fn sheet_toggle(ui: &mut egui::Ui, c: &mut Ctx) {
+    let collapsed = c.friends.sheet_collapsed;
+    let room = c.contact_sheet_room;
+    let (icon, tip) = if !room {
+        (
+            "layout-sidebar-right-expand-filled",
+            aurora_i18n::tr!("people-contact-sheet-no-room"),
+        )
+    } else if collapsed {
+        (
+            "layout-sidebar-right-expand-filled",
+            aurora_i18n::tr!("people-contact-sheet-expand"),
+        )
+    } else {
+        (
+            "layout-sidebar-right-collapse-filled",
+            aurora_i18n::tr!("people-contact-sheet-collapse"),
+        )
+    };
+    let resp = widgets::action_button_if(ui, c.p, icon, "", widgets::ActionKind::Flat, Vec2::splat(rows::TOOLBAR_H), room);
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, room, tip));
+    if resp.on_hover_text(tip).on_disabled_hover_text(tip).clicked() {
+        c.friends.sheet_collapsed = !collapsed;
+    }
 }
 
 /// "Sort" and its three pills, then "Set" and the contact sets that fit
@@ -362,7 +435,7 @@ pub(super) fn set_pills(ui: &mut egui::Ui, c: &Ctx, sets: &[String], chosen: &mu
 
 /// One friend: picture, names, set dot, rights, and the quick actions
 /// under the pointer.
-fn row(ui: &mut egui::Ui, c: &mut Ctx, data: &super::RadarData, st: &mut PeopleUi, line: &Line, order: &[Uuid]) {
+fn row(ui: &mut egui::Ui, c: &mut Ctx, data: &super::RadarData, st: &mut PeopleUi, line: &Line, order: &[Uuid], focus: egui::Id) {
     let p = c.p;
     let f = &line.friend;
     let width = ui.available_width().min(ui.clip_rect().right() - ui.cursor().left()).max(0.0);
@@ -387,6 +460,10 @@ fn row(ui: &mut egui::Ui, c: &mut Ctx, data: &super::RadarData, st: &mut PeopleU
             .or(st.sheet)
             == Some(f.id),
     );
+    super::type_ahead::reveal(ui, focus, rect, f.id);
+    if resp.clicked() || resp.secondary_clicked() {
+        ui.memory_mut(|m| m.request_focus(focus));
+    }
     if !ui.is_rect_visible(rect) {
         rows::person_menu(&resp, p, c.world, &st.sel, f.id);
         return;
@@ -446,10 +523,7 @@ fn row(ui: &mut egui::Ui, c: &mut Ctx, data: &super::RadarData, st: &mut PeopleU
     let click_sheet =
         c.contact_sheet_on_click && !clicked_right && resp.clicked() && ui.input(|i| !i.modifiers.command && !i.modifiers.shift);
     if action.sheet || click_sheet {
-        super::nearby::open_sheet(st, f.id);
-        if c.embedded_contacts {
-            st.sheet_grow = false;
-        }
+        show_sheet(c, st, f.id);
     }
     if action.activate {
         c.actions.push(super::PeopleAction::OpenIm(f.id));
@@ -457,6 +531,19 @@ fn row(ui: &mut egui::Ui, c: &mut Ctx, data: &super::RadarData, st: &mut PeopleU
     rows::person_menu(&resp, p, c.world, &st.sel, f.id);
     let on_names = resp.hover_pos().is_some_and(|at| at.x >= left && at.x <= end.names_right);
     rows::contact_tip(resp, (on_names && (cut || line.full != line.name)).then_some(line.full.as_str()));
+}
+
+/// Show `id`'s contact sheet. In Conversations › Contacts, a sheet the
+/// button collapsed is expanded again when there is room, rather than opened
+/// beside the list without its collapse button.
+fn show_sheet(c: &mut Ctx, st: &mut PeopleUi, id: Uuid) {
+    if c.embedded_contacts && c.contact_sheet_room && c.friends.sheet_collapsed {
+        c.friends.sheet_collapsed = false;
+    }
+    super::nearby::open_sheet(st, id);
+    if c.embedded_contacts {
+        st.sheet_grow = false;
+    }
 }
 
 /// The buttons `quick_actions` gives this friend, known before the row is hot
@@ -495,10 +582,7 @@ fn hover_actions(ui: &mut egui::Ui, c: &mut Ctx, st: &mut PeopleUi, f: &Friend, 
             "info-circle-filled" if resp.clicked() => {
                 st.sel = vec![f.id];
                 st.anchor = Some(f.id);
-                super::nearby::open_sheet(st, f.id);
-                if c.embedded_contacts {
-                    st.sheet_grow = false;
-                }
+                show_sheet(c, st, f.id);
             }
             "dots-filled" => {
                 let (p, world) = (c.p, c.world);
@@ -572,6 +656,108 @@ fn received(ui: &mut egui::Ui, p: &crate::theme::Palette, f: &Friend, slot: Rect
 mod tests {
     use super::*;
 
+    /// A click on a friend takes the keyboard, then the first letters of
+    /// another name jump to that friend (LLScrollListCtrl::handleUnicodeCharHere).
+    #[test]
+    fn typing_jumps_to_the_first_friend_whose_name_matches() {
+        let theme = crate::theme::Theme::default();
+        let p = theme.palette();
+        let mut frames = crate::ui::widgets::elide_tests::Frames::new();
+        theme.apply(&frames.ctx, 1.0);
+        frames.ctx.all_styles_mut(|style| style.animation_time = 0.0);
+        let mut world = crate::world::World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
+        let ids: Vec<Uuid> = ["Alice", "Bob", "Carol"]
+            .into_iter()
+            .enumerate()
+            .map(|(i, name)| {
+                let id = Uuid::from_u128(0xF000 + i as u128);
+                world.social.friends.push(Friend {
+                    id,
+                    online: true,
+                    rights_given: 3,
+                    rights_has: 7,
+                });
+                world.social.names.insert(id, name.to_owned());
+                id
+            })
+            .collect();
+        let radar = crate::world::radar::Radar::default();
+        let mut radar_settings = super::super::RadarSettings::default();
+        let (voice, pics) = (HashMap::new(), HashMap::new());
+        let data = super::super::RadarData {
+            radar: &radar,
+            settings: &mut radar_settings,
+            voice: &voice,
+            draw_distance: 64.0,
+            now: 0.0,
+            pics: &pics,
+        };
+        let mut contacts = crate::ui::contacts::ContactsUi::default();
+        let mut settings = super::super::FriendsSettings::default();
+        settings.sort = SORT_NAME;
+        let mut actions = Vec::new();
+        let mut st = PeopleUi::default();
+        let bounds = Rect::from_min_size(Pos2::new(20.0, 20.0), Vec2::new(420.0, 400.0));
+        let mut draw = |ui: &mut egui::Ui, st: &mut PeopleUi| {
+            let mut child = super::super::nearby::list_ui(ui, bounds, "type-ahead-test", false);
+            let mut c = Ctx {
+                p: &p,
+                world: &world,
+                contacts: &mut contacts,
+                friends: &mut settings,
+                images: &pics,
+                actions: &mut actions,
+                embedded_contacts: false,
+                contact_sheet_on_click: false,
+                contact_sheet_room: false,
+            };
+            list(&mut child, &mut c, &data, st, false);
+        };
+        // Without a click the list does not own the keyboard.
+        frames.run(vec![egui::Event::Text("b".into())], |ui| draw(ui, &mut st));
+        assert!(st.sel.is_empty(), "typing with the keyboard elsewhere leaves the list alone");
+
+        frames.run(Vec::new(), |ui| draw(ui, &mut st));
+        let row = frames
+            .ctx
+            .viewport(|v| {
+                v.this_pass
+                    .widgets
+                    .layers()
+                    .flat_map(|(_, widgets)| widgets)
+                    .filter(|w| w.sense.senses_drag() && (w.rect.height() - RICH_H).abs() < 0.5)
+                    .map(|w| w.rect)
+                    .min_by(|a, b| a.top().total_cmp(&b.top()))
+            })
+            .expect("the friend rows are drawn");
+        let pos = row.center();
+        frames.run(
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+            |ui| draw(ui, &mut st),
+        );
+        frames.run(vec![egui::Event::Text("b".into())], |ui| draw(ui, &mut st));
+        assert_eq!(st.sel, vec![ids[1]], "typing B jumps to Bob");
+        assert_eq!(st.anchor, Some(ids[1]));
+        frames.run(vec![egui::Event::Text("o".into())], |ui| draw(ui, &mut st));
+        assert_eq!(st.sel, vec![ids[1]], "a longer prefix keeps the match");
+        frames.run(vec![egui::Event::Text("b".into())], |ui| draw(ui, &mut st));
+        assert_eq!(st.sel, vec![ids[1]], "a prefix with no match keeps the selection");
+    }
+
     #[test]
     fn inline_controls_fit_the_list_at_transition_widths() {
         let theme = crate::theme::Theme::default();
@@ -639,6 +825,7 @@ mod tests {
                                     actions: &mut actions,
                                     embedded_contacts: embedded,
                                     contact_sheet_on_click: embedded,
+                                    contact_sheet_room: embedded,
                                 };
                                 list(&mut child, &mut c, &data, &mut st, true);
                             });
@@ -727,6 +914,173 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Conversations › Contacts: the button in the sheet's head collapses
+    /// the sheet, so the list takes the whole pane, and the one that takes its
+    /// place at the end of the toolbar expands it again on the friend held;
+    /// the setting keeps the choice. In a pane too narrow for both it does
+    /// nothing.
+    #[test]
+    fn the_toolbar_button_collapses_and_expands_the_contact_sheet() {
+        let theme = crate::theme::Theme::default();
+        let p = theme.palette();
+        let mut frames = crate::ui::widgets::elide_tests::Frames::new();
+        theme.apply(&frames.ctx, 1.0);
+        let mut world = crate::world::World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
+        for index in 0..3 {
+            let id = Uuid::from_u128(0xF100 + index);
+            world.social.friends.push(Friend {
+                id,
+                online: true,
+                rights_given: 3,
+                rights_has: 7,
+            });
+            world.social.names.insert(id, format!("Friend {index}"));
+        }
+        let radar = crate::world::radar::Radar::default();
+        let mut radar_settings = super::super::RadarSettings::default();
+        let (voice, pics) = (HashMap::new(), HashMap::new());
+        let data = super::super::RadarData {
+            radar: &radar,
+            settings: &mut radar_settings,
+            voice: &voice,
+            draw_distance: 64.0,
+            second_life: true,
+            now: 0.0,
+            pics: &pics,
+        };
+        let mut contacts = crate::ui::contacts::ContactsUi::default();
+        let mut settings = super::super::FriendsSettings::default();
+        let mut st = PeopleUi::default();
+        let ctx = frames.ctx.clone();
+        // the widgets drawn in the pane, after `events`
+        let mut frame = |width: f32, events: Vec<egui::Event>, settings: &mut super::super::FriendsSettings, st: &mut PeopleUi| {
+            let bounds = Rect::from_min_size(Pos2::new(20.0, 20.0), Vec2::new(width, 500.0));
+            let mut layer = None;
+            frames.shapes(events, |ui| {
+                let mut child = super::super::nearby::list_ui(ui, bounds, "friends-pane-test", true);
+                layer = Some(child.layer_id());
+                let pane = super::super::FriendsPane {
+                    st: &mut *st,
+                    data: &data,
+                    settings: &mut *settings,
+                    images: &pics,
+                };
+                super::super::friends_pane(&mut child, &p, &world, pane, &mut contacts);
+            });
+            let rects: Vec<_> = frames
+                .ctx
+                .viewport(|v| v.this_pass.widgets.get_layer(layer.expect("drawn")).cloned().collect());
+            rects
+        };
+        let toggle_of = |rects: &[egui::WidgetRect]| {
+            rects
+                .iter()
+                .filter(|w| w.rect.size() == Vec2::splat(rows::TOOLBAR_H) && w.rect.top() < 20.0 + rows::TOOLBAR_H)
+                .max_by(|a, b| a.rect.right().total_cmp(&b.rect.right()))
+                .map(|w| w.rect)
+        };
+        let click = |at: Pos2| {
+            [true, false].map(|pressed| {
+                vec![
+                    egui::Event::PointerMoved(at),
+                    egui::Event::PointerButton {
+                        pos: at,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ]
+            })
+        };
+        let mut button = None;
+        for _ in 0..3 {
+            button = toggle_of(&frame(640.0, Vec::new(), &mut settings, &mut st));
+        }
+        let button = button.expect("the toggle is drawn");
+        let first = Some(Uuid::from_u128(0xF100));
+        assert_eq!(st.sheet, first, "a wide pane shows the sheet beside the list");
+        for events in click(button.center()) {
+            frame(640.0, events, &mut settings, &mut st);
+        }
+        let mut expand = None;
+        for _ in 0..2 {
+            expand = toggle_of(&frame(640.0, Vec::new(), &mut settings, &mut st));
+        }
+        assert!(settings.sheet_collapsed, "the click collapses the sheet");
+        assert_eq!(st.sheet, None, "the list takes the whole pane");
+        let expand = expand.expect("the toolbar has the expand button");
+        assert_eq!(expand, button, "the button does not move when it is used");
+        for events in click(button.center()) {
+            frame(640.0, events, &mut settings, &mut st);
+        }
+        for _ in 0..2 {
+            frame(640.0, Vec::new(), &mut settings, &mut st);
+        }
+        assert!(!settings.sheet_collapsed, "a second click expands it");
+        assert_eq!(st.sheet, first, "on the friend held");
+
+        // collapsed again, a friend's "Show contact details" expands the sheet
+        // on that friend rather than opening it beside the list without its
+        // collapse button
+        for events in click(button.center()) {
+            frame(640.0, events, &mut settings, &mut st);
+        }
+        let mut rects = Vec::new();
+        for _ in 0..2 {
+            rects = frame(640.0, Vec::new(), &mut settings, &mut st);
+        }
+        assert!(settings.sheet_collapsed);
+        let mut rows_at: Vec<Rect> = rects
+            .iter()
+            .filter(|w| w.rect.width() > 300.0 && w.rect.top() > 20.0 + rows::TOOLBAR_H)
+            .map(|w| w.rect)
+            .collect();
+        rows_at.sort_by(|a, b| a.top().total_cmp(&b.top()));
+        let second = rows_at.get(1).copied().expect("the second friend's row");
+        for _ in 0..2 {
+            rects = frame(640.0, vec![egui::Event::PointerMoved(second.center())], &mut settings, &mut st);
+        }
+        let mut quick: Vec<Rect> = rects
+            .iter()
+            .filter(|w| w.rect.size() == rows::BUTTON && second.contains(w.rect.center()))
+            .map(|w| w.rect)
+            .collect();
+        quick.sort_by(|a, b| a.left().total_cmp(&b.left()));
+        assert_eq!(quick.len(), 6, "an online friend's quick actions");
+        for events in click(quick[4].center()) {
+            frame(640.0, events, &mut settings, &mut st);
+        }
+        for _ in 0..2 {
+            frame(640.0, Vec::new(), &mut settings, &mut st);
+        }
+        assert!(!settings.sheet_collapsed, "the contact details expand the sheet");
+        assert_eq!(st.sheet, Some(Uuid::from_u128(0xF101)), "on the friend asked for");
+
+        // the search field keeps its focus when the pane narrows past the
+        // sheet and the expand button appears in the toolbar beside it
+        let search = Pos2::new(100.0, 20.0 + rows::TOOLBAR_H / 2.0);
+        for events in click(search) {
+            frame(640.0, events, &mut settings, &mut st);
+        }
+        let focused = ctx.memory(|m| m.focused());
+        assert!(focused.is_some(), "the click focuses the search field");
+        for _ in 0..3 {
+            frame(300.0, Vec::new(), &mut settings, &mut st);
+        }
+        assert_eq!(ctx.memory(|m| m.focused()), focused, "the search field keeps its focus");
+        ctx.memory_mut(|m| m.surrender_focus(focused.expect("focused")));
+
+        let mut narrow = None;
+        for _ in 0..3 {
+            narrow = toggle_of(&frame(300.0, Vec::new(), &mut settings, &mut st));
+        }
+        let narrow = narrow.expect("the toggle is drawn greyed out");
+        for events in click(narrow.center()) {
+            frame(300.0, events, &mut settings, &mut st);
+        }
+        assert!(!settings.sheet_collapsed, "a pane too narrow for both leaves the setting alone");
     }
 
     /// The right end of a friend's row, at every width, with or without the

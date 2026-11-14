@@ -525,6 +525,8 @@ pub struct Settings {
     pub camera: crate::camera::CameraSettings,
     /// The crosshair in mouselook (ShowCrosshairs; #1166).
     pub crosshair: crate::ui::crosshair::Settings,
+    /// Size and appearance of the ordinary mouse pointer.
+    pub pointer: crate::cursors::Preferences,
     /// LLViewerJoystick: device, axis mapping and separate avatar/flycam tuning.
     pub joystick: crate::joystick::Settings,
     pub gamepad: crate::joystick::Settings,
@@ -1355,6 +1357,10 @@ pub struct Settings {
     /// Aurora extension: allow the left/right mouse chord on land and objects
     /// without a click action, in addition to our avatar. Off by default.
     pub world_mouse_walk: bool,
+    /// A left drag on our avatar turns the camera around it without turning
+    /// the avatar, as a right drag does (the Firestorm habit, feedback #445).
+    /// Off by default: the drag steers the avatar (LLToolPie::startCameraSteering).
+    pub left_drag_avatar_moves_camera: bool,
     pub arrows_strafe: bool,
     /// The arrow keys (and Page Up / Down, Home) move the avatar while the
     /// chat bar has the keyboard, even with text in it; an empty bar always
@@ -1688,6 +1694,11 @@ pub struct Settings {
     /// graphics card once it is known (`graphics_presets::for_machine`).
     #[serde(skip)]
     pub new_profile: bool,
+    /// The keyboard's defaults were placed for a layout that may only stand
+    /// in for the active one (a new profile, or a file older than version
+    /// 40): the first report of `keybinds::LayoutWatch` moves them.
+    #[serde(skip)]
+    pub defaults_follow_reported_layout: bool,
     /// Version 33 turned the camera's limits back on in this file: the login
     /// screen says so once (`ui/login/camera_limits_notice.rs`).
     #[serde(skip)]
@@ -1745,7 +1756,7 @@ pub(crate) fn max_texture_resolution_choice(v: u32) -> u32 {
         .unwrap_or(MAX_TEXTURE_RESOLUTIONS[0])
 }
 
-const SETTINGS_VERSION: u32 = 39;
+const SETTINGS_VERSION: u32 = 40;
 
 /// The world render percentage that draws at the display's logical
 /// resolution, as the Legacy Viewer does on a Mac with RenderHiDPI 0: 50 on
@@ -2095,6 +2106,7 @@ impl Default for Settings {
             build: Default::default(),
             camera: Default::default(),
             crosshair: Default::default(),
+            pointer: Default::default(),
             joystick: Default::default(),
             gamepad: crate::joystick::Settings::gamepad_defaults(),
             pending_legacy_gamepad: None,
@@ -2416,6 +2428,7 @@ impl Default for Settings {
             invert_mouse: false,
             arrows_strafe: false,
             world_mouse_walk: false,
+            left_drag_avatar_moves_camera: false,
             arrow_keys_always_move: false,
             letter_keys_move: true,
             walk_backwards_without_turning: false,
@@ -2524,6 +2537,7 @@ impl Default for Settings {
             settings_version: SETTINGS_VERSION,
             newer_file: None,
             new_profile: false,
+            defaults_follow_reported_layout: false,
             camera_limits_restored: false,
         }
     }
@@ -2778,6 +2792,7 @@ impl Settings {
         let forced = std::env::var_os("AURORA_CAPTURE").is_some();
         s.window_maximized = window_starts_maximized(saved_window.0, saved_window.1, forced);
         s.new_profile = new_profile;
+        s.defaults_follow_reported_layout = new_profile;
         s.finished(newer)
     }
 
@@ -3186,6 +3201,13 @@ impl Settings {
             // sorted order of these levels
             crate::graphics_presets::upgrade_blend_order(&mut self);
         }
+        if self.settings_version < 40 {
+            // the letter shortcuts of version 12 (or older defaults moved
+            // then) were placed for the first layout of a Wayland keymap,
+            // which only stood in for the active one: they follow the layout
+            // the compositor reports first (`keybinds::LayoutWatch`)
+            self.defaults_follow_reported_layout = true;
+        }
         if !self.audio.mic_gain.is_finite() {
             self.audio.mic_gain = 1.0;
         }
@@ -3294,6 +3316,8 @@ impl Settings {
             0.5
         };
         self.ui_scale = self.ui_scale.clamp(0.75, 2.0);
+        self.pointer.size = self.pointer.size.clamp(16, 64);
+        self.pointer.touch_size = self.pointer.touch_size.clamp(16, 64);
         self.mouse_sensitivity = self.mouse_sensitivity.clamp(0.1, 5.0);
         self.texture_budget_mb = self.texture_budget_mb.clamp(256, 32768);
         self.font_scale = self.font_scale.clamp(FONT_SCALE_MIN, FONT_SCALE_MAX);
@@ -3620,6 +3644,15 @@ impl Settings {
     }
 }
 
+/// How the minimap displays avatar names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum MiniAvatarNameFormat {
+    Display,
+    Legacy,
+    #[default]
+    DisplayAndLegacy,
+}
+
 /// Mini-map (LLNetMap) and world map (LLFloaterWorldMap) options, with the
 /// Firestorm defaults.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -3627,6 +3660,8 @@ impl Settings {
 pub struct MapSettings {
     /// MiniMapScale: pixels per region, 32..4096.
     pub mini_scale: f32,
+    /// Avatar name format in minimap tooltips and avatar menus.
+    pub mini_avatar_name_format: MiniAvatarNameFormat,
     /// MiniMapRotate: camera direction at the top (else north).
     pub mini_rotate: bool,
     /// MiniMapObjects.
@@ -3674,6 +3709,7 @@ impl Default for MapSettings {
     fn default() -> Self {
         MapSettings {
             mini_scale: 128.0,
+            mini_avatar_name_format: MiniAvatarNameFormat::DisplayAndLegacy,
             // forced to north-up at the first login (llnetmap.cpp)
             mini_rotate: false,
             mini_objects: true,
@@ -3838,6 +3874,30 @@ mod tests {
                 let restored: Settings = serde_json::from_slice(&bytes).expect("restart");
                 assert_eq!((restored.appearance_camera_movement, restored.customize_animation), (camera, pose));
             }
+        }
+    }
+
+    #[test]
+    fn cursor_preferences_keep_defaults_and_clamp_both_saved_sizes() {
+        use super::Settings;
+        let old: Settings = serde_json::from_str("{}").expect("older preferences");
+        assert_eq!(old.pointer.size, 32);
+        assert_eq!(old.pointer.touch_size, 32);
+        assert_eq!(old.pointer.look, crate::cursors::PointerLook::System);
+        assert_eq!(old.pointer.touch_look, crate::cursors::TouchLook::Finger);
+
+        for (size, touch_size, expected_size, expected_touch_size) in [(0, 90, 16, 64), (48, 24, 48, 24), (90, 0, 64, 16)] {
+            let settings = Settings {
+                pointer: crate::cursors::Preferences {
+                    size,
+                    touch_size,
+                    ..Default::default()
+                },
+                ..Settings::default()
+            }
+            .sanitized();
+            assert_eq!(settings.pointer.size, expected_size);
+            assert_eq!(settings.pointer.touch_size, expected_touch_size);
         }
     }
 
@@ -5048,6 +5108,33 @@ mod tests {
         let bytes = serde_json::to_vec(&existing).expect("serialize synthetic settings");
         let saved: Settings = serde_json::from_slice(&bytes).expect("read synthetic settings");
         assert_eq!(saved.sanitized().keybinds, existing.keybinds);
+    }
+
+    /// A file older than version 40 had its letters placed for the first
+    /// layout of a Wayland keymap: they follow the first reported layout,
+    /// once (`KeyBindings::follow_layout_change`); a newer file waits for none.
+    #[test]
+    fn older_files_follow_the_reported_keyboard_layout_once() {
+        for (version, follows) in [
+            (12, true),
+            (31, true),
+            (33, true),
+            (37, true),
+            (38, true),
+            (39, true),
+            (SETTINGS_VERSION, false),
+        ] {
+            let file = Settings {
+                settings_version: version,
+                ..Settings::default()
+            };
+            let loaded = file.sanitized();
+            assert_eq!(loaded.defaults_follow_reported_layout, follows, "version {version}");
+            assert_eq!(loaded.settings_version, SETTINGS_VERSION);
+            // saved, the file is the current version: the next launch waits for no report
+            let saved: Settings = serde_json::from_slice(&serde_json::to_vec(&loaded).expect("write settings")).expect("read settings");
+            assert!(!saved.sanitized().defaults_follow_reported_layout, "only once");
+        }
     }
 
     /// The move of the letter shortcuts to the layout's letters runs once

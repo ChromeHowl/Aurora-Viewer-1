@@ -94,6 +94,8 @@ pub struct AuroraState {
     /// AURORA_DEMO_PLACES=…:open: the first place selected (a narrow row
     /// opened) once the list has one.
     pub demo_open: bool,
+    /// Landmark folders of the rail whose children are hidden (#3001).
+    collapsed_folders: HashSet<Uuid>,
 }
 
 impl AuroraState {
@@ -584,7 +586,13 @@ impl PlacesUi {
 
         let mut r = ui.new_child(egui::UiBuilder::new().max_rect(rail.shrink2(Vec2::new(8.0, 10.0))));
         r.set_clip_rect(rail);
-        self.rail(&mut r, p, c.world, cat, env);
+        // The rail used to paint every folder without a scroll area, so a
+        // tall tree clipped with no way to reach the bottom, and no way to
+        // collapse nested folders (#3001).
+        egui::ScrollArea::vertical()
+            .id_salt("places-rail")
+            .auto_shrink([false, false])
+            .show(&mut r, |ui| self.rail(ui, p, c.world, cat, env));
 
         let mut l = ui.new_child(egui::UiBuilder::new().max_rect(list));
         l.set_clip_rect(list);
@@ -680,9 +688,20 @@ impl PlacesUi {
         let at = ui.cursor().min + Vec2::new(10.0, 0.0);
         section(ui, p, aurora_i18n::tr!("ui-places-folders"), at);
         ui.add_space(22.0);
-        for f in model::folders(&world.inventory) {
+        let folders = model::folders(&world.inventory);
+        let has_children: HashSet<Uuid> = folders.windows(2).filter(|w| w[1].depth > w[0].depth).map(|w| w[0].id).collect();
+        let mut skip_deeper_than = None::<usize>;
+        for f in &folders {
+            if let Some(depth) = skip_deeper_than {
+                if f.depth > depth {
+                    continue;
+                }
+                skip_deeper_than = None;
+            }
             let n = cat.landmarks.iter().filter(|pl| pl.folder == Some(f.id)).count();
-            let resp = rail_row(
+            let branch = has_children.contains(&f.id);
+            let collapsed = branch && self.aurora.collapsed_folders.contains(&f.id);
+            let (resp, caret) = widgets::rail_tree_row(
                 ui,
                 p,
                 "folder-filled",
@@ -691,9 +710,19 @@ impl PlacesUi {
                 Some(n),
                 self.aurora.source == Source::Folder(f.id),
                 f.depth,
+                branch.then_some(!collapsed),
             );
-            if resp.clicked() {
+            if caret.is_some_and(|c| c.clicked()) {
+                if collapsed {
+                    self.aurora.collapsed_folders.remove(&f.id);
+                } else {
+                    self.aurora.collapsed_folders.insert(f.id);
+                }
+            } else if resp.clicked() {
                 self.set_source(Source::Folder(f.id));
+            }
+            if collapsed {
+                skip_deeper_than = Some(f.depth);
             }
             menu::context_menu(&resp, p, |ui| {
                 let inv = &world.inventory;
@@ -805,8 +834,11 @@ impl PlacesUi {
                 Line::Title(t) => {
                     ui.add_space(10.0);
                     let at = ui.cursor().min + Vec2::new(10.0, 0.0);
-                    section(ui, p, t, at);
-                    ui.add_space(20.0);
+                    let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 20.0), egui::Sense::hover());
+                    // large History lists (#2955): skip off-screen section paint
+                    if ui.is_rect_visible(r) {
+                        section(ui, p, t, at);
+                    }
                     continue;
                 }
                 Line::Place(k, place) => (*k, place),
@@ -823,6 +855,11 @@ impl PlacesUi {
             };
             let out = place_row(ui, p, c, place, selected, snapshot, self.aurora.source == Source::Favorites, wide);
             widgets::reveal_search_selection(ui, &out.resp, selected);
+            // place_row already skips its paint when clipped; skip menus and
+            // snapshot work for thousands of History rows off screen (#2955)
+            if !ui.is_rect_visible(out.resp.rect) {
+                continue;
+            }
             let target = match key {
                 Key::Visit(_) => place.global.map(super::drag::Target::History),
                 Key::Landmark(_) => place.item.map(super::drag::Target::Landmark),
@@ -837,9 +874,7 @@ impl PlacesUi {
             }
             // every row on screen asks for its picture, not only the one
             // previewed (#798)
-            if let Some(s) = spot
-                && ui.is_rect_visible(out.resp.rect)
-            {
+            if let Some(s) = spot {
                 self.want_snapshots.push(s);
             }
             if let Some(fav) = place.favorite.filter(|_| reorder) {

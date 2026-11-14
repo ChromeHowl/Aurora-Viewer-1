@@ -302,6 +302,9 @@ pub struct StatusInfo<'a> {
     /// The grid has a Marketplace (World › SL Marketplace is shown only on
     /// the Second Life grids, GridCheck "secondlife").
     pub marketplace: bool,
+    /// The grid has an Avatar Welcome Pack (Me › Avatar Welcome Pack… is
+    /// shown only then, GridFeatureCheck avatar_picker).
+    pub avatar_welcome: bool,
     /// The grid has a Destination Guide (World › Destinations is shown only
     /// then, GridFeatureCheck destination_guide).
     pub destinations: bool,
@@ -915,6 +918,12 @@ fn main_menus(ui: &mut egui::Ui, p: &Palette, panels: &mut Panels, st: &StatusIn
             super::experiences::WINDOW,
             &mut panels.experiences,
         );
+        // menu_viewer.xml: Avatar Welcome Pack… (Floater.Toggle
+        // avatar_welcome_pack), after the attachments, which this menu does
+        // not hold; on a grid with the page
+        if st.avatar_welcome && menu::item(ui, p, "user-circle", aurora_i18n::tr!("ui-bars-avatar-welcome-pack")) {
+            super::widgets::toggle_floater(ui.ctx(), super::avatar_welcome::WINDOW, &mut panels.avatar_welcome);
+        }
         menu::separator(ui, p);
         if menu::item_if(ui, p, "home-filled", aurora_i18n::tr!("common-go-home"), st.can_go_home) {
             *action = BarAction::TeleportHome;
@@ -1025,17 +1034,24 @@ fn main_menus(ui: &mut egui::Ui, p: &Palette, panels: &mut Panels, st: &StatusIn
         if menu::item_keys(ui, p, "hand-move", aurora_i18n::tr!("gesture-title"), &gestures) {
             super::widgets::toggle_floater(ui.ctx(), "gestures", &mut panels.gestures);
         }
-        for (tab, icon, label) in [
-            (1, "users", aurora_i18n::tr!("common-friends")),
-            (0, "radar-filled", aurora_i18n::tr!("common-nearby-people")),
-            (2, "users-group", aurora_i18n::tr!("common-groups")),
-            (4, "ban", aurora_i18n::tr!("ui-bars-block-list")),
-        ] {
+        let mut people_tab = |ui: &mut egui::Ui, tab, icon: &str, label: &str| {
             if menu::item(ui, p, icon, label) {
                 super::widgets::open_floater(ui.ctx(), "people", &mut panels.people);
                 panels.people_tab = tab;
             }
-        }
+        };
+        people_tab(ui, 1, "users", aurora_i18n::tr!("common-friends"));
+        people_tab(ui, 0, "radar-filled", aurora_i18n::tr!("common-nearby-people"));
+        people_tab(ui, 2, "users-group", aurora_i18n::tr!("common-groups"));
+        flip_window(
+            ui,
+            p,
+            "tags-filled",
+            aurora_i18n::tr!("toolbar-command-group-titles"),
+            super::group_titles::WINDOW,
+            &mut panels.group_titles,
+        );
+        people_tab(ui, 4, "ban", aurora_i18n::tr!("ui-bars-block-list"));
         menu::separator(ui, p);
         // Firestorm "Online Status" menu
         menu::submenu(ui, p, "circle-filled", aurora_i18n::tr!("ui-bars-online-status"), true, |ui| {
@@ -1971,20 +1987,69 @@ fn location_field(ui: &mut egui::Ui, p: &Palette, panels: &mut Panels, st: &Stat
             .size()
             .x;
         let lw = text_w.min(w).ceil();
-        let resp = ui
+        // a web address in the parcel's name opens in the browser, as the
+        // Legacy Viewer's LLURLLineEditor links it (LLUrlRegistry)
+        let link_color = crate::ui::colors::text(crate::ui::colors::get().chat_urls);
+        let (resp, link_hovered, link_clicked) = ui
             .allocate_ui_with_layout(Vec2::new(lw, 18.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 ui.set_max_width(lw);
-                ui.add(egui::Label::new(small(loc, p.ink)).truncate().sense(egui::Sense::click()))
+                let mut job = egui::text::LayoutJob::default();
+                let mut links = Vec::new();
+                let mut chars = 0;
+                for (run, url) in place::link_runs(loc) {
+                    let start = chars;
+                    chars += run.chars().count();
+                    let (color, underline) = match url {
+                        Some(_) => (link_color, egui::Stroke::new(1.0, link_color)),
+                        None => (p.ink, egui::Stroke::NONE),
+                    };
+                    job.append(
+                        run,
+                        0.0,
+                        egui::TextFormat {
+                            font_id: egui::FontId::proportional(12.0),
+                            color,
+                            underline,
+                            ..Default::default()
+                        },
+                    );
+                    if let Some(url) = url {
+                        links.push((start..chars, url.to_owned()));
+                    }
+                }
+                let (origin, galley, resp) = egui::Label::new(job).truncate().sense(egui::Sense::click()).layout_in_ui(ui);
+                if ui.is_rect_visible(resp.rect) {
+                    ui.painter().add(egui::epaint::TextShape::new(origin, galley.clone(), p.ink));
+                }
+                let mut link_hovered = false;
+                let mut link_clicked = false;
+                for (i, (range, url)) in links.iter().enumerate() {
+                    for (j, rect) in crate::ui::chat::range_rects(&galley, origin, range.clone()).into_iter().enumerate() {
+                        if rect.width() <= 0.5 {
+                            continue;
+                        }
+                        let link = ui.interact(rect, egui::Id::unique(("nav_location_link", i, j)), egui::Sense::click());
+                        if link.hovered() {
+                            link_hovered = true;
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                        }
+                        if link.on_hover_text(url).clicked() {
+                            crate::ui::chat::open_web_link(ui.ctx(), url);
+                            link_clicked = true;
+                        }
+                    }
+                }
+                (resp, link_hovered, link_clicked)
             })
-            .inner
-            .on_hover_text(aurora_i18n::tr!(
-                "ui-bars-click-to-copy-the-slurl-or-enter-a-destination",
-                loc = loc.to_string()
-            ));
-        if resp.hovered() {
+            .inner;
+        let resp = resp.on_hover_text(aurora_i18n::tr!(
+            "ui-bars-click-to-copy-the-slurl-or-enter-a-destination",
+            loc = loc.to_string()
+        ));
+        if resp.hovered() && !link_hovered {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Text);
         }
-        if resp.clicked() {
+        if resp.clicked() && !link_clicked {
             panels.nav_edit = Some(slurl.to_owned());
             panels.nav_edit_new = true;
         }
@@ -2407,6 +2472,8 @@ pub fn run_command(ctx: &egui::Context, cmd: &str, panels: &mut Panels) -> BarAc
         "gridstatus" => toggle(super::grid_status::WINDOW, &mut panels.grid_status),
         // ToggleWebBrowser: the browser window on the home page, or closed
         "webbrowser" => toggle(super::web_browser::WINDOW, &mut panels.web_browser),
+        // Floater.Toggle avatar_welcome_pack: the grid's ready-made avatars
+        "avatar" => toggle(super::avatar_welcome::WINDOW, &mut panels.avatar_welcome),
         // Floater.Toggle destinations: the grid's Destination Guide
         "destinations" => toggle(super::destinations::WINDOW, &mut panels.destinations),
         // Floater.Toggle fs_voice_controls
@@ -2519,6 +2586,7 @@ fn command_active(cmd: &str, panels: &Panels, flying: bool, seated: bool, mousel
         "gridstatus" => panels.grid_status,
         "avatar_align" => panels.avatar_align,
         "webbrowser" => panels.web_browser,
+        "avatar" => panels.avatar_welcome,
         "destinations" => panels.destinations,
         "voice" => panels.voice_controls,
         "performance" | "statistics" => panels.perf,
@@ -3267,9 +3335,10 @@ pub(crate) fn toolbar_row(
             && (!panels.chat || super::widgets::floater_minimized(ui.ctx(), "conversations"));
         let count = if badge { row.unread } else { 0 };
         // the Photo roll's button, dimmed while the session has no photo
-        // and the Destination Guide's on a grid without one (GridFeatureCheck)
+        // and the Avatar Welcome Pack's and the Destination Guide's on a grid without one (GridFeatureCheck)
+        let no_pack = b.command == "avatar" && !toolbar.avatar_welcome;
         let no_guide = b.command == "destinations" && !toolbar.destinations;
-        let usable = !(b.command == "photo_roll" && toolbar.photo_roll_empty) && !no_guide;
+        let usable = !(b.command == "photo_roll" && toolbar.photo_roll_empty) && !no_pack && !no_guide;
         let tip = if badge {
             aurora_i18n::tr!(
                 "ui-bars-unread",
@@ -3299,6 +3368,8 @@ pub(crate) fn toolbar_row(
             .to_owned()
         } else if !super::toolbar::ready(&b.command) {
             format!("{}\n{}", super::toolbar::label(b), menu::not_yet())
+        } else if no_pack {
+            format!("{}\n{}", super::toolbar::label(b), aurora_i18n::tr!("avatar-welcome-unavailable"))
         } else if no_guide {
             format!("{}\n{}", super::toolbar::label(b), aurora_i18n::tr!("destinations-unavailable"))
         } else if !usable {
@@ -4090,6 +4161,7 @@ mod tests {
             ("group_titles", super::super::group_titles::WINDOW, |p| p.group_titles),
             ("gridstatus", super::super::grid_status::WINDOW, |p| p.grid_status),
             ("webbrowser", super::super::web_browser::WINDOW, |p| p.web_browser),
+            ("avatar", super::super::avatar_welcome::WINDOW, |p| p.avatar_welcome),
             ("destinations", super::super::destinations::WINDOW, |p| p.destinations),
             ("beacons", super::super::beacons::WINDOW, |p| p.beacons),
             ("quickprefs", super::super::quick_prefs::WINDOW, |p| p.quick_prefs),

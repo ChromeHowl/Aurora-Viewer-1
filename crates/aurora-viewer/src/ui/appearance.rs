@@ -1844,7 +1844,9 @@ pub fn show(
         // a guess too small (buttons wrapped in a narrow window, a long
         // message) made the window grow to fit them, the list take the new
         // room, and the window grow again at every frame.
-        let below_id = ui.scope_id().with("appearance_below_list");
+        let below_id = ui
+            .scope_id()
+            .with(("appearance_below_list", st.editing, st.adding, st.tab, st.edit_tab));
         let estimate = if st.editing || st.tab == 2 { 130.0 } else { 154.0 };
         let reserved = ui.ctx().data(|d| d.get_temp::<f32>(below_id)).unwrap_or(estimate);
         let list_top = ui.cursor().top();
@@ -1863,7 +1865,7 @@ pub fn show(
                     let list_width = ui.available_width();
                     clipboard::list_focus(ui, egui::Rect::from_min_size(ui.cursor().min, Vec2::new(list_width, height)));
                     egui::ScrollArea::vertical()
-                        .id_salt("appearance_list")
+                        .id_salt(("appearance_list", st.editing, st.adding, st.tab, st.edit_tab))
                         .max_height(height)
                         .min_scrolled_height(height)
                         .auto_shrink([false, false])
@@ -2276,6 +2278,72 @@ mod tests {
         let (_, landscape) = preview_rects(frame, egui::vec2(400.0, 180.0), true);
         assert!(landscape.min.x > 0.0);
         assert_eq!(landscape.min.y, 0.0);
+    }
+
+    /// After the user made Appearance wider, dragging it narrower must stick:
+    /// the old `set_min_width(available_width)` ratcheted the body's min so
+    /// the floater could grow but never shrink again (#3035).
+    #[test]
+    fn appearance_window_can_shrink_again_after_it_was_made_wider() {
+        let ctx = egui::Context::default();
+        crate::theme::Theme::default().apply(&ctx, 1.0);
+        let _icons = icons::Icons::load(&ctx, None);
+        let mut world = wardrobe(0);
+        let mut st = AppearanceUi::default();
+        let area = || ctx.memory(|m| m.area_rect(egui::Id::unique("appearance"))).expect("floater");
+        for _ in 0..10 {
+            draw(&ctx, &mut world, &mut st, None);
+        }
+        let opened = area();
+        assert!((opened.width() - 580.0).abs() < 1.0, "opens at its default width: {opened:?}");
+        let input = |pos: egui::Pos2, pressed: Option<bool>| egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1600.0, 900.0))),
+            events: std::iter::once(egui::Event::PointerMoved(pos))
+                .chain(pressed.map(|pressed| egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: Default::default(),
+                }))
+                .collect(),
+            ..Default::default()
+        };
+        let drag_right_edge = |world: &mut World, st: &mut AppearanceUi, delta_x: f32| {
+            let rect = area();
+            let grab = egui::pos2(rect.right() - 1.0, rect.center().y);
+            draw_input(&ctx, world, st, input(grab, None));
+            draw_input(&ctx, world, st, input(grab, Some(true)));
+            for i in 1..=40 {
+                draw_input(
+                    &ctx,
+                    world,
+                    st,
+                    input(grab + Vec2::new(delta_x * (i as f32 / 20.0).min(1.0), 0.0), None),
+                );
+            }
+            let dragged = area();
+            draw_input(&ctx, world, st, input(grab + Vec2::new(delta_x, 0.0), Some(false)));
+            for _ in 0..20 {
+                draw(&ctx, world, st, None);
+            }
+            (dragged, area())
+        };
+        let (wide_drag, wide) = drag_right_edge(&mut world, &mut st, 200.0);
+        assert!(
+            wide.width() >= opened.width() + 150.0,
+            "grew wider: {opened:?} -> drag {wide_drag:?} -> rest {wide:?}"
+        );
+        assert_eq!(wide.size(), wide_drag.size(), "wide size sticks after release");
+        let (narrow_drag, narrow) = drag_right_edge(&mut world, &mut st, -180.0);
+        assert!(
+            narrow.width() + 50.0 < wide.width(),
+            "must shrink again after widening: {wide:?} -> drag {narrow_drag:?} -> rest {narrow:?}"
+        );
+        assert_eq!(
+            narrow.size(),
+            narrow_drag.size(),
+            "narrow size sticks after release: {narrow_drag:?} vs {narrow:?}"
+        );
     }
 
     #[test]
@@ -3860,6 +3928,129 @@ mod tests {
         hits.iter()
             .find(|(clip, pos)| clip.height() < window && clip.contains(*pos))
             .map(|(clip, pos)| (pos.y - clip.top(), clip.bottom() - pos.y))
+    }
+
+    fn visible_list_outfit(ctx: &egui::Context, world: &mut World, st: &mut AppearanceUi) -> Option<(Uuid, String, egui::Pos2)> {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1600.0, 900.0))),
+            ..Default::default()
+        };
+        let shapes = draw_output(ctx, world, st, input).1;
+        let window_height = shapes.iter().map(|shape| shape.clip_rect.height()).fold(0.0, f32::max);
+        st.shown_outfits(&world.inventory).into_iter().find_map(|id| {
+            let folder = world.inventory.folders.get(&id)?;
+            if model::folder_links(&world.inventory, id).is_empty() {
+                return None;
+            }
+            shapes.iter().find_map(|shape| {
+                let pos = text_position(&shape.shape, &folder.info.name)?;
+                (shape.clip_rect.height() < window_height && shape.clip_rect.contains(pos)).then(|| (id, folder.info.name.clone(), pos))
+            })
+        })
+    }
+
+    #[test]
+    fn outfit_list_keeps_its_position_and_window_size_after_visiting_worn() {
+        let ctx = egui::Context::default();
+        crate::theme::Theme::default().apply(&ctx, 1.0);
+        let _icons = icons::Icons::load(&ctx, None);
+        let mut world = wardrobe(120);
+        let mut st = AppearanceUi::default();
+        st.open(1, false);
+        for _ in 0..4 {
+            draw(&ctx, &mut world, &mut st, None);
+        }
+
+        for _ in 0..3 {
+            draw_input(
+                &ctx,
+                &mut world,
+                &mut st,
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1600.0, 900.0))),
+                    events: vec![
+                        egui::Event::PointerMoved(egui::pos2(300.0, 450.0)),
+                        egui::Event::MouseWheel {
+                            unit: egui::MouseWheelUnit::Point,
+                            delta: egui::vec2(0.0, -600.0),
+                            phase: egui::TouchPhase::Move,
+                            source: egui::MouseWheelSource::Unknown,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                    ..Default::default()
+                },
+            );
+        }
+
+        let (outfit, _, _) = visible_list_outfit(&ctx, &mut world, &mut st).expect("scrolled outfit is in sight");
+        assert!(
+            st.shown_outfits(&world.inventory)
+                .iter()
+                .position(|id| *id == outfit)
+                .unwrap_or_default()
+                > 10
+        );
+        st.outfit_selection.single(outfit);
+        st.reveal_outfit = Some(outfit);
+        for _ in 0..4 {
+            draw(&ctx, &mut world, &mut st, None);
+        }
+        assert_eq!(st.outfit_selection.focus, Some(outfit), "the outfit is selected");
+        assert!(
+            st.list_open.as_ref().is_some_and(|open| open.contains(&outfit)),
+            "the outfit is expanded"
+        );
+        let item = model::folder_links(&world.inventory, outfit)
+            .into_iter()
+            .find_map(|link| world.inventory.items.get(&link.target).map(|item| item.name.clone()))
+            .expect("outfit item");
+        click_row(
+            &ctx,
+            &mut world,
+            &mut st,
+            &item,
+            egui::Modifiers::NONE,
+            egui::PointerButton::Primary,
+        );
+        assert!(
+            st.item_selected(outfit, model::folder_links(&world.inventory, outfit)[0].target),
+            "item row click selects an item"
+        );
+        let first_visible = visible_list_outfit(&ctx, &mut world, &mut st)
+            .expect("outfit list remains scrolled")
+            .0;
+        assert_eq!(first_visible, outfit, "the expanded outfit is the first visible row");
+        let before_size = ctx
+            .memory(|m| m.area_rect(egui::Id::unique("appearance")))
+            .expect("appearance window")
+            .size();
+
+        st.open(2, false);
+        for _ in 0..4 {
+            draw(&ctx, &mut world, &mut st, None);
+        }
+        let worn_size = ctx
+            .memory(|m| m.area_rect(egui::Id::unique("appearance")))
+            .expect("appearance window")
+            .size();
+        st.open(1, false);
+        for _ in 0..4 {
+            draw(&ctx, &mut world, &mut st, None);
+        }
+
+        let after_visible = visible_list_outfit(&ctx, &mut world, &mut st)
+            .expect("outfit list remains visible")
+            .0;
+        let after_size = ctx
+            .memory(|m| m.area_rect(egui::Id::unique("appearance")))
+            .expect("appearance window")
+            .size();
+        assert_eq!(after_visible, first_visible, "top of the visible outfit list changed");
+        assert!(
+            (before_size.y - after_size.y).abs() < 1.0,
+            "window height changed: outfits {before_size:?}, worn {worn_size:?}, returned {after_size:?}"
+        );
     }
 
     /// The banner's locate button brings the current outfit into view and
