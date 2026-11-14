@@ -178,9 +178,6 @@ pub struct Editors {
     pub agent_name: String,
     /// The script editor link's state, shown in the preferences.
     pub link_status: Option<String>,
-    /// FSSaveInventoryScriptsAsMono: a script opened from the inventory
-    /// starts on Mono, else on LSL2 (set by the app before `open`).
-    pub inventory_mono: bool,
     /// The region runs SLua: the Lua compile targets can be chosen.
     pub lua_scripts: bool,
     /// The account's folder of copies of the unsaved scripts (backup.rs);
