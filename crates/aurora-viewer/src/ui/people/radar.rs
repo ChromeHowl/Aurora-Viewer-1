@@ -908,7 +908,7 @@ pub fn tab(
         // `search_field` / TextEdit could allocate wider and grow the floater
         // every frame while an edge was held (#3033).
         let w = ui.available_width();
-        widgets::search_box(ui, p, &mut st.filter, aurora_i18n::tr!("ui-people-filter"), w);
+        widgets::clearable_search_box(ui, p, &mut st.filter, aurora_i18n::tr!("ui-people-filter"), w);
     });
     ui.add_space(4.0);
     if data.settings.show_minimap {

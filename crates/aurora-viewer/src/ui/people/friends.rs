@@ -689,6 +689,7 @@ mod tests {
             settings: &mut radar_settings,
             voice: &voice,
             draw_distance: 64.0,
+            second_life: false,
             now: 0.0,
             pics: &pics,
         };

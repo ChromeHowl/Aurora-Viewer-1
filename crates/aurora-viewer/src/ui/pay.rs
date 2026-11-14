@@ -1320,6 +1320,7 @@ mod tests {
             owner_id: Uuid::from_u128(2),
             source_type: aurora_net::ChatSourceType::Object,
             chat_type: aurora_net::ChatType::OwnerSay,
+            region: None,
             position: glam::Vec3::ZERO,
             message: "@pay=n".into(),
         };
@@ -1354,6 +1355,7 @@ mod tests {
             owner_id: Uuid::from_u128(2),
             source_type: aurora_net::ChatSourceType::Object,
             chat_type: aurora_net::ChatType::OwnerSay,
+            region: None,
             position: glam::Vec3::ZERO,
             message: "@pay=n".into(),
         };

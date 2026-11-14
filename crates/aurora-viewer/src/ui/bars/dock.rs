@@ -783,7 +783,7 @@ mod tests {
             let skin = crate::ui::skin::Layout::default();
             // Same as app.rs: the default dock leaves Conversations to the
             // island unless the chat bar is autohidden.
-            let layout = DockLayout::default().of(&skin, self.chat.autohide).clone();
+            let layout = DockLayout::default().of(&skin, self.chat.bar_mode.hides()).clone();
             let settings = crate::ui::toolbar::ToolbarSettings {
                 buttons: self.buttons.clone(),
                 left: self.left.clone(),
@@ -1193,7 +1193,11 @@ mod tests {
             (crate::ui::toolbar::Bar::Right, false),
         ] {
             let mut bench = Bench::new();
-            bench.chat.autohide = autohide;
+            bench.chat.bar_mode = if autohide {
+                crate::settings::ChatBar::WhenTyping
+            } else {
+                crate::settings::ChatBar::Always
+            };
             bench.buttons = Some(without.clone());
             match side {
                 crate::ui::toolbar::Bar::Left => bench.left = vec![conv.clone()],

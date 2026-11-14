@@ -7762,7 +7762,11 @@ mod motion_tests {
             world.apply(NetEvent::TeleportStarted { flags: 0 });
             world.apply(NetEvent::TeleportFinished { handle: to, flying: false });
             if fail {
-                world.apply(NetEvent::TeleportFailed { reason: "no".into() });
+                world.apply(NetEvent::TeleportFailed {
+                    reason: "no".into(),
+                    code: String::new(),
+                    region: String::new(),
+                });
                 return from;
             }
             world.apply(NetEvent::MainRegionChanged { handle: to });
