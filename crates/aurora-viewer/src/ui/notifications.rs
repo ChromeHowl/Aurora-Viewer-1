@@ -1581,7 +1581,6 @@ mod tests {
             mute_rect.min.x > accept_rect.min.x - 8.0,
             "wrapped Mute Owner must not lose the Legacy indent: mute={mute_rect:?} accept={accept_rect:?}"
         );
-
     }
 
     #[test]
