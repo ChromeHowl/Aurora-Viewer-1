@@ -5808,6 +5808,7 @@ impl App {
                     mods,
                     true,
                     Some(idx),
+                    &self.interactions.props,
                 ) {
                     return;
                 }
@@ -5915,10 +5916,17 @@ impl App {
                     shift: self.shift,
                     command: self.command,
                 };
-                if self
-                    .media
-                    .on_click(&self.world, &self.scene, ray, depth_t, &self.settings.media, mods, false, None)
-                {
+                if self.media.on_click(
+                    &self.world,
+                    &self.scene,
+                    ray,
+                    depth_t,
+                    &self.settings.media,
+                    mods,
+                    false,
+                    None,
+                    &self.interactions.props,
+                ) {
                     return;
                 }
             }
@@ -13763,6 +13771,18 @@ impl App {
                     hovered.and_then(|idx| self.world.objects.get(idx)).map(|o| o.key.local_id),
                     hovered.and_then(|idx| crate::interaction::cursor_action(&self.world, idx, &self.interactions.props)),
                 );
+            }
+            // MediaFirstClickInteract reads the owner of a media object
+            // before the click: LLSelectMgr::setHoverObject asks its
+            // properties as the pointer comes on it
+            if let Some(idx) = hovered
+                && self.settings.media.first_click_interact
+                && self.media.has_media(&self.world, idx)
+                && let Some((root, _)) = crate::interaction::root(&self.world, idx)
+                && let Some(o) = self.world.objects.get(root)
+                && let Some(cmd) = self.interactions.tip_request(o.key.region, o.full_id)
+            {
+                self.send(cmd);
             }
             if let Some(idx) = hovered
                 && let Some(target) = crate::interaction::target(&self.world, idx, &std::collections::HashMap::new())
