@@ -223,6 +223,8 @@ pub struct Facts {
     pub friend: bool,
     /// RLVa `@startim` forbids an IM with this resident (RlvActions::canStartIM).
     pub im_blocked: bool,
+    /// RLV `@pay` prevents resident and group payments (`RlvActions::canPayAvatar`).
+    pub pay_blocked: bool,
     /// EditLinkedParts.
     pub edit_linked: bool,
     /// ShowPropertyLines, shared with the World menu and terrain editor.
@@ -982,7 +984,7 @@ fn avatar_menu_reporting(
                 act(CtxAction::ShowOnMap(id));
             }
             menu::todo(ui, p, "share", aurora_i18n::tr!("common-share"));
-            if menu::item(ui, p, "coin-filled", aurora_i18n::tr!("common-pay")) {
+            if menu::item_if(ui, p, "coin-filled", aurora_i18n::tr!("common-pay"), world.rlva_can_pay()) {
                 act(CtxAction::PayResident(id));
             }
             block(ui);
@@ -1055,7 +1057,7 @@ fn avatar_menu_reporting(
             }
             offer_tp(ui);
             request_tp(ui);
-            if menu::item(ui, p, "coin-filled", aurora_i18n::tr!("common-pay")) {
+            if menu::item_if(ui, p, "coin-filled", aurora_i18n::tr!("common-pay"), world.rlva_can_pay()) {
                 act(CtxAction::PayResident(id));
             }
             navigation(ui);
@@ -1484,6 +1486,38 @@ pub fn suitcase_confirm(
         answer = Some(false);
     }
     answer
+}
+
+/// A teleport the simulator refused or could not finish
+/// (`world::teleport_failure`): the Legacy Viewer's `CouldNotTeleportReason`
+/// alert, "Teleport failed." and the reason, with the line that explains an
+/// OpenSim Hypergrid refusal under it. True once closed.
+pub fn teleport_failed(ctx: &egui::Context, p: &Palette, reason: &str, hint: Option<&str>) -> bool {
+    use egui::RichText;
+    let mut closed = false;
+    let modal = crate::ui::widgets::Modal::new(egui::Id::unique("teleport_failed")).show(ctx, |ui| {
+        ui.set_width(400.0);
+        ui.horizontal(|ui| {
+            super::widgets::glyph(ui, "alert-triangle-filled", p.amber, 20.0);
+            ui.label(
+                RichText::new(aurora_i18n::tr!("teleport-failed-title"))
+                    .size(15.0)
+                    .strong()
+                    .color(p.ink),
+            );
+        });
+        ui.add_space(6.0);
+        ui.add(egui::Label::new(RichText::new(reason).size(12.5).color(p.ink)).wrap());
+        if let Some(hint) = hint {
+            ui.add_space(6.0);
+            ui.add(egui::Label::new(RichText::new(hint).size(12.0).color(p.muted)).wrap());
+        }
+        ui.add_space(10.0);
+        if super::widgets::default_button(super::widgets::flat_button(ui, p, aurora_i18n::tr!("common-ok"))).clicked() {
+            closed = true;
+        }
+    });
+    closed || modal.should_close()
 }
 
 /// Warning before opening a web link outside the trusted domains (phishing,

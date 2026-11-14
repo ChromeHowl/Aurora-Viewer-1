@@ -202,9 +202,13 @@ impl App {
             self.world.rlva_configure(self.settings.rlva_enabled);
             let scenario = mode.strip_suffix("-released").unwrap_or(&mode);
             if scenario == "baseline"
+                || scenario == "ground-wear"
                 || scenario.starts_with("sphere-")
                 || scenario.starts_with("camera-")
-                || matches!(scenario, "overlay" | "textures" | "silhouette" | "self" | "head" | "resolution")
+                || matches!(
+                    scenario,
+                    "overlay" | "textures" | "textures-grey" | "silhouette" | "self" | "head" | "resolution"
+                )
             {
                 // Keep the avatar and the world visible in offline visual
                 // comparisons; a conversation otherwise covers the subject.
@@ -255,6 +259,9 @@ impl App {
                     objects: vec![crate::demo::hud::object(31, false)],
                 });
                 "@remattach:center 2=n".to_owned()
+            } else if scenario == "ground-wear" {
+                self.panels.settings = false;
+                "@detach=n".to_owned()
             } else if scenario == "communication" || scenario == "temporary" {
                 self.panels.settings = false;
                 self.panels.inventory = false;
@@ -405,10 +412,12 @@ impl App {
                     "@setoverlay=n,setoverlay_texture:{}=force,setoverlay_alpha:0.7=force,setoverlay_touch=n",
                     crate::demo::TEX_HOLES
                 )
-            } else if matches!(scenario, "textures" | "silhouette" | "self" | "head") {
+            } else if matches!(scenario, "textures" | "textures-grey" | "silhouette" | "self" | "head") {
                 self.panels.settings = false;
                 match scenario {
                     "textures" => format!("@setcam_textures:{}=n", crate::demo::TEX_GRADIENT),
+                    // Empty @setcam_textures is IMG_DEFAULT, the local flat grey.
+                    "textures-grey" => "@setcam_textures=n".to_owned(),
                     "silhouette" => "@camavdist:0=n".to_owned(),
                     "self" => "@showself=n".to_owned(),
                     _ => "@showselfhead=n".to_owned(),
@@ -583,6 +592,37 @@ impl App {
             log::info!(
                 "RLVa communication demo: new_session_blocked={new_session_blocked}, local_placeholders={blocked}, existing_session_allowed={}",
                 self.world.rlva_can_start_im(from)
+            );
+        }
+        // An object worn from the ground: it attaches with an item the
+        // inventory has not heard of, and keeps its own object id.
+        let ground_item = Uuid::from_u128(0x726c7667);
+        if mode == "ground-wear" && self.frame_count == 760 {
+            let mut object = crate::demo::outfit_attachment(&aurora_net::AttachRequest {
+                item_id: ground_item,
+                owner_id: self.world.agent_id,
+                point: 3,
+                add: true,
+                flags: 0,
+                group_mask: 0,
+                everyone_mask: 0,
+                next_owner_mask: 0,
+                name: String::new(),
+                desc: String::new(),
+            });
+            object.full_id = Uuid::from_u128(0x726c7668);
+            self.world.apply(NetEvent::ObjectUpdates {
+                handle: self.world.main_region.unwrap_or_default(),
+                objects: vec![object],
+            });
+        }
+        if mode == "ground-wear" && self.frame_count == 860 {
+            log::info!(
+                "RLVa ground wear demo: detach={}, in_inventory={}, worn={}, rejected={}",
+                self.world.rlva.has("detach"),
+                self.world.inventory.items.contains_key(&ground_item),
+                self.world.worn_attachment(&ground_item).is_some(),
+                self.world.rlva.watchdog.rejected.contains(&ground_item),
             );
         }
         if mode == "temporary" && self.frame_count == 740 {

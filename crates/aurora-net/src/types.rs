@@ -817,8 +817,14 @@ pub enum NetEvent {
     VoiceModerationFailed {
         everyone: bool,
     },
+    /// A teleport refused or failed (`teleport_failed.rs`): `reason` is the
+    /// simulator's text, `code` the id the viewer looks up for its own
+    /// wording (AlertInfo's Message, else the reason), `region` its
+    /// REGION_NAME. The viewer's own failures leave `code` empty.
     TeleportFailed {
         reason: String,
+        code: String,
+        region: String,
     },
     Alert {
         message: String,
@@ -1479,6 +1485,12 @@ pub enum NetEvent {
     HoverParcel {
         handle: RegionHandle,
         parcel: std::sync::Arc<ParcelInfo>,
+    },
+    /// A bake reassembled from the simulator's UDP image packets
+    /// (`ImageData` / `ImagePacket`). `None`: `ImageNotInDatabase`.
+    HostImage {
+        id: Uuid,
+        bytes: Option<Vec<u8>>,
     },
 }
 
@@ -2499,6 +2511,9 @@ pub enum NetCommand {
     DummyWearablesUpdate,
     /// Forget the in-memory object caches (the files are deleted by the viewer).
     ClearObjectCache,
+    /// Bakes to fetch from the simulator that holds them (`image_udp`).
+    /// The set replaces the previous one; an empty set cancels what was in flight.
+    SyncHostImages(Vec<crate::image_udp::Want>),
     /// Build tools: selection, moves, new prims, links, terraforming.
     Build(crate::build::BuildCmd),
 }
@@ -2595,6 +2610,18 @@ pub struct ExperienceLogEvent {
     pub object_name: String,
     pub parcel_name: String,
     pub attachment: bool,
+}
+
+impl NetEvent {
+    /// A teleport failure of the viewer's own (blocked, offline, given up):
+    /// no simulator code, so no Legacy popup, only the notice.
+    pub fn viewer_teleport_failed(reason: impl Into<String>) -> Self {
+        NetEvent::TeleportFailed {
+            reason: reason.into(),
+            code: String::new(),
+            region: String::new(),
+        }
+    }
 }
 
 #[cfg(test)]

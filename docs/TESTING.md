@@ -1039,6 +1039,7 @@ when unfocused") is ignored during a screenshot.
 | `AURORA_DEMO_TP_CAM=alt\|alt-off` | The camera on a point before the demo teleport, "Return after a teleport in the region" on or off |
 | `AURORA_TP_SCREEN=legacy` or `alt` | The teleport screen of before 2026-10-17, to compare |
 | `AURORA_DEMO_TP_NO_ARRIVAL=1` | The region never confirms the demo teleport |
+| `AURORA_DEMO_TELEPORT_FAILED=<reason>[,hypergrid]` | Every teleport is refused with that reason: the Teleport failed popup |
 | `AURORA_DEMO_TP_CANCEL=1\|locked` | The teleport screen's Cancel pressed during the demo teleport, or a teleport that cannot be cancelled |
 | `AURORA_DEMO_TP_AWAY=1` | Departure out of range of the demo region, then return |
 | `AURORA_DEMO_AGENT_JITTER=<mm>` | Small position corrections of our avatar |
@@ -1451,6 +1452,14 @@ when unfocused") is ignored during a screenshot.
   behind the avatar (`true`); with `remote` both come back, like the
   Legacy Viewer. Capture at frame 400 (`AURORA_DEMO_TP="60,60,30"`) to see
   it.
+- **Alt+click on an ignored object (#3288)**, on a grid: set a prim's
+  Click to: Ignore Object and put another prim, or the ground, behind it.
+  Alt+click the ignored prim: the camera orbits the prim behind it, or
+  focuses the ground when that is what the click meets. Open the build
+  tools and Alt+click again: the camera orbits the ignored prim. An
+  ignored prim with nothing behind it focuses nothing. The Focus tool
+  (build tools already open) still focuses the ignored prim. There is no
+  offline demo for this; the click action belongs to a rezzed prim.
 - **`AURORA_TP_SCREEN`**: `legacy` brings back the teleport screen of
   before 2026-10-17 (0.8 s at least after the arrival, then a bar easing at
   2.6 per second up to 98.5 %), `alt` uses it every other teleport, starting
@@ -1458,6 +1467,16 @@ when unfocused") is ignored during a screenshot.
   0.4 s have passed, its bar finishing in 0.15 s
   (`app/teleport_screen.rs`). With `AURORA_PROFILE=1` the teleport
   timeline ends `arrived (teleport screen hidden)`, or `…, old screen)`.
+- **`AURORA_DEMO_TELEPORT_FAILED=<reason>[,hypergrid]`** (issue #3416): every
+  teleport the resident asks for (map, landmark, Home, a link) starts, then
+  the region refuses it with that reason as a TeleportFailed would. A code of
+  the Legacy Viewer's teleport_strings.xml (`noaccess_tport`, `no_host`…)
+  shows its readable text; anything else is shown as sent. `,hypergrid` puts
+  the agent on another OpenSim grid: `Unauthorized,hypergrid` adds the line
+  that explains a refused return home, `Could not resolve Landmark grid
+  gatekeeper,hypergrid` the one for an unreachable grid. The popup says
+  "Teleport failed." with the reason, OK closes it, and the nearby chat keeps
+  the same wording.
 - **`AURORA_DEMO_TP_NO_ARRIVAL=1`**: with `AURORA_DEMO_TP=remote`, the bar
   stops at 50 % and no arrival comes. After 15 s + 3 s per attachment the
   screen closes on the world, a notice says the region did not confirm the
@@ -3702,6 +3721,13 @@ To check with these scenarios:
 | `AURORA_DEMO_DISPLAYNAME="<name>"` | Display name change (simulated) |
 | `AURORA_DEMO_DISPLAYNAME_ERROR=<error_tag>` | Server error on the name change |
 
+A grid whose login has an empty appearance service (OpenSim with ViewerAsset
+on another host) fetches those bakes from the simulator over UDP. There is
+no offline demo: it needs a live region. On that grid our avatar and the
+others finish loading, and the log has no `texture … fetch failed` line for
+a bake. A grid that publishes an appearance capability, and Second Life,
+still fetch bakes over HTTP.
+
 ### Details
 
 `AURORA_DEMO_BLENDER_LIVE=1` opens the local bridge and places a purple shell
@@ -4357,6 +4383,7 @@ Other existing AO modes: interface, interface-group, interface-track, interface-
   Check persistence after reopening the viewer, both bulk Aurora/Legacy choices,
   and Reset this section restoring Legacy.
 - **`AURORA_DEMO_AO=interface|interface-group|interface-track|interface-combine|interface-swim|interface-swim-missing`**: approved native AO interface. `interface` has six synthetic standing entries; `interface-group` opens a simultaneous group, `interface-track` an independent cycle, `interface-combine` its guided creation dialog, and `interface-swim` one selected swimming slot with all eight resolved. `interface-swim-missing` removes Floating from that fixture: its state row must show an amber warning triangle, assigned required states a green check, and optional states no marker. The detail pane, compact AO panel and Movement gate share the triangle and missing-animation message; tooltips distinguish missing and assigned required states. No optional-slot counter remains. Test FR/EN, state navigation, single-click selection, row drag insertion/reload, creation from checked main entries, group-member add/remove/order, track cycle isolation, rename and dissociation. Inventory operations use the normal mutation/acknowledgement path against the offline simulator. Examples never seed a user's inventory; all shared theme/font/widget files remain unchanged.
+- **`AURORA_DEMO_AO=unavailable`**: seeds a native AO, then at frame 360 applies the same in-place rename OpenSim sends on a Hypergrid teleport (`#Aurora` becomes `#Aurora (Unavailable)`, version −1). The AO window must still list its set. Inventory opens beside it on that renamed folder. Offline only; a reload while the folder is renamed finds nothing, as in the Legacy Viewer.
 - **`AURORA_DEMO_AO=folder-names`**: seeds an existing native AO (including all eight swimming slots) and an empty bridge directory under their previous `AO` / `Bridge` names. The real acknowledged startup edits must rename both to `#Aurora/Aurora AO` and `#Aurora/Aurora Bridge`; the AO selection and links remain unchanged. Opens the real inventory beside the AO after frame 360 with both sibling folders visible; capture at 1050 after bridge provisioning. Regression tests additionally cover an already worn current bridge retaining its folder/item/object identity and valid handshake without another copy/upload/detach, new-name precedence, pending/failed acknowledgements, an authoritative empty old AO and old interrupted-import protection. Human grid validation: confirm the two existing folders are renamed on login, the selected set and animations still work, and a second login creates no duplicate folder or legacy AO import.
 - **`AURORA_DEMO_AO=folder-names-wait`**: uses the same cached old native folders but withholds both inventory services until frame 720. Capture at 450: `AO` and `Bridge` are unchanged, the selected set still works and no metadata edit is sent. Capture at 1200: both folders have their new names and the bridge reaches Ready after its five-second inventory save. The factory must wait beyond its normal timeout if services are delayed, rename an already worn controller without replacing its identities, and still time out a request that was actually sent. The readiness gate is shared with AO startup; running/ready bridge commands continue independently of inventory availability. Offline only.
 - **`AURORA_DEMO_AO=1`**: opens the AO manager, with two standing poses in
@@ -6133,7 +6160,7 @@ before (`amis`, `groupes`, `repere`, `historique`…) are still accepted.
 | `AURORA_DEMO_USERINFO=hidden\|liaison\|opensim\|fail\|savefail` | Preferences › Privacy › Visibility, the account settings the grid keeps |
 | `AURORA_DEMO_SLURLS=1\|offer` | Place links with their region rating badges, one region looked up |
 | `AURORA_DEMO_APPLINKS=1\|actions\|preview\|<command>[:restore]` | URI examples, visible action markers, their previews or a minimize/reopen scenario |
-| `AURORA_DEMO_EXPERIENCE=1\|auto\|profile\|blocked\|walk\|arrive` | Experiences asking: a door to click, a pad to walk into, a parcel greeter on arrival; also fills Me › Experiences |
+| `AURORA_DEMO_EXPERIENCE=1\|auto\|profile\|blocked\|walk\|arrive\|scenes` | Experiences asking: a door to click, a pad to walk into, a parcel greeter on arrival; `scenes`: an experience's environment pushes, then its clear; also fills Me › Experiences |
 | `AURORA_DEMO_CONTACTS=<tab>` | Contacts tab of Conversations |
 | `AURORA_DEMO_CONTACTS_FILTER=<query>` | Prefills the groups filter of Contacts (with `AURORA_DEMO_CONTACTS=groups`) |
 | `AURORA_DEMO_SET_NOTICES=config\|config-responses\|config-bottom\|chat` | A contact set's own online notices and automatic responses |
@@ -6284,6 +6311,9 @@ before (`amis`, `groupes`, `repere`, `historique`…) are still accepted.
   and delivers OwnerSay from an attachment with the native temporary marker,
   without experience or inventory metadata. Its raw command remains nearby
   chat; the log reports `option_off_jump=false, source_allowed=false`.
+  `ground-wear` sets `@detach=n`, then an object attaches at frame 760 with an
+  item missing from the inventory, as one worn from the ground; the log's
+  `RLVa ground wear demo` line reports `worn=true, rejected=false`.
   `hud-lock` seeds a temporary HUD with a point removal lock while requesting
   hidden HUDs and wireframe rendering. Capture after frame 810: the HUD is
   visible, the world stays filled and the log reports `locked=true,
@@ -6297,9 +6327,15 @@ before (`amis`, `groupes`, `repere`, `historique`…) are still accepted.
   Preferences for the unobstructed baseline. These modes never contact a grid.
   Vision modes close Conversations and use the same fixed camera framing
   around the avatar so its body and attachments remain visible.
-  `baseline` shows the unobstructed scene directly. `textures`, `silhouette`,
-  `self` and `head` exercise forced world textures, distant avatar silhouettes
-  and own-avatar visibility. `resolution` sets the real 3D resolution divisor
+  `baseline` shows the unobstructed scene directly. `textures`, `textures-grey`,
+  `silhouette`, `self` and `head` exercise forced world textures, distant
+  avatar silhouettes and own-avatar visibility. `textures` substitutes the
+  demo gradient. `textures-grey` (`@setcam_textures=n`, the same as
+  `@camtextures=n`) paints world surfaces and particles the flat grey of
+  `IMG_DEFAULT` and leaves the avatar and its attachments textured (#3365).
+  Releasing (`textures-grey-released`) restores the surfaces. An explicit
+  texture id, and the restore on a grid, still need a grid: there is no
+  fake region for that. `resolution` sets the real 3D resolution divisor
   to 12: the scene becomes coarse while text, HUDs and controls stay sharp.
   Compare it with `baseline` and `resolution-released`; check scene clicks
   still address their visible surfaces. Append `-released` to an effect mode to disable
@@ -8797,7 +8833,7 @@ Human grid validation: remember MFA for account A and B, restart the viewer, the
   the account's page; `fail`: the settings never come, the switches stay
   greyed; `savefail`: a change is refused, a notice says so and the
   switches go back to what the grid has.
-- **`AURORA_DEMO_EXPERIENCE=1|auto|profile|blocked|walk|arrive`**: experiences
+- **`AURORA_DEMO_EXPERIENCE=1|auto|profile|blocked|walk|arrive|scenes`**: experiences
   asking for permissions; the demo plays the simulator, GetExperienceInfo and
   ExperiencePreferences. In SL a script may ask from any event (a click, a
   collision, the arrival on the parcel, a timer): the viewer only sees the
@@ -8825,6 +8861,9 @@ Human grid validation: remember MFA for account A and B, restart the viewer, the
   environment (PushExpEnvironment, PushPartialEnvironment): over 3 s the sky
   fades to a violet sunset and the water fog turns red. The profile's Forget
   fades it back over 1 s, Block at once (ENV_PUSH, `world/eep_push.rs`).
+  `scenes`: an already-allowed controller pushes violet lighting at frame 620,
+  blue lighting at 900, then clears its override at 1200. Capture frames
+  850, 1150 and 1400 to compare both scenes and the restored shared environment.
   The Me › Experiences window lists them: the club's experience is
   Administered, the plaza's Contributed, and Allowed or Blocked follows your
   answers (the tab moves when you Allow, Block or Forget in the profile).
@@ -13311,9 +13350,12 @@ the variable.
 - `udp in= out= pkt/s`, then `in / out kb/s`: packets and throughput of all
   the circuits.
 - `resent`, `given_up`: reliable packets we sent again, and those abandoned
-  after their last resend. `dup`: packets the simulator resent although we
-  had them (our acknowledgement was late or lost). `unacked`: reliable
-  packets still waiting for their acknowledgement.
+  after their last resend. An ordinary reliable packet waits at least 1 s,
+  or five times the smoothed ping when that is longer (an unanswered ping
+  can raise it, and that ping stops at 2 s), then is given up after three
+  resends. The login circuit code keeps a fixed 5 s wait. `dup`: packets the
+  simulator resent although we had them (our acknowledgement was late or
+  lost). `unacked`: reliable packets still waiting for their acknowledgement.
 - `gaps`, `late`, `lost`: provisional sequence holes, those filled before
   their deadline, and confirmed losses. A hole becomes `lost` only after
   sixteen smoothed round trips (ping floored at 100 ms), at most 5 s, like

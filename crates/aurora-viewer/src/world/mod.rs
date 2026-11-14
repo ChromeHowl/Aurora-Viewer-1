@@ -108,6 +108,7 @@ pub mod status;
 pub mod suitcase;
 pub mod system_messages;
 pub mod teleport_cancel;
+pub mod teleport_failure;
 pub mod teleport_invites;
 pub mod temp_attachments;
 pub mod terrain;
@@ -510,6 +511,8 @@ pub struct World {
     pub tp_progress: f32,
     pub tp_status: String,
     pub tp_failed: bool,
+    /// The simulator's last teleport failure, for its popup (`teleport_failure`).
+    pub tp_failure: Option<teleport_failure::Failure>,
     /// Whether the teleport screen offers Cancel, and a cancel sent.
     pub tp_cancel: teleport_cancel::TeleportCancel,
     /// Outfit restore at login (Current Outfit folder).
@@ -763,6 +766,9 @@ pub struct World {
     pub reopen_ims: Vec<open_ims::Conversation>,
     /// Disk cache root (inventory cache).
     pub cache_dir: Option<std::path::PathBuf>,
+    /// Host bakes reassembled by the session, drained by the frame
+    /// (`TexSource::Host`). `None` means the simulator does not have the image.
+    host_images: Vec<(Uuid, Option<Vec<u8>>)>,
 }
 
 /// Lines kept in memory for one conversation (the nearby chat is one). The
@@ -799,6 +805,68 @@ fn saved_prefix(timestamp: u32) -> String {
 /// The largest region a grid can have (Constants.MaximumRegionSize,
 /// OpenSim): a corrupt patch number must not make a land grid of gigabytes.
 const MAX_REGION_SIZE: u32 = 4096;
+
+/// A region handle that can be asked for a host bake. Zero is unset, and
+/// the preview region is not a simulator.
+fn usable_host_region(region: RegionHandle) -> Option<RegionHandle> {
+    (region != 0 && region != objects::PREVIEW_REGION).then_some(region)
+}
+
+/// Where a baked texture is fetched.
+///
+/// `LLVOAvatar::getImage` (`llvoavatar.cpp`) and `LLVOAvatarSelf::setNewBakedTexture`
+/// (`llvoavatarself.cpp`): an empty appearance service is `FTT_HOST_BAKE`
+/// from the avatar's object host. `getImageURL` with a service builds
+/// `appearance_service/texture/<avatar>/<bake>/<uuid>`.
+pub(crate) fn source_for_bake(service: &str, region: Option<RegionHandle>, avatar: Uuid, bake: &str, tex: Uuid) -> TexSource {
+    if !service.is_empty() {
+        let base = if service.ends_with('/') {
+            service.to_owned()
+        } else {
+            format!("{service}/")
+        };
+        return TexSource::Bake {
+            url: format!("{base}texture/{avatar}/{bake}/{tex}"),
+        };
+    }
+    match region.and_then(usable_host_region) {
+        Some(region) => TexSource::Host { region },
+        None => TexSource::Asset,
+    }
+}
+
+#[cfg(test)]
+mod bake_source_tests {
+    use super::source_for_bake;
+    use crate::scene::textures::TexSource;
+    use uuid::Uuid;
+
+    #[test]
+    fn an_empty_appearance_service_fetches_the_bake_from_the_host() {
+        let avatar = Uuid::from_u128(1);
+        let tex = Uuid::from_u128(2);
+        assert_eq!(
+            source_for_bake("", Some(0x100), avatar, "head", tex),
+            TexSource::Host { region: 0x100 }
+        );
+        assert_eq!(source_for_bake("", None, avatar, "head", tex), TexSource::Asset);
+        assert_eq!(source_for_bake("", Some(0), avatar, "head", tex), TexSource::Asset);
+        assert_eq!(
+            source_for_bake("", Some(crate::world::objects::PREVIEW_REGION), avatar, "head", tex),
+            TexSource::Asset
+        );
+        let url = match source_for_bake("https://bake.example", Some(0x100), avatar, "head", tex) {
+            TexSource::Bake { url } => url,
+            other => panic!("expected a bake url, got {other:?}"),
+        };
+        assert_eq!(url, format!("https://bake.example/texture/{avatar}/head/{tex}"));
+        let url = match source_for_bake("https://bake.example/", None, avatar, "head", tex) {
+            TexSource::Bake { url } => url,
+            other => panic!("expected a bake url, got {other:?}"),
+        };
+        assert_eq!(url, format!("https://bake.example/texture/{avatar}/head/{tex}"));
+    }
+}
 
 impl World {
     pub fn add_tracked_region(&mut self, name: &str, label: &str) {
@@ -934,6 +1002,7 @@ impl World {
             tp_progress: 0.0,
             tp_status: String::new(),
             tp_failed: false,
+            tp_failure: None,
             tp_cancel: Default::default(),
             own_animations_awaited: None,
             outfit: Default::default(),
@@ -1051,6 +1120,7 @@ impl World {
             open_ims_path: None,
             reopen_ims: Vec::new(),
             cache_dir: None,
+            host_images: Vec::new(),
         }
     }
 
@@ -2532,6 +2602,21 @@ impl World {
 
     /// The root prim of the object our avatar wears from inventory item
     /// `item` (LLVOAvatar::getWornAttachment).
+    /// How many objects our avatar wears, HUDs included, each linkset once:
+    /// LLVOAvatar::getAttachmentCount (indra/newview/llvoavatar.cpp) adds up
+    /// the attached objects of every attachment point, never their child
+    /// prims. The arrival's patience counts 3 s for each (`arrival_wait.rs`).
+    pub fn own_attachment_count(&self) -> usize {
+        let Some(me) = self.objects.index_of_uuid(&self.agent_id).and_then(|i| self.objects.get(i)) else {
+            return 0;
+        };
+        self.objects
+            .children_of(&me.key)
+            .iter()
+            .filter(|i| self.objects.get(**i).is_some_and(|o| o.is_attachment()))
+            .count()
+    }
+
     pub fn worn_attachment(&self, item: &Uuid) -> Option<usize> {
         if item.is_nil() {
             return None;
@@ -2707,15 +2792,24 @@ impl World {
     }
 
     pub fn bake_source(&self, avatar: Uuid, bake: &str, tex: Uuid) -> TexSource {
-        match self.login.as_ref().map(|l| l.agent_appearance_service.as_str()) {
-            Some(base) if !base.is_empty() => {
-                let base = if base.ends_with('/') { base.to_owned() } else { format!("{base}/") };
-                TexSource::Bake {
-                    url: format!("{base}texture/{avatar}/{bake}/{tex}"),
-                }
-            }
-            _ => TexSource::Asset,
-        }
+        let service = self.login.as_ref().map(|l| l.agent_appearance_service.as_str()).unwrap_or("");
+        source_for_bake(service, self.host_bake_region(avatar), avatar, bake, tex)
+    }
+
+    /// The simulator that holds this avatar's bakes: the object's region,
+    /// otherwise the region we are in. A preview attachment is not a grid.
+    fn host_bake_region(&self, avatar: Uuid) -> Option<RegionHandle> {
+        let from_object = self
+            .objects
+            .index_of_uuid(&avatar)
+            .and_then(|i| self.objects.get(i))
+            .and_then(|object| usable_host_region(object.key.region));
+        from_object.or_else(|| self.main_region.and_then(usable_host_region))
+    }
+
+    /// Bakes the session reassembled, for the texture streamer.
+    pub fn take_host_images(&mut self) -> Vec<(Uuid, Option<Vec<u8>>)> {
+        std::mem::take(&mut self.host_images)
     }
 
     /// Apply one network event. Returns events the app layer must handle.
@@ -3466,7 +3560,7 @@ impl World {
                 );
                 None
             }
-            NetEvent::TeleportFailed { reason } => {
+            NetEvent::TeleportFailed { reason, code, region } => {
                 self.cancel_friend_join_flight();
                 self.cancel_friend_join();
                 self.tp_history.failed();
@@ -3474,10 +3568,17 @@ impl World {
                 self.tp_back_slurl = None;
                 self.teleporting = false;
                 self.tp_failed = true;
+                let said = teleport_failure::text(&code, &reason, &region);
                 self.system_notice(
-                    aurora_i18n::tr!("world-mod-teleport-failed", reason = reason.to_string()),
+                    aurora_i18n::tr!("world-mod-teleport-failed", reason = said),
                     crate::world::notice_topics::Topic::Teleport,
                 );
+                // CouldNotTeleportReason: the simulator's failures only, the
+                // viewer's own ones stay a notice
+                if !code.is_empty() {
+                    log::warn!("teleport failed: {reason} (code {code})");
+                    self.tp_failure = Some(teleport_failure::Failure { code, reason, region });
+                }
                 None
             }
             NetEvent::ScriptControlChange(blocks) => {
@@ -4560,6 +4661,10 @@ impl World {
                 if let Some(reset) = self.skeleton_reset_from(source, target, animations) {
                     self.skeleton_resets.push(reset);
                 }
+                None
+            }
+            NetEvent::HostImage { id, bytes } => {
+                self.host_images.push((id, bytes));
                 None
             }
             other => Some(other),
@@ -7557,6 +7662,36 @@ mod motion_tests {
         assert!(!world.arrived_by_local_teleport, "another region: the camera comes back");
     }
 
+    /// CouldNotTeleportReason: a simulator's refusal keeps its popup, worded
+    /// as the Legacy Viewer words its code; the viewer's own failures stay a
+    /// notice.
+    #[test]
+    fn a_simulator_teleport_failure_gets_the_popup() {
+        let (mut world, _) = teleport_fixture();
+        world.begin_teleport(true);
+        world.apply(NetEvent::TeleportStarted { flags: 0 });
+        world.apply(NetEvent::TeleportFailed {
+            reason: "You cannot go there".into(),
+            code: "noaccess_tport".into(),
+            region: String::new(),
+        });
+        let failure = world.tp_failure.clone().expect("popup kept");
+        assert_eq!(
+            teleport_failure::text(&failure.code, &failure.reason, &failure.region),
+            aurora_i18n::tr!("teleport-error-noaccess-tport")
+        );
+        let said = aurora_i18n::tr!(
+            "world-mod-teleport-failed",
+            reason = aurora_i18n::tr!("teleport-error-noaccess-tport").to_owned()
+        );
+        assert!(world.chat.iter().any(|line| line.text == said), "the notice uses the same wording");
+
+        world.tp_failure = None;
+        world.begin_teleport(true);
+        world.apply(NetEvent::viewer_teleport_failed(aurora_i18n::tr!("rlva-blocked")));
+        assert!(world.tp_failure.is_none());
+    }
+
     #[test]
     fn known_remote_destination_shows_progress_and_failure_ends_the_teleport() {
         let (mut world, handle) = teleport_fixture();
@@ -7568,9 +7703,9 @@ mod motion_tests {
             flying: false,
         });
         assert_eq!(world.ui_sounds.iter().filter(|s| **s == UiSound::TeleportOut).count(), 1);
-        world.apply(NetEvent::TeleportFailed {
-            reason: aurora_i18n::tr!("world-mod-destination-unavailable").into(),
-        });
+        world.apply(NetEvent::viewer_teleport_failed(aurora_i18n::tr!(
+            "world-mod-destination-unavailable"
+        )));
         assert!(!world.teleporting && world.tp_failed);
         // The screen remains eligible for its failure fade-out.
         assert!(world.tp_show_progress);
@@ -8410,6 +8545,41 @@ mod motion_tests {
         world.flush_arrival(t);
         world.flush_arrival(t + std::time::Duration::from_secs(60));
         assert_eq!(world.objects.index_of_uuid(&worn.full_id), Some(worn_idx));
+    }
+
+    /// TELEPORT_EXPIRY_PER_ATTACHMENT counts attached objects
+    /// (getAttachmentCount), HUDs included, not their prims: two worn
+    /// linksets of 50 prims and a HUD give up a stuck arrival after
+    /// 15 + 3 x 3 s, not after minutes.
+    #[test]
+    fn the_arrival_waits_per_worn_object_not_per_prim() {
+        let (mut world, _, worn, here, _) = worn_fixture();
+        let mut objects = Vec::new();
+        for n in 0..49 {
+            objects.push(prim(&worn, worn.local_id + 100 + n, worn.local_id));
+        }
+        let mut second = worn.clone();
+        second.local_id = worn.local_id + 1000;
+        second.full_id = Uuid::from_u128(0xBEEF2);
+        for n in 0..49 {
+            objects.push(prim(&second, second.local_id + 1 + n, second.local_id));
+        }
+        let mut hud = worn.clone();
+        hud.local_id = worn.local_id + 2000;
+        hud.full_id = Uuid::from_u128(0xBEEF3);
+        hud.state = 0xF1;
+        objects.push(second);
+        objects.push(hud);
+        world.apply(NetEvent::ObjectUpdates { handle: here, objects });
+        assert_eq!(world.own_attachment_count(), 3);
+        world.arrived_once = true;
+        world.begin_teleport(true);
+        world.apply(NetEvent::TeleportStarted { flags: 0 });
+        let t = Instant::now();
+        let count = world.own_attachment_count();
+        assert!(!world.arrival_overdue(t, count));
+        assert!(!world.arrival_overdue(t + std::time::Duration::from_secs(24), count));
+        assert!(world.arrival_overdue(t + std::time::Duration::from_secs(25), count));
     }
 
     #[test]

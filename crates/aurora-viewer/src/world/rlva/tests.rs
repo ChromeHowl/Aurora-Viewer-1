@@ -63,9 +63,11 @@ fn rlva_vendor_payments_follow_buy_while_resident_payments_follow_pay() {
         message: String::new(),
     };
     command(&mut world.rlva, A, "@pay=n");
+    assert!(!world.rlva_can_pay());
     assert!(world.rlva_allows_command(&object, Uuid::nil()));
     assert!(!world.rlva_allows_command(&resident, Uuid::nil()));
     command(&mut world.rlva, A, "@pay=y,buy=n");
+    assert!(world.rlva_can_pay());
     assert!(!world.rlva_allows_command(&object, Uuid::nil()));
     assert!(world.rlva_allows_command(&resident, Uuid::nil()));
 }
@@ -1815,7 +1817,14 @@ fn rlva_teleport_home_landmarks_and_bare_tplocal_follow_the_legacy_rules() {
 fn rlva_render_aliases_release_without_mutating_saved_settings_and_touch_measures_the_surface() {
     let mut r = enabled();
     command(&mut r, A, "@camtextures=n,camavdist:4=n,showselfhead=n");
-    assert_eq!(r.camera_texture(), Some(aurora_prim::te::DEFAULT_TEXTURE));
+    // Empty @camtextures / @setcam_textures is IMG_DEFAULT, the flat grey
+    // (rlvhelper.cpp), not the plywood texture.
+    assert_eq!(r.camera_texture(), Some(aurora_prim::te::IMG_DEFAULT));
+    let expected = aurora_prim::te::IMG_DEFAULT.to_string();
+    assert_eq!(
+        r.camera_reply(&Command::parse("getcam_textures=123").unwrap(), 1.0, 1.0).as_deref(),
+        Some(expected.as_str())
+    );
     assert_eq!(r.silhouette_distance(), Some(4.0));
     command(&mut r, A, "@camtextures=y,camavdist:4=y");
     assert_eq!(r.camera_texture(), None);
@@ -2622,6 +2631,73 @@ fn empty_trash_ignores_rlva_locks_without_exempting_other_purges() {
     assert!(!world.rlva_inventory_mutation_allowed(&purge(Uuid::from_u128(92)), Uuid::nil()));
 }
 
+/// #2718: an object worn from the ground while something else is @detach
+/// locked: its item is not in the inventory yet.
+#[test]
+fn rlva_detach_lock_keeps_an_object_worn_from_the_ground() {
+    use aurora_net::AttachRequest;
+    let mut world = crate::world::World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
+    for event in crate::demo::events() {
+        world.apply(event);
+    }
+    world.rlva.configure(true);
+    let handle = world.main_region.expect("demo region");
+    let attachment = |world: &crate::world::World, item_id: Uuid, point: u8| {
+        crate::demo::outfit_attachment(&AttachRequest {
+            item_id,
+            owner_id: world.agent_id,
+            point,
+            add: true,
+            flags: 0,
+            group_mask: 0,
+            everyone_mask: 0,
+            next_owner_mask: 0,
+            name: String::new(),
+            desc: String::new(),
+        })
+    };
+    let (locked, ground) = (Uuid::from_u128(0xE001), Uuid::from_u128(0xE002));
+    let object = attachment(&world, locked, 2);
+    world.objects.upsert(handle, object);
+    let source = world
+        .worn_attachment(&locked)
+        .map(|i| world.objects.get(i).unwrap().full_id)
+        .expect("worn");
+    world.movement_complete = true;
+    let tick = |world: &mut crate::world::World| {
+        world.rlva_watchdog_tick(std::time::Instant::now());
+        world.rlva_watchdog_tick(std::time::Instant::now());
+    };
+    tick(&mut world);
+    command(&mut world.rlva, source, "@detach=n");
+    tick(&mut world);
+
+    // the object keeps its own id: only its item is new
+    let mut object = attachment(&world, ground, 3);
+    object.full_id = Uuid::from_u128(0xE102);
+    world.objects.upsert(handle, object);
+    assert!(!world.inventory.items.contains_key(&ground));
+    tick(&mut world);
+    assert!(
+        world.rlva.watchdog.rejected.is_empty(),
+        "the wearer's other lock does not refuse it"
+    );
+    assert!(world.worn_attachment(&ground).is_some());
+
+    // a lock on the point itself still does
+    let (held, refused) = (Uuid::from_u128(0xE003), 4);
+    command(&mut world.rlva, source, "@detach:chest=n,addattach=n");
+    let mut object = attachment(&world, held, refused);
+    object.full_id = Uuid::from_u128(0xE103);
+    world.objects.upsert(handle, object);
+    tick(&mut world);
+    assert!(world.rlva.watchdog.rejected.contains(&held), "@addattach still refuses it");
+    assert!(
+        !world.rlva_can_add(Uuid::from_u128(0xE00F), 3, Uuid::nil()),
+        "an item neither known nor worn stays refused"
+    );
+}
+
 #[test]
 fn rlva_linking_refuses_the_locked_seat_like_can_stand_but_sittp_alone_does_not() {
     use crate::world::World;
@@ -2653,4 +2729,36 @@ fn rlva_linking_refuses_the_locked_seat_like_can_stand_but_sittp_alone_does_not(
     assert!(world.rlva_can_link(&[seat, other]));
     command(&mut world.rlva, A, "@editworld=n");
     assert!(!world.rlva_can_link(&[seat, other]));
+}
+
+/// #3154: `@setenv_daytime:-1=force` and `@setenv_reset=force` go back to the
+/// shared environment, unless `@setenv=n` came before them.
+#[test]
+fn rlva_environment_reset_returns_to_the_shared_environment_unless_locked() {
+    use crate::world::{World, eep::SkyFrame, eep_env::SourceRights};
+    for reset in ["setenv_daytime:-1=force", "setenv_reset=force"] {
+        for (lines, shared) in [
+            (vec![format!("@{reset}")], true),
+            (vec![format!("@{reset},setenv=n")], true),
+            (vec![format!("@setenv=n,{reset}")], false),
+            (vec!["@setenv=n".to_owned(), format!("@{reset}")], false),
+            (vec!["@setenv=n".to_owned(), "@setenv=y".to_owned(), format!("@{reset}")], true),
+        ] {
+            let mut world = World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
+            world.rlva.configure(true);
+            // a sky the user picked, then an RLVa sky over it
+            world.eep.apply_local_sky(SkyFrame::default(), SourceRights::Flags(0));
+            world.on_chat(chat("@setenv_ambient:0.2/0.4/0.6=force"));
+            world.rlva_pending();
+            assert!(world.rlva.environment.is_some());
+            for line in &lines {
+                world.on_chat(chat(line));
+                world.rlva_pending();
+            }
+            assert_eq!(world.eep.has_local(), !shared, "{lines:?}: the user's local sky");
+            assert!(world.rlva.environment.is_none(), "{lines:?}: RLVa's sky stays");
+        }
+    }
+    assert!(environment::supports("setenv_reset", true));
+    assert!(!environment::supports("getenv_reset", false));
 }

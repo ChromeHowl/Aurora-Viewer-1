@@ -2367,6 +2367,25 @@ impl App {
         if self.demo && self.bridge_demo_command(&cmd) {
             return;
         }
+        // AURORA_DEMO_TELEPORT_FAILED: the region refuses every teleport
+        if self.demo
+            && let Some((reason, _)) = crate::demo::teleport_failure()
+            && matches!(
+                cmd,
+                NetCommand::TeleportTo { .. }
+                    | NetCommand::TeleportLandmark(_)
+                    | NetCommand::TeleportToRegion { .. }
+                    | NetCommand::TeleportHome
+            )
+        {
+            self.world.apply(NetEvent::TeleportStarted { flags: 0 });
+            self.world.apply(NetEvent::TeleportFailed {
+                code: reason.clone(),
+                reason,
+                region: String::new(),
+            });
+            return;
+        }
         // LLAgent::startTeleportRequest: a teleport waits while the maturity
         // preference is not in sync with the server (TELEPORT_PENDING)
         self.named_teleport.observe(&cmd, actor);
@@ -3564,7 +3583,7 @@ impl App {
                 match result {
                     Ok(command) => self.send_deferred_teleport(command, actor),
                     Err(reason) => {
-                        self.world.apply(NetEvent::TeleportFailed { reason });
+                        self.world.apply(NetEvent::viewer_teleport_failed(reason));
                     }
                 }
             }
@@ -4396,7 +4415,7 @@ impl App {
                         "viewer: arrival applied ({}), seated {}, {} worn objects",
                         if self.world.arrived_by_crossing { "crossing" } else { "teleport" },
                         self.world.agent.seated,
-                        self.scene.own_attachment_count()
+                        self.world.own_attachment_count()
                     )
                 });
                 self.stop_local_typing();
@@ -5444,6 +5463,7 @@ impl App {
             return;
         }
         let alt = self.alt || self.object_view;
+        let now = Instant::now();
         // a rigged mesh with nothing to do with the click lets it through
         let depth = if alt || self.build.open {
             depth
@@ -5451,8 +5471,28 @@ impl App {
             self.scene
                 .touch_depth(&self.world, &picked.drawn, ray, depth, self.settings.draw_distance)
         };
-        let hit = if alt {
-            picked.visible_point()
+        // Alt+click (LLToolCamera::pickAsync) skips Ignore Object unless
+        // the build tools are open. An empty drawn answer in the diagnostic
+        // wait mode still uses the older depth.
+        let alt_focus = alt.then(|| {
+            self.scene.alt_focus_target(
+                &self.world,
+                &picked.drawn,
+                ray,
+                picked.visible_point(),
+                self.build.open,
+                self.settings.draw_distance,
+                now,
+            )
+        });
+        let hit = if let Some((point, _)) = alt_focus {
+            point.or_else(|| {
+                if picked.drawn.blend.is_none() && picked.drawn.opaque.is_none() {
+                    picked.visible_point()
+                } else {
+                    None
+                }
+            })
         } else {
             self.scene
                 .action_point(&self.world, ray, depth, self.build.open, self.settings.draw_distance)
@@ -5509,7 +5549,6 @@ impl App {
         } else {
             self.media.unfocus();
         }
-        let now = Instant::now();
         let own_idx = self.world.objects.index_of_uuid(&self.world.agent_id);
         if self.demo && std::env::var_os("AURORA_DEMO_ACTIONS").is_some() {
             log::info!(
@@ -5579,12 +5618,14 @@ impl App {
             // (our avatar too, to look at a part of it closely); keep holding
             // to zoom, Ctrl to orbit, Ctrl+Shift to pan
             if let (Some(p), Some(ray)) = (hit, ray) {
-                let idx = match picked.drawn.blend.or(picked.drawn.opaque) {
-                    // Terrain has no object: do not bind the camera to an
-                    // invisible prim whose box happens to enclose its point.
-                    Some(d) => self.scene.record_object(d.record).map(|(idx, _)| idx),
-                    None if on_avatar => own_idx,
-                    None => self.scene.interaction_at(&self.world, p, now, self.build.open),
+                let idx = match alt_focus {
+                    // The face kept above, or the surface traced past an
+                    // ignored one. Terrain has no object: do not bind the
+                    // camera to an invisible prim whose box encloses it.
+                    Some((_, Some(idx))) => Some(idx),
+                    Some((Some(_), None)) => None,
+                    _ if on_avatar => own_idx,
+                    _ => self.scene.interaction_at(&self.world, p, now, self.build.open),
                 };
                 let object = idx.and_then(|i| crate::camera::pick_focus_object(&self.world, i, now));
                 self.camera.alt_focus(p, object, ray, &mut self.world.agent, &self.settings.camera);
@@ -7206,6 +7247,22 @@ impl App {
         self.suitcase_ask_for(&grid, go)
     }
 
+    /// Where the agent is, for the Hypergrid line of a teleport failure:
+    /// Second Life, its OpenSim login grid, or another grid by Hypergrid
+    /// (LFSimFeatureHandler::hyperGridURL against the login grid).
+    fn teleport_failure_grid(&self) -> crate::world::teleport_failure::Grid {
+        use crate::world::teleport_failure::Grid;
+        if self.demo && crate::demo::teleport_failure().is_some_and(|(_, hypergrid)| hypergrid) {
+            return Grid::OpenSimAway;
+        }
+        let Some(home) = crate::grids::home(&self.settings) else {
+            return Grid::SecondLife;
+        };
+        let away = crate::grids::current(&self.settings, self.world.opensim_extras())
+            .is_some_and(|here| !crate::grids::same_grid(&self.settings, &here, &home));
+        if away { Grid::OpenSimAway } else { Grid::OpenSimHome }
+    }
+
     /// The question for a teleport to `grid`, when it leaves worn items
     /// behind; true when the teleport is held for it.
     fn suitcase_ask_for(&mut self, grid: &str, go: SuitcaseGo) -> bool {
@@ -8352,9 +8409,7 @@ impl App {
     /// path when that delayed action is refused; scripts retain their actor.
     fn send_deferred_teleport(&mut self, command: NetCommand, actor: uuid::Uuid) {
         if actor.is_nil() && !self.user_teleport_allowed(&command) {
-            self.world.apply(NetEvent::TeleportFailed {
-                reason: aurora_i18n::tr!("rlva-blocked").into(),
-            });
+            self.world.apply(NetEvent::viewer_teleport_failed(aurora_i18n::tr!("rlva-blocked")));
         } else {
             self.send_from(command, actor);
         }
@@ -10319,6 +10374,9 @@ impl App {
             }
         }
         self.net_profile.events_left(self.net.events.len());
+        for (id, bytes) in self.world.take_host_images() {
+            self.scene.textures.note_host_image(id, bytes);
+        }
         let corrections = self.world.agent.take_corrections();
         if corrections.count > 0 {
             aurora_net::transition::step(|| format!("position of our avatar corrected by {:.2} m", corrections.largest));
@@ -11708,6 +11766,9 @@ impl App {
             );
             self.scene
                 .stream(&mut gfx.renderer, &self.net, &self.world, texture_budget * 1024 * 1024, frame_time);
+            if let Some(wants) = self.scene.textures.take_host_wants() {
+                self.send(NetCommand::SyncHostImages(wants));
+            }
         }
         self.perf.update_ms = t_up.elapsed().as_secs_f32() * 1000.0;
         self.frame_profile.lap(Lap::Stream);
@@ -11848,7 +11909,7 @@ impl App {
             }
         }
         // no answer from the region: stop waiting, without ending the session
-        if self.world.arrival_overdue(Instant::now(), self.scene.own_attachment_count()) {
+        if self.world.arrival_overdue(Instant::now(), self.world.own_attachment_count()) {
             let kind = if self.world.teleporting {
                 aurora_net::transition::Kind::Teleport
             } else {
@@ -19289,6 +19350,13 @@ impl App {
                     self.answer_suitcase(ask, yes);
                 }
                 self.portal_crossing_question(&ctx, &p);
+                if let Some(failure) = self.world.tp_failure.as_ref() {
+                    let said = crate::world::teleport_failure::text(&failure.code, &failure.reason, &failure.region);
+                    let hint = crate::world::teleport_failure::hint(&failure.reason, self.teleport_failure_grid());
+                    if ui::context::teleport_failed(&ctx, &p, &said, hint) {
+                        self.world.tp_failure = None;
+                    }
+                }
                 if let Some((url, dont_warn, danger, entry)) = self.url_confirm.as_mut()
                     && let Some(yes) = ui::context::external_link_confirm(&ctx, &p, url, dont_warn, *danger)
                 {

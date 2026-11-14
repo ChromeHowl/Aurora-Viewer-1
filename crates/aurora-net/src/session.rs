@@ -381,6 +381,8 @@ struct Session<'a> {
     attach_queue: attach_queue::AttachQueue,
     inventory_merchant_pending: bool,
     next_inventory_callback: u32,
+    /// Bakes fetched from the simulator with `RequestImage` (`image_udp`).
+    images: crate::image_udp::Fetch,
 }
 
 /// The packet counters the bandwidth asked is adjusted from.
@@ -581,6 +583,7 @@ pub(crate) async fn run_session(sh: &Shared, req: LoginRequest, cmd_rx: &mut mps
         offer_hosts: Default::default(),
         inventory_merchant_pending: false,
         next_inventory_callback: 0,
+        images: Default::default(),
     };
 
     log::info!(
@@ -1387,6 +1390,7 @@ impl Session<'_> {
     // ----------------------------------------------------------------- tick
 
     fn tick(&mut self) {
+        self.flush_host_images(Instant::now());
         if self.logout_started.is_none() && self.viewer_stats.due(Instant::now(), self.agent_moved) {
             self.send_viewer_stats();
         }
@@ -3122,6 +3126,10 @@ impl Session<'_> {
                 }
             }
             NetCommand::ClearObjectCache => self.object_cache.clear(),
+            NetCommand::SyncHostImages(wants) => {
+                self.images.sync(&wants);
+                self.flush_host_images(Instant::now());
+            }
             NetCommand::Build(b) => self.on_build(b),
             // handled by on_social_command
             NetCommand::RequestMuteList { .. }
@@ -4027,7 +4035,8 @@ impl Session<'_> {
             "EstablishAgentCommunication" => {
                 let ipport = b["sim-ip-and-port"].as_str();
                 transition::link(|| format!("EstablishAgentCommunication for {ipport}"));
-                let seed = b["seed-capability"].as_str().to_owned();
+                // EstablishAgentCommunication's seed, same guess as the login seed.
+                let seed = crate::curl_url::ensure_scheme(b["seed-capability"].as_str());
                 if let Ok(addr) = ipport.parse::<SocketAddr>() {
                     self.set_seed(addr, seed);
                 }
@@ -4088,12 +4097,18 @@ impl Session<'_> {
             }
             "TeleportFailed" => {
                 let reason = b["Info"][0]["Reason"].as_str().to_owned();
+                let alert = &b["AlertInfo"][0];
+                let code = alert["Message"].as_str().to_owned();
                 transition::end(
                     Some(transition::Kind::Teleport),
-                    &format!("failed (TeleportFailed: {reason})"),
+                    &format!(
+                        "failed (TeleportFailed: {reason}{})",
+                        if code.is_empty() { String::new() } else { format!(", {code}") }
+                    ),
                     &self.sh.stats,
                 );
-                emit(self.sh, NetEvent::TeleportFailed { reason });
+                let extra = crate::teleport_failed::llsd_bytes(&alert["ExtraParams"]);
+                emit(self.sh, crate::teleport_failed::event(reason, Some((code, &extra))));
             }
             "DisableSimulator" => {
                 transition::link(|| {
@@ -4244,6 +4259,75 @@ impl Session<'_> {
         self.sims.get(&addr).map(|s| s.handle).unwrap_or(0)
     }
 
+    fn addr_of_handle(&self, handle: RegionHandle) -> Option<SocketAddr> {
+        self.sims.iter().find(|(_, sim)| sim.handle == handle).map(|(addr, _)| *addr)
+    }
+
+    /// `LLMessageSystem::sendSemiReliable`: one reliable send, no resend,
+    /// timeout `max(1s, 5 × ping)` (`llmessage/message.cpp`).
+    fn send_semi<M: Msg>(&mut self, addr: SocketAddr, msg: &M) {
+        let Some(sim) = self.sims.get_mut(&addr) else {
+            return;
+        };
+        let timeout = (sim.circuit.rtt * 5).max(Duration::from_secs(1));
+        let _ = sim.circuit.send_reliable_with(
+            &self.sock,
+            &self.sh.stats,
+            msg,
+            Resend {
+                timeout: Some(timeout),
+                max_retries: 0,
+            },
+        );
+    }
+
+    fn flush_host_images(&mut self, now: Instant) {
+        for batch in self.images.take_outbound(now) {
+            let Some(addr) = self.addr_of_handle(batch.region) else {
+                log::debug!("host bake request for region {:#x} has no circuit yet", batch.region);
+                continue;
+            };
+            let message = crate::image_udp::request_message(self.agent_id(), self.session_id(), &batch.items);
+            self.send_semi(addr, &message);
+        }
+    }
+
+    fn on_image_data(&mut self, pkt: &IncomingPacket) -> Result<(), aurora_msg::DecodeError> {
+        let message: ImageData = pkt.decode()?;
+        let id = message.image_id.id;
+        if let Some(bytes) = self.images.header(
+            id,
+            message.image_id.packets,
+            message.image_id.size,
+            message.image_data.data,
+            Instant::now(),
+        ) {
+            emit(self.sh, NetEvent::HostImage { id, bytes: Some(bytes) });
+        }
+        Ok(())
+    }
+
+    fn on_image_packet(&mut self, pkt: &IncomingPacket) -> Result<(), aurora_msg::DecodeError> {
+        let message: ImagePacket = pkt.decode()?;
+        let id = message.image_id.id;
+        if let Some(bytes) = self
+            .images
+            .packet(id, message.image_id.packet, message.image_data.data, Instant::now())
+        {
+            emit(self.sh, NetEvent::HostImage { id, bytes: Some(bytes) });
+        }
+        Ok(())
+    }
+
+    fn on_image_missing(&mut self, pkt: &IncomingPacket) -> Result<(), aurora_msg::DecodeError> {
+        let message: ImageNotInDatabase = pkt.decode()?;
+        let id = message.image_id.id;
+        if self.images.not_in_database(id) {
+            emit(self.sh, NetEvent::HostImage { id, bytes: None });
+        }
+        Ok(())
+    }
+
     fn dispatch(&mut self, from: SocketAddr, pkt: &IncomingPacket) -> Result<(), aurora_msg::DecodeError> {
         let id = pkt.id;
         if self.dispatch_inventory_upload(from, pkt)?
@@ -4260,6 +4344,13 @@ impl Session<'_> {
             || self.dispatch_god(pkt)?
         {
             return Ok(());
+        }
+        if id == ImageData::ID {
+            return self.on_image_data(pkt);
+        } else if id == ImagePacket::ID {
+            return self.on_image_packet(pkt);
+        } else if id == ImageNotInDatabase::ID {
+            return self.on_image_missing(pkt);
         }
         if id == PacketAck::ID {
             let m: PacketAck = pkt.decode()?;
@@ -5431,17 +5522,23 @@ impl Session<'_> {
             );
         } else if id == TeleportFailed::ID {
             let m: TeleportFailed = pkt.decode()?;
+            let alert = m
+                .alert_info
+                .first()
+                .map(|info| (field_str(&info.message), info.extra_params.as_slice()));
             transition::end(
                 Some(transition::Kind::Teleport),
-                &format!("failed (TeleportFailed: {})", field_str(&m.info.reason)),
+                &format!(
+                    "failed (TeleportFailed: {}{})",
+                    field_str(&m.info.reason),
+                    alert
+                        .as_ref()
+                        .filter(|(code, _)| !code.is_empty())
+                        .map_or(String::new(), |(code, _)| format!(", {code}"))
+                ),
                 &self.sh.stats,
             );
-            emit(
-                self.sh,
-                NetEvent::TeleportFailed {
-                    reason: field_str(&m.info.reason),
-                },
-            );
+            emit(self.sh, crate::teleport_failed::event(field_str(&m.info.reason), alert));
         } else if id == ParcelMediaCommandMessage::ID {
             let m: ParcelMediaCommandMessage = pkt.decode()?;
             let c = &m.command_block;
@@ -6828,6 +6925,7 @@ mod event_queue_tests {
             attach_queue: Default::default(),
             inventory_merchant_pending: false,
             next_inventory_callback: 0,
+            images: Default::default(),
         }
     }
 
@@ -7183,6 +7281,7 @@ mod script_dialog_tests {
             attach_queue: Default::default(),
             inventory_merchant_pending: false,
             next_inventory_callback: 0,
+            images: Default::default(),
         }
     }
 
