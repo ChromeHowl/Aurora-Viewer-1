@@ -794,7 +794,7 @@ pub struct App {
     tp_overlay: Option<TpOverlay>,
     /// When the logout began, for its screen or its small progress bar
     /// (FSDisableLogoutScreens).
-    logging_out: Option<Instant>,
+    logging_out: teleport_screen::LogoutScreen,
     was_teleporting: bool,
     /// Offline demo teleport: started at.
     demo_tp_start: Option<Instant>,
@@ -1867,7 +1867,7 @@ impl App {
             scene_capture_pending: false,
             scene_capture_place: None,
             tp_overlay: None,
-            logging_out: None,
+            logging_out: teleport_screen::LogoutScreen::default(),
             was_teleporting: false,
             demo_tp_start: None,
             demo_tp_triggered: false,
@@ -3222,6 +3222,9 @@ impl App {
     }
 
     fn back_to_login(&mut self, error: Option<String>) {
+        // the login screen never draws the logout bar, so it would stay set
+        // and show again, stuck at 95 %, in the next session's world
+        self.logging_out.end();
         self.parcel_music.enter(false);
         self.stream_url.clear();
         self.music_fade.reset();
@@ -6536,7 +6539,7 @@ impl App {
             self.release_bridge();
             self.note_user_logout();
             self.net.send(NetCommand::Logout);
-            self.logging_out = Some(Instant::now());
+            self.logging_out.begin(Instant::now());
         }
     }
 
@@ -7997,11 +8000,9 @@ impl App {
     /// view), or with FSDisableLogoutScreens its small progress bar, until
     /// the login screen comes back.
     fn draw_logout_progress(&mut self, ctx: &egui::Context, p: &crate::theme::Palette) {
-        let Some(since) = self.logging_out else { return };
-        if !matches!(self.screen, Screen::World) {
-            self.logging_out = None;
+        let Some(since) = self.logging_out.shown(matches!(self.screen, Screen::World)) else {
             return;
-        }
+        };
         let elapsed = since.elapsed().as_secs_f32();
         let fraction = teleport_screen::logout_fraction(elapsed);
         let text = aurora_i18n::tr!("l3-logging-out");
@@ -15086,7 +15087,7 @@ impl App {
                 self.release_bridge();
                 self.note_user_logout();
                 self.net.send(NetCommand::Logout);
-                self.logging_out = Some(Instant::now());
+                self.logging_out.begin(Instant::now());
                 self.world.system_message(aurora_i18n::tr!("app-logging-out"));
             }
             BarAction::Quit => {
