@@ -873,12 +873,19 @@ pub fn plan(inv: &Inventory, action: Action, worn: &HashMap<Uuid, u8>) -> Result
             };
             let mut seen = HashSet::new();
             let mut replaced_clothing = HashSet::new();
+            let mut first_object = true;
             for id in ids {
                 let layer = super::inventory::actions::original(inv, id)
                     .and_then(|id| inv.items.get(&id))
                     .map(|it| (it.asset_type, it.flags & 0xff));
                 // The first clothing of a layer replaces, the next ones add.
                 let replace_layer = replace && layer.is_some_and(|(kind, layer)| kind != 5 || replaced_clothing.insert(layer));
+                // An attachment replaces only as the first object of the batch.
+                let replace = if layer.is_some_and(|(kind, _)| kind == 6) {
+                    replaces_object(replace, &mut first_object)
+                } else {
+                    replace
+                };
                 wear_link(
                     inv,
                     &mut current,
@@ -1343,6 +1350,15 @@ pub fn force_changes_nothing(inv: &Inventory, action: &Action, worn: &HashMap<Uu
     links(&folder_links(inv, cof)) == links(&change.links)
 }
 
+/// LLAppearanceMgr needs_to_replace for objects
+/// (indra/newview/llappearancemgr.cpp): of the objects of one wear, only the
+/// first replaces what is on its point; the others are added.
+fn replaces_object(replace: bool, first: &mut bool) -> bool {
+    let replaces = *first && replace;
+    *first = false;
+    replaces
+}
+
 /// Explicit attachment requests retain the chosen point and replace/add mode.
 /// They are sent only after the COF update has been acknowledged. Objects
 /// are linked on arrival, so "Add" also needs its explicit rez request.
@@ -1378,6 +1394,10 @@ pub fn attachments_for_action(inv: &Inventory, agent: Uuid, action: &Action) -> 
         _ => return Vec::new(),
     };
     let mut seen = HashSet::new();
+    // A multi-item Wear replaces only its first object (needs_to_replace);
+    // the other actions carry the mode of each request.
+    let batch = matches!(action, Action::WearItems { .. });
+    let mut first_object = true;
     requests
         .into_iter()
         .filter_map(|request| super::inventory::actions::original(inv, request.item).map(|id| (id, request)))
@@ -1387,7 +1407,11 @@ pub fn attachments_for_action(inv: &Inventory, agent: Uuid, action: &Action) -> 
             item_id: it.id,
             owner_id: if it.owner.is_nil() { agent } else { it.owner },
             point: request.point,
-            add: !request.replace,
+            add: !if batch {
+                replaces_object(request.replace, &mut first_object)
+            } else {
+                request.replace
+            },
             flags: it.flags,
             group_mask: it.group_mask,
             everyone_mask: it.everyone_mask,
@@ -2859,6 +2883,74 @@ mod tests {
             assert_eq!((requests[0].point, requests[0].add), (35, !replace));
             assert!(!change.links.iter().any(|link| link.target == original));
         }
+    }
+
+    #[test]
+    fn a_multi_item_wear_replaces_only_its_first_object() {
+        let mut inv = fixture();
+        let agent = Uuid::from_u128(1);
+        let first = Uuid::from_u128(723);
+        assert_eq!(inv.items[&first].asset_type, 6, "fixture attachment");
+        let (second, third) = (Uuid::from_u128(9101), Uuid::from_u128(9102));
+        for id in [second, third] {
+            let mut copy = inv.items[&first].clone();
+            copy.id = id;
+            inv.items.insert(id, copy);
+        }
+        let wear = |replace| Action::WearItems {
+            items: vec![first, second, third],
+            replace,
+            point: 0,
+        };
+        // Wear: the first replaces (no ADD bit), the others add
+        let modes = |action: &Action| {
+            attachments_for_action(&inv, agent, action)
+                .iter()
+                .map(|a| (a.item_id, a.point, a.add))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(modes(&wear(true)), [(first, 0, false), (second, 0, true), (third, 0, true)]);
+        // Add: all add
+        assert_eq!(modes(&wear(false)), [(first, 0, true), (second, 0, true), (third, 0, true)]);
+        // a single Wear still replaces
+        assert_eq!(
+            modes(&Action::WearItem {
+                item: second,
+                replace: true,
+                point: 0
+            }),
+            [(second, 0, false)]
+        );
+        // the batch's explicit point is kept on every object
+        let on_chest = Action::WearItems {
+            items: vec![first, second],
+            replace: true,
+            point: 3,
+        };
+        assert_eq!(modes(&on_chest), [(first, 3, false), (second, 3, true)]);
+        // the planned COF agrees: a later object does not take the links of
+        // the ones before it off the point they share
+        let (change, _) = plan(&inv, wear(true), &HashMap::new()).expect("wear");
+        for id in [first, second, third] {
+            assert!(change.links.iter().any(|l| l.target == id), "{id} is linked");
+        }
+    }
+
+    #[test]
+    fn a_wear_of_items_forced_by_rlva_keeps_each_requests_own_mode() {
+        let inv = fixture();
+        let agent = Uuid::from_u128(1);
+        let item = Uuid::from_u128(723);
+        let action = Action::Force {
+            remove: Vec::new(),
+            wear: vec![WearRequest {
+                item,
+                replace: true,
+                point: 3,
+            }],
+        };
+        let asked = attachments_for_action(&inv, agent, &action);
+        assert_eq!(asked.iter().map(|a| (a.point, a.add)).collect::<Vec<_>>(), [(3, false)]);
     }
 
     #[test]
