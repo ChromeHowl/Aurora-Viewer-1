@@ -99,7 +99,7 @@ impl Session<'_> {
                     // diagnostics; an invalid document must not fail silently.
                     log::warn!("PushExpEnvironment ignored: invalid recipient, experience, action or serialized document");
                 }
-            },
+            }
             _ => {}
         }
     }

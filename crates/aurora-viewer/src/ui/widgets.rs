@@ -2267,7 +2267,10 @@ pub fn segmented_tall_with_disabled(
     }
     // the lit face, its edges sliding from the segment chosen before (kept
     // from the track's left, so that moving the window does not slide it)
-    if let Some(chosen) = rects.get(*selected).filter(|_| disabled.get(*selected).copied().flatten().is_none()) {
+    if let Some(chosen) = rects
+        .get(*selected)
+        .filter(|_| disabled.get(*selected).copied().flatten().is_none())
+    {
         let id = ui.scope_id().with(("segmented-slide", options.len(), options.first().map(|o| o.0)));
         let time = ui.style().animation_time;
         let left = ui
