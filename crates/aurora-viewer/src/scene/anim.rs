@@ -536,6 +536,11 @@ pub struct Controller {
     /// Temporary eye diagnostics (set for our own avatar by the scene).
     pub debug_eyes: bool,
     eye_log: Option<(Instant, Instant)>,
+    /// The joint states blended on each eye joint this frame (diagnostics).
+    eye_states: Vec<String>,
+    /// What the eye motion fed itself last frame (diagnostics): the look
+    /// distance, the inter-ocular distance, the vergence and the yaw / pitch.
+    eye_calc: Vec<String>,
     /// Pose frozen since then (LLCharacter::requestPause).
     paused_at: Option<Instant>,
     /// Default motion joint states of the last frame, held during a pause
@@ -1008,7 +1013,8 @@ impl Controller {
         // LLEyeMotion::onUpdate
         if eye_w > 0.0 {
             pr.jitter(now);
-            let head_rot = p.head.map(|h| h.0).unwrap_or(Quat::IDENTITY);
+            let head_rot = p.head.map(|h| h.0).filter(|q| q.is_finite()).unwrap_or(Quat::IDENTITY);
+            self.eye_calc.clear();
             for (l, r, pl, pp) in [(j.eye_l, j.eye_r, p.eye_l, p.eye_r), (j.alt_l, j.alt_r, p.alt_l, p.alt_r)] {
                 let (Some(l), Some(r)) = (l, r) else {
                     continue;
@@ -1044,8 +1050,28 @@ impl Controller {
                 } else {
                     Quat::IDENTITY
                 };
-                out.push((l, MEDIUM_PRIORITY, eye_w, rot * jitter * vq, false));
-                out.push((r, MEDIUM_PRIORITY, eye_w, rot * jitter * vq.inverse(), false));
+                // A rotation that is not a finite unit one would stay on the
+                // eye until an animation replaces it: rest instead.
+                let (lq, rq) = (rot * jitter * vq, rot * jitter * vq.inverse());
+                let (lq, rq) = if lq.is_finite() && rq.is_finite() {
+                    (lq.normalize(), rq.normalize())
+                } else {
+                    (Quat::IDENTITY, Quat::IDENTITY)
+                };
+                if self.debug_eyes {
+                    self.eye_calc.push(format!(
+                        "pair({l},{r}) target={:?} vergence_deg={:.1} iod={:?} rot_deg={:.1} left={lq:?} right={rq:?}",
+                        target.map(|t| t.1),
+                        vergence.to_degrees(),
+                        match (pl, pp) {
+                            (Some(a), Some(b)) => Some(a.1.distance(b.1)),
+                            _ => None,
+                        },
+                        2.0 * rot.w.abs().min(1.0).acos().to_degrees(),
+                    ));
+                }
+                out.push((l, MEDIUM_PRIORITY, eye_w, lq, false));
+                out.push((r, MEDIUM_PRIORITY, eye_w, rq, false));
             }
         }
         // LLBreatheMotionRot (MEDIUM_PRIORITY, normal blend), from the
@@ -1449,6 +1475,33 @@ impl Controller {
                 }
             }
         }
+        if self.debug_eyes {
+            self.eye_states.clear();
+            for (name, joint) in [
+                ("mEyeLeft", lj.eye_l),
+                ("mEyeRight", lj.eye_r),
+                ("mFaceEyeAltLeft", lj.alt_l),
+                ("mFaceEyeAltRight", lj.alt_r),
+                ("mFaceRoot", rig.names.get("mFaceRoot").copied()),
+            ] {
+                if let Some(list) = joint.and_then(|j| states.get(j)) {
+                    let list: Vec<String> = list
+                        .iter()
+                        .map(|st| {
+                            format!(
+                                "p{} w{:.2}{}{}{}",
+                                st.0,
+                                st.1,
+                                if st.2.is_some() { " rot" } else { "" },
+                                if st.3.is_some() { " pos" } else { "" },
+                                if st.4 { " additive" } else { "" }
+                            )
+                        })
+                        .collect();
+                    self.eye_states.push(format!("{name}=[{}]", list.join("; ")));
+                }
+            }
+        }
         // LLKeyframeMotion::applyConstraint adds its step to the joint's position
         // of the last frame, every frame. A stronger position at full weight
         // leaves it no share of the blend (LLJointStateBlender::blendJointStates).
@@ -1778,14 +1831,43 @@ impl Controller {
         if !due_bad && !due_any {
             return;
         }
-        let motions: Vec<String> = self.motions.iter().map(|m| format!("{}:{:.2}", m.id, m.weight)).collect();
+        let eye_joints: Vec<usize> = [lj.eye_l, lj.eye_r, lj.alt_l, lj.alt_r].into_iter().flatten().collect();
+        let motions: Vec<String> = self
+            .motions
+            .iter()
+            .map(|m| {
+                // the priority of each eye joint this animation keys
+                let keyed: Vec<String> = m
+                    .anim
+                    .anim
+                    .joints
+                    .iter()
+                    .zip(&m.anim.joints)
+                    .filter_map(|(jm, j)| {
+                        let j = (*j)?;
+                        eye_joints.contains(&j).then(|| {
+                            let prio = if jm.priority >= 0 { jm.priority } else { m.anim.anim.base_priority };
+                            format!("{}@p{prio}", jm.joint_name)
+                        })
+                    })
+                    .collect();
+                if keyed.is_empty() {
+                    format!("{}:{:.2}", m.id, m.weight)
+                } else {
+                    format!("{}:{:.2} KEYS_EYES({})", m.id, m.weight, keyed.join(","))
+                }
+            })
+            .collect();
         log::warn!(
-            "eye debug ({}): look={:?} cleared={} head={:?} motions=[{}]\n  {}",
+            "eye debug ({}): look={:?} look_len={:?} cleared={} head={:?} motions=[{}]\n  states: {}\n  calc: {}\n  {}",
             if due_bad { "odd" } else { "periodic" },
             self.look,
+            self.look.map(|l| l.length()),
             self.look_cleared,
             self.posed.head,
             motions.join(" "),
+            self.eye_states.join(" "),
+            self.eye_calc.join(" | "),
             lines.join("\n  ")
         );
         self.eye_log = Some((if due_bad { now } else { last_bad }, now));
