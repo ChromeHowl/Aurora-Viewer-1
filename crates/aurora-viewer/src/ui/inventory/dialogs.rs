@@ -979,7 +979,7 @@ pub(super) fn preview(
             }
         });
     });
-    super::embedded::preview(ctx, p, st, images);
+    super::embedded::preview(ctx, p, st, inv, images);
     if let Some(host) = &mut st.tab_host {
         host.closing(&mut open);
     }
