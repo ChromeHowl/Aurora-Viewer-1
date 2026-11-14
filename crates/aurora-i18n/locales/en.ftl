@@ -15348,22 +15348,6 @@ l2s-color-ims-color = IMs and group chat
 l2s-color-username = Colour usernames distinctly
 l2s-color-username-hint = The username under the name on the name tags takes its own colour.
 l2s-color-username-color = Usernames
-l2s-ban-all = Ban from all my groups
-l2s-unban-all = Unban from all my groups
-l2s-ban = Ban
-l2s-unban = Unban
-l2s-ban-all-question = You are about to ban { $name } from all { $count } groups you can manage bans in:
-l2s-unban-all-question = You are about to lift the ban on { $name } in all { $count } groups you can manage bans in:
-l2s-ban-all-title = Group bans
-l2s-ban-all-started = Updating group bans for { $name } in { $count } groups, one group at a time. A report will follow when done.
-l2s-ban-all-report =
-    { $name } has been banned in { $done } of { $count } groups.
-    Banned in: { $succeeded }
-    Failed in: { $failed }
-l2s-unban-all-report =
-    The ban on { $name } has been lifted in { $done } of { $count } groups.
-    Lifted in: { $succeeded }
-    Failed in: { $failed }
 l2s-worn-out-of-view = { $name } is in a region nearby, out of view
 l2s-worn-out-of-view-hint = Come closer to see what they wear.
 l2s-worn-out-of-view-since = { $name } is out of view since { $time }: what they wore then

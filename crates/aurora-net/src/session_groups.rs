@@ -163,17 +163,6 @@ impl Session<'_> {
     fn group_bans(&mut self, group: uuid::Uuid, action: Option<i32>, ids: Vec<uuid::Uuid>, refresh: bool) {
         let Some(cap) = self.main_cap("GroupAPIv1") else {
             log::info!("group bans: no GroupAPIv1 capability");
-            if let Some(action) = action {
-                emit(
-                    self.sh,
-                    NetEvent::GroupBanDone {
-                        group,
-                        action,
-                        ids,
-                        ok: false,
-                    },
-                );
-            }
             return;
         };
         let url = format!("{cap}?group_id={group}");
@@ -181,18 +170,7 @@ impl Session<'_> {
         let events = self.sh.events.clone();
         tokio::spawn(async move {
             let mut reply = match action {
-                Some(action) => {
-                    let posted = crate::caps::post_llsd(&http, &url, &groups::ban_body(action, &ids)).await;
-                    // what the POST came to, for those that wait on it
-                    // (LLGroupActions::banFromAllGroupsCoro)
-                    let _ = events.send(NetEvent::GroupBanDone {
-                        group,
-                        action,
-                        ids: ids.clone(),
-                        ok: posted.is_ok(),
-                    });
-                    posted
-                }
+                Some(action) => crate::caps::post_llsd(&http, &url, &groups::ban_body(action, &ids)).await,
                 None => crate::caps::get_llsd(&http, &url).await,
             };
             // postGroupBanRequestCoro: with BAN_UPDATE, the list again

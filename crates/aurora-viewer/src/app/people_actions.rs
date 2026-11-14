@@ -1,17 +1,15 @@
 //! What the radar's and the residents' menus do beyond the shared ones:
 //! "Track" (the tracking beacon follows a resident the radar sees),
-//! "Share", "Mark", and "Ban / Unban from all my groups", asked first (the
-//! estate's "Kick", "Teleport Home" and "Ban" are in app/land_moderation.rs).
+//! "Share" and "Mark" (the estate's "Kick", "Teleport Home" and "Ban" are in
+//! app/land_moderation.rs; "Ban from all my groups" is in
+//! ui/chat/moderation.rs and app/group_chat_moderation.rs).
 //!
 //! Port of FSRadar::startTracking, checkTracking and updateTracking
 //! (indra/newview/fsradar.cpp), LLTracker::render3D's close-in stop
 //! (lltracker.cpp), LLAvatarActions::share (llavataractions.cpp),
 //! LLNetMap::setAvatarMarkColors and clearAvatarMarkColors (llnetmap.cpp),
 //! originally LGPL 2.1, with their TrackAvatarNotPossible question
-//! (notifications.xml); "Ban / Unban from
-//! all my groups" asked with FSBanFromAllGroups and FSUnbanFromAllGroups
-//! (LLGroupActions::confirmBanFromAllGroups), the run itself in
-//! world/group_ban_all.rs.
+//! (notifications.xml).
 use super::*;
 use crate::world::radar::{self, TrackStep, Tracked};
 use glam::DVec3;

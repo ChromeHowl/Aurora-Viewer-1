@@ -15351,22 +15351,6 @@ l2s-color-ims-color = MI et chat de groupe
 l2s-color-username = Colorer les noms d'utilisateur à part
 l2s-color-username-hint = Le nom d'utilisateur sous le nom, sur les étiquettes, prend sa propre couleur.
 l2s-color-username-color = Noms d'utilisateur
-l2s-ban-all = Bannir de tous mes groupes
-l2s-unban-all = Lever le bannissement de tous mes groupes
-l2s-ban = Bannir
-l2s-unban = Lever le bannissement
-l2s-ban-all-question = Vous allez bannir { $name } des { $count } groupes où vous pouvez gérer les bannissements :
-l2s-unban-all-question = Vous allez lever le bannissement de { $name } dans les { $count } groupes où vous pouvez gérer les bannissements :
-l2s-ban-all-title = Bannissements de groupe
-l2s-ban-all-started = Mise à jour des bannissements de { $name } dans { $count } groupes, un groupe à la fois. Un rapport suivra à la fin.
-l2s-ban-all-report =
-    { $name } a été banni de { $done } groupes sur { $count }.
-    Banni de : { $succeeded }
-    Échec dans : { $failed }
-l2s-unban-all-report =
-    Le bannissement de { $name } a été levé dans { $done } groupes sur { $count }.
-    Levé dans : { $succeeded }
-    Échec dans : { $failed }
 l2s-worn-out-of-view = { $name } est dans une région proche, hors de vue
 l2s-worn-out-of-view-hint = Approchez-vous pour voir ce qu'il ou elle porte.
 l2s-worn-out-of-view-since = { $name } est hors de vue depuis { $time } : ce qu'il ou elle portait alors

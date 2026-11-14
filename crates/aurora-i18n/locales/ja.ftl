@@ -15268,22 +15268,6 @@ l2s-color-ims-color = IM とグループチャット
 l2s-color-username = ユーザー名を別の色にする
 l2s-color-username-hint = 名前タグの名前の下にあるユーザー名を専用の色にします。
 l2s-color-username-color = ユーザー名
-l2s-ban-all = 自分のすべてのグループから追放
-l2s-unban-all = 自分のすべてのグループで追放を解除
-l2s-ban = 追放
-l2s-unban = 追放を解除
-l2s-ban-all-question = { $name } を、追放を管理できる { $count } 個のすべてのグループから追放しようとしています：
-l2s-unban-all-question = 追放を管理できる { $count } 個のすべてのグループで、{ $name } の追放を解除しようとしています：
-l2s-ban-all-title = グループの追放
-l2s-ban-all-started = { $name } の追放を { $count } 個のグループで 1 つずつ更新しています。完了したら報告します。
-l2s-ban-all-report =
-    { $name } は { $count } 個中 { $done } 個のグループで追放されました。
-    追放：{ $succeeded }
-    失敗：{ $failed }
-l2s-unban-all-report =
-    { $name } の追放は { $count } 個中 { $done } 個のグループで解除されました。
-    解除：{ $succeeded }
-    失敗：{ $failed }
 l2s-worn-out-of-view = { $name } は近くのリージョンにいますが、視界の外です
 l2s-worn-out-of-view-hint = 近づくと着用しているものが見えます。
 l2s-worn-out-of-view-since = { $name } は { $time } から視界の外です：その時に着用していたもの
