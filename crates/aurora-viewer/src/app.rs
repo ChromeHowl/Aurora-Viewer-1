@@ -11166,6 +11166,9 @@ impl App {
             }
             self.ik_editor.tick_project(&self.scene.jobs, &self.egui_ctx, &self.world);
             self.ik_editor.tick_animations(&mut self.scene.anims, &mut self.world.inventory);
+            let me = self.world.agent_id;
+            let drafts = (!me.is_nil() && !self.demo).then(|| crate::settings::account_dir(&me).join("animation_drafts"));
+            self.ik_editor.set_clip_recovery(drafts);
             self.ik_editor.tick_clip(&self.scene.jobs, &self.egui_ctx, &self.world);
             self.scene.ik_edit = self.ik_editor.request();
             if self.demo

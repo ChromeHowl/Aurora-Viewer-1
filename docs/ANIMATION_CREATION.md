@@ -181,12 +181,19 @@ Imported animation tracks remain authored and export as before.
   exported file to time zero.
 - Global priority, loop enable, loop start/end, ease-in and ease-out.
 - Native hand pose and expression.
-- **Interpolation**: how the clip goes from one key to the next. Linear
-  (the default) keeps the keys as they are, which is how every viewer plays
-  a native animation (rotations along the shortest arc). Step holds each
-  key until one frame before the next; Spline curves through the keys on a
-  Catmull-Rom curve. A native file only holds keys, so Step and Spline are
-  written as extra keys on the 30 fps grid and play the same in any viewer.
+- **Interpolation**, per track: Smooth, Linear (the default), Stepped, Custom
+  curve or Spline. A native file only holds keys, which every viewer plays
+  linearly, so every mode but Linear is written as extra keys (a key on every
+  frame for the curved ones) and plays the same in any viewer. Spline is a
+  Catmull-Rom curve through the keys and their neighbours (rotations along
+  the shortest arc).
+- **Autosaved draft**: while IK Edit is open and the draft has authored keys,
+  it is written every 5 seconds, when it changed, to the account's
+  `animation_drafts/recovery.auroraanim` (the project format, so priorities,
+  interpolation and curves are kept). After a crash, File > Open the
+  autosaved draft opens it as a new draft. The first write of a session moves
+  an unopened recovery file to `recovery.previous.auroraanim` (kept, not
+  replaced by the new draft). Off in the demo.
 
 Loop times are seconds relative to the exported start. The creation preview
 shows exact keyed frames; the ordinary import preview displays final

@@ -34,6 +34,8 @@ pub(super) enum Output {
     Prepared(Prepared),
     Loaded(Document),
     Saved(PathBuf),
+    /// The autosaved draft was written at this revision.
+    Autosaved(u64),
     Cancelled,
     Failed(String),
 }
@@ -178,6 +180,70 @@ pub(super) fn start(
             })
         };
         let output = work().unwrap_or_else(Output::Failed);
+        let _ = tx.send(output);
+        ctx.request_repaint();
+    });
+}
+
+/// The account's autosaved draft, a project file in its recovery folder.
+pub(super) const RECOVERY: &str = "recovery.auroraanim";
+
+/// The recovery file the first autosave of a session moved aside.
+pub(super) const RECOVERY_PREVIOUS: &str = "recovery.previous.auroraanim";
+
+/// Keep a recovery file the user has not opened: the first write of a
+/// session moves it to `RECOVERY_PREVIOUS` (replacing the one before), so
+/// the new draft never overwrites it.
+pub(super) fn rotate_recovery(dir: &std::path::Path) -> std::io::Result<()> {
+    let current = dir.join(RECOVERY);
+    if current.is_file() {
+        std::fs::rename(&current, dir.join(RECOVERY_PREVIOUS))?;
+    }
+    Ok(())
+}
+
+/// Write the draft as a project file in `dir`, atomically: a crash while
+/// writing keeps the previous one. A failure is logged, never shown.
+pub(super) fn autosave(
+    jobs: &Jobs,
+    tx: crossbeam_channel::Sender<Output>,
+    document: Arc<Document>,
+    revision: u64,
+    dir: PathBuf,
+    first: bool,
+) {
+    jobs.execute(move || {
+        if first && let Err(error) = rotate_recovery(&dir) {
+            log::warn!("animation draft autosave: keeping the previous draft: {error}");
+            return;
+        }
+        let bytes = match document.project_json() {
+            Ok(bytes) => bytes,
+            Err(key) => {
+                log::warn!("animation draft autosave: {key}");
+                return;
+            }
+        };
+        let path = dir.join(RECOVERY);
+        match std::fs::create_dir_all(&dir)
+            .map_err(|error| error.to_string())
+            .and_then(|()| write_atomic(&path, &bytes))
+        {
+            Ok(()) => {
+                let _ = tx.send(Output::Autosaved(revision));
+            }
+            Err(error) => log::warn!("animation draft autosave to {}: {error}", path.display()),
+        }
+    });
+}
+
+/// Read the autosaved draft back as a document (`Output::Loaded`).
+pub(super) fn recover(jobs: &Jobs, ctx: &egui::Context, tx: crossbeam_channel::Sender<Output>, path: PathBuf, rig: Arc<Rig>) {
+    let ctx = ctx.clone();
+    jobs.execute(move || {
+        let output = read_file(&path)
+            .and_then(|bytes| Document::from_project_json(&bytes, &rig).map_err(|key| aurora_i18n::text(key).to_owned()))
+            .map_or_else(Output::Failed, Output::Loaded);
         let _ = tx.send(output);
         ctx.request_repaint();
     });

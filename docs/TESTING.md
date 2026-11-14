@@ -9754,7 +9754,11 @@ sibling tracks stay put,
 and the playhead should track the pointer during the drag. Copy/paste a pose,
 delete a selected bone key and whole-frame keys separately, toggle auto-key and
 pose a bone to confirm one key is
-recorded on drag release, and try undo/redo, FPS and every interpolation mode.
+recorded on drag release, and try undo/redo, FPS and every interpolation mode
+(Spline curves smoothly through the keys and is exported as a key on every
+frame). The draft is autosaved every few seconds while it changes (not in the
+demo, which has no account folder): after a crash, File > Open the autosaved
+draft brings it back as a new draft.
 Try Space to play/pause, Home to return to the start, Ctrl+Z/Y to undo/redo,
 Ctrl+C/V to copy/paste a pose, Delete for the selected bone key and Ctrl+S to
 save the project. Focus the animation-name or numeric fields first; their text

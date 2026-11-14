@@ -59,6 +59,9 @@ anim-edit-interpolation-smooth = Smooth
 anim-edit-interpolation-linear = Linear
 anim-edit-interpolation-stepped = Stepped
 anim-edit-interpolation-curve = Custom curve
+anim-edit-interpolation-spline = Spline
+anim-edit-recover = Open the autosaved draft
+anim-edit-recover-tip = The last draft is written every few seconds while it changes, so that it survives a crash: open it as a new draft
 anim-edit-curve-editor = Easing curve · { $bone }
 anim-edit-curve-start = Ease in
 anim-edit-curve-end = Ease out
@@ -15013,16 +15016,6 @@ b4-poser-apply = Apply
 b4-poser-apply-tip = Keep the frame shown as the pose (undo brings the pose back)
 b4-poser-override = Manual edits override animation
 b4-poser-override-tip = On: the joints you edited keep your edit and the animation moves the others. Off: the animation drives every joint it animates
-b4-clip-step = Step
-b4-clip-linear = Linear
-b4-clip-spline = Spline
-b4-clip-interpolation = Interpolation
-b4-clip-interpolation-tip = How the animation goes from one key to the next: Step holds each key until the next, Linear goes straight (what every viewer plays), Spline curves smoothly through the keys. Step and Spline are written as extra keys on the 30 fps grid
-b4-clip-open = Open .anim…
-b4-clip-open-tip = Open an animation file in the timeline as a new draft, to edit its keys
-b4-clip-recover = Open the autosaved draft
-b4-clip-recover-tip = The last draft is written every few seconds while it changes, so that it survives a crash: open it as a new draft
-b4-clip-too-large = The animation file is too large.
 
 # World map and teleports: teleport history columns and time zone, map region info and landmarks, teleport options
 tpmap-zone-utc = UTC

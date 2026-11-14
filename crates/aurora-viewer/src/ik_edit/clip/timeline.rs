@@ -934,6 +934,7 @@ impl Editor {
         );
         let mut action = None;
         let mut delete_frame_keys = false;
+        let mut recover = false;
         menu::dropdown(&button, palette, egui::PopupCloseBehavior::CloseOnClick, |ui| {
             // greyed out with the drafts full, like Create: opening would
             // have to drop the current document
@@ -948,6 +949,19 @@ impl Editor {
                 can_open,
             ) {
                 action = Some(files::Action::LoadProject);
+            }
+            if self.clip.recovery_exists == Some(true)
+                && menu::item_tip(
+                    ui,
+                    palette,
+                    // outline: Tabler has no filled "history" icon
+                    "history",
+                    aurora_i18n::tr!("anim-edit-recover"),
+                    self.can_recover(),
+                    aurora_i18n::tr!("anim-edit-recover-tip"),
+                )
+            {
+                recover = true;
             }
             if menu::item_tip(
                 ui,
@@ -972,6 +986,9 @@ impl Editor {
         });
         if let Some(action) = action {
             self.queue_studio_file_action(action);
+        }
+        if recover {
+            self.queue_recover();
         }
         if delete_frame_keys {
             self.studio_delete_clip_keyframe();

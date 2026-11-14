@@ -13,6 +13,7 @@ fn interpolation_label(mode: document::Interpolation) -> &'static str {
         document::Interpolation::Linear => aurora_i18n::tr!("anim-edit-interpolation-linear"),
         document::Interpolation::Stepped => aurora_i18n::tr!("anim-edit-interpolation-stepped"),
         document::Interpolation::Curve => aurora_i18n::tr!("anim-edit-interpolation-curve"),
+        document::Interpolation::Spline => aurora_i18n::tr!("anim-edit-interpolation-spline"),
     }
 }
 
@@ -29,6 +30,7 @@ fn interpolation_combo(ui: &mut egui::Ui, id_salt: impl egui::AsIdSalt, interpol
                 document::Interpolation::Linear,
                 document::Interpolation::Stepped,
                 document::Interpolation::Curve,
+                document::Interpolation::Spline,
             ] {
                 let response = ui.selectable_value(interpolation, mode, interpolation_label(mode));
                 changed |= response.changed();
@@ -114,6 +116,14 @@ impl Editor {
                 .clicked()
             {
                 self.queue_studio_file_action(files::Action::LoadProject);
+            }
+            if self.clip.recovery_exists == Some(true)
+                && ui
+                    .add_enabled(self.can_recover(), egui::Button::new(aurora_i18n::tr!("anim-edit-recover")))
+                    .on_hover_text(aurora_i18n::tr!("anim-edit-recover-tip"))
+                    .clicked()
+            {
+                self.queue_recover();
             }
             if ui
                 .add_enabled(

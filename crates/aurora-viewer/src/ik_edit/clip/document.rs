@@ -33,6 +33,9 @@ pub enum Interpolation {
     Linear,
     Stepped,
     Curve,
+    /// A Catmull-Rom curve through the keys and their neighbours
+    /// (`interpolation.rs`); exported as a key on every frame.
+    Spline,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -165,7 +168,8 @@ fn eased(mode: Interpolation, curve: Curve, amount: f32) -> f32 {
     let amount = amount.clamp(0.0, 1.0);
     match mode {
         Interpolation::Smooth => amount * amount * (3.0 - 2.0 * amount),
-        Interpolation::Linear => amount,
+        // Spline takes its own path in `sample`: it needs the neighbouring keys.
+        Interpolation::Linear | Interpolation::Spline => amount,
         Interpolation::Stepped => {
             if amount >= 1.0 {
                 1.0
@@ -188,6 +192,7 @@ fn sample<K, T: Copy>(
     curve: Curve,
     key: impl Fn(&K) -> (f32, T),
     mix: impl Fn(T, T, f32) -> T,
+    cubic: impl Fn([T; 4], f32) -> T,
 ) -> Option<T> {
     let (first_time, first) = key(keys.first()?);
     let (last_time, last) = key(keys.last()?);
@@ -205,6 +210,11 @@ fn sample<K, T: Copy>(
     } else {
         1.0
     };
+    if mode == Interpolation::Spline {
+        let before = key(&keys[upper.saturating_sub(2)]).1;
+        let after = key(&keys[(upper + 1).min(keys.len() - 1)]).1;
+        return Some(cubic([before, a, b, after], amount));
+    }
     Some(mix(a, b, eased(mode, curve, amount)))
 }
 
@@ -263,6 +273,7 @@ impl Track {
             self.curve,
             |key| (key.time, key.rotation),
             |a, b, u| a.slerp(b, u),
+            super::interpolation::spline_rotation,
         )
     }
 
@@ -274,6 +285,7 @@ impl Track {
             self.curve,
             |key| (key.time, key.position),
             |a, b, u| a.lerp(b, u),
+            super::interpolation::spline_position,
         )
     }
 }

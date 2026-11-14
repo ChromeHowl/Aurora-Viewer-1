@@ -6,6 +6,7 @@ use aurora_assets::Animation;
 use std::{collections::HashSet, sync::Arc};
 pub(super) mod document;
 pub(super) mod files;
+mod interpolation;
 #[cfg(test)]
 mod key_tests;
 mod picker;
@@ -127,8 +128,24 @@ pub(super) struct State {
     tx: crossbeam_channel::Sender<files::Output>,
     rx: crossbeam_channel::Receiver<files::Output>,
     pub prepared: Vec<Prepared>,
+    /// Where the account's draft is autosaved, None before a login and in
+    /// the demo.
+    recovery_dir: Option<std::path::PathBuf>,
+    /// An autosaved draft is there (looked at once per folder).
+    recovery_exists: Option<bool>,
+    /// Open the autosaved draft: its file.
+    recover_request: Option<std::path::PathBuf>,
+    autosaved: Option<u64>,
+    autosave_at: Option<Instant>,
     from_avatar_studio: bool,
     pub(super) return_after_upload: bool,
+}
+/// How often the draft is written while it changes.
+const AUTOSAVE_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
+/// Whether the draft is due to be autosaved: changed since the last write,
+/// and no write for AUTOSAVE_EVERY.
+fn autosave_due(revision: u64, autosaved: Option<u64>, last: Option<Instant>, now: Instant) -> bool {
+    autosaved != Some(revision) && last.is_none_or(|at| now.saturating_duration_since(at) >= AUTOSAVE_EVERY)
 }
 impl Default for State {
     fn default() -> Self {
@@ -181,6 +198,11 @@ impl Default for State {
             tx,
             rx,
             prepared: Vec::new(),
+            recovery_dir: None,
+            recovery_exists: None,
+            recover_request: None,
+            autosaved: None,
+            autosave_at: None,
             from_avatar_studio: false,
             return_after_upload: false,
         }
@@ -443,12 +465,19 @@ impl State {
                     self.busy = false;
                     self.message = Some(aurora_i18n::tr!("anim-edit-saved", path = path.display().to_string()).to_string());
                 }
+                files::Output::Autosaved(revision) => {
+                    self.autosaved = Some(revision);
+                    self.recovery_exists = Some(true);
+                }
                 files::Output::Cancelled => self.busy = false,
                 files::Output::Failed(error) => {
                     self.busy = false;
                     self.error = Some(error);
                 }
             }
+        }
+        if let Some(path) = self.recover_request.take() {
+            files::recover(jobs, ctx, self.tx.clone(), path, rig.clone());
         }
         if let Some((action, document)) = self.take_file_action() {
             let import_skeleton = matches!(action, files::Action::Load)
@@ -476,6 +505,16 @@ impl State {
                 });
             }
             let now = Instant::now();
+            // Never a blank draft: it would replace a draft that a crash left
+            // before it was opened again.
+            if let Some(dir) = &self.recovery_dir
+                && document.tracks.iter().any(|track| track.authored)
+                && autosave_due(self.revision, self.autosaved, self.autosave_at, now)
+            {
+                self.autosave_at = Some(now);
+                let first = self.autosaved.is_none();
+                files::autosave(jobs, self.tx.clone(), document.clone(), self.revision, dir.clone(), first);
+            }
             let dt = self.at.map_or(0.0, |at| now.saturating_duration_since(at).as_secs_f64());
             self.at = Some(now);
             if self.active && self.playing {
@@ -537,6 +576,35 @@ impl Editor {
             return;
         }
         self.clip.export = Some(action);
+        self.clip.busy = true;
+        self.clip.error = None;
+        self.clip.message = None;
+    }
+
+    /// The account's folder for the autosaved draft (`app.rs`, each frame
+    /// while IK Edit is open); None after a logout and in the demo.
+    pub fn set_clip_recovery(&mut self, dir: Option<std::path::PathBuf>) {
+        if self.clip.recovery_dir != dir {
+            self.clip.recovery_exists = dir.as_ref().map(|d| d.join(files::RECOVERY).is_file());
+            self.clip.recovery_dir = dir;
+            self.clip.autosaved = None;
+        }
+    }
+
+    /// Whether the autosaved draft can be opened, with the drafts not full.
+    pub(in crate::ik_edit::clip) fn can_recover(&self) -> bool {
+        self.clip.recovery_exists == Some(true) && self.clip.file_action_allowed(files::Action::Load)
+    }
+
+    /// Open the autosaved draft as a new draft, as Open project does.
+    pub(in crate::ik_edit::clip) fn queue_recover(&mut self) {
+        let Some(dir) = self.clip.recovery_dir.clone() else { return };
+        if self.clip.drafts_full() {
+            self.clip.error = Some(aurora_i18n::text("anim-edit-drafts-full").to_owned());
+            self.clip.message = None;
+            return;
+        }
+        self.clip.recover_request = Some(dir.join(files::RECOVERY));
         self.clip.busy = true;
         self.clip.error = None;
         self.clip.message = None;
