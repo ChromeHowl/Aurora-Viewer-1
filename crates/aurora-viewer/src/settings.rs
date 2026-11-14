@@ -1356,6 +1356,10 @@ pub struct Settings {
     /// without a click action, in addition to our avatar. Off by default.
     pub world_mouse_walk: bool,
     pub arrows_strafe: bool,
+    /// Aurora extension: pressing a walk key twice quickly runs while held
+    /// (agent_handle_doubletap_run, always on in the Legacy Viewer). On by
+    /// default.
+    pub double_tap_run: bool,
     /// The arrow keys (and Page Up / Down, Home) move the avatar while the
     /// chat bar has the keyboard, even with text in it; an empty bar always
     /// lets them through. The Legacy Viewer's `ArrowKeysAlwaysMove`, off by
@@ -2412,6 +2416,7 @@ impl Default for Settings {
             destinations_wide: true,
             invert_mouse: false,
             arrows_strafe: false,
+            double_tap_run: true,
             world_mouse_walk: false,
             arrow_keys_always_move: false,
             letter_keys_move: true,
