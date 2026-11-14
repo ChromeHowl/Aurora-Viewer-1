@@ -1235,6 +1235,12 @@ fn image(cx: &mut Cx) {
             "%",
         );
     });
+    // Order-independent transparency (aurora-render oit_stochastic.rs), an
+    // Aurora addition
+    cx.group(tr!("ui-options-transparency"), |cx| {
+        cx.experimental()
+            .toggle(tr!("ui-options-oit"), tr!("ui-options-oit-help"), &field!(oit));
+    });
     cx.group(tr!("ui-options-color-and-sharpness"), |cx| {
         world_lut(cx);
         // "HDR and Emissive" (RenderDisableVintageMode): off, the tone
