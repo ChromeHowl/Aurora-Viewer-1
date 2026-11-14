@@ -1449,6 +1449,11 @@ pub struct Settings {
     /// the avatar, as a right drag does (the Firestorm habit, feedback #445).
     /// Off by default: the drag steers the avatar (LLToolPie::startCameraSteering).
     pub left_drag_avatar_moves_camera: bool,
+    /// Aurora extension, MMO-style mouse buttons: the right button's drag
+    /// steers our avatar (the turn keys slide, the left button walks
+    /// forward) and the left button held on our avatar orbits the camera,
+    /// the other way round from the default. Off by default.
+    pub mmo_mouse_buttons: bool,
     pub arrows_strafe: bool,
     /// Aurora extension: pressing a walk key twice quickly runs while held
     /// (agent_handle_doubletap_run, always on in the Legacy Viewer). On by
@@ -2538,6 +2543,7 @@ impl Default for Settings {
             double_tap_run: true,
             world_mouse_walk: false,
             left_drag_avatar_moves_camera: false,
+            mmo_mouse_buttons: false,
             arrow_keys_always_move: false,
             letter_keys_move: true,
             walk_backwards_without_turning: false,
