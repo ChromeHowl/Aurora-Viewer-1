@@ -1648,16 +1648,16 @@ mod tests {
         }
     }
 
-    /// In the Legacy toast style, French Mute Owner wraps under Accept /
-    /// Discard and must keep the same left edge as those buttons (#2932).
+    /// In the Legacy toast style, a Mute Owner that wraps under Accept /
+    /// Discard must keep the same left edge as those buttons (#2932). The
+    /// card is narrowed to force the wrap the long French label causes,
+    /// because switching the process-wide language here raced with the
+    /// other tests that compare the interface text.
     #[test]
-    fn legacy_object_offer_wrapped_buttons_keep_the_text_indent_in_french() {
-        let previous = aurora_i18n::language().to_owned();
-        aurora_i18n::select("fr", Some("fr"));
+    fn legacy_object_offer_wrapped_buttons_keep_the_text_indent() {
         let mute = aurora_i18n::tr!("ui-notifications-mute-owner");
         let accept = aurora_i18n::tr!("ui-notifications-accept");
         let discard = aurora_i18n::tr!("ui-notifications-discard");
-        assert_eq!(mute, "Ignorer le propriétaire");
 
         let ctx = egui::Context::default();
         let theme = crate::theme::Theme::default();
@@ -1666,10 +1666,10 @@ mod tests {
         let icons = Icons::default();
         let world = World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
         let mut list = Notifications::default();
-        let body = "Un objet nommé Distributeur appartenant à Jane Doe vous a donné cet objet :\nNote de bienvenue";
+        let body = "An object named Dispenser owned by Jane Doe gave you this item:\nWelcome note";
         list.push(
             Kind::Inventory,
-            "Distributeur",
+            "Dispenser",
             body,
             Data::Inventory {
                 from: JANE,
@@ -1678,8 +1678,8 @@ mod tests {
                 object: Uuid::nil(),
                 task: true,
                 task_offer: Some(crate::world::inventory_offers::TaskOffer {
-                    object_name: "Distributeur".into(),
-                    item_name: "Note de bienvenue".into(),
+                    object_name: "Dispenser".into(),
+                    item_name: "Welcome note".into(),
                     from_group: false,
                     own_object: false,
                 }),
@@ -1697,7 +1697,7 @@ mod tests {
                     ..Default::default()
                 },
                 |ui| {
-                    ui.set_width(320.0);
+                    ui.set_width(240.0);
                     card(
                         ui,
                         &p,
@@ -1735,19 +1735,19 @@ mod tests {
             mute_rect.min.y > accept_rect.max.y + 1.0,
             "Mute Owner wraps under the first row: {mute_rect:?} above {accept_rect:?}"
         );
-        // Label glyphs sit a couple of pixels inside each button face, so
-        // allow a small inset difference while still catching the old bug
-        // that dropped the whole 22 px Legacy indent on the wrapped row.
+        // Label glyphs sit inside each button face, and the English labels
+        // differ in width (the French ones were all wider than the faces'
+        // minimum), so allow an inset difference of up to 10 px while still
+        // catching the old bug that dropped the whole 22 px Legacy indent
+        // on the wrapped row (it put Mute Owner about 30 px to the left).
         assert!(
-            (mute_rect.min.x - accept_rect.min.x).abs() < 4.0,
+            (mute_rect.min.x - accept_rect.min.x).abs() < 10.0,
             "wrapped Mute Owner keeps Accept's left edge: mute={mute_rect:?} accept={accept_rect:?}"
         );
         assert!(
-            mute_rect.min.x > accept_rect.min.x - 8.0,
+            mute_rect.min.x > accept_rect.min.x - 10.0,
             "wrapped Mute Owner must not lose the Legacy indent: mute={mute_rect:?} accept={accept_rect:?}"
         );
-
-        aurora_i18n::select(&previous, Some(&previous));
     }
 
     #[test]

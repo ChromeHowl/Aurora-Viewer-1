@@ -156,7 +156,7 @@ The other components (ported code, native libraries, assets) are in
 | emath 0.37.0 | MIT OR Apache-2.0 |
 | emojis 0.9.1 | (MIT OR Apache-2.0) AND Unicode-3.0 |
 | ena 0.14.4 | MIT OR Apache-2.0 |
-| encoding_rs 0.8.42 | (Apache-2.0 OR MIT) AND BSD-3-Clause |
+| encoding_rs 0.8.44 | (Apache-2.0 OR MIT) AND BSD-3-Clause |
 | endi 1.1.1 | MIT |
 | enum-primitive-derive 0.3.0 | MIT |
 | enumflags2 0.7.12 | MIT OR Apache-2.0 |
@@ -179,7 +179,7 @@ The other components (ported code, native libraries, assets) are in
 | fdeflate 0.3.7 | MIT OR Apache-2.0 |
 | fearless_simd 0.4.1 | Apache-2.0 OR MIT |
 | fixedbitset 0.5.7 | MIT OR Apache-2.0 |
-| flate2 1.1.10 | MIT OR Apache-2.0 |
+| flate2 1.1.11 | MIT OR Apache-2.0 |
 | float-cmp 0.9.0 | MIT |
 | float-cmp 0.10.0 | MIT |
 | fluent-bundle 0.16.0 | Apache-2.0 OR MIT |
@@ -212,7 +212,7 @@ The other components (ported code, native libraries, assets) are in
 | gif 0.14.2 | MIT OR Apache-2.0 |
 | gilrs-core 0.6.8 | Apache-2.0 OR MIT |
 | glam 0.33.12 | MIT OR Apache-2.0 |
-| glam 0.34.1 | MIT OR Apache-2.0 |
+| glam 0.34.3 | MIT OR Apache-2.0 |
 | glamx 0.3.1 | MIT OR Apache-2.0 |
 | glow 0.17.0 | MIT OR Apache-2.0 OR Zlib |
 | glutin_wgl_sys 0.6.1 | Apache-2.0 |
@@ -285,7 +285,7 @@ The other components (ported code, native libraries, assets) are in
 | litrs 1.0.0 | MIT OR Apache-2.0 |
 | lock_api 0.4.14 | MIT OR Apache-2.0 |
 | lock_api 0.5.0 | MIT OR Apache-2.0 |
-| log 0.4.34 | MIT OR Apache-2.0 |
+| log 0.4.35 | MIT OR Apache-2.0 |
 | mach2 0.4.3 | BSD-2-Clause OR MIT OR Apache-2.0 |
 | mach2 0.6.0 | BSD-2-Clause OR MIT OR Apache-2.0 |
 | md-5 0.10.6 | MIT OR Apache-2.0 |
@@ -380,7 +380,7 @@ The other components (ported code, native libraries, assets) are in
 | profiling 1.0.18 | MIT OR Apache-2.0 |
 | ptr_meta 0.3.2 | MIT |
 | ptr_meta_derive 0.3.2 | MIT |
-| pulldown-cmark 0.13.5 | MIT |
+| pulldown-cmark 0.13.6 | MIT |
 | pulseaudio 0.3.2 | MIT |
 | pxfm 0.1.30 | BSD-3-Clause OR Apache-2.0 |
 | quick-error 2.0.1 | MIT OR Apache-2.0 |
@@ -412,9 +412,9 @@ The other components (ported code, native libraries, assets) are in
 | rkyv 0.8.18 | MIT |
 | rkyv_derive 0.8.18 | MIT |
 | robust 1.2.0 | MIT OR Apache-2.0 |
-| ron 0.12.2 | MIT OR Apache-2.0 |
+| ron 0.12.3 | MIT OR Apache-2.0 |
 | roxmltree 0.20.0 | MIT OR Apache-2.0 |
-| roxmltree 0.21.1 | MIT OR Apache-2.0 |
+| roxmltree 0.21.2 | MIT OR Apache-2.0 |
 | rstar 0.13.0 | MIT OR Apache-2.0 |
 | rtc 0.21.1 | MIT OR Apache-2.0 |
 | rtc-crypto 0.21.1 | MIT OR Apache-2.0 |
@@ -442,7 +442,7 @@ The other components (ported code, native libraries, assets) are in
 | rustls-native-certs 0.8.4 | Apache-2.0 OR ISC OR MIT |
 | rustls-pki-types 1.15.1 | MIT OR Apache-2.0 |
 | rustls-platform-verifier 0.7.1 | MIT OR Apache-2.0 |
-| rustls-webpki 0.103.15 | ISC |
+| rustls-webpki 0.103.16 | ISC |
 | rusty-opus 1.0.2 | BSD-3-Clause |
 | safe_arch 1.2.0 | Zlib OR Apache-2.0 OR MIT |
 | sansio 1.0.1 | MIT OR Apache-2.0 |
@@ -542,7 +542,7 @@ The other components (ported code, native libraries, assets) are in
 | tracing 0.1.44 | MIT |
 | tracing-attributes 0.1.31 | MIT |
 | tracing-core 0.1.36 | MIT |
-| trash 5.2.9 | MIT |
+| trash 5.3.0 | MIT |
 | tree_magic_mini 3.2.2 | MIT |
 | try-lock 0.2.5 | MIT |
 | ttf-parser 0.25.1 | MIT OR Apache-2.0 |
@@ -570,7 +570,7 @@ The other components (ported code, native libraries, assets) are in
 | usvg 0.49.0 | Apache-2.0 OR MIT |
 | utf8_iter 1.0.4 | Apache-2.0 OR MIT |
 | utf8parse 0.2.2 | Apache-2.0 OR MIT |
-| uuid 1.29.0 | Apache-2.0 OR MIT |
+| uuid 1.29.2 | Apache-2.0 OR MIT |
 | vec_map 0.8.2 | MIT OR Apache-2.0 |
 | vello_common 0.2.0 | Apache-2.0 OR MIT |
 | vello_cpu 0.2.0 | Apache-2.0 OR MIT |
@@ -647,7 +647,7 @@ The other components (ported code, native libraries, assets) are in
 | zerotrie 0.2.5 | Unicode-3.0 |
 | zerovec 0.11.8 | Unicode-3.0 |
 | zerovec-derive 0.11.6 | Unicode-3.0 |
-| zip 9.1.2 | MIT |
+| zip 9.5.0 | MIT |
 | zlib-rs 0.6.8 | Zlib |
 | zmij 1.0.23 | MIT |
 | zopfli 0.8.3 | Apache-2.0 |

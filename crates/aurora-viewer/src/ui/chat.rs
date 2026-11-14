@@ -4158,6 +4158,7 @@ pub fn conversations_waiting(world: &World) -> bool {
 /// Firestorm's nearby chat toasts are while the nearby chat panel is visible
 /// (LLFloaterIMNearbyChatHandler::processChat, nearby_chat->getVisible());
 /// on the Contacts or an IM tab the bubbles come back.
+#[cfg(test)]
 pub fn local_chat_shown(ctx: &egui::Context, st: &ChatUi) -> bool {
     let minimized = ctx
         .data_mut(|d| d.get_persisted::<bool>(egui::Id::unique(("conversations", "minimized"))))
