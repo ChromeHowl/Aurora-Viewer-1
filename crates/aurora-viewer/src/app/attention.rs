@@ -249,22 +249,23 @@ impl App {
     /// Between frames, the window at hand (the frame holds it): whether it
     /// is in front, the flash asked for, and the clicks on the notifications.
     pub(super) fn attention_window(&mut self) {
-        if let Some(win) = self.gfx.as_ref().and_then(|g| g.window.as_ref()) {
-            self.attention.behind = !window_in_front(win);
+        if let Some(g) = &self.gfx {
+            self.attention.behind = !window_in_front(&g.window);
         }
         self.unread_title();
         if std::mem::take(&mut self.attention.flash)
-            && let Some(win) = self.gfx.as_ref().and_then(|g| g.window.as_ref())
+            && let Some(g) = &self.gfx
         {
             #[cfg(windows)]
             {
                 log::info!("taskbar flash");
-                flash_window(win);
+                flash_window(&g.window);
             }
             #[cfg(not(windows))]
-            if flashes_here(win.is_minimized()) {
+            if flashes_here(g.window.is_minimized()) {
                 log::info!("taskbar flash");
-                win.request_user_attention(Some(winit::window::UserAttentionType::Informational));
+                g.window
+                    .request_user_attention(Some(winit::window::UserAttentionType::Informational));
             } else {
                 log::debug!("taskbar flash skipped: the window is not minimized");
             }
@@ -276,7 +277,7 @@ impl App {
     /// Counted like the Conversations button (IMs, group chats,
     /// conferences), in world only.
     fn unread_title(&mut self) {
-        let Some(win) = self.gfx.as_ref().and_then(|g| g.window.as_ref()) else {
+        let Some(g) = &self.gfx else {
             return;
         };
         let in_world = matches!(self.screen, super::Screen::World);
@@ -296,7 +297,7 @@ impl App {
             want = aurora_i18n::tr!("video-memory-full-window-title", title = want.as_str());
         }
         if *shown != want {
-            win.set_title(&want);
+            g.window.set_title(&want);
             *shown = want;
         }
     }
@@ -313,9 +314,9 @@ impl App {
         }
         for id in clicked {
             let open = self.attention.opens.iter().find(|(i, _)| *i == id).map(|(_, o)| *o);
-            if let Some(win) = self.gfx.as_ref().and_then(|g| g.window.as_ref()) {
-                win.set_minimized(false);
-                win.focus_window();
+            if let Some(g) = &self.gfx {
+                g.window.set_minimized(false);
+                g.window.focus_window();
             }
             if !matches!(self.screen, super::Screen::World) {
                 continue;
