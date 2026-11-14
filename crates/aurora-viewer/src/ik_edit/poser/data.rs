@@ -178,7 +178,6 @@ impl Session {
     /// getJointExportRotation, indra/newview/fsposeranimator.cpp, writes the
     /// change and not the base too). A change, not a filter on edited joints,
     /// so that touching a joint does not bring its captured rotation along.
-    #[cfg(test)]
     pub fn authored(&self, rig: &Rig, model: Mat4) -> Option<Pose> {
         let resolved = self.pose.snapshot(rig, model)?;
         let pose = Pose {
