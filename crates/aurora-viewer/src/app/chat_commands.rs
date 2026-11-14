@@ -377,10 +377,18 @@ impl App {
         let pending = std::mem::take(&mut self.key_to_name);
         for (id, since) in pending {
             // key_to_name_callback: RlvActions::canShowName else RlvStrings::getAnonym
-            if !self.world.rlva_can_name(id) {
-                let name = crate::world::rlva::privacy::anonymous(id).display_name.clone();
-                self.report_command(format!("{id}: ({name})"));
-            } else if let Some(name) = self.world.social.avatar_names.complete(&id).or_else(|| self.world.person_name(&id)) {
+            let answer = cmdline::key_name_answer(!self.world.rlva_can_name(id), self.settings.chat_commands.key_to_name_ignores_rlva);
+            let name = match answer {
+                cmdline::KeyNameAnswer::Anonymous => Some(crate::world::rlva::privacy::anonymous(id).display_name.clone()),
+                cmdline::KeyNameAnswer::RealName => self
+                    .world
+                    .social
+                    .avatar_names
+                    .complete_real(&id)
+                    .or_else(|| self.world.social.names.get(&id).cloned()),
+                cmdline::KeyNameAnswer::Lookup => self.world.social.avatar_names.complete(&id).or_else(|| self.world.person_name(&id)),
+            };
+            if let Some(name) = name {
                 self.report_command(format!("{id}: ({name})"));
             } else if since.elapsed().as_secs() < KEY_TO_NAME_TIMEOUT_SECS {
                 self.key_to_name.push((id, since));

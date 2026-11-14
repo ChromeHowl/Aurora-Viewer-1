@@ -14612,3 +14612,6 @@ cmdline-take-skipped-take = Skipped { $id }: you are not allowed to take it into
 cmdline-take-skipped-copy = Skipped { $id }: you are not allowed to copy it into your inventory.
 cmdline-take-skipped-attachment = Skipped { $id }: attachments cannot be taken with this command.
 cmdline-take-drop-refused = Not transferred: { $name } ({ $reason }).
+
+ui-options-commands-key2name-ignores-rlva = key2name ignores RLVa name hiding
+ui-options-commands-key2name-ignores-rlva-hint = When RLVa hides names, the key2name command prints the real name instead of an anonymous one. This reveals names that RLVa hides; the Legacy Viewer never does.
