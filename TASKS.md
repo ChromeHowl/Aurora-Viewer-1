@@ -3484,6 +3484,7 @@ The same questions an hour long, **the most rewarding first**. Reading taken by 
   - ⬜ later: the reporter's "sometimes nothing" may be plain text links in a notecard; they are not clickable in the Legacy Viewer either (checked by the human), so making them clickable would be a new feature.
 
 - 🔧 #2556: group notice attachments accept copyable, transferable landmarks dragged from Favorites and Places, including linked landmarks; unsafe or non-transferable items remain refused.
+- ✅ Selection rectangle started on an object ([#2717](https://github.com/Aurora-Viewer/Aurora-Viewer/issues/2717)): a press in the build tools selected the object under it at once, so a rectangle kept that object whatever it enclosed. As LLToolSelect::handleMouseUp and LLToolSelectRect::handleHover: the click selects on release, and a press that leaves the slop drops the object it started on and, without Shift or Ctrl, the current selection. Aurora keeps its own 3-pixel slop (the Legacy Viewer's is 5). Tested on the grid by the human on 2026-11-07.
 
 ## Audio and voice
 
