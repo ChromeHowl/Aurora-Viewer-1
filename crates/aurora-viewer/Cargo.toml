@@ -157,11 +157,12 @@ zbus = "5.19.0"
 # The keyboard layout (keybinds/layout/linux.rs): the XKB keymap of the
 # Wayland compositor or the X server, and the active layout heard on winit's
 # own Wayland connection (`client_system`: libwayland, as winit uses it).
-# All four already in the tree through winit, with these features (MIT, MIT,
+# `xkb` is the protocol module the watch uses; winit enables it only on its
+# own x11rb 0.13. All four already in the tree through winit (MIT, MIT,
 # MIT / Apache-2.0, MIT)
 wayland-backend = { version = "0.3.17", features = ["client_system"] }
 wayland-client = "0.31.15"
-x11rb = { version = "0.14.0", features = ["allow-unsafe-code", "dl-libxcb"] }
+x11rb = { version = "0.14.0", features = ["allow-unsafe-code", "dl-libxcb", "xkb"] }
 xkbcommon-dl = { version = "0.4.2", features = ["x11"] }
 # The font directories fontconfig is configured with (ui/fonts.rs), for the
 # fonts of NixOS and of any other set-up found only there; pure Rust, already
