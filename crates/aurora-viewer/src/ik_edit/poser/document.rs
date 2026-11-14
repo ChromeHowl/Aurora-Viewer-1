@@ -85,6 +85,21 @@ impl Document {
                 .collect(),
         }
     }
+    /// Save diff: only the joints changed since posing started (or pinned),
+    /// each as a change on the destination's own pose
+    /// (FSFloaterPoser::savePoseToXml writes no joint that is all zero when
+    /// saving a diff). `None` when nothing changed.
+    pub fn diff(rig: &Rig, session: &data::Session, name: String, priority: i32) -> Option<Self> {
+        let mut document = Self::capture(rig, session, name, priority);
+        let joints = std::mem::take(&mut document.joints);
+        document.joints = joints
+            .into_iter()
+            .enumerate()
+            .filter(|(bone, _)| session.edited(*bone) || session.pose.locks.contains_key(bone))
+            .map(|(_, joint)| joint)
+            .collect();
+        (!document.joints.is_empty()).then_some(document)
+    }
     pub fn valid(&self, rig: &Rig) -> bool {
         let mut seen = HashSet::new();
         self.version == 1

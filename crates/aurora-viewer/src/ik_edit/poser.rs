@@ -11,7 +11,6 @@ use std::{
 
 mod bd_pose;
 mod bones;
-mod bvh;
 mod compact;
 mod controls;
 mod data;
@@ -25,6 +24,7 @@ pub(crate) mod stand;
 mod storage;
 mod subjects;
 mod together;
+mod total;
 mod trackball;
 mod ui;
 mod world_hints;
@@ -151,6 +151,8 @@ pub(super) struct State {
     preset: usize,
     drag_checkpoint: bool,
     name: String,
+    /// Each subject's own name for the field above (`data::Names`).
+    names: data::Names,
     priority: i32,
     pub(super) group: usize,
     filter: String,
@@ -516,6 +518,7 @@ impl Editor {
         }
         self.leave_clip();
         let clip = std::mem::take(&mut self.clip);
+        let names = std::mem::take(&mut self.poser.names).reopened(&self.poser.name);
         *self = Self {
             clip,
             open: true,
@@ -524,6 +527,7 @@ impl Editor {
             poser: State {
                 active: true,
                 name: aurora_i18n::tr!("poser-new-name").to_string(),
+                names,
                 priority: 4,
                 ..Default::default()
             },
@@ -599,25 +603,24 @@ impl Editor {
             match loaded {
                 storage::Loaded::Pose(document, mode) => {
                     if document.apply(&world.avatar_lib.rig, session, mode, model) {
-                        self.poser.name = document.name;
+                        self.poser.names.set(subject, &mut self.poser.name, document.name.clone());
                         self.poser.priority = document.priority;
                     }
                 }
-                storage::Loaded::Animation(animation, mode) => {
-                    let mut pose = ik::LocalPose {
+                storage::Loaded::Animation(animation, mode, name) => {
+                    if !name.is_empty() {
+                        self.poser.names.set(subject, &mut self.poser.name, name);
+                    }
+                    let start = ik::LocalPose {
                         rotations: session.pose.rotations.clone(),
                         positions: session.pose.positions.clone(),
                     };
-                    let sample = ik::animations::Sample {
-                        animation: Arc::new(BoundAnim::bind(animation, &world.avatar_lib.rig)),
-                        frame: 0,
-                        time_seconds: None,
-                    };
-                    ik::animations::apply(&world.avatar_lib.rig, &mut pose, Vec3::ZERO, &[sample]);
+                    let (pose, anim_base) = total::load(&world.avatar_lib.rig, animation, start);
                     let selective = matches!(mode, document::LoadMode::Selective | document::LoadMode::SelectiveRotations);
                     let rotations = matches!(mode, document::LoadMode::Rotations | document::LoadMode::SelectiveRotations);
                     let edited: Vec<_> = (0..world.avatar_lib.rig.len()).map(|b| session.edited(b)).collect();
                     session.checkpoint();
+                    session.anim_base = Some(Arc::new(anim_base));
                     let current = Arc::make_mut(&mut session.pose);
                     for (bone, edited) in edited.iter().enumerate() {
                         if selective && *edited {
@@ -638,7 +641,6 @@ impl Editor {
             }
             self.refresh = true;
         }
-        self.clip.prepared.append(&mut self.poser.storage.prepared);
     }
     fn poser_transform(&mut self, rig: &Rig, frame: &Frame, position: Vec3, rotation: Quat, rotated: bool) {
         let Some(bone) = self.selected else { return };

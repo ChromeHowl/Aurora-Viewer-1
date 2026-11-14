@@ -111,7 +111,7 @@ impl Editor {
             session.history(redo);
             self.refresh = true;
         }
-        if let Some((document, pose, copies)) = self.poser.storage.overwrite.clone() {
+        if let Some((document, pose, black_dragon)) = self.poser.storage.overwrite.clone() {
             widgets::Modal::new(egui::Id::unique("poser-overwrite-confirm")).show(ctx, |ui| {
                 ui.heading(aurora_i18n::tr!("poser-overwrite"));
                 ui.label(&document.name);
@@ -133,7 +133,7 @@ impl Editor {
                         self.poser.storage.job = Some(storage::Job::Save(storage::Save {
                             document,
                             pose,
-                            copies,
+                            black_dragon,
                             confirm: false,
                             pick: false,
                         }));
@@ -428,6 +428,7 @@ impl Editor {
     /// Name, Save (its menu holds the export options), Load (its modes) and
     /// the upload.
     fn pose_footer_ui(&mut self, ui: &mut egui::Ui, p: &Palette, rig: &Rig, frame: &Frame) {
+        self.follow_name();
         ui.horizontal(|ui| {
             widgets::restricted_text_field(ui, true, &mut self.poser.name, widgets::TextPolicy::PrintableNoPipe, |b, _| {
                 egui::TextEdit::singleline(b)
@@ -441,12 +442,12 @@ impl Editor {
                     ui,
                     p,
                     "device-floppy-filled",
-                    aurora_i18n::text("poser-save-library"),
+                    aurora_i18n::text("poser-save-diff"),
                     widgets::ActionKind::Primary,
                     egui::vec2(0.0, 28.0),
                     !self.poser.storage.busy && !self.poser.name.trim().is_empty(),
                 )
-                .on_hover_text(aurora_i18n::text("poser-export-hint"))
+                .on_hover_text(aurora_i18n::text("poser-save-diff-hint"))
                 .clicked()
                 {
                     self.save_pose(rig, frame, false);
@@ -462,23 +463,9 @@ impl Editor {
                     menu::toggle(
                         ui,
                         p,
-                        "file-upload-filled",
-                        aurora_i18n::text("poser-also-bvh"),
-                        &mut self.poser.also_bvh,
-                    );
-                    menu::toggle(
-                        ui,
-                        p,
                         "file-type-xml",
                         aurora_i18n::text("wornposer-bd-also-save"),
                         &mut self.poser.also_black_dragon,
-                    );
-                    menu::toggle(
-                        ui,
-                        p,
-                        "accessible-filled",
-                        aurora_i18n::text("poser-unlock-pelvis"),
-                        &mut self.poser.unlock_pelvis,
                     );
                     menu::separator(ui, p);
                     ui.horizontal(|ui| {
@@ -522,15 +509,15 @@ impl Editor {
                     ui,
                     p,
                     "file-upload-filled",
-                    aurora_i18n::text("poser-upload"),
+                    aurora_i18n::text("poser-save-total"),
                     widgets::ActionKind::Flat,
                     egui::vec2(0.0, 28.0),
                     !self.poser.storage.busy,
                 )
-                .on_hover_text(aurora_i18n::text("poser-export-hint"))
+                .on_hover_text(aurora_i18n::text("poser-save-total-hint"))
                 .clicked()
                 {
-                    self.import_pose(rig, frame);
+                    self.save_total(rig, frame);
                 }
             });
         });
@@ -552,7 +539,12 @@ impl Editor {
             .map(|e| e.path.clone())
     }
     /// `pick`: Save as…, the file is chosen in the system dialog.
+    /// The name field shows the selected subject's own name.
+    pub(super) fn follow_name(&mut self) {
+        self.poser.names.follow(self.poser.subject, &mut self.poser.name);
+    }
     pub(super) fn save_pose(&mut self, rig: &Rig, frame: &Frame, pick: bool) {
+        self.follow_name();
         let Some(session) = self.poser.sessions.get(&self.poser.subject) else {
             return;
         };
@@ -562,7 +554,10 @@ impl Editor {
         };
         let mut capture = session.clone();
         capture.pose = Arc::new(snapshot);
-        let document = document::Document::capture(rig, &capture, self.poser.name.clone(), self.poser.priority);
+        let Some(document) = document::Document::diff(rig, &capture, self.poser.name.clone(), self.poser.priority) else {
+            self.poser.storage.message = Some(aurora_i18n::text("poser-diff-unchanged").to_owned());
+            return;
+        };
         let Some(authored) = session.authored(rig, frame.model) else {
             self.poser.storage.message = Some(aurora_i18n::text("anim-edit-invalid").to_owned());
             return;
@@ -570,32 +565,31 @@ impl Editor {
         self.poser.storage.job = Some(storage::Job::Save(storage::Save {
             document,
             pose: Arc::new(authored),
-            copies: storage::Copies {
-                bvh: self.poser.also_bvh,
-                unlock_pelvis: self.poser.unlock_pelvis,
-                black_dragon: self.poser.also_black_dragon,
-            },
+            black_dragon: self.poser.also_black_dragon,
             confirm: self.poser.confirm_overwrite,
             pick,
         }));
     }
-    pub(super) fn import_pose(&mut self, rig: &Rig, frame: &Frame) {
+    /// Save total animation: the animation loaded as the base with the
+    /// changes applied, written as a new `.anim` file (the base is never
+    /// modified). Needs a loaded animation.
+    pub(super) fn save_total(&mut self, rig: &Rig, frame: &Frame) {
+        self.follow_name();
         let Some(session) = self.poser.sessions.get(&self.poser.subject) else {
             return;
         };
-        let Some(authored) = session.authored(rig, frame.model) else {
+        let Some(base) = session.anim_base.clone() else {
+            self.poser.storage.message = Some(aurora_i18n::text("poser-total-need-base").to_owned());
+            return;
+        };
+        let Some(snapshot) = session.pose.snapshot(rig, frame.model) else {
             self.poser.storage.message = Some(aurora_i18n::text("anim-edit-invalid").to_owned());
             return;
         };
-        let translations = (0..rig.len())
-            .filter(|b| authored.positions[*b].distance_squared(rig.local_pos[*b]) > 1e-10)
-            .collect();
-        self.poser.storage.job = Some(storage::Job::Import(
-            Arc::new(authored),
-            translations,
-            self.poser.name.clone(),
-            self.poser.priority,
-        ));
+        match total::total(rig, &base, &snapshot, &session.base) {
+            Ok(animation) => self.poser.storage.job = Some(storage::Job::Total(animation, self.poser.name.clone())),
+            Err(key) => self.poser.storage.message = Some(aurora_i18n::text(key).to_owned()),
+        }
     }
     /// The library in the joints column's place: the window keeps its size.
     fn pose_library_ui(&mut self, ui: &mut egui::Ui, p: &Palette, world: &World) {
@@ -729,9 +723,7 @@ impl Editor {
         ui.add_space(6.0);
         bones::caption(ui, p, aurora_i18n::text("poser-settings-files"));
         widgets::switch_labeled(ui, p, &mut self.poser.confirm_overwrite, aurora_i18n::tr!("poser-overwrite"));
-        widgets::switch_labeled(ui, p, &mut self.poser.also_bvh, aurora_i18n::tr!("poser-also-bvh"));
         widgets::switch_labeled(ui, p, &mut self.poser.also_black_dragon, aurora_i18n::tr!("wornposer-bd-also-save"));
-        widgets::switch_labeled(ui, p, &mut self.poser.unlock_pelvis, aurora_i18n::tr!("poser-unlock-pelvis"));
         ui.horizontal(|ui| {
             ui.label(aurora_i18n::tr!("poser-priority"));
             ui.add(egui::DragValue::new(&mut self.poser.priority).range(0..=6));

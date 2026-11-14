@@ -78,6 +78,56 @@ pub(super) fn bounded_scale(scale: Vec3) -> Vec3 {
     scale.signum() * scale.abs().clamp(Vec3::splat(0.001), Vec3::splat(10.0))
 }
 
+/// The save name each posed subject keeps, keyed as the sessions are (the
+/// subject's id). The name field shows the selected subject's own.
+#[derive(Default)]
+pub(super) struct Names {
+    shown: Option<Uuid>,
+    by_subject: HashMap<Uuid, String>,
+}
+impl Names {
+    /// The field `text` follows `subject`: the one it showed keeps what the
+    /// field held, the new one gets its own (kept across a close and reopen).
+    /// The very first time, the field keeps its text unless the subject
+    /// already has a name.
+    pub fn follow(&mut self, subject: Uuid, text: &mut String) {
+        if self.shown == Some(subject) {
+            return;
+        }
+        if let Some(previous) = self.shown {
+            self.by_subject.insert(previous, std::mem::take(text));
+            *text = self.by_subject.get(&subject).cloned().unwrap_or_default();
+        } else if let Some(own) = self.by_subject.get(&subject) {
+            text.clone_from(own);
+        }
+        self.shown = Some(subject);
+    }
+    /// A saved or loaded name for `subject`, shown at once when it is the
+    /// one the field follows.
+    pub fn set(&mut self, subject: Uuid, text: &mut String, name: String) {
+        if self.shown == Some(subject) {
+            *text = name;
+        } else {
+            self.by_subject.insert(subject, name);
+        }
+    }
+    /// A new window starts from the names kept, with the field not yet
+    /// following anyone.
+    pub fn reopened(mut self, text: &str) -> Self {
+        if let Some(shown) = self.shown.take() {
+            self.by_subject.insert(shown, text.to_owned());
+        }
+        self
+    }
+    /// Drop the names of subjects that are gone.
+    pub fn retain(&mut self, keep: impl Fn(&Uuid) -> bool) {
+        self.by_subject.retain(|id, _| keep(id));
+        if self.shown.is_some_and(|id| !keep(&id)) {
+            self.shown = None;
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(super) struct Session {
     pub base: Arc<Pose>,
@@ -85,6 +135,9 @@ pub(super) struct Session {
     pub enabled: bool,
     pub undo: Vec<Arc<Pose>>,
     pub redo: Vec<Arc<Pose>>,
+    /// The animation loaded as the base (Load > an animation file): what
+    /// Save total animation applies the changes to.
+    pub anim_base: Option<Arc<total::AnimBase>>,
 }
 impl Session {
     pub fn new(pose: Pose) -> Self {
@@ -95,6 +148,7 @@ impl Session {
             enabled: true,
             undo: Vec::new(),
             redo: Vec::new(),
+            anim_base: None,
         }
     }
     pub fn checkpoint(&mut self) {
@@ -124,6 +178,7 @@ impl Session {
     /// getJointExportRotation, indra/newview/fsposeranimator.cpp, writes the
     /// change and not the base too). A change, not a filter on edited joints,
     /// so that touching a joint does not bring its captured rotation along.
+    #[cfg(test)]
     pub fn authored(&self, rig: &Rig, model: Mat4) -> Option<Pose> {
         let resolved = self.pose.snapshot(rig, model)?;
         let pose = Pose {
