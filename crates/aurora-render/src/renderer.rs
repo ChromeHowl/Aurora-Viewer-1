@@ -4736,6 +4736,7 @@ impl Backend {
             constants: &[],
             polygon_line: false,
             unclipped_depth: false,
+            range: None,
         };
         // the stochastic depth and the accumulation at the passes' own
         // count (oit_stochastic.rs `pass_samples`), the total alpha at the
@@ -6560,6 +6561,7 @@ impl Backend {
                     il,
                     false,
                     true,
+                    soft,
                 )
             }),
             b: mk(
@@ -11552,9 +11554,11 @@ impl Backend {
                 bind_mesh(&mut pass, &self.groups.a);
                 let pipe = match lists.blend_depth_mode {
                     RiggedBlendDepth::Write | RiggedBlendDepth::Split => &self.pipelines.blend_depth_fringe_depth,
-                    RiggedBlendDepth::HalfCovered | RiggedBlendDepth::Layered | RiggedBlendDepth::Runs | RiggedBlendDepth::Layers => {
-                        &self.pipelines.blend_depth_mask
-                    }
+                    RiggedBlendDepth::HalfCovered
+                    | RiggedBlendDepth::Layered
+                    | RiggedBlendDepth::Runs
+                    | RiggedBlendDepth::Layers
+                    | RiggedBlendDepth::Exact => &self.pipelines.blend_depth_mask,
                 };
                 draw_sided(&mut pass, pipe, rigged, 0);
             }
@@ -12010,6 +12014,7 @@ impl Backend {
                         sampler: &self.post_sampler,
                         buffer: &self.post_buffer,
                         glow: &self.glow.views[1],
+                        rays: &self.targets.vol_rays,
                     },
                     post_size,
                     self.lost.get(),
