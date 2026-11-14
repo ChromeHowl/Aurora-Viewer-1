@@ -116,8 +116,6 @@ pub const COMMANDS: &[Command] = commands![
     "discord", "brand-discord-filled", "toolbar-command-discord", false;
     "360capture", "panorama-horizontal-filled", "toolbar-command-360-snapshot", true;
     "omnifilter", "filter-filled", "toolbar-command-omnifilter", true;
-    "avatar_align", "user-scan", "toolbar-command-avatar-align", true;
-    "face_nearest_avatar", "user-search", "toolbar-command-face-nearest", true;
 ];
 
 impl Command {
