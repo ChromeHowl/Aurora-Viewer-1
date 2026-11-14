@@ -234,8 +234,8 @@ pub(super) fn draw(ui: &mut egui::Ui, env: &mut LineEnv, line: &crate::world::Ch
                 )
                 .sense(egui::Sense::click()),
             );
-            if object && !line.source.is_nil() {
-                super::object_sender(&r.on_hover_cursor(egui::CursorIcon::PointingHand), p, world, line);
+            if object {
+                super::line_object_sender(r, p, world, line, env.menu);
             } else if !avatar.is_nil() {
                 line_name_menu(&r, p, world, avatar, line, env.menu);
                 if r.on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -333,7 +333,10 @@ pub(super) fn draw(ui: &mut egui::Ui, env: &mut LineEnv, line: &crate::world::Ch
         if !own && look.tail {
             let pic = egui::Rect::from_min_size(egui::pos2(rect.left() - PIC_GAP - PIC, rect.bottom() - PIC), egui::Vec2::splat(PIC));
             sender_picture(ui, env, line, pic, &name, avatar, object, logged);
-            if !avatar.is_nil() {
+            if object {
+                let cube = ui.interact(pic, ui.scope_id().with("sender"), egui::Sense::click());
+                super::line_object_sender(cube.on_hover_text(name.as_str()), p, world, line, env.menu);
+            } else if !avatar.is_nil() {
                 let resp = ui.interact(pic, ui.scope_id().with("sender"), egui::Sense::click());
                 line_name_menu(&resp, p, world, avatar, line, env.menu);
                 if resp
@@ -382,7 +385,9 @@ fn sender_picture(
     if object {
         ui.painter().rect_filled(rect, ui.visuals().window_corner_radius, p.raised);
         let (glyph, tint) = super::object_row::object_glyph(line, p, super::super::colors::sender_color(line));
-        if let Some(t) = env.icons.get(glyph) {
+        if !super::object_row::paint_wearer(ui.painter(), env.world, line, env.pics, env.wanted, rect, 1.0)
+            && let Some(t) = env.icons.get(glyph)
+        {
             ui.painter().image(
                 t.id(),
                 rect.shrink(5.0),

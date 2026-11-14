@@ -97,6 +97,7 @@ pub const REQUESTED_CAPS: &[&str] = &[
     "ProvisionVoiceAccountRequest",
     // instant messages kept while offline (LLIMProcessing::requestOfflineMessages)
     "ReadOfflineMsgs",
+    "PersistentChatConversationsRequest",
     "RegionExperiences",
     "RegionObjects",
     "RegionSchedule",

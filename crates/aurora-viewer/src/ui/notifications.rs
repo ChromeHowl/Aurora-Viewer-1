@@ -72,6 +72,8 @@ pub struct ToastEnv<'a> {
     /// full-width bars are shown (their room has no margin of its own).
     pub presence_at: crate::settings::PresencePosition,
     pub classic_bars: bool,
+    /// Reduce animations: a poke card does not jiggle (`ui/poke.rs`).
+    pub still: bool,
 }
 
 /// Show the Conversations window for a clicked card: opened if closed,
@@ -89,6 +91,8 @@ fn toast_seconds(n: &Notification, message_seconds: f64) -> f64 {
         Data::Message { .. } => message_seconds,
         // ShowMyComplexityChanges (the notice's expiry)
         Data::Complexity { seconds } => f64::from(seconds),
+        // long enough to poke back
+        Data::Poke { .. } => TOAST_OFFER,
         _ if n.interactive() => TOAST_OFFER,
         _ => TOAST_INFO,
     }
@@ -221,6 +225,35 @@ pub(super) fn time_width(ui: &egui::Ui, time: &str) -> f32 {
     })
 }
 
+/// Side of an icon action of a poke card (Poke back, Send IM).
+const ACTION: f32 = 20.0;
+
+/// An icon action of a card, drawn like its close cross (the card's cover
+/// takes the click): its rectangle. Greyed out when not `enabled`.
+fn action_slot(ui: &mut egui::Ui, p: &Palette, icons: &Icons, icon: &str, enabled: bool) -> egui::Rect {
+    let (r, _) = ui.allocate_exact_size(Vec2::splat(ACTION), egui::Sense::hover());
+    let hot = enabled && ui.rect_contains_pointer(r);
+    if hot {
+        ui.painter().rect_filled(r, ui.visuals().window_corner_radius, p.raised);
+    }
+    if let Some(t) = icons.get(icon) {
+        let color = if !enabled {
+            p.muted_dim
+        } else if hot {
+            p.ink
+        } else {
+            p.muted
+        };
+        ui.painter().image(
+            t.id(),
+            egui::Rect::from_center_size(r.center(), Vec2::splat(14.0)),
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            color,
+        );
+    }
+    r
+}
+
 /// The card of a friend online / offline or of the messages of a
 /// conversation: their picture, the name, the start of the last message.
 /// Clicking the card opens the conversation (`Notification::opens`), its
@@ -238,9 +271,16 @@ pub(super) fn person_card(
     let (who, status, count) = match n.data {
         Data::Presence { who, online } => (who, Some(if online { Status::Online } else { Status::Offline }), 1),
         Data::Message { from, count, .. } => (from, None, count),
+        // the count is in its text ("poked you (3 times)")
+        Data::Poke { from, .. } => (from, None, 1),
         _ => return None,
     };
+    // a poke card: Poke back (while a poke may go to them) and Send IM
+    let poke = matches!(n.data, Data::Poke { .. });
+    let poke_back = if poke { super::poke::button(ui.ctx(), world, &who) } else { None };
     let mut close = egui::Rect::NOTHING;
+    let mut poke_rect = egui::Rect::NOTHING;
+    let mut im_rect = egui::Rect::NOTHING;
     let mut name_hover = None;
     let surface = if toast { p.panel } else { p.raised.gamma_multiply(0.55) };
     // a toast floats at its own width, a card fills its list
@@ -285,22 +325,45 @@ pub(super) fn person_card(
                     });
                 });
                 let shown = world.notification_body(n);
-                if !shown.is_empty() {
+                if poke {
+                    // "👉 poked you (3 times)", its two actions at the end
+                    ui.horizontal(|ui| {
+                        let actions = 2.0 * ACTION + 4.0;
+                        ui.allocate_ui(Vec2::new((ui.available_width() - actions).max(40.0), 18.0), |ui| {
+                            name_hover = name_hover.or(text::person_body(ui, p, env.emoji, &n.body, &n.name_links));
+                        });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.spacing_mut().item_spacing.x = 4.0;
+                            im_rect = action_slot(ui, p, icons, "message-circle-filled", true);
+                            if let Some(b) = &poke_back {
+                                poke_rect = action_slot(ui, p, icons, super::poke::ICON, b.enabled);
+                            }
+                        });
+                    });
+                } else if !shown.is_empty() {
                     let text = message_excerpt(world, &shown);
                     name_hover = name_hover.or(text::person_body(ui, p, env.emoji, &text, &n.name_links));
                 }
             });
         });
     };
-    let frame = if toast {
-        super::widgets::overlay(ui, p, egui::Margin::same(8), body).response
+    let draw = |ui: &mut egui::Ui| {
+        if toast {
+            super::widgets::overlay(ui, p, egui::Margin::same(8), body).response
+        } else {
+            egui::Frame::new()
+                .fill(surface)
+                .corner_radius(ui.visuals().window_corner_radius)
+                .inner_margin(egui::Margin::same(8))
+                .show(ui, body)
+                .response
+        }
+    };
+    // a poke card jiggles when it comes out and at each new poke
+    let frame = if poke {
+        super::poke::jiggle(ui, who, n.id, env.still, draw)
     } else {
-        egui::Frame::new()
-            .fill(surface)
-            .corner_radius(ui.visuals().window_corner_radius)
-            .inner_margin(egui::Margin::same(8))
-            .show(ui, body)
-            .response
+        draw(ui)
     };
     // the whole card answers the click, over its text: the cross hides it,
     // the rest opens what it is about
@@ -310,16 +373,26 @@ pub(super) fn person_card(
         egui::Sense::click(),
     );
     let on_close = cover.hover_pos().is_some_and(|pos| close.contains(pos));
-    if n.opens() && !on_close && cover.hovered() {
+    let on_poke = cover.hover_pos().is_some_and(|pos| poke_rect.contains(pos));
+    let on_im = cover.hover_pos().is_some_and(|pos| im_rect.contains(pos));
+    let poke_enabled = poke_back.as_ref().is_some_and(|b| b.enabled);
+    if n.opens() && !on_close && !(on_poke && !poke_enabled) && cover.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
     let tip = if on_close {
-        if toast {
+        if poke {
+            // a poke card is a toast only: closing it is the end of it
+            aurora_i18n::tr!("common-close")
+        } else if toast {
             aurora_i18n::tr!("ui-notifications-hide-keep-in-bell")
         } else {
             aurora_i18n::tr!("common-close")
         }
-    } else if matches!(n.data, Data::Message { .. }) {
+    } else if on_poke && let Some(b) = &poke_back {
+        if b.enabled { aurora_i18n::tr!("ui-poke-back") } else { b.tip }
+    } else if on_im {
+        aurora_i18n::tr!("ui-context-send-im")
+    } else if matches!(n.data, Data::Message { .. } | Data::Poke { .. }) {
         aurora_i18n::tr!("ui-notifications-open-conversation")
     } else if n.opens() {
         aurora_i18n::tr!("ui-notifications-send-im")
@@ -328,6 +401,13 @@ pub(super) fn person_card(
     };
     let cover = if tip.is_empty() { cover } else { cover.on_hover_text(tip) };
     if cover.clicked() {
+        if on_poke {
+            // greyed out (offline, just poked): nothing
+            return poke_enabled.then_some(Response::Poke);
+        }
+        if on_im {
+            return Some(Response::Open);
+        }
         if !on_close && let Some(target) = name_hover {
             text::open(ui.ctx(), target);
             return None;
@@ -475,6 +555,7 @@ pub(super) fn card(
                 Data::None
                 | Data::Presence { .. }
                 | Data::Message { .. }
+                | Data::Poke { .. }
                 | Data::RegionRestart
                 | Data::RegionMessage { .. }
                 | Data::Complexity { .. } => {}
@@ -782,14 +863,38 @@ pub(super) fn card(
     out
 }
 
-/// Script prompts are windows for Close All in both notification styles.
-/// Dismissing one uses the existing ignore-without-reply response.
-pub(super) fn close_script_prompt(ctx: &egui::Context, n: &Notification) -> bool {
-    if !matches!(n.data, Data::Dialog { .. } | Data::TextBox { .. }) {
+/// The windows a scripted object opens that Close Window closes: the Legacy
+/// Viewer's `LLScriptFloater` types -- `ScriptDialog` (llDialog and
+/// llTextBox), `LoadWebPage` (llLoadURL), `ObjectGiveItem` and
+/// `OwnObjectGiveItem` (llGiveInventory) -- and, beyond the Legacy Viewer, a
+/// permission question (`ScriptQuestion`).
+///
+/// A permission question is `LLToastScriptQuestion`, a toast, in the Legacy
+/// Viewer: Close Window never reaches it there. Aurora stacks it with the
+/// script windows, though, so Ctrl+W on the top card would otherwise skip it
+/// and close the card below, surprising the user. Closing it refuses the
+/// request, as its own cross does (the `ScriptAnswer` with no permission
+/// bit).
+fn script_window(n: &Notification) -> bool {
+    matches!(
+        n.data,
+        Data::Dialog { .. } | Data::TextBox { .. } | Data::Url(_) | Data::Inventory { task: true, .. } | Data::Permissions { .. }
+    )
+}
+
+/// Script windows are windows for Close Window while they show as toasts and
+/// for Close All wherever they show. Dismissing one uses the existing
+/// close/ignore response.
+pub(super) fn close_script_prompt(ctx: &egui::Context, n: &Notification, window: bool) -> bool {
+    if !script_window(n) {
         return false;
     }
     let id = egui::Id::NULL.with(("script_prompt", n.id));
-    super::close_key::shown_extra(ctx, id);
+    if window {
+        super::close_key::shown_prompt(ctx, id, n.id);
+    } else {
+        super::close_key::shown_extra(ctx, id);
+    }
     super::close_key::take(ctx, id)
 }
 
@@ -1048,11 +1153,11 @@ pub fn show(
                                 ui.spacing_mut().item_spacing.y = 4.0;
                                 // newest first
                                 for n in list.list.iter_mut().rev().filter(|n| !n.transient) {
-                                    if close_script_prompt(ctx, n) {
+                                    if close_script_prompt(ctx, n, false) {
                                         answers.push((n.id, Response::Dismiss));
                                         continue;
                                     }
-                                    let r = if matches!(n.data, Data::Message { .. }) {
+                                    let r = if matches!(n.data, Data::Message { .. } | Data::Poke { .. }) {
                                         person_card(ui, p, icons, world, env, &mut nui.wanted_pics, n, false)
                                     } else {
                                         card(ui, p, icons, world, env.images, &mut nui.wanted_images, n, false, false)
@@ -1085,20 +1190,22 @@ pub fn show(
                 let (ids, behind) = shown_toasts(list, nui, dnd);
                 for id in ids.into_iter().rev() {
                     if let Some(n) = list.list.iter_mut().find(|n| n.id == id) {
-                        if close_script_prompt(ctx, n) {
+                        if close_script_prompt(ctx, n, true) {
                             answers.push((id, Response::Dismiss));
                             nui.toasts.retain(|(t, _)| *t != id);
                             continue;
                         }
-                        let r = if matches!(n.data, Data::Presence { .. } | Data::Message { .. }) {
+                        let r = if matches!(n.data, Data::Presence { .. } | Data::Message { .. } | Data::Poke { .. }) {
                             person_card(ui, p, icons, world, env, &mut nui.wanted_pics, n, true)
                         } else {
                             card(ui, p, icons, world, env.images, &mut nui.wanted_images, n, true, false)
                         };
                         match r {
                             // closing a toast only hides it: the offer waits in
-                            // the list (a scripted window too, until answered)
-                            Some(Response::Dismiss) if !matches!(n.data, Data::Dialog { .. }) => {
+                            // the list (a scripted window too, until answered);
+                            // a poke card, a toast only, is answered (its count
+                            // ends)
+                            Some(Response::Dismiss) if !matches!(n.data, Data::Dialog { .. } | Data::Poke { .. }) => {
                                 nui.toasts.retain(|(t, _)| *t != id);
                                 nui.hidden.insert(id);
                             }
@@ -1137,6 +1244,64 @@ fn script_rows(count: usize) -> impl Iterator<Item = std::ops::Range<usize>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Close Window reaches the Legacy Viewer's script floaters (a dialog,
+    /// a text box, a URL, an object's offer) and Aurora's stacked permission
+    /// question; a resident's offer stays out.
+    #[test]
+    fn script_windows_include_permission_questions_over_the_legacy_viewer() {
+        let note = |data| Notification {
+            id: 1,
+            time: std::time::SystemTime::UNIX_EPOCH,
+            kind: Kind::Script,
+            title: String::new(),
+            body: String::new(),
+            name_links: Vec::new(),
+            read: false,
+            data,
+            text: String::new(),
+            transient: false,
+            quiet: false,
+            maturity: 0,
+        };
+        let sender = ([127, 0, 0, 1], 1).into();
+        let offer = |task, object| Data::Inventory {
+            from: Uuid::nil(),
+            tx: Uuid::nil(),
+            asset_type: 6,
+            object,
+            task,
+            task_offer: None,
+        };
+        for data in [
+            Data::Dialog {
+                sender,
+                object: Uuid::nil(),
+                object_name: String::new(),
+                own_object: false,
+                channel: 0,
+                buttons: Vec::new(),
+            },
+            Data::TextBox {
+                sender,
+                object: Uuid::nil(),
+                channel: 0,
+            },
+            Data::Url("https://example.invalid".into()),
+            offer(true, Uuid::nil()),
+            Data::Permissions {
+                task: Uuid::nil(),
+                item: Uuid::nil(),
+                questions: 0,
+                region: Default::default(),
+                experience: None,
+                caution: None,
+            },
+        ] {
+            assert!(script_window(&note(data)));
+        }
+        assert!(!script_window(&note(offer(false, Uuid::from_u128(7)))));
+    }
 
     #[test]
     fn bell_right_click_turns_do_not_disturb_over_and_keeps_the_rest() {

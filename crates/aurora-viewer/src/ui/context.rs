@@ -299,6 +299,9 @@ pub enum CtxAction {
     ForgetHudScale(ObjKey),
     SetHudMoveLock(ObjKey, bool),
     Detach(ObjKey),
+    /// Take a worn attachment off, then move its item to the Trash, after
+    /// Inventory's "Detach and Delete" confirmation.
+    DetachDelete(ObjKey),
     AttachmentInventory(Uuid),
     EditAttachment(ObjKey),
     /// "Touch" / "Edit" of a worn item in the inventory or the
@@ -359,6 +362,9 @@ pub enum CtxAction {
     /// a conversation, a resident or a group.
     ShowHistory(Option<Uuid>),
     OfferTeleport(Uuid),
+    /// Poke a resident (`world/pokes.rs`): the friends list, a
+    /// conversation's head, a profile and a poke card's Poke back.
+    Poke(Uuid),
     /// A button of a teleport card in a conversation (accept or not).
     AnswerTeleport {
         invite: u64,

@@ -310,6 +310,7 @@ impl App {
             }
             InvAction::TakeTask(request) => self.take_task_inventory(*request),
             InvAction::StopConfirmingDelete => self.settings.inventory.confirm_delete = false,
+            InvAction::Notice(text) => self.world.system_message(text),
             InvAction::Edit(change) => self.edit_inventory(change, false),
             InvAction::Delete(deletion) => {
                 if let Some(deletion) = self.listings_ui.guard_inventory_delete(&self.world.inventory, *deletion) {
@@ -392,6 +393,28 @@ impl App {
             }
             InvAction::WearCopy { item, replace } => self.wear_copy(item, replace),
             InvAction::EditEnvironment(id) => self.env_editor_load(id),
+            InvAction::PreviewMany(ids) => {
+                let (resources, documents): (Vec<_>, Vec<_>) = ids
+                    .into_iter()
+                    .partition(|id| crate::ui::texture_library::catalogue::resource(&self.world.inventory, *id).is_some());
+                self.texture_library.open_group(&self.egui_ctx, &self.world, resources);
+                for id in &documents {
+                    self.apply_inventory_action(InvAction::Preview(*id));
+                }
+                let previews: Vec<_> = documents
+                    .iter()
+                    .copied()
+                    .filter(|id| {
+                        self.world
+                            .inventory
+                            .items
+                            .get(id)
+                            .is_some_and(|item| matches!(item.asset_type, 1 | 7 | 20))
+                    })
+                    .collect();
+                self.inventory_ui.group_documents(&previews);
+                self.script_editors.group_inventory(&documents);
+            }
             InvAction::Preview(id) => {
                 if self
                     .world

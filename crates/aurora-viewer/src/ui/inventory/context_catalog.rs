@@ -14,6 +14,7 @@ pub(super) enum Command {
     Empty(Uuid),
     DefaultFolder(Vec<Uuid>),
     Delete(Vec<Uuid>, bool),
+    DetachDelete(Vec<Uuid>),
     Share(Vec<Uuid>),
     Open(Uuid),
     OpenMany(Vec<Uuid>),
@@ -970,12 +971,25 @@ fn build_mode(inv: &Inventory, id: Uuid, st: &InventoryUi, prefs: &InventoryPref
         );
     }
     if !trash || all {
+        // A worn selection's Delete asks to take it off first ("DeleteWornItems").
+        let detach = ready && super::delete::detach_allowed(inv, &ids, prefs, facts);
+        if all || !super::delete::worn_in(inv, &ids, facts).is_empty() {
+            c.add(
+                "detach-delete",
+                "bottom",
+                "trash-x-filled",
+                aurora_i18n::tr!("ui-inventory-dialogs-detach-and-delete"),
+                detach,
+                Command::DetachDelete(ids.clone()),
+            );
+            c.slot("detach-delete", 6);
+        }
         c.add(
             "delete",
             "bottom",
             "trash-filled",
             aurora_i18n::tr!("common-delete"),
-            ready && super::delete::allowed(inv, &ids, prefs, facts),
+            ready && (super::delete::allowed(inv, &ids, prefs, facts) || detach),
             Command::Delete(ids, false),
         );
         c.slot("delete", 7);
@@ -1164,6 +1178,7 @@ pub(super) fn execute(
     facts: &Facts,
     actions: &mut Vec<InvAction>,
 ) {
+    let main = st.is_main();
     let mut submit = |plan: Result<Mutation, String>| match plan {
         Ok(m) => actions.push(InvAction::Edit(m)),
         Err(reason) => {
@@ -1195,6 +1210,17 @@ pub(super) fn execute(
                 super::delete::confirm_or_run(inv, st, prefs, facts, actions, ids);
             }
         }
+        Command::DetachDelete(ids) => {
+            if st.pending.is_none()
+                && st.pending_delete.is_none()
+                && st.detach_delete.is_none()
+                && st.dialog.is_none()
+                && super::delete::detach_allowed(inv, &ids, prefs, facts)
+            {
+                st.detach_from_world = false;
+                st.dialog = Some(EditDialog::DetachDelete(ids));
+            }
+        }
         Command::Share(ids) => {
             st.share_items = ids;
             // LLAvatarActions::shareWithAvatars: allow_multiple true
@@ -1202,34 +1228,42 @@ pub(super) fn execute(
         }
         Command::Open(id) => super::context::open(inv, id, st, actions),
         Command::OpenMany(ids) => {
+            let start = actions.len();
             for id in ids {
                 super::context::open(inv, id, st, actions);
             }
-        }
-        Command::Batch(batch) => actions.extend(batch),
-        Command::PropertiesMany(ids) => {
-            for id in ids {
-                if !st
-                    .windows
-                    .iter()
-                    .any(|window| matches!(window.state.dialog, Some(EditDialog::Properties(item)) if item == id))
-                {
-                    let state = InventoryUi {
-                        ui_id: Uuid::new_v4(),
-                        dialog: Some(EditDialog::Properties(id)),
-                        ..Default::default()
-                    };
-                    st.windows.push(InventoryWindow {
-                        id: state.ui_id,
-                        root: Uuid::nil(),
-                        additional: false,
-                        state: Box::new(state),
-                        open: false,
-                    });
-                }
+            // LLInventoryAction::doToSelected hosts compatible bulk previews
+            // together. Keep non-preview actions on their existing path.
+            let mut previews = Vec::new();
+            let other: Vec<_> = actions
+                .drain(start..)
+                .filter_map(|action| {
+                    if let InvAction::Preview(id) = &action {
+                        previews.push(*id);
+                        None
+                    } else {
+                        Some(action)
+                    }
+                })
+                .collect();
+            actions.extend(other);
+            if previews.len() > 1 {
+                actions.push(InvAction::PreviewMany(previews));
+            } else {
+                actions.extend(previews.into_iter().map(InvAction::Preview));
             }
         }
+        Command::Batch(batch) => actions.extend(batch),
+        // a folder window's own list holds none of the Properties windows
+        // (they move to the main inventory's each frame): it would open a
+        // second editor of an item already shown
+        Command::PropertiesMany(ids) if !main => st.properties_asked.push(super::document::PropertiesAsk::Many(ids)),
+        Command::Properties(id) if !main => st.properties_asked.push(super::document::PropertiesAsk::One(id)),
+        Command::PropertiesMany(ids) => st.open_properties_many(&ids),
         Command::Properties(id) => {
+            if st.focus_properties(ui.ctx(), id) {
+                return;
+            }
             st.property_edit = None;
             st.dialog = Some(EditDialog::Properties(id));
         }
@@ -1292,6 +1326,85 @@ mod tests {
         crate::world::inventory::demo::seed(&mut inv, Uuid::from_u128(2));
         inv
     }
+    #[test]
+    fn bulk_open_groups_resources_but_keeps_other_item_actions() {
+        let mut inv = inventory();
+        let ids = [9101, 9102, 9103].map(Uuid::from_u128);
+        inv.add_items(
+            ids.into_iter()
+                .zip([57, 0, 3])
+                .map(|(id, kind)| aurora_net::inventory::InvItem {
+                    id,
+                    asset_type: kind,
+                    asset_id: Uuid::from_u128(9200 + kind as u128),
+                    ..Default::default()
+                })
+                .collect(),
+        );
+        let ctx = egui::Context::default();
+        let mut st = InventoryUi::default();
+        let mut prefs = InventoryPreferences::default();
+        let mut actions = Vec::new();
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            execute(
+                Command::OpenMany(ids.to_vec()),
+                ui,
+                &inv,
+                &mut st,
+                &mut prefs,
+                &facts(),
+                &mut actions,
+            );
+        });
+        assert!(
+            actions
+                .iter()
+                .any(|action| matches!(action, InvAction::TeleportLandmark(id) if *id == Uuid::from_u128(9203)))
+        );
+        assert!(
+            actions
+                .iter()
+                .any(|action| matches!(action, InvAction::PreviewMany(items) if items == &ids[..2]))
+        );
+    }
+
+    #[test]
+    fn bulk_open_groups_document_and_script_previews() {
+        let mut inv = inventory();
+        let ids = [9301, 9302, 9303, 9304].map(Uuid::from_u128);
+        inv.add_items(
+            ids.into_iter()
+                .zip([1, 7, 10, 20])
+                .map(|(id, kind)| aurora_net::inventory::InvItem {
+                    id,
+                    asset_type: kind,
+                    asset_id: Uuid::from_u128(9400 + kind as u128),
+                    ..Default::default()
+                })
+                .collect(),
+        );
+        let ctx = egui::Context::default();
+        let mut st = InventoryUi::default();
+        let mut prefs = InventoryPreferences::default();
+        let mut actions = Vec::new();
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            execute(
+                Command::OpenMany(ids.to_vec()),
+                ui,
+                &inv,
+                &mut st,
+                &mut prefs,
+                &facts(),
+                &mut actions,
+            );
+        });
+        assert!(
+            actions
+                .iter()
+                .any(|action| matches!(action, InvAction::PreviewMany(items) if items == &ids))
+        );
+    }
+
     #[test]
     fn landmark_destination_actions_use_link_targets_and_require_one_available_asset() {
         let mut inv = inventory();

@@ -684,6 +684,10 @@ pub struct Settings {
     pub env_persist: bool,
     /// The weather of this viewer (the Environment window's "Weather").
     pub weather: crate::weather::WeatherSettings,
+    /// Sky, water and day cycle lists A–Z instead of the inventory's order
+    /// (an Aurora switch on the lists, off: the order since #812; the
+    /// Legacy Viewer's lists are always by name).
+    pub env_lists_by_name: bool,
     /// Which stars the night sky shows: the real sky over Paris (Aurora's
     /// default) or the Legacy Viewer's random stars (world/night_sky.rs).
     pub night_sky: crate::world::night_sky::NightSky,
@@ -865,6 +869,11 @@ pub struct Settings {
     pub balance_shows_received: bool,
     /// The same for L$ spent, in red.
     pub balance_shows_spent: bool,
+    /// Preferences › Chat › Conversations: send and receive pokes
+    /// (`world/pokes.rs`). On by default: a poke needs both viewers to
+    /// read it. Off, no Poke button shows and a poke arrives as an
+    /// ordinary IM.
+    pub pokes: bool,
     /// Mini-map and world map options (Firestorm MiniMap* / Map* settings).
     pub maps: MapSettings,
     /// "Search": last tab, rating boxes and land limits.
@@ -881,6 +890,9 @@ pub struct Settings {
     /// The Appearance tab shown at exit (gallery, outfit list, worn), shown
     /// again at the next start, as the Legacy Viewer's `LastAppearanceTab`.
     pub appearance_tab: u8,
+    /// The order of the Appearance outfits (FSOutfitListSortOrder and
+    /// OutfitGallerySortOrder, saved like them).
+    pub appearance_outfit_sort: crate::world::outfit_folders::Sort,
     pub show_ao: bool,
     /// Loading / teleport screens show the last view, blurred.
     pub loading_backdrop: bool,
@@ -893,6 +905,10 @@ pub struct Settings {
     pub window_x: Option<i32>,
     pub window_y: Option<i32>,
     pub window_maximized: bool,
+    /// Last display used for restoring native window placement.
+    pub window_display: Option<crate::window_display::SavedDisplay>,
+    /// Recover unreachable window geometry when connected displays change.
+    pub window_display_recovery: bool,
     /// Start in a borderless window covering the current monitor.
     pub window_fullscreen: bool,
     /// Legacy single-account authorization, read once for migration only.
@@ -1393,6 +1409,10 @@ pub struct Settings {
     /// colours of the interface (`crate::interface_colors`), each the
     /// skin's by default.
     pub interface_colors: crate::interface_colors::InterfaceColors,
+    /// Preferences › Appearance › Skin: the system's light or dark mode and
+    /// accent colour (`crate::system_theme`), live, off by default. A
+    /// colour of `interface_colors` wins over the system's.
+    pub follow_system_theme: bool,
     /// Firestorm's camera and movement windows (floater_camera.xml,
     /// floater_moveview.xml) instead of `ui/controls.rs`.
     pub classic_controls: bool,
@@ -1465,6 +1485,11 @@ pub struct Settings {
     /// the avatar, as a right drag does (the Firestorm habit, feedback #445).
     /// Off by default: the drag steers the avatar (LLToolPie::startCameraSteering).
     pub left_drag_avatar_moves_camera: bool,
+    /// Aurora extension, MMO-style mouse buttons: the right button's drag
+    /// steers our avatar (the turn keys slide, the left button walks
+    /// forward) and the left button held on our avatar orbits the camera,
+    /// the other way round from the default. Off by default.
+    pub mmo_mouse_buttons: bool,
     pub arrows_strafe: bool,
     /// Aurora extension: pressing a walk key twice quickly runs while held
     /// (agent_handle_doubletap_run, always on in the Legacy Viewer). On by
@@ -2292,6 +2317,7 @@ impl Default for Settings {
             env_manual_transition: 0.0,
             env_persist: true,
             weather: Default::default(),
+            env_lists_by_name: false,
             night_sky: Default::default(),
             night_sky_place: Default::default(),
             night_sky_latitude: crate::world::night_sky::LATITUDE as f32,
@@ -2366,6 +2392,7 @@ impl Default for Settings {
             notify_money_threshold: 200,
             balance_shows_received: true,
             balance_shows_spent: true,
+            pokes: true,
             maps: MapSettings::default(),
             search: Default::default(),
             show_people: true,
@@ -2375,6 +2402,7 @@ impl Default for Settings {
             appearance_fill_previews: false,
             wearable_favorites_sort: Default::default(),
             appearance_tab: 0,
+            appearance_outfit_sort: Default::default(),
             show_ao: false,
             ao: Default::default(),
             bridge: Default::default(),
@@ -2390,6 +2418,8 @@ impl Default for Settings {
             window_x: None,
             window_y: None,
             window_maximized: false,
+            window_display: None,
+            window_display_recovery: true,
             window_fullscreen: false,
             mfa_hash: String::new(),
             font: crate::ui::fonts::DEFAULT.into(),
@@ -2553,6 +2583,7 @@ impl Default for Settings {
             color_blindness_strength: 1.0,
             high_contrast: false,
             interface_colors: Default::default(),
+            follow_system_theme: false,
             classic_controls: false,
             camera_shots: Vec::new(),
             camera_views: Default::default(),
@@ -2587,6 +2618,7 @@ impl Default for Settings {
             double_tap_run: true,
             world_mouse_walk: false,
             left_drag_avatar_moves_camera: false,
+            mmo_mouse_buttons: false,
             arrow_keys_always_move: false,
             letter_keys_move: true,
             walk_backwards_without_turning: false,
@@ -3637,6 +3669,8 @@ impl Settings {
             window_x: old.window_x,
             window_y: old.window_y,
             window_maximized: old.window_maximized,
+            window_display: old.window_display,
+            window_display_recovery: old.window_display_recovery,
             window_fullscreen: old.window_fullscreen,
             // a newer build's own values are not this build's to reset
             newer_file: old.newer_file,

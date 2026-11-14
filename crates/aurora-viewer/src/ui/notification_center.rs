@@ -112,6 +112,8 @@ pub fn show_seconds(n: &Notification, message_seconds: f64) -> f64 {
         Data::Message { .. } => message_seconds.clamp(1.0, SHOW_INFO),
         // ShowMyComplexityChanges (the notice's expiry)
         Data::Complexity { seconds } => f64::from(seconds),
+        // long enough to poke back
+        Data::Poke { .. } => SHOW_ANSWER,
         _ if n.interactive() => SHOW_ANSWER,
         _ => SHOW_INFO,
     }
@@ -132,10 +134,10 @@ fn may_show(n: &Notification, m: &Moment) -> bool {
 }
 
 /// Rolls out as a card: what is listed, and a message kept out of the bell
-/// (`ToastPrefs::im_in_bell` off) or the complexity notice, whose card
-/// leaves with its time.
+/// (`ToastPrefs::im_in_bell` off), a poke or the complexity notice, whose
+/// card leaves with its time.
 fn card(n: &Notification) -> bool {
-    !n.transient || matches!(n.data, Data::Message { .. } | Data::Complexity { .. })
+    !n.transient || matches!(n.data, Data::Message { .. } | Data::Poke { .. } | Data::Complexity { .. })
 }
 
 /// The count on the bell: what waits in "To do", without the cards still
@@ -510,7 +512,17 @@ fn rolled_out(
             child.set_clip_rect(Rect::from_min_size(top, Vec2::new(width + 12.0, full_h * keep)).intersect(ui.clip_rect()));
             child.multiply_opacity(keep);
         }
-        let r = center_card(&mut child, p, icons, world, env, &mut nui.wanted_pics, &mut nui.wanted_images, n);
+        let r = center_card(
+            &mut child,
+            p,
+            icons,
+            world,
+            env,
+            &mut nui.wanted_pics,
+            &mut nui.wanted_images,
+            n,
+            true,
+        );
         let card = child.min_rect();
         nui.center.heights.insert(peek.id, card.height());
         // the time left, a fine violet bar along the card's bottom
@@ -663,7 +675,7 @@ fn full_list(
                     let pinned = |n: &Notification| matches!(n.data, Data::RegionRestart);
                     for first in [true, false] {
                         for n in list.list.iter_mut().rev().filter(|n| !n.transient && pinned(n) == first) {
-                            if let Some(r) = center_card(ui, p, icons, world, env, &mut nui.wanted_pics, &mut nui.wanted_images, n) {
+                            if let Some(r) = center_card(ui, p, icons, world, env, &mut nui.wanted_pics, &mut nui.wanted_images, n, false) {
                                 answers.push((n.id, r));
                             }
                         }
@@ -781,8 +793,9 @@ fn center_card(
     wanted: &mut std::collections::HashSet<uuid::Uuid>,
     wanted_images: &mut std::collections::HashSet<uuid::Uuid>,
     n: &mut Notification,
+    window: bool,
 ) -> Option<Response> {
-    if super::notifications::close_script_prompt(ui.ctx(), n) {
+    if super::notifications::close_script_prompt(ui.ctx(), n, window) {
         return Some(Response::Dismiss);
     }
     if matches!(n.data, Data::RegionRestart)
@@ -792,7 +805,7 @@ fn center_card(
     }
     let read = n.read;
     let inner = ui.scope(|ui| {
-        if matches!(n.data, Data::Message { .. }) {
+        if matches!(n.data, Data::Message { .. } | Data::Poke { .. }) {
             cards::person_card(ui, p, icons, world, env, wanted, n, false)
         } else {
             cards::card(ui, p, icons, world, env.images, wanted_images, n, false, true)

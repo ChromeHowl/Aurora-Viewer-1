@@ -228,6 +228,8 @@ pub fn page(cx: &mut Cx, tab: usize) {
                     &field!(payment_sent_opens),
                     &opens,
                 );
+                // Aurora's own: pokes (`world/pokes.rs`), on by default
+                cx.toggle(tr!("ui-options-pokes"), tr!("ui-options-pokes-hint"), &field!(pokes));
                 // the tab of a conversation with news flashes
                 // (FSFloaterIMContainer::startFlashingTab), in violet and softly
                 cx.toggle(

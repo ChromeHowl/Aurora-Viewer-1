@@ -26,10 +26,20 @@ use crate::weather::{PUDDLE_DISTANCE, Precipitation, WeatherQuality, WeatherSett
 pub enum EnvAction {
     /// Apply a settings item from a list.
     Pick(SettingsKind, Uuid),
-    /// "Shared environment" (the reset button).
+    /// "Shared environment" (Reset, or that row in a list).
     Shared,
+    /// "Based on day cycle" / day list "Nothing": drop that list's local override.
+    Clear(SettingsKind),
     /// A time of day preset (1..=4).
     Preset(u8),
+}
+
+/// A sky / water / day list choice (asset or one of the two fixed rows).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettingsPick {
+    Item(Uuid),
+    Shared,
+    DayBased,
 }
 
 /// LLFloaterEnvironmentAdjust slider scales.
@@ -40,10 +50,46 @@ const SLIDER_SCALE_GLOW_B: f32 = -5.0;
 /// F_APPROXIMATELY_ZERO (llmath.h).
 const APPROXIMATELY_ZERO: f32 = 0.00001;
 
+/// Fallback when fonts are not ready yet; real width comes from
+/// [`label_column_w`] so "Sky environment" / "Water environment" are not
+/// painted over the combo (#3109).
 const LABEL_W: f32 = 74.0;
 const COMBO_W: f32 = 216.0;
 /// Height of a list's entries under its search field.
 const LIST_H: f32 = 420.0;
+const LABEL_FONT: f32 = 12.5;
+
+/// Widest of `labels` at the selector's label size, so the column fits the
+/// current language instead of a fixed English guess.
+fn label_column_w(ui: &egui::Ui, labels: &[&str]) -> f32 {
+    let font = egui::FontId::proportional(LABEL_FONT);
+    labels
+        .iter()
+        .map(|label| {
+            ui.fonts_mut(|f| {
+                f.layout_no_wrap((*label).to_owned(), font.clone(), egui::Color32::PLACEHOLDER)
+                    .size()
+                    .x
+            })
+        })
+        .fold(LABEL_W, f32::max)
+        .ceil()
+}
+
+/// Label in a fixed column, clipped so a long string cannot cover the combo.
+fn paint_selector_label(ui: &mut egui::Ui, p: &Palette, label: &str, tip: &str, label_w: f32) {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(label_w, 20.0), egui::Sense::hover());
+    ui.painter().with_clip_rect(rect.intersect(ui.clip_rect())).text(
+        rect.left_center(),
+        egui::Align2::LEFT_CENTER,
+        label,
+        egui::FontId::proportional(LABEL_FONT),
+        p.ink,
+    );
+    if !tip.is_empty() {
+        resp.on_hover_text(tip);
+    }
+}
 
 #[derive(Default)]
 pub struct EnvironmentUi {
@@ -58,8 +104,9 @@ pub struct EnvironmentUi {
     /// everywhere as deep as a long snowfall leaves it).
     pub weather_fill: bool,
     catalog: SettingsCatalog,
-    /// Inventory generation the lists were built from, and when.
-    built: Option<(u64, super::inventory::view::Sort)>,
+    /// Inventory generation, sort and A–Z choice the lists were built
+    /// from, and when.
+    built: Option<(u64, super::inventory::view::Sort, bool)>,
     built_at: Option<std::time::Instant>,
     /// Folders still to load for the lists (0: complete).
     pub scan_left: usize,
@@ -83,12 +130,12 @@ impl EnvironmentUi {
     /// Rebuild the lists when the inventory changed (loadPresets), at most
     /// once a second while folders keep arriving.
     pub fn refresh(&mut self, ctx: &egui::Context, inv: &Inventory) {
-        let version = (inv.generation, super::inventory::view::picker_sort(ctx));
+        let version = (inv.generation, super::inventory::view::picker_sort(ctx), lists_by_name(ctx));
         let due = self.built_at.is_none_or(|t| t.elapsed() >= std::time::Duration::from_secs(1)) || self.scan_left == 0;
-        let sort_changed = self.built.is_some_and(|built| built.1 != version.1);
+        let sort_changed = self.built.is_some_and(|built| (built.1, built.2) != (version.1, version.2));
         if self.built != Some(version) && (due || sort_changed) {
-            let order = super::inventory::view::picker_order(ctx, inv);
-            self.catalog = SettingsCatalog::build(inv, |id| order.rank(id));
+            let ranks = list_ranks(ctx, inv);
+            self.catalog = SettingsCatalog::build(inv, |id| ranks.rank(id));
             self.built = Some(version);
             self.built_at = Some(std::time::Instant::now());
         }
@@ -118,7 +165,7 @@ impl EnvironmentUi {
             "environment_selector",
             aurora_i18n::tr!("common-environment"),
             pos,
-            Vec2::new(440.0, 300.0),
+            Vec2::new(480.0, 300.0),
         )
         .fixed()
         .help(aurora_i18n::tr!("ui-environment-choose-a-sky-water-or-day-cycle-from-your"))
@@ -205,22 +252,24 @@ impl EnvironmentUi {
         out: &mut Vec<EnvAction>,
     ) {
         ui.spacing_mut().item_spacing = Vec2::new(4.0, 6.0);
+        let sky = aurora_i18n::tr!("ui-environment-sky-environment");
+        let water = aurora_i18n::tr!("ui-environment-water-environment");
+        let day = aurora_i18n::tr!("extra-day-night");
+        let time = aurora_i18n::tr!("ui-environment-time");
+        // Quick preferences passes a wide column; the Environment window's
+        // 74 px was too narrow for English "Water environment" (#3109).
+        let label_w = label_w.max(label_column_w(ui, &[sky, water, day, time]));
         let rows = [
-            (
-                SettingsKind::Sky,
-                aurora_i18n::tr!("ui-environment-sky-environment"),
-                aurora_i18n::tr!("ui-environment-sky-settings"),
-                view.sky,
-            ),
+            (SettingsKind::Sky, sky, aurora_i18n::tr!("ui-environment-sky-settings"), view.sky),
             (
                 SettingsKind::Water,
-                aurora_i18n::tr!("ui-environment-water-environment"),
+                water,
                 aurora_i18n::tr!("ui-environment-water-settings"),
                 view.water,
             ),
             (
                 SettingsKind::Day,
-                aurora_i18n::tr!("extra-day-night"),
+                day,
                 aurora_i18n::tr!("ui-environment-day-cycle-settings"),
                 view.day,
             ),
@@ -229,15 +278,7 @@ impl EnvironmentUi {
             widgets::surface(ui, p, |ui| {
                 ui.set_min_width(ui.available_width());
                 ui.horizontal(|ui| {
-                    let (rect, resp) = ui.allocate_exact_size(Vec2::new(label_w, 20.0), egui::Sense::hover());
-                    ui.painter().text(
-                        rect.left_center(),
-                        egui::Align2::LEFT_CENTER,
-                        label,
-                        egui::FontId::proportional(12.5),
-                        p.ink,
-                    );
-                    resp.on_hover_text(tip);
+                    paint_selector_label(ui, p, label, tip, label_w);
                     if let Some(a) = self.list_row(ui, p, kind, shown) {
                         out.push(a);
                     }
@@ -300,14 +341,7 @@ impl EnvironmentUi {
         if let Some(time_of_day) = time_of_day {
             widgets::divider(ui, p);
             ui.horizontal(|ui| {
-                let (rect, _) = ui.allocate_exact_size(Vec2::new(label_w, 20.0), egui::Sense::hover());
-                ui.painter().text(
-                    rect.left_center(),
-                    egui::Align2::LEFT_CENTER,
-                    aurora_i18n::tr!("ui-environment-time"),
-                    egui::FontId::proportional(12.5),
-                    p.ink,
-                );
+                paint_selector_label(ui, p, time, "", label_w);
                 for (i, name) in [
                     aurora_i18n::tr!("ui-environment-sunrise"),
                     aurora_i18n::tr!("common-midday"),
@@ -363,7 +397,11 @@ impl EnvironmentUi {
             self.search_list = None;
             ui.data_mut(|d| d.insert_temp(demo_open_id(&salt), text.to_owned()));
         }
-        settings_list(ui, p, &self.catalog, kind, shown, salt, COMBO_W).map(|id| EnvAction::Pick(kind, id))
+        match settings_list(ui, p, &self.catalog, kind, shown, salt, COMBO_W)? {
+            SettingsPick::Item(id) => Some(EnvAction::Pick(kind, id)),
+            SettingsPick::Shared => Some(EnvAction::Shared),
+            SettingsPick::DayBased => Some(EnvAction::Clear(kind)),
+        }
     }
 
     /// "Personal lighting": edits the local sky at once. Returns
@@ -720,7 +758,7 @@ pub fn settings_list(
     shown: Shown,
     salt: impl std::hash::Hash + std::fmt::Debug,
     width: f32,
-) -> Option<Uuid> {
+) -> Option<SettingsPick> {
     let list = catalog.list(kind);
     let second = if kind == SettingsKind::Day {
         aurora_i18n::tr!("common-nothing")
@@ -778,10 +816,11 @@ pub fn settings_list(
             ui.ctx().memory_mut(|m| m.areas_mut().set_state(layer, area));
         }
         let margins = egui::Frame::popup(ui.style()).total_margin().sum().y;
+        // No ComboBox `.height`: that wraps the popup in its own scroll and
+        // stacked with the list's ScrollArea as a double scrollbar (#3109).
         let mut content_height = None;
         egui::ComboBox::from_id_salt(salt)
             .width(width)
-            .height(LIST_H + 40.0)
             .selected_text(RichText::new(text).size(12.0).color(p.ink))
             .truncate()
             // a click in the search field must not close the list
@@ -790,19 +829,25 @@ pub fn settings_list(
                 // Aurora addition: the Legacy Viewer's lists only jump to
                 // the first name starting with the letters typed
                 // (LLScrollListCtrl::handleUnicodeCharHere). `search_field`
-                // with ↑ ↓ left to the list, so ↓ reaches the names.
-                let search = {
-                    let width = ui.available_width();
-                    crate::ui::widgets::search_text_edit(ui, p, &mut query, |edit| {
-                        edit.hint_text(aurora_i18n::tr!("ui-environment-search-by-name"))
-                            .desired_width(width)
-                            .event_filter(egui::EventFilter {
-                                horizontal_arrows: true,
-                                vertical_arrows: false,
-                                ..Default::default()
-                            })
+                // with ↑ ↓ left to the list, so ↓ reaches the names, and
+                // the A–Z switch at its end (also an Aurora addition).
+                ui.set_min_width(width);
+                let search = ui
+                    .horizontal(|ui| {
+                        let width = ui.available_width() - 20.0 - ui.spacing().item_spacing.x;
+                        let search = crate::ui::widgets::search_text_edit(ui, p, &mut query, |edit| {
+                            edit.hint_text(aurora_i18n::tr!("ui-environment-search-by-name"))
+                                .desired_width(width)
+                                .event_filter(egui::EventFilter {
+                                    horizontal_arrows: true,
+                                    vertical_arrows: false,
+                                    ..Default::default()
+                                })
+                        });
+                        order_toggle(ui, p);
+                        search
                     })
-                };
+                    .inner;
                 if opening {
                     search.request_focus();
                 }
@@ -811,7 +856,7 @@ pub fn settings_list(
                 let enter = search.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 if enter && let Some(c) = matches.first() {
                     if shown != Shown::Item(c.asset) {
-                        picked = Some(c.asset);
+                        picked = Some(SettingsPick::Item(c.asset));
                     }
                     ui.close();
                 }
@@ -819,14 +864,25 @@ pub fn settings_list(
                 let searching = !query.trim().is_empty();
                 let scroll = egui::ScrollArea::vertical().max_height(LIST_H).show(ui, |ui| {
                     if !searching {
-                        // the two fixed entries show the state; they cannot be
-                        // picked (setDefaultPresetsEnabled(false))
-                        for (i, label) in [aurora_i18n::tr!("ui-environment-shared-environment"), second]
-                            .into_iter()
-                            .enumerate()
-                        {
-                            let on = env_select::shown_index(list, shown) == i && !matches!(shown, Shown::Preset(_) | Shown::Personal);
-                            ui.add_enabled(false, egui::Button::selectable(on, RichText::new(label).size(12.0)));
+                        // Aurora: Shared and DayBased / Nothing are clickable
+                        // (Legacy greys them with setDefaultPresetsEnabled(false)
+                        // and only Reset returns to Shared; the list entries
+                        // are clearer).
+                        let fixed = [
+                            (SettingsPick::Shared, aurora_i18n::tr!("ui-environment-shared-environment")),
+                            (SettingsPick::DayBased, second),
+                        ];
+                        for (choice, label) in fixed {
+                            let on = matches!(
+                                (choice, shown),
+                                (SettingsPick::Shared, Shown::Shared) | (SettingsPick::DayBased, Shown::DayBased)
+                            );
+                            if widgets::search_list_item(ui, on, RichText::new(label).size(12.0)).clicked() {
+                                if !on {
+                                    picked = Some(choice);
+                                }
+                                ui.close();
+                            }
                         }
                         widgets::divider(ui, p);
                     } else if matches.is_empty() {
@@ -845,9 +901,20 @@ pub fn settings_list(
                         let on = shown == Shown::Item(c.asset);
                         if widgets::search_list_item(ui, on, RichText::new(&c.name).size(12.0)).clicked() {
                             if !on {
-                                picked = Some(c.asset);
+                                picked = Some(SettingsPick::Item(c.asset));
                             }
-                            ui.close();
+                            widgets::divider(ui, p);
+                        } else if matches.is_empty() {
+                            // cut to the list's width: the drop-down does not wrap,
+                            // and a long query would widen it
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(aurora_i18n::tr!("ui-environment-no-match", query = query.trim().to_string()))
+                                        .size(12.0)
+                                        .color(p.muted),
+                                )
+                                .truncate(),
+                            );
                         }
                     }
                 });
@@ -865,10 +932,10 @@ pub fn settings_list(
         ui.data_mut(|d| d.insert_temp(query_id, query));
     });
     if widgets::icon_button(ui, p, "caret-left-filled", aurora_i18n::tr!("common-previous"), !list.is_empty()) {
-        picked = env_select::step(list, env_select::shown_index(list, shown), false);
+        picked = env_select::step(list, env_select::shown_index(list, shown), false).map(SettingsPick::Item);
     }
     if widgets::icon_button(ui, p, "caret-right-filled", aurora_i18n::tr!("common-next"), !list.is_empty()) {
-        picked = env_select::step(list, env_select::shown_index(list, shown), true);
+        picked = env_select::step(list, env_select::shown_index(list, shown), true).map(SettingsPick::Item);
     }
     picked
 }
@@ -877,6 +944,94 @@ pub fn settings_list(
 /// (demo captures).
 fn demo_open_id(salt: &(impl std::hash::Hash + std::fmt::Debug)) -> egui::Id {
     egui::Id::unique("env_list_demo_open").with(salt)
+}
+
+/// Whether the sky, water and day cycle lists are A–Z (`env_lists_by_name`
+/// of the settings), published by the app once per frame like the
+/// inventory selectors' sort. Every list of settings items follows it: the
+/// selector and the photo's Light section, the editors' Load menus, the
+/// parcel and region pickers.
+pub fn set_lists_by_name(ctx: &egui::Context, by_name: bool) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::unique("env_lists_by_name"), by_name));
+}
+
+pub fn lists_by_name(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp(egui::Id::unique("env_lists_by_name"))).unwrap_or_default()
+}
+
+/// The choice a list's switch made since the app last saved it.
+pub fn take_lists_by_name_change(ctx: &egui::Context) -> Option<bool> {
+    ctx.data_mut(|d| d.remove_temp(egui::Id::unique("env_lists_by_name_changed")))
+}
+
+fn flip_lists_by_name(ctx: &egui::Context, by_name: bool) {
+    set_lists_by_name(ctx, by_name);
+    ctx.data_mut(|d| d.insert_temp(egui::Id::unique("env_lists_by_name_changed"), by_name));
+}
+
+/// The A–Z switch beside a list's search field.
+pub fn order_toggle(ui: &mut egui::Ui, p: &Palette) {
+    let mut by_name = lists_by_name(ui.ctx());
+    let tip = if by_name {
+        aurora_i18n::tr!("ui-environment-sorted-by-name")
+    } else {
+        aurora_i18n::tr!("ui-environment-in-inventory-order")
+    };
+    if widgets::sort_by_name_toggle(ui, p, &mut by_name, tip) {
+        flip_lists_by_name(ui.ctx(), by_name);
+    }
+}
+
+/// The same switch as the first row of a Load menu, which stays open.
+pub fn order_menu_row(ui: &mut egui::Ui, p: &Palette) {
+    let mut by_name = lists_by_name(ui.ctx());
+    if super::menu::toggle(
+        ui,
+        p,
+        "sort-ascending-letters",
+        aurora_i18n::tr!("ui-environment-sort-by-name"),
+        &mut by_name,
+    ) {
+        flip_lists_by_name(ui.ctx(), by_name);
+    }
+    super::menu::separator(ui, p);
+}
+
+/// The place of each settings item in the lists ([`env_select::ranks`]),
+/// kept until the inventory, its sort or the lists' order change.
+pub struct ListRanks {
+    version: (Uuid, Uuid, u64, super::inventory::view::Sort, &'static str, bool),
+    ranks: std::collections::HashMap<Uuid, usize>,
+}
+
+impl ListRanks {
+    pub fn rank(&self, id: Uuid) -> usize {
+        self.ranks.get(&id).copied().unwrap_or(usize::MAX)
+    }
+}
+
+pub fn list_ranks(ctx: &egui::Context, inv: &Inventory) -> std::sync::Arc<ListRanks> {
+    let key = egui::Id::unique("env_list_ranks");
+    let version = (
+        inv.root,
+        inv.lib_root,
+        inv.generation,
+        super::inventory::view::picker_sort(ctx),
+        aurora_i18n::language(),
+        lists_by_name(ctx),
+    );
+    if let Some(ranks) = ctx.data(|d| d.get_temp::<std::sync::Arc<ListRanks>>(key))
+        && ranks.version == version
+    {
+        return ranks;
+    }
+    let order = super::inventory::view::picker_order(ctx, inv);
+    let ranks = std::sync::Arc::new(ListRanks {
+        version,
+        ranks: env_select::ranks(inv, version.5, |id| order.rank(id)),
+    });
+    ctx.data_mut(|d| d.insert_temp(key, ranks.clone()));
+    ranks
 }
 
 /// Azimuth and elevation (degrees) of a sun or moon rotation
@@ -1325,6 +1480,45 @@ fn weather_source_note(ui: &mut egui::Ui, p: &Palette, source: crate::weather::W
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn selector_label_column_fits_water_environment() {
+        let ctx = egui::Context::default();
+        let mut width = 0.0;
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0))),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    width = label_column_w(
+                        ui,
+                        &[
+                            aurora_i18n::tr!("ui-environment-sky-environment"),
+                            aurora_i18n::tr!("ui-environment-water-environment"),
+                            aurora_i18n::tr!("extra-day-night"),
+                            aurora_i18n::tr!("ui-environment-time"),
+                        ],
+                    );
+                });
+            },
+        );
+        // the font atlas of the first frame: dropped uncleared, it panics
+        // under debug assertions (`--profile ci`, the merge queue)
+        output.textures_delta.clear();
+        assert!(
+            width > LABEL_W,
+            "English Water environment needs more than the old {LABEL_W} px column, got {width}"
+        );
+        let water = aurora_i18n::tr!("ui-environment-water-environment");
+        let water_w = ctx.fonts_mut(|f| {
+            f.layout_no_wrap(water.to_owned(), egui::FontId::proportional(LABEL_FONT), egui::Color32::WHITE)
+                .size()
+                .x
+        });
+        assert!(width + 0.5 >= water_w, "column {width} must cover {water} ({water_w})");
+    }
 
     #[test]
     fn azimuth_and_elevation_round_trip() {

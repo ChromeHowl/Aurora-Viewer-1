@@ -109,6 +109,7 @@ pub mod physics;
 pub mod place_card;
 pub mod place_details;
 pub mod places;
+pub mod poke;
 pub mod portals;
 pub mod pose_stand;
 pub mod presence;
@@ -527,3 +528,5 @@ mod tests {
         assert!(settings.show_minimap && !settings.show_chat);
     }
 }
+
+pub(crate) mod preview_tabs;

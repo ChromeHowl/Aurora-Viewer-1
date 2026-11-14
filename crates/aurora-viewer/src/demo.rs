@@ -24,6 +24,9 @@ pub mod parcel_visibility;
 pub mod pointing;
 #[path = "demo_pose_stand.rs"]
 pub mod pose_stand;
+/// A demo friend's pokes, and pokes back to ours (AURORA_DEMO_POKE).
+#[path = "demo_poke.rs"]
+pub mod poke;
 #[path = "demo_poser.rs"]
 pub mod poser;
 
@@ -176,6 +179,8 @@ pub mod land;
 /// (AURORA_DEMO_LEGACY_BUMP).
 #[path = "demo_legacy_bump.rs"]
 pub mod legacy_bump;
+#[path = "demo_legacy_lists.rs"]
+pub mod legacy_lists;
 #[path = "demo_link.rs"]
 pub mod link;
 /// A Mask of cutoff 255 over an alpha just under opaque (AURORA_DEMO_MASK_255).
@@ -2819,6 +2824,10 @@ fn demo_profile(id: Uuid) -> aurora_net::AvatarProfile {
     // (and so a banner in the Aurora window)
     if p.sl_image.is_nil() && std::env::var_os("AURORA_DEMO_PROFILE").is_some() {
         p.sl_image = tags::scenario_picture(id);
+    }
+    // AURORA_DEMO_OBJECT_CHAT: ours, which the gag we wear speaks under
+    if p.sl_image.is_nil() && id == DEMO_AGENT && object_chat::scene().is_some() {
+        p.sl_image = tags::picture_texture(0);
     }
     // AURORA_DEMO_CHATLOG: the conversation's resident and we have one, for
     // the pictures of the history lines

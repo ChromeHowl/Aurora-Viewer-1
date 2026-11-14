@@ -1630,7 +1630,10 @@ when unfocused") is ignored during a screenshot.
   the `backing up from` and `after walking` yaws match, #1259). Additional
   comma-separated flags:
   `world` enables the world mouse-walk preference for this demo; `world-off`
-  disables it. Aim at land or a noninteractive object to compare both.
+  disables it. `mmo` turns on MMO-style mouse buttons: the left press
+  on the avatar then orbits the camera without turning it, and a right drag
+  (past the click's 10 points) steers instead, the left button walking
+  forward while it steers. Aim at land or a noninteractive object to compare both.
   `left-first` releases the left button before the right; by default the
   right is released first. `right-before-left` presses the right button first.
   `quick` queues both buttons and both releases behind the deferred left
@@ -1968,6 +1971,13 @@ map is the built-in Transparent texture: Alpha mode is enabled and shows
 Alpha blending. Repeat with `AURORA_DEMO_BUILD_STYLE=legacy` and without it.
 A transparency above 0 still shows Alpha blending and greys the combo; an
 opaque texture still greys it.
+On General, click the object in the world, then the blank stretch in the
+label column to the left of the Name field: the whole name is selected and
+the next letters replace it. Click into Description, click the world, then
+that blank stretch again: Description is selected instead. A click on a
+tab, a checkbox or into the field itself does not select the whole line.
+Check both `AURORA_DEMO_BUILD_STYLE=aurora` and `legacy`. A read-only name
+(no modify right) selects the same way and does not change when typed on.
 Compare with `floater_tools.xml` and `panel_fs_tools_texture.xml`: the compact tool
 block ends with linked-part navigation, Link/Unlink and the ruler on one row;
 counters sit directly above the five tabs. General places sale before permissions.
@@ -2461,6 +2471,13 @@ back closer, with a return to the start at the end of the list. With Linked
 edit, only the prims under the pointer that belong to the same object as the
 main selection take part. The gesture replaces the selection without moving
 the camera. Over an empty area, the selection stays unchanged.
+
+`AURORA_DEMO_BUILD=rect,<x>,<y>,-,<dx>,<dy>` presses the Edit tool at a pixel
+through the real click path, drags and releases; `rect,object:<id>,-,<dx>,<dy>`
+presses on an object. `rect-shift` holds Shift, `rect-focus` loses the window
+focus and `rect-tool` changes tool with the button down, and `keep:<id>` at the
+end selects an object first. The `demo rect:` lines of the log give the
+selection and its space before, during and after the gesture.
 
 `AURORA_DEMO_BUILD=cycle,object:99610` adds three nested objects, two of
 them linksets, selects A then simulates two notches towards the back and one
@@ -3480,7 +3497,7 @@ Drop, particle filters) is `AURORA_DEMO_WORN=menu`.
 |---|---|
 | `AURORA_DEMO_HUDS=<mode>` | Worn HUDs: display, touch, Shift-click, move, edit |
 | `AURORA_DEMO_FLOATING_TEXT=<mode>` | Floating-text baseline and multiline reference fixtures |
-| `AURORA_DEMO_WORN=<mode>` | Object worn on the body: animated attachment point, menus, Edit, Inspect, derender of a linked part, inventory double-clicks, pause while edited, temporary detach, temporary attachments in Appearance |
+| `AURORA_DEMO_WORN=<mode>` | Object worn on the body: animated attachment point, menus, Edit, Inspect, Detach and Delete, derender of a linked part, inventory double-clicks, pause while edited, temporary detach, temporary attachments in Appearance |
 
 ### Details
 
@@ -3624,6 +3641,7 @@ Collada on an object of their own (prim, sculpt and mesh), on a bought one
 upload, or have no item of, is never written.
 
 **`AURORA_DEMO_WORN=1|animated|menu|edit|move|freeze|inspect|derender-part|inventory|library|sound|temporary|temporary-detach|temporary-drop`** — our avatar wears on its
+**`AURORA_DEMO_WORN=1|animated|menu|edit|move|freeze|inspect|detach-delete|derender-part|inventory|library|sound|temporary|temporary-detach|temporary-drop`** — our avatar wears on its
 back (Spine point) a two-prim object, touchable, modifiable, linked to an
 inventory item ("Demo backpack", in the current outfit). No
 access to a grid.
@@ -3670,6 +3688,10 @@ access to a grid.
 - `inspect`: "Inspect" at frame 740: the window lists the root and the
   linked prim, their figures and the totals; the prim of the highlighted
   row is outlined in yellow, the others in blue.
+- `detach-delete`: "Detach and Delete" (the trash icon of the menu's
+  bottom bar) at frame 740: Inventory's "Detach and Delete" confirmation
+  opens over the world and the Inventory window does not change. Capture
+  at frame 760.
 - `derender-part` (#3384): "Edit" on the backpack at frame 700, "Edit
   linked parts" ticked and its linked prim selected at 720, right click on
   that prim at 740, "Derender temporarily" at 780: only the linked prim
@@ -5083,7 +5105,7 @@ both open states and the selection count. Capture at frame 620.
   with no day (`default`: Firestorm's default day asset, the built-in
   default sky offline) or replies for another parcel and
   another region (`stale`: ignored).
-- **`AURORA_DEMO_ENV_SELECT=1|lighting|list|search|search-none|search-back`**:
+- **`AURORA_DEMO_ENV_SELECT=1|lighting|list|search|search-none|search-back|order|order-az`**:
   environment picker
   (`demo_env.rs`), with a library containing an
   "Environments" folder and a Settings folder in the inventory, whose
@@ -5098,6 +5120,13 @@ both open states and the selection count. Capture at frame 620.
   line cut to the list's width.
   `search-back`: "zzz" typed (2510) then erased (2520): the whole list is
   back at its full height, without a scroll bar.
+  line cut to the list's width. `order`: the items are dated (a later
+  one newer) and the sky list opens (2500) in the inventory's order,
+  newest first: the user's sky, then the library's from Annan Adored
+  Pink Sky down to A-12AM. `order-az`: the same with the lists' A–Z
+  switch on (2490): the user's sky, then the library's skies A to Z
+  (A-6PM before A-12AM: numbers by value, as the inventory's by-name
+  order), the switch lit beside the search field.
 - **`AURORA_DEMO_ENV_KEYS=u|y|n|x|j`**: at frame 300, Ctrl+Shift + the
   letter goes through the shortcut table as World › Environment's
   shortcuts (#1264): `u` Sunrise, `y` Midday, `n` Sunset, `x` Midnight,
@@ -5889,9 +5918,9 @@ both open states and the selection count. Capture at frame 620.
 
 | Variable | Effect |
 |---|---|
-| `AURORA_DEMO_TOOLBAR=1` | Open the "Toolbar buttons" window; the bars mockup's custom state, side toolbars, labels. |
+| `AURORA_DEMO_TOOLBAR=1` | Toolbar customization, side bars, labels and menu commands. |
 | `AURORA_DEMO_AREA_SEARCH=1\|filters\|ranges\|scope\|fields\|columns\|all-columns\|link\|parcel\|sale\|search\|menu` | Open Area Search with named objects and sale entries; `menu` opens its right-click menu. |
-| `AURORA_DEMO_TEXTURE_LIBRARY=<mode>` | Compact inventory library with synthetic folders, eight types and thumbnails. |
+| `AURORA_DEMO_TEXTURE_LIBRARY=<mode>` | Compact inventory library with synthetic folders, eight types and thumbnails; `tabs*` opens grouped previews. |
 | `AURORA_DEMO_UNINSTALL=confirm\|running\|result\|left` | "Remove Aurora from this computer" as a dry run: its confirmation, or the result window. |
 
 `AURORA_DEMO_UNINSTALL` opens Preferences › Language and updates on the
@@ -5957,6 +5986,16 @@ dock in icons and labels, the left toolbar in labels). Capture at frame 780.
 `empty-left` / `empty-right` move all bottom buttons to that side for this
 run only, without opening the editor. With Aurora bars, the empty bottom
 dock must be invisible while nearby chat remains available (#1631).
+
+`menu-add` / `menu-remove` test the menu command context popup (#2341).
+Use `AURORA_DEMO_BARS=islands` and `AURORA_DEMO_MENU_SEARCH=Import`
+(or the translated Import label, such as `Importer` with `--language fr`).
+The existing search scenario opens the wolf menu and types the query; the
+new scenario right-clicks the Import result at frames 650–651. `menu-add`
+starts without its button, `menu-remove` includes it in the bottom bar.
+Capture frames 620 and 750: the filtered result, then the Add/Remove popup,
+which must remain readable after the parent menu closes. The fixture's
+layout changes are temporary and do not alter saved toolbars.
 
 Combine the face modes below with `AURORA_DEMO_ACTIONS=face-drops`, which
 seeds the static action cubes without running the action-click scenario.
@@ -6062,6 +6101,17 @@ an explicit Drag handle. `material-preview-rotate` left-drags the scene at frame
 handle onto the surface at frame 760. Check that rotation changes only the
 preview camera, that the handle does not rotate the scene, and that dropping
 it applies the material. Its permission/retention checks match other sources.
+`tabs` opens six material items in one scrollable tabbed preview at frame 620.
+Switch tabs and edit each material independently; an asterisk marks unsaved edits.
+`tabs-textures`, `tabs-properties`, `tabs-notecards`, `tabs-scripts`,
+`tabs-animations` and `tabs-sounds` exercise bulk opening for textures, object
+properties, editable notecards, inventory scripts and media previews. Each
+compatible editor family has its own host. Objects use bulk Properties;
+wearing/attachment actions and environment editors retain their existing paths. Script tabs keep their source
+identity and cursor; Ctrl+F follows the active tab.
+The tab strip’s close button closes the current item. Closing the whole host
+checks each material for unsaved edits before removing it; Cancel keeps the
+remaining tabs open. Capture at frame 850. A single-item Open stays independent.
 `multi-preview` opens two textures and two materials in separate resizable
 windows at frames 620–680, then reopens the first texture at frame 720: four
 windows remain, with no replacement or duplicate. `multi-preview-closed` also
@@ -6146,6 +6196,7 @@ before (`amis`, `groupes`, `repere`, `historique`…) are still accepted.
 | `AURORA_DEMO_CONTRAST=1\|0` | High contrast palette on or off for this run (Preferences › Accessibility), never saved |
 | `AURORA_DEMO_COLORS=accent:<hex>,surface:<hex>,text:<hex>` | Interface colours of this run (Preferences › Appearance › Skin), never saved |
 | `AURORA_DEMO_OPACITY=active:<0-1>,inactive:…,conversations:…,bars:…,menus:…,console:…,tags:…,minimap:…` | See-through surfaces of this run (Preferences › Appearance › Skin), never saved |
+| `AURORA_DEMO_SYSTEM_THEME=<look>[;<look>…][;secs=<n>]` or `system` | Follows a made-up system theme, or the real one, in this run, never saved |
 | `AURORA_DEMO_PERF=compact`, `full`, `network` or `monitor-<section>` | Opens the Performance window: compact, the resource monitor, or one of its sections |
 | `AURORA_DEMO_SUITCASE=1` | The question before a Hypergrid teleport that leaves worn items behind |
 | `AURORA_DEMO_QUICKPREFS=1` | Opens the Quick preferences window (toolbar `quickprefs`) |
@@ -6199,6 +6250,7 @@ before (`amis`, `groupes`, `repere`, `historique`…) are still accepted.
 | `AURORA_DEMO_BUSY_PAUSE=<frame>` | From that frame, the window counts as behind on a busy card: the Render pauses, with its notice and window title, until a click |
 | `AURORA_DEMO_GAMING_MODE=<frame>` | From that frame, gaming mode is on as from its toolbar button: the Render pauses, the loop slows, with its notice and window title, until the window comes back in front |
 | `AURORA_DEMO_IM_ANNOUNCE=1\|prefs` | Residents start typing IMs to us, then send them: the conversation announced before the message, and the unread count in the window title |
+| `AURORA_DEMO_POKE=<n>` | Nova pokes us `n` times (3 by default): the poke card, its jiggle and its count; a poke we send to a demo resident is poked back |
 | `AURORA_DEMO_MENTION=list\|names` | The chat bar's `@` list of residents to mention, or the prediction of a nearby resident's name |
 | `AURORA_DEMO_KEYWORDS=1\|prefs` | Keyword alerts on for the run: nearby chat, IM, group chat and object lines holding a keyword, coloured and with their sound; or the preferences' settings, the lines sent again and again |
 | `AURORA_DEMO_NOTIFS=1\|dnd\|list\|history\|legacy\|legacy-history\|object\|object-own\|object-group\|object-history\|legacy-object\|group-notice\|legacy-group-notice\|group-notice-saved\|group-notice-chat\|purchase\|purchase-open\|fees\|fees-answered\|fees-short` | Notification center: cards, burst, paused bell, history, Legacy toasts, object inventory offers, group notices, a delivered purchase, a group fee and a question to take L$ |
@@ -6233,6 +6285,7 @@ before (`amis`, `groupes`, `repere`, `historique`…) are still accepted.
 | `AURORA_DEMO_CONTACTS_FILTER=<query>` | Prefills the groups filter of Contacts (with `AURORA_DEMO_CONTACTS=groups`) |
 | `AURORA_DEMO_SET_NOTICES=config\|config-responses\|config-bottom\|chat` | A contact set's own online notices and automatic responses |
 | `AURORA_DEMO_CHATLOG=<mode>` | Conversation history, offline IMs and saved private/group conversation restoration |
+| `AURORA_DEMO_LEGACY_LISTS=1\|run\|again\|none\|unreadable\|other-grid` | The import of a Legacy Viewer's lists in Preferences |
 | `AURORA_DEMO_GLYPHS=1\|2\|rtl\|rtl2` | Names, titles and chat in extended characters (system fonts); `rtl`, `rtl2`: right-to-left text |
 | `AURORA_DEMO_EMOJI_PICKER=1\|<text>` | Conversations open on the emoji picker, a text in the input field |
 | `AURORA_DEMO_EMOJI_CODES=<text>` | Conversations input holding a text with the keyboard: emoji code suggestions |
@@ -6259,15 +6312,19 @@ before (`amis`, `groupes`, `repere`, `historique`…) are still accepted.
 | `AURORA_DEMO_CONV_SCROLL=up\|new` | The friend's conversation, long, shown from its top: no button with `up`; `new` with three messages come in and the button back to the latest messages (with `AURORA_DEMO_CONV`) |
 | `AURORA_DEMO_CONV_LINE_MENU=1` | Open a visible message's context menu in Aurora or Compact (with `AURORA_DEMO_CONV`) |
 | `AURORA_DEMO_CONV_MODERATE=menu\|eject\|ban\|banned\|error\|ban-all\|unban-all\|ban-all-run\|profile` | A group chat's moderator options on a member: the menu, the eject and ban questions, a ban sent, a refused text mute, a ban in all our groups and its report, the profile's menu (with `AURORA_DEMO_CONV=aurora:group`) |
+| `AURORA_DEMO_CONV_SCROLL=up\|new` | The friend's conversation, long, shown from its top: the button back to the latest messages; `new` with three messages come in (with `AURORA_DEMO_CONV`) |
+| `AURORA_DEMO_CONV_LINE_MENU=1\|object` | Open a visible message's context menu in Aurora or Compact (with `AURORA_DEMO_CONV`), or an object line's in any style (with `AURORA_DEMO_OBJECT_CHAT`) |
 | `AURORA_DEMO_PROFILE=<avatar>[:tab\|edit\|compact\|form\|publish]` | An avatar's profile window |
 | `AURORA_DEMO_CONTENTS_DROP=world\|panel[:ctrl][:drop]` | A selection of four inventory entries carried over an object or onto its Contents tab, with or without Ctrl |
 | `AURORA_DEMO_SHARE=multi[:n=<count>]` | Dozens of Orion-like friends (default 80) for inventory Share multi-select (#3074) |
+| `AURORA_DEMO_CONTENTS_DROP=world\|panel\|tab[:ctrl][:drop]` | A selection of four inventory entries carried over an object, onto its Contents list, or resting on the Contents tab until it opens |
 | `AURORA_DEMO_GIVE=profile\|avatar\|texture[:over\|:drop]` | Inventory carried to a resident's profile window or to their avatar in the world: hint, outline, give confirmation (#991) |
 | `AURORA_DEMO_FEED=<url>` | Profile "Feed" tab on this page |
 | `AURORA_DEMO_APPEARANCE=<mode>` | Appearance window and outfits |
 | `AURORA_DEMO_WEARABLE_FAVORITES=1\|evening\|recent\|create\|import\|import-done` | Favorite Wearables window on the Appearance demo's favorites |
 | `AURORA_DEMO_AVATAR_STUDIO=1|white|reveal|cycle|pedestal|t-pose|a-pose|grounding|hover-height|hover-menu|environment|pose-cycle|pose-menu|lighting-menu|animation-editor|animation-editor-hover|animation-jump` | Studio backdrop, transitions, grounded poses, display hover height, lighting, menu previews and the native animation editor |
 | `AURORA_DEMO_OUTFITS=<count>[,closed][,scroll][,locate]` | A large wardrobe in the Appearance demo: generated outfits, the window closed, scrolled or located on the current outfit |
+| `AURORA_DEMO_OUTFITS=<count>[,closed][,scroll][,locate][,newest][,oldest][,favorites][,images]` | A large wardrobe in the Appearance demo: generated outfits, the window closed, scrolled or located on the current outfit, sorted by date, favorites or images |
 | `AURORA_DEMO_OUTFIT_RESTORE=warm\|cold` | The outfit's attachments restored at login against a region that puts part of it back by itself |
 | `AURORA_DEMO_INITIAL_OUTFIT=1\|Name\|Name,male\|Name,female` | A fake first login that wears the named My Outfits folder (#3411) |
 | `AURORA_DEMO_SHAPE=<mode>` | Worn shape editor and permission scenarios |
@@ -7077,6 +7134,17 @@ failure. Grid validation and any paid upload are performed by the human.
   New Folder made in the green A — Personal folder at 700 through the menu's own
   change (the demo's reply lists the folders it made, as AIS's does): capture
   820, the new folder green.
+- **`AURORA_DEMO_INVENTORY=aurora-favorite-folders`**: turns "Favorite
+  folders in the folder sidebar" on and marks three demo folders as
+  favorites, two of them inside "A personal folder". Aurora's wide inventory
+  lists them by name under "Favorite folders", between the smart searches
+  and the folder tree. Click one: the list opens on it, and the tree opens
+  its parents and scrolls to it (`AURORA_DEMO_POINTER="103,443,l"` clicks
+  the first row, Body). With the setting off (the default), the sidebar is
+  unchanged. `aurora-favorite-folders-many`: nine favorite folders, the
+  list shows six rows and scrolls. `aurora-favorite-folders-off`: the same
+  three favorite folders with the setting off, no list. `favorite-folders`:
+  the setting on in the Legacy-style window, which has no list.
 - **`AURORA_DEMO_INVENTORY=bulk-multi|bulk-folder|bulk-permissions`**: selected items
   and folder context menus expose Bulk permissions; the last mode opens the
   shared type/permission controls directly. Apply/OK use synthetic inventory
@@ -7469,6 +7537,19 @@ failure. Grid validation and any paid upload are performed by the human.
   then `(2)` with her message, until the conversation is read. A
   conversation closed is announced again at its resident's next turn.
   `prefs` leaves both switches to Preferences › Chat, to try them by hand.
+- **`AURORA_DEMO_POKE=<n>`**: from frame 700, every 120 frames (two
+  seconds at 60 fps), Nova (shown under the display name "Tess ✨" the
+  demo gives her) sends the poke IM `/me pokes you 👉`, `n` times (3 when
+  the value is not a number). With Preferences › Chat ›
+  Conversations › "Pokes" on (the default), her line is in the
+  conversation and a poke card comes out instead of the IM toast: "👉 poked
+  you", then "(2 times)", "(3 times)", jiggling at each poke (still with
+  Reduce animations), with Poke back, Send IM and its cross. Any poke we
+  send to a demo resident (Poke back, a friend's row in People › Friends,
+  a conversation's head, a profile) is poked back 1.5 s later, so a poke
+  war plays offline; the buttons rest 2 s after each poke. With "Pokes"
+  off, her pokes are ordinary IMs with their toast and no Poke button
+  shows.
 - **`AURORA_DEMO_BUSY_PAUSE=<frame>`**: from that frame on, the window is
   taken as behind with GPU frames of 300 ms (another program keeping the
   card busy, #2355): after two of them the world is no longer drawn, its
@@ -7696,6 +7777,19 @@ failure. Grid validation and any paid upload are performed by the human.
   faces in the background's hue; the secondary text in the text's hue;
   text that still reads on its background. `AURORA_DEMO_CONTRAST=1`
   ignores them. Combine with `AURORA_DEMO_OPTIONS=appearance/2` (the page).
+- **`AURORA_DEMO_SYSTEM_THEME=<look>[;<look>…][;secs=<n>]`**: follows the
+  system theme for this run, as Preferences › Appearance › Skin › Follow
+  the system theme does, without touching the saved settings, on looks
+  made up by the demo. A look is `light` or `dark`, with an optional
+  `accent:<hex>`: `light,accent:#2563EB;dark,accent:#E11D48;secs=3` changes
+  every 3 seconds (4 by default), and a single look stays. `system` follows
+  the real system instead. What to look for: the windows, bars, name
+  plates and chat change at once, with no restart; on `light`, counts,
+  selected rows and initials still read; on `dark`, the skin's own
+  background and text come back. `AURORA_DEMO_COLORS` wins over it,
+  `AURORA_DEMO_CONTRAST=1` ignores it. Combine with
+  `AURORA_DEMO_OPTIONS=appearance/2` (the swatches show the colours in
+  use; a look with no accent shows the note that the desktop gives none).
 - **`AURORA_DEMO_COLORPICK=1`**: at frame 300, opens the compact colour
   picker (`widgets::color_button`) of the first colour swatch
   drawn. To be combined with `AURORA_DEMO_OPTIONS=5` (Appearance ›
@@ -7794,7 +7888,7 @@ failure. Grid validation and any paid upload are performed by the human.
   (the Share confirmation opens), onto a group's (no hint, nothing given),
   and Escape during the drag (the messages come back). No grid is needed.
 
-- **`AURORA_DEMO_CONTENTS_DROP=world|panel[:ctrl][:drop]`**: with
+- **`AURORA_DEMO_CONTENTS_DROP=world|panel|tab[:ctrl][:drop]`**: with
   `AURORA_DEMO_INVENTORY=1` and `AURORA_DEMO_ACTIONS=1`, a selection of
   four entries (a notecard, a script, a sound and an object) is carried
   from frame 700, without a press. `world` puts the pointer on the yellow
@@ -7802,15 +7896,23 @@ failure. Grid validation and any paid upload are performed by the human.
   selection needs Ctrl, so nothing is outlined and `:drop` says "Hold Ctrl
   over an object…"; with `:ctrl` the box gets the violet outline and
   `:drop` (frame 720) puts the four entries into its contents, the script
-  stopped. `panel` puts the pointer on the Contents tab: add
+  stopped. `panel` puts the pointer on the Contents list: add
   `AURORA_DEMO_BUILD=move,object:976` and `AURORA_DEMO_BUILD_TAB=contents`
   (also useful with `world` to see the contents arrive); the list gets its
   violet outline and `:drop` adds the four entries, the script running
   unless `:ctrl`. Capture at frame 715 (hover) or 800 (drop) with
   `AURORA_FPS_LIMIT=60`: "Contents (3 items)" becomes "(7 items)".
-  Manually: select several items (Ctrl+click) or a folder and drag them
-  onto an object you own with and without Ctrl, onto someone else's (a
-  no-transfer item refuses the whole drop), and onto the Contents tab.
+  `tab` rests the same drag on the Contents tab while General is showing
+  (`AURORA_DEMO_BUILD_TAB=general`, both `AURORA_DEMO_BUILD_STYLE=aurora`
+  and `legacy`): the tab opens after about half a second. Capture at
+  frame 760. `:drop` moves onto the list at frame 760 and releases at
+  frame 780, so the four entries arrive. A drag that only passes over
+  the tab does not open it.
+  Manually: select an object, leave General showing, and drag a notecard
+  from the inventory onto Contents until the tab opens, then drop it
+  into the list. Sweep across the tabs without resting: they stay put.
+  Onto an object you own, with and without Ctrl, and onto someone else's
+  (a no-transfer item refuses the whole drop).
 
 - **`AURORA_DEMO_GIVE=profile|avatar|texture[:over|:drop]`**: with `AURORA_DEMO_INVENTORY=1`, seven of
   its entries are carried from frame 700, without a press. `profile`, with
@@ -7893,8 +7995,14 @@ failure. Grid validation and any paid upload are performed by the human.
   "Except from my friends" lets Orion's through and still ignores Tess's.
   The log says `ignoring conference (ad-hoc) chat from <name>` for each.
 
+- **`AURORA_DEMO_CONV_LINE_MENU=object`**: with
+  `AURORA_DEMO_OBJECT_CHAT=aurora|compact|bubbles|legacy`, right-click the
+  name of the last object line at frame 702: Inspect and Ignore, after Copy
+  and Quote in the Aurora and Compact styles. Capture at frame 780.
 - **`AURORA_DEMO_CONV_LINE_MENU=1`**: with `AURORA_DEMO_CONV=aurora:group`
   or `aurora:compact:group`, right-click a visible message at frame 702.
+  `AURORA_DEMO_OBJECT_CHAT=aurora|compact` works too: the menu of the line
+  in the middle of the view, Inspect and Ignore on an object's.
   Combine with `AURORA_DEMO_SNOOZE=300` (without `auto`) and `AURORA_FPS_LIMIT=60`:
   captures at frames 780 and 1500 show the same highlighted target while
   new group messages arrive below the paused viewport. Inline place, avatar,
@@ -8661,6 +8769,10 @@ Human grid validation: remember MFA for account A and B, restart the viewer, the
   name in its text and no picture of its own, Nova's two under another:
   two headers. The option shows only with the Aurora style: with
   `compact`, `:on` changes nothing, since each Compact row names its sender.
+  sub-settings. Last comes "Aurora Demo (gagged)", a gag we wear talking
+  for us: its line shows our profile picture where the other objects show
+  the cube, in every style, the compact rows and the cards above the chat
+  bar included.
 - **`AURORA_DEMO_CONV=bubbles[:busy|group|local|legacy]`**: the Conversations
   window as a messenger, placed at 700 x 560 px. Without a suffix, the
   conversation with an online friend over two days: their bubbles on the
@@ -9028,6 +9140,10 @@ Human grid validation: remember MFA for account A and B, restart the viewer, the
 
 - **`AURORA_DEMO_PEOPLE_FILTER=<text>`**: combine with a People scenario to prefill its search. With `rows` or `legacy`, `tesstouch` and `tesstouch Resident` must find the resident displayed as `Tess ✧`; `TESS` must find the same resident. An empty filter restores all rows; unrelated text shows no matches. This deliberately searches display, legacy and account names regardless of the chosen name format, while retaining contact aliases and RLVa anonymity.
 - **`AURORA_DEMO_PEOPLE=rows|crowd|sheet|legacy|friends|groups|sets|recent|blocked|blocked-empty`**: People › Near you in
+- **`AURORA_DEMO_PEOPLE=recent-save|recent-restore`**: use the same task title for both launches. `recent-save` seeds four Recent People rows and a private tab, and enables persistence for the isolated demo account/grid. Wait for the list to appear, then exit normally or terminate that viewer process. `recent-restore` does not seed those rows or that tab: they must return from disk with their original activity times. These modes enable tab restoration only for the scenario, without changing the user's setting. Ordinary demo modes stay in memory. The fixture is under the demo settings account's `social/demo-recent-people` folder.
+- **Persistence regression tests**: `cargo test --workspace social_history` includes a child process killed after background publication, without logout/destructors; its internal `AURORA_SOCIAL_TEST_CHILD` variable is test-only and is not a viewer option. It also checks account/grid isolation, closed tabs, disabled restoration, early activity during loading, and preservation of unreadable/newer-format files. `cargo test --workspace persistent_chat` checks the service response's account/participant identities and timestamp parsing. Live validation requires a human on a grid advertising `PersistentChatConversationsRequest`: contacts from an earlier supported client's direct conversations should appear without opening tabs or replaying notifications; grids without the capability retain local history.
+
+- **`AURORA_DEMO_PEOPLE=rows|crowd|sheet|legacy|friends|groups|sets|recent|blocked`**: People › Near you in
   Aurora's look, with the residents of the People mock-up (names, ranges,
   states, arrivals), alone on screen. `rows`: the rich rows grouped by
   range (whisper 10 m, say 20 m, shout 100 m, beyond), Tess selected with
@@ -9248,6 +9364,16 @@ Human grid validation: remember MFA for account A and B, restart the viewer, the
   visible. The list controls must stay inside their pane. Returning
   from the large layout to a reduced one restores the list and its selection.
 - **`AURORA_DEMO_CHATLOG=im|find|history[:find]|offline|restore[:slow]|import[:run|again|login|same|none]|shared[:on]|long:<n>[:scroll]`**:
+- **`AURORA_DEMO_LEGACY_LISTS=1|run|again|none|unreadable|other-grid`**: a
+  Legacy Viewer's folder is made up beside the demo account's and Preferences ›
+  Language and updates opens on it. `1` waits in the import window, `run`
+  imports (an object of the plaza leaves the world, the row says what was
+  added), `again` imports twice (the row says there is nothing new), `none`
+  shows a folder missing, `unreadable` a media list that cannot be read and
+  `other-grid` the warning of a grid whose folders cannot be told apart. The
+  four lists are in memory during the run, and the account's transcripts are
+  wiped.
+- **`AURORA_DEMO_CHATLOG=im|find|history[:find]|offline|restore[:slow]|import[:run|again|login|same|none]|long:<n>[:scroll]`**:
   the conversation history without a grid. The demo is its own
   "grid": its files are in
   `config\demo\accounts\<demo account uuid>\chat_logs\demo\`, never in
@@ -10664,20 +10790,24 @@ descriptions, chat, notice bodies and local filenames continue to accept Unicode
 The same rules apply in both interface styles. The agent uses demo mode only;
 the human verifies actual saved inventory names on the grid.
 
-**`AURORA_DEMO_OUTFITS=<count>[,closed][,scroll][,locate]`** — with
-`AURORA_DEMO_APPEARANCE`, adds `<count>` generated outfits (names like
-"Beach Day 0012") with 20 to 60 links each to a pool of 480 generated
+**`AURORA_DEMO_OUTFITS=<count>[,closed][,scroll][,locate][,newest][,oldest][,favorites][,images]`**
+— with `AURORA_DEMO_APPEARANCE`, adds `<count>` generated outfits (names
+like "Beach Day 0012") with 20 to 60 links each to a pool of 480 generated
 clothes, objects and body parts, a thumbnail id (never loaded offline) on
-one in four. `closed` leaves the window closed; `scroll` turns the wheel
-over the list or gallery of the default window from frame 700, down then up
-every 300 frames; `locate` presses the locate button of the current outfit
-banner at start: the gallery or list scrolls to the worn outfit, selects
-it and flashes it for 1.6 s (the flash is gone by frame 620, the selection
-stays). With `AURORA_PROFILE=1`, read `ui` of `perf summary`
-(and `u_inventory` in `max:`): with 3,000 outfits it is 0.5 to 0.8 ms with
-the window open or scrolled and 0.4 ms closed; it was 31 to 37 ms open and
-2.5 ms closed before the wardrobe's links were walked only on inventory
-changes and only the rows in sight laid out.
+one in four, and dates a day apart that do not follow the names. `newest`
+and `oldest` start on that date order, `favorites` (one outfit in five is
+then a favorite) and `images` turn on the matching Sort outfits toggle,
+saved in the demo profile like any choice of the menu, so a later run
+without a mode starts on it. `closed` leaves the window closed; `scroll`
+turns the wheel over the list or gallery of the default window from frame
+700, down then up every 300 frames; `locate` presses the locate button of
+the current outfit banner at start: the gallery or list scrolls to the worn
+outfit, selects it and flashes it for 1.6 s (the flash is gone by frame
+620, the selection stays). With `AURORA_PROFILE=1`, read `ui` of `perf
+summary` (and `u_inventory` in `max:`): with 3,000 outfits it is 0.5 to 0.8
+ms with the window open or scrolled and 0.4 ms closed; it was 31 to 37 ms
+open and 2.5 ms closed before the wardrobe's links were walked only on
+inventory changes and only the rows in sight laid out.
 
 The demo objects use distinct points (skull, left ear,
 left ring finger, left foot and top-right HUD), shown in the

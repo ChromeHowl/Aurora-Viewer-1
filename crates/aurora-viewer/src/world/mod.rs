@@ -56,6 +56,7 @@ pub mod land;
 pub mod land_buy;
 pub mod land_moderation;
 pub mod landmarks;
+pub mod legacy_lists;
 pub mod lookat;
 pub mod lsl_syntax;
 pub mod lslbridge;
@@ -83,6 +84,7 @@ pub mod payments;
 pub mod place_details;
 pub mod place_snapshots;
 pub mod pointat;
+pub mod pokes;
 pub mod portals;
 pub mod poser_consent;
 pub mod profiles;
@@ -102,6 +104,7 @@ pub mod script_dialog_limit;
 pub mod search;
 pub mod sim_console;
 pub mod social;
+pub mod social_history;
 pub mod sound_parcels;
 pub mod staff;
 pub mod status;
@@ -565,6 +568,9 @@ pub struct World {
     /// (`NetEvent::NearbyTyping`, LLVOAvatar::mTyping), until their stop,
     /// their line, or their leaving.
     nearby_typing: HashSet<Uuid>,
+    /// Objects heard speaking while worn by their owner (renamers, gags,
+    /// @redirchat relays) and that owner, whose picture their lines show.
+    pub worn_speakers: HashMap<Uuid, Uuid>,
     pub social: social::Social,
     /// Contact sets and aliases (LGGContactSets), per account.
     pub contact_sets: contact_sets::ContactSets,
@@ -667,6 +673,8 @@ pub struct World {
     pub inventory_offers: inventory_offers::InventoryOffers,
     /// Residents' direct payments, as cards in their conversations.
     pub payments: payments::Payments,
+    /// Pokes sent and received (`pokes.rs`).
+    pub pokes: pokes::Pokes,
     /// The content rating chosen during the session and its sync with the
     /// server.
     pub maturity: maturity::MaturityPreference,
@@ -759,8 +767,10 @@ pub struct World {
     /// (LLAgent::setTeleportState(TELEPORT_MOVING) saves the "back" SLURL
     /// there) and said on its arrival.
     tp_back_slurl: Option<String>,
-    /// The account's list of open private and group conversations (open_ims.rs).
-    open_ims_path: Option<std::path::PathBuf>,
+    /// Recent participants and open tabs, saved for this account and grid.
+    social_history: social_history::History,
+    /// Chosen before login; fixed until this session ends.
+    pub social_grid: String,
     /// Conversations of the last session, read at login, that the app
     /// reopens when the setting asks for it.
     pub reopen_ims: Vec<open_ims::Conversation>,
@@ -938,6 +948,7 @@ impl World {
             balance_changes: Vec::new(),
             typing_started: Vec::new(),
             nearby_typing: HashSet::new(),
+            worn_speakers: HashMap::new(),
             login: None,
             agent_id: Uuid::nil(),
             regions: HashMap::new(),
@@ -1100,6 +1111,7 @@ impl World {
             teleport_invites: teleport_invites::TeleportInvites::default(),
             inventory_offers: inventory_offers::InventoryOffers::default(),
             payments: payments::Payments::default(),
+            pokes: pokes::Pokes::default(),
             maturity: maturity::MaturityPreference::default(),
             set_home: home::SetHome::default(),
             user_info: user_info::UserInfoState::default(),
@@ -1117,7 +1129,8 @@ impl World {
             fly_after_teleport: false,
             show_back_slurl: true,
             tp_back_slurl: None,
-            open_ims_path: None,
+            social_history: Default::default(),
+            social_grid: String::new(),
             reopen_ims: Vec::new(),
             cache_dir: None,
             host_images: Vec::new(),
@@ -1128,7 +1141,7 @@ impl World {
     /// stays for the next one: the conversations and the nearby chat go, and
     /// the transcripts close (only their writer and settings are kept).
     pub fn reset(&mut self) {
-        self.save_open_ims();
+        self.flush_social_history();
         let lib = self.avatar_lib.clone();
         let cache_dir = self.cache_dir.take();
         let mut chat_log = std::mem::take(&mut self.chat_log);
@@ -2881,10 +2894,8 @@ impl World {
                 if hidden > 0 {
                     log::info!("invisible: hidden again from {hidden} friend(s) the login still showed us to");
                 }
-                let open = account.join(open_ims::FILE);
+                self.social_history = social_history::History::load(&crate::settings::accounts_dir(), l.agent_id, &self.social_grid);
                 self.experiences.log = experience_log::ExperienceLog::load(account.join(experience_log::FILE), &experience_log::now().0);
-                self.reopen_ims = open_ims::load(&open);
-                self.open_ims_path = Some(open);
                 self.calls.load_volumes(account.join(calls::VOLUMES_FILE));
                 self.tp_storage = tphistory::HistoryStorage::load(account.join(tphistory::TELEPORT_HISTORY_FILE));
                 self.hud_scales = hud_scale::HudScales::load(account.join(hud_scale::FILE));
@@ -3369,6 +3380,10 @@ impl World {
             }
             NetEvent::InstantMessage(im) => {
                 self.on_im(im);
+                None
+            }
+            NetEvent::RecentParticipants { request, people } => {
+                self.on_recent_participants(request, people);
                 None
             }
             NetEvent::OfflineMessagesFailed => {
@@ -4860,6 +4875,9 @@ impl World {
                 slurl,
             });
         }
+        if c.source_type == ChatSourceType::Object && self.attachment_wearer(c.source_id).is_some_and(|(wearer, _)| wearer == c.owner_id) {
+            self.worn_speakers.insert(c.source_id, c.owner_id);
+        }
         self.push_chat(ChatLine {
             time,
             from,
@@ -4868,6 +4886,24 @@ impl World {
             source: c.source_id,
             origin: Origin::Live,
         });
+    }
+
+    /// The avatar wearing `source` and the prim of `source`'s link set on the
+    /// attachment point, from the object tree (none for a rezzed object).
+    pub(crate) fn attachment_wearer(&self, source: Uuid) -> Option<(Uuid, Uuid)> {
+        let mut index = self.objects.index_of_uuid(&source)?;
+        for _ in 0..64 {
+            let object = self.objects.get(index)?;
+            let parent = self
+                .objects
+                .parent_of(object)
+                .and_then(|index| self.objects.get(index).map(|parent| (index, parent)))?;
+            if parent.1.is_avatar() {
+                return (object.attachment_point() != 0).then_some((parent.1.full_id, object.full_id));
+            }
+            index = parent.0;
+        }
+        None
     }
 
     fn on_im(&mut self, mut im: InstantMessage) {
@@ -4928,11 +4964,13 @@ impl World {
             if !im.from_name.is_empty() {
                 self.social.names.entry(im.from_agent_id).or_insert_with(|| im.from_name.clone());
             }
-            // UISndNewIncomingIMSession (by the IM mode)
+            // UISndNewIncomingIMSession (by the IM mode); a poke's card
+            // takes the place of its toast (pokes.rs)
             self.im_messages.push(ImMessage {
                 kind: ImKind::Private,
                 session: im.from_agent_id,
                 new_session: !self.social.has_session(&im.from_agent_id),
+                poke: self.takes_poke(&im.message, im.offline),
             });
             let from = self
                 .social
@@ -5482,6 +5520,12 @@ impl World {
     /// Answer a notification: messages to send and a URL to open.
     pub fn respond_notification(&mut self, id: u64, r: notifications::Response) -> (Vec<aurora_net::NetCommand>, Option<String>) {
         let data = self.notifications.list.iter().find(|n| n.id == id).map(|n| n.data.clone());
+        // a poke card closed: the next poke starts a new count
+        if let Some(notifications::Data::Poke { from, .. }) = data
+            && matches!(r, notifications::Response::Dismiss)
+        {
+            self.pokes.forget(&from);
+        }
         if let Some(notifications::Data::RlvaQuery { from, exceptions }) = data {
             self.rlva_answer_im_query(from, exceptions, &r);
             self.notifications.respond(id, r, |_| Uuid::nil(), Uuid::nil());
@@ -5855,6 +5899,15 @@ impl World {
     /// disturb with the Legacy Viewer's toasts, group chats by their own
     /// preference.
     pub fn notify_message(&mut self, m: &ImMessage, in_sight: bool) {
+        // a poke: its card, in sight or not, whatever the toast preferences
+        // (Poke back is what it is for); its line is in the conversation
+        if m.poke {
+            if let Some(line) = self.resident_line(m) {
+                let (from, name) = (line.source, line.from.clone());
+                self.notify_poke(from, name);
+            }
+            return;
+        }
         let prefs = self.notifications.toasts;
         let wanted = match m.kind {
             ImKind::Group => prefs.group_im,
@@ -5914,6 +5967,12 @@ impl World {
                 who
             }
             notifications::Data::Message { session, .. } => session,
+            // a poke's Send IM: their conversation, and the streak ends
+            notifications::Data::Poke { from, .. } => {
+                self.social.session_mut(from);
+                self.pokes.forget(&from);
+                from
+            }
             _ => return None,
         };
         self.notifications.list.retain(|n| n.id != id);
@@ -8527,6 +8586,41 @@ mod motion_tests {
             objects: vec![other],
         });
         assert!(!world.is_typing_nearby(&id));
+    }
+
+    /// An object heard while its owner wears it (a renamer, a gag) is
+    /// remembered with that owner, for their picture; a rezzed one, or one
+    /// worn by someone else than its owner, is not.
+    #[test]
+    fn only_objects_worn_by_their_owner_speak_with_the_owners_picture() {
+        let (mut world, avatar, worn, here, _) = worn_fixture();
+        let me = world.agent_id;
+        let mut rezzed = worn.clone();
+        rezzed.local_id = worn.local_id + 1;
+        rezzed.full_id = Uuid::from_u128(0xF00D);
+        rezzed.parent_id = 0;
+        rezzed.state = 0;
+        world.apply(NetEvent::ObjectUpdates {
+            handle: here,
+            objects: vec![avatar, worn.clone(), rezzed.clone()],
+        });
+        let said = |source, owner| {
+            NetEvent::Chat(ChatMessage {
+                from_name: "Jane Doe".into(),
+                source_id: source,
+                owner_id: owner,
+                source_type: ChatSourceType::Object,
+                chat_type: ChatType::Normal,
+                position: Vec3::new(10.0, 10.0, 20.0),
+                message: "hello".into(),
+            })
+        };
+        world.apply(said(rezzed.full_id, me));
+        world.apply(said(worn.full_id, Uuid::from_u128(0xD00D)));
+        assert!(world.worn_speakers.is_empty(), "rezzed, or worn by another than its owner");
+        world.apply(said(worn.full_id, me));
+        assert_eq!(world.worn_speakers.get(&worn.full_id), Some(&me));
+        assert_eq!(world.chat.len(), 3, "every line still shown");
     }
 
     #[test]

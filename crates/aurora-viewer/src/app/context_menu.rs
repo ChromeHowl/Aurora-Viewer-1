@@ -338,7 +338,7 @@ impl App {
         f.edit = crate::build::selectable(w, idx);
         f.id = o.full_id;
         f.attachment_item = w.objects.get(root).and_then(|o| o.attachment_item_id());
-        f.blocked = w.mutes.is_muted_id(&root_id);
+        f.blocked = w.object_block_entry(&o.full_id).is_some();
         f.name = props.map(|p| p.name.clone()).unwrap_or_default();
         if let Some(root) = w.hud_root(idx).and_then(|i| w.objects.get(i)) {
             f.local_hud_scale = Some(w.hud_scales.scale(root.full_id));
@@ -601,6 +601,30 @@ impl App {
                     self.apply_appearance_action(crate::world::appearance::Action::Remove(item));
                 }
             }
+            CtxAction::DetachDelete(key) => {
+                // the worn object's item, as Detach finds it; Inventory's
+                // "Detach and Delete" confirmation then asks about it without
+                // opening the Inventory window (refused under @showinv)
+                if let Some(idx) = self.world.objects.index_of(&key)
+                    && ui::context::wearer(&self.world, idx) == Some(self.world.agent_id)
+                    && let Some(item) = self
+                        .world
+                        .objects
+                        .get(linkset_root(&self.world, idx))
+                        .and_then(|o| o.attachment_item_id())
+                    && !self.world.rlva.has("showinv")
+                {
+                    // the same rules as Inventory's entry, checked before the
+                    // confirmation: its window may be closed to say why not
+                    let facts = ui::inventory::Facts::from_world(&self.world, self.appearance_ui.pending.is_some());
+                    if let Err(reason) = self
+                        .inventory_ui
+                        .ask_detach_delete(&self.world.inventory, &self.settings.inventory, &facts, item)
+                    {
+                        self.world.system_message(reason);
+                    }
+                }
+            }
             CtxAction::Touch(local_id) => self.menu_touch(local_id),
             CtxAction::Sit { target, offset } => {
                 if let Some(idx) = self.world.objects.index_of_uuid(&target)
@@ -659,6 +683,19 @@ impl App {
             CtxAction::ResetCamera => self.reset_camera_view(),
             CtxAction::Im(id) => {
                 self.open_conversation_to_type(id);
+            }
+            // a refused poke (offline, cooling…) sends nothing: its button
+            // already said why
+            CtxAction::Poke(id) => {
+                if let Some(cmd) = self.world.poke(id, Instant::now()) {
+                    self.send(cmd);
+                    // the finger jabs from where it was clicked
+                    if !self.settings.reduce_motion
+                        && let Some(at) = self.egui_ctx.pointer_latest_pos()
+                    {
+                        crate::ui::poke::jab(&self.egui_ctx, at);
+                    }
+                }
             }
             CtxAction::Call(id) => {
                 if self.settings.audio.voice_enabled {
@@ -719,21 +756,7 @@ impl App {
             CtxAction::InviteToGroup(id) => self.group_profile_ui.invite.choose_group(vec![id]),
             CtxAction::GiveCallingCard(id) => self.world.offer_calling_card(id),
             CtxAction::ToggleBlockObject { id, name } => {
-                // the whole object is blocked: its root (LLMute of getRootEdit)
-                let root = self
-                    .world
-                    .objects
-                    .index_of_uuid(&id)
-                    .and_then(|i| self.world.objects.get(linkset_root(&self.world, i)))
-                    .map_or(id, |r| r.full_id);
-                let name = if name.is_empty() {
-                    aurora_i18n::tr!("common-object-2", value0 = root.to_string()[..8].to_string())
-                } else {
-                    name
-                };
-                if self.world.mutes.is_muted_id(&root) {
-                    self.world.unblock(root, &name, 0);
-                } else if let Err(e) = self.world.block(root, &name, crate::world::mutes::MuteType::Object) {
+                if let Err(e) = self.world.toggle_block_object(id, &name) {
                     self.world.system_message(e);
                 }
             }
