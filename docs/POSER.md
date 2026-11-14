@@ -50,10 +50,10 @@ this one; Reset acts on all of them, as in the full window.
   the full window's.
 - **Last row**, three groups of one kind each: picking (markers Always or
   On hover, Ctrl + click body parts, Ctrl + click avatars), going back
-  (undo, redo, reset) and files (Save, Load, Upload). The reset greys out
+  (undo, redo, reset) and files (Save diff, Load, Save total animation). The reset greys out
   when it would change nothing; its tip names the joint; with Shift it
-  resets the whole pose. Save is a small form: the name, BVH, pelvis,
-  priority, Save to the library, and Save as… (the file chosen in the
+  resets the whole pose. Save diff is a small form: the name,
+  priority, Save diff to the library, and Save as… (the file chosen in the
   system dialog). Load lists the library, with the load mode in a submenu
   and Open file.
 - **Start / Stop**, alone across the window under the last row.
@@ -215,8 +215,7 @@ world-lock flags, without subject IDs, avatar names or world coordinates.
 The book in the title bar shows the library in the joints column's place
 (the window keeps its size): back arrow, refresh, open folder, search, the
 entries with their date; a double click loads everything. Save's menu (its
-chevron) holds the optional BVH output next to the pose file, the pelvis
-unlock and the priority. Load's menu holds the four modes, applied to the
+chevron) holds Save as… and the priority. Load's menu holds the four modes, applied to the
 selected library entry while the library is shown or to a file chosen
 otherwise, and "Open a file".
 
@@ -227,24 +226,35 @@ loads preserve joints already edited in the current pose. Loading finishes
 on the subject originally chosen, even if the picker changes during I/O.
 World locks are reanchored to the destination subject.
 
-Files and uploads contain what you authored, as in the Legacy Viewer
-(`FSPoserAnimator::getJointExportRotation`, `FSFloaterPoser::savePoseToXml`):
-the pose captured when posing starts is what the changes apply to, and stays
-out of them. **T-pose** clears it, so a pose built from there is saved
-complete; a hand preset or a loaded file does the same for its joints. Reset
-brings the captured pose back, and undo restores this state with the pose.
-A pose document stores complete joints as they are and the others as changes,
-which apply to the destination's own pose (the Legacy Viewer's "Save Diff").
-Files saved before this are read as complete. BVH and uploads write the same
-changes on the rest skeleton: an untouched capture exports a T-pose.
+There are exactly two ways out, both saving a file and neither uploading:
 
-BVH export writes the actual skeleton hierarchy in inches and Y-up, with
-a reference frame and two identical posed frames. The pelvis-unlock setting
-controls root rotation and translation. Native animations and BVH have no
-scale tracks; BVH also omits collision volumes. The Aurora pose document
-retains those channels. **Upload as animation…** reuses the existing native
-encoder and opens the normal import preview. Upload and the simulator price
-confirmation still require the human's action; saving never uploads.
+1. **Save diff** writes a `*.aurora-pose.json` with only the joints you
+   changed (the Legacy Viewer's "Save Diff", `FSFloaterPoser::savePoseToXml`
+   skips joints with no change). Each joint holds the turn made on its own
+   frame, `rotation = captured * change` (the Legacy Viewer's
+   `mRotation * mBaseRotation`, which is `base * change` in the usual
+   quaternion product), so it loads onto any pose as the same turn. A joint
+   built from T-pose, a preset or a loaded file is stored complete. Nothing
+   changed: nothing is saved and the window says so. Files saved before this
+   are read as before.
+2. **Save total animation** writes a new `.anim`: the animation loaded as the
+   base (Load, then an `.anim` or `.bvh` file) with your changes applied.
+   Each rotation key of a driven joint becomes `key * change`, where
+   `change = first frame * (pose on screen)`, so the motion stays and the
+   joint turns as it did on screen; a joint the file does not drive, and
+   that you changed, gets one key with your pose. Position keys move by your
+   position change. Priority, loop, ease and hand pose are the file's. The
+   file is checked with the same reader as **Upload animation**, so it opens
+   in that preview; the loaded animation is never modified. Without a loaded
+   animation the button explains that one is needed; with no change it
+   says so. Upload and the simulator price confirmation still require the
+   human's action; saving never uploads.
+
+Why both are measured on the pose they were made on: the old exports wrote
+the change on the rest skeleton, so a joint whose captured rotation was not
+the rest one (any avatar playing an animation) turned the wrong way when the
+file was loaded or uploaded. There is no BVH export any more; Load still
+reads `.bvh`.
 
 ## Consent
 
@@ -281,8 +291,8 @@ owner-say tag. There are no IMs, software advertisements or capability probes.
 The gear of the title bar opens the settings as a panel over the joint,
 grouped Window (stop on close, confirm a close that loses the pose, DoF
 while posing), Handling (markers, natural
-alignment, trackball sensitivity) and Files (overwrite confirmation, BVH,
-pelvis unlock, priority), with the note on the formats' limits.
+alignment, trackball sensitivity) and Files (overwrite confirmation,
+priority), with the note on the formats' limits.
 
 The eye next to the gear hides or shows the joint markers and gizmos in one
 click, the same setting as Handling's switch: an open eye while they are
@@ -298,8 +308,8 @@ again" turns the setting off. The Legacy Viewer closes at once
 (`FSFloaterPoser::onClose`); Aurora asks so that no pose is lost by mistake.
 
 Defaults were checked against the local Legacy Viewer source: stop on close,
-joint markers and natural alignment on; DoF in edit, additional BVH, pelvis
-unlock and overwrite confirmation off; trackball sensitivity 0.5. DoF while
+joint markers and natural alignment on; DoF in edit and overwrite
+confirmation off; trackball sensitivity 0.5. DoF while
 posing permits the normal configured DoF effect, without enabling it globally.
 Settings and privacy are saved through Aurora's existing settings store.
 
@@ -307,7 +317,7 @@ Main integration validation on 2026-10-24: the script parser, formatting and Cli
 pass; the complete workspace has 4,860 passing tests, zero failures and 29
 ignored tests. The suite used one test thread on the shared PC. Twenty-three poser/consent
 regressions cover actual pointer actions for both hands, visible scroll
-clips, scaled text and window stability, pose/BVH/native files, eligibility,
+clips, scaled text and window stability, pose and animation files, eligibility,
 history and authenticated consent lifetime. Rotation and articulated movement drags create one undo
 step; idle controls preserve exact values, and stale IK bindings/virtual
 controls cannot affect the poser. Camera orbit/roll is checked against
@@ -324,8 +334,7 @@ request/answer events exercise the real consent state machine; they are
 not a substitute for two-client LSL transport validation.
 
 Human checks: edit each tab and channel, use presets and undo, save/reload
-each load mode, enable BVH and inspect its import, confirm overwrite, prepare
-an animation import, switch subjects, and test both close behaviours. On a
+each load mode, confirm overwrite, load an animation and save the total animation, switch subjects, and test both close behaviours. On a
 grid, use two accounts running this build to verify bridge reprovisioning,
 request/accept/refuse/withdraw, mute/privacy, timeout, region departure and
 logout. Also validate owned and unowned ground/worn animesh and mesh/shape
