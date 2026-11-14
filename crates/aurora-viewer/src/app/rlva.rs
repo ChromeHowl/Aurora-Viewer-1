@@ -160,11 +160,30 @@ impl App {
             .build
             .selection
             .iter()
-            .filter(|key| self.world.objects.index_of(key).is_none_or(|i| !self.world.rlva_can_edit(i)))
+            .filter(|key| {
+                self.world.objects.index_of(key).is_none_or(|i| {
+                    // LLSelectMgr::deselectAllIfTooFar: @interact keeps only HUDs
+                    !self.world.rlva_can_edit(i) || (self.world.rlva.has("interact") && !self.world.rlva_is_hud(i))
+                })
+            })
             .copied()
             .collect();
         if !invalid.is_empty() {
-            self.build.deselect(&self.world, &invalid);
+            self.build.drop_selected(&self.world, &invalid);
+        }
+        // @fartouch applies while editing, on the whole selection, and waits
+        // for an object menu ("navigating to rate an object's owner")
+        if self.world.rlva.has("fartouch")
+            && self.build.open
+            && !matches!(
+                self.context_menu.as_ref().map(|m| &m.target),
+                Some(ui::context::Target::Object { .. })
+            )
+            && let Some(primary) = self.build.selection.first().and_then(|key| self.world.objects.index_of(key))
+            && let Some(bounds) = self.build.bounds(&self.world, std::time::Instant::now())
+            && self.world.rlva_selection_too_far(primary, bounds.center)
+        {
+            self.build.deselect_all(&self.world);
         }
         let locked_hud = self.world.rlva_has_locked_hud();
         if locked_hud {
@@ -207,7 +226,7 @@ impl App {
                 || scenario.starts_with("camera-")
                 || matches!(
                     scenario,
-                    "overlay" | "textures" | "textures-grey" | "silhouette" | "self" | "head" | "resolution"
+                    "overlay" | "textures" | "textures-grey" | "silhouette" | "self" | "head" | "resolution" | "interact" | "fartouch"
                 )
             {
                 // Keep the avatar and the world visible in offline visual
@@ -225,6 +244,11 @@ impl App {
             let message = if scenario == "baseline" {
                 self.panels.settings = false;
                 "@clear".to_owned()
+            } else if scenario == "interact" || scenario == "fartouch" {
+                self.panels.settings = false;
+                self.panels.chat = false;
+                self.panels.inventory = false;
+                format!("@{scenario}=n")
             } else if scenario == "camera-prefs" {
                 self.options_ui.page = ui::options::Page::Camera;
                 self.options_ui.tab = 0;
@@ -242,6 +266,15 @@ impl App {
                     "alwaysrun" => "@alwaysrun=n".to_owned(),
                     "both" => "@temprun=n,alwaysrun=n".to_owned(),
                     _ => "@clear".to_owned(),
+                }
+            } else if let Some(limit) = scenario.strip_prefix("camera-zoom-") {
+                // the camera starts 7.6 m from the focus point
+                self.panels.settings = false;
+                match limit {
+                    "max" => "@setcam_origindistmax:8=n".to_owned(),
+                    // 8.0 m from the avatar: both limits clamp every frame
+                    "both" => "@setcam_avdistmax:7=n,setcam_origindistmin:7.2=n".to_owned(),
+                    _ => "@setcam_origindistmin:6=n".to_owned(),
                 }
             } else if scenario == "rename" {
                 self.settings.rlva.shared_wear = false;
@@ -454,6 +487,30 @@ impl App {
                 730 if mode == "run-late" => self.rlva_demo_message("@temprun=n".to_owned()),
                 740 | 749 => log::info!("RLVa demo: {mode} temp_run={}, running={}", self.temp_run.is_some(), self.running()),
                 _ => {}
+            }
+        }
+        if let Some(limit) = mode.strip_suffix("-released").unwrap_or(&mode).strip_prefix("camera-zoom-") {
+            // five wheel clicks past the distance limit, then one back; with
+            // both limits held, one click away from the focus and one back
+            let out = if limit == "min" { -1.0 } else { 1.0 };
+            let clicks = match self.frame_count {
+                760 if limit == "both" => out,
+                n @ 740..=788 if n % 12 == 8 && limit != "both" => out,
+                810 => -out,
+                _ => 0.0,
+            };
+            if clicks != 0.0 {
+                self.camera
+                    .scroll(clicks, false, false, &mut self.world.agent, &mut self.settings.camera);
+            }
+            if matches!(self.frame_count, 750 | 800 | 840) {
+                log::info!(
+                    "RLVa demo: {mode}, frame {}, camera to focus {:.3} m, to avatar {:.3} m, zoom {:.4}",
+                    self.frame_count,
+                    self.camera.position.distance(self.camera.target),
+                    self.camera.position.distance(self.world.agent.position),
+                    self.camera.zoom_fraction()
+                );
             }
         }
         if mode == "sitting" && self.frame_count == 740 {

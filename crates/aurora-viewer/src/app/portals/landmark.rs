@@ -111,6 +111,10 @@ impl Pending {
 
 impl App {
     pub(in crate::app) fn queue_landmark_portal(&mut self, item: uuid::Uuid, point: Vec3, shift: bool) {
+        if !self.world.rlva_allows_portal_crossing() {
+            self.portal_notice(aurora_i18n::tr!("rlva-blocked"));
+            return;
+        }
         let Some(cargo) = cargo(&self.world.inventory, item).filter(|item| !item.asset_id.is_nil()) else {
             self.portal_drop_notice("portal-landmark-unavailable");
             return;
@@ -152,6 +156,7 @@ impl App {
 
     pub(in crate::app) fn portal_drop_notice(&mut self, key: &str) {
         let message = match key {
+            "rlva-blocked" => aurora_i18n::tr!("rlva-blocked"),
             "portal-invalid" => aurora_i18n::tr!("portal-invalid"),
             "portal-bridge-required" => aurora_i18n::tr!("portal-bridge-required"),
             "portal-landmark-unavailable" => aurora_i18n::tr!("portal-landmark-unavailable"),
@@ -169,6 +174,10 @@ impl App {
 
     pub(in crate::app) fn update_place_portal(&mut self) {
         let Some(mut pending) = self.portal_drop.take() else { return };
+        if matches!(pending.destination, DropDestination::Landmark { .. }) && !self.world.rlva_allows_portal_crossing() {
+            self.portal_notice(aurora_i18n::tr!("rlva-blocked"));
+            return;
+        }
         if self.world.teleporting || pending.agent != self.world.agent_id || Some(pending.region) != self.world.main_region {
             return;
         }

@@ -489,7 +489,9 @@ pub fn step(frame: u64) -> Option<Step> {
     let s = match frame {
         30 => Step::Open { lighting },
         2490 if scenario() == "order-az" => Step::ListsByName,
-        2500 if matches!(scenario(), "list" | "search" | "search-none" | "search-back" | "order" | "order-az") => Step::OpenList(SettingsKind::Sky),
+        2500 if matches!(scenario(), "list" | "search" | "search-none" | "search-back" | "order" | "order-az") => {
+            Step::OpenList(SettingsKind::Sky)
+        }
         2510 if scenario() == "search" => Step::Search(SettingsKind::Sky, "sunset"),
         2510 if scenario() == "search-none" => Step::Search(SettingsKind::Sky, "zzz no sky has a name as long as this one"),
         2510 if scenario() == "search-back" => Step::Search(SettingsKind::Sky, "zzz"),

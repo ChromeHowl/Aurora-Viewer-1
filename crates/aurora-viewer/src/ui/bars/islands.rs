@@ -1185,6 +1185,8 @@ mod tests {
             fly_override: false,
             quiet_snapshots: false,
             release_keys: false,
+            animation_speed: 1.0,
+            slow_motion_animations: false,
             marketplace: false,
             avatar_welcome: false,
             destinations: false,

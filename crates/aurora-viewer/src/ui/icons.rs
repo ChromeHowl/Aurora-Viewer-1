@@ -402,6 +402,7 @@ const FILLED: &[(&str, &[u8])] = svg_list!(
     "player-play",
     "player-record",
     "player-skip-back",
+    "player-skip-forward",
     "player-stop",
     "player-track-next",
     "player-track-prev",

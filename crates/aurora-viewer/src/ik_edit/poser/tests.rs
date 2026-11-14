@@ -71,6 +71,290 @@ pub(super) fn selected_fixture() -> (World, Editor) {
     editor.select(rig.names["mHead"], rig, &frame);
     (world, editor)
 }
+#[test]
+fn poser_joint_toggle_falls_back_tracks_undo_and_survives_saved_pose_loads() {
+    let (world, _) = fixture();
+    let rig = &world.avatar_lib.rig;
+    let frame = Frame::new(&world).unwrap();
+    let bone = rig.names["mHead"];
+    let mut session = data::Session::new(SubjectPose::capture(rig, &frame).unwrap());
+    let animated_rotation = (rig.local_rot[bone] * Quat::from_rotation_z(0.42)).normalize();
+    let animated_position = rig.local_pos[bone] + Vec3::new(0.03, 0.0, 0.0);
+    let mut rotations = rig.local_rot.clone();
+    let mut positions = rig.local_pos.clone();
+    rotations[bone] = animated_rotation;
+    positions[bone] = animated_position;
+    session.toggle_joint(bone, None);
+    assert!(!session.pose.enabled[bone]);
+    let actual = session
+        .pose
+        .matrices_with_animation(rig, frame.model, &rotations, &positions, Vec3::ZERO);
+    let mut expected_rotations = session.pose.rotations.clone();
+    let mut expected_positions = session.pose.positions.clone();
+    expected_rotations[bone] = animated_rotation;
+    expected_positions[bone] = animated_position;
+    let expected = rig.world_with(&expected_rotations, Vec3::ZERO, &expected_positions, &session.pose.scales);
+    assert!(
+        actual[bone].abs_diff_eq(expected[bone], 1e-5),
+        "disabled joint follows its live animation"
+    );
+    let pelvis_offset = Vec3::new(0.08, -0.03, 0.02);
+    let mut pelvis_pose = (*session.pose).clone();
+    pelvis_pose.enabled[rig.pelvis] = false;
+    let actual = pelvis_pose.matrices_with_animation(rig, frame.model, &rotations, &positions, pelvis_offset);
+    let expected = rig.world_with(&rotations, pelvis_offset, &positions, &pelvis_pose.scales);
+    assert!(
+        actual[rig.pelvis].abs_diff_eq(expected[rig.pelvis], 1e-5),
+        "disabled pelvis keeps the live offset"
+    );
+
+    session.history(false);
+    assert!(session.pose.enabled[bone], "undo restores the enabled state");
+    session.history(true);
+    assert!(!session.pose.enabled[bone], "redo restores the disabled state");
+
+    let document = document::Document::capture(rig, &session, "Disabled head".into(), 4);
+    let encoded = serde_json::to_string(&document).unwrap();
+    assert!(encoded.contains("\"enabled\":false"));
+    let decoded: document::Document = serde_json::from_str(&encoded).unwrap();
+    let mut loaded = data::Session::new(SubjectPose::capture(rig, &frame).unwrap());
+    assert!(decoded.apply(rig, &mut loaded, document::LoadMode::All, frame.model));
+    assert!(!loaded.pose.enabled[bone], "saved pose keeps a disabled joint");
+    loaded = data::Session::new(SubjectPose::capture(rig, &frame).unwrap());
+    assert!(decoded.apply(rig, &mut loaded, document::LoadMode::Selective, frame.model));
+    assert!(loaded.pose.enabled[bone], "selective load enables joints it applies");
+
+    let authored = session.authored(rig, frame.model).unwrap();
+    assert!(
+        !storage::native(rig, &authored, &[], "Disabled head".into(), 4)
+            .unwrap()
+            .animation
+            .joints
+            .iter()
+            .any(|joint| joint.joint_name == "mHead")
+    );
+    let bvh = bvh::encode(rig, &authored, false).unwrap();
+    let mut neutral_head = authored.clone();
+    neutral_head.enabled[bone] = true;
+    neutral_head.rotations[bone] = Quat::IDENTITY;
+    assert_eq!(
+        bvh,
+        bvh::encode(rig, &neutral_head, false).unwrap(),
+        "disabled head exports neutral rotation"
+    );
+}
+#[test]
+fn poser_joint_rework_selective_load_reenables_an_already_off_edited_joint() {
+    let (world, _) = fixture();
+    let rig = &world.avatar_lib.rig;
+    let frame = Frame::new(&world).unwrap();
+    let head = rig.names["mHead"];
+    let neck = rig.names["mNeck"];
+    let mut source = data::Session::new(SubjectPose::capture(rig, &frame).unwrap());
+    let saved = Arc::make_mut(&mut source.pose);
+    saved.rotations[head] = (rig.local_rot[head] * Quat::from_rotation_z(0.35)).normalize();
+    saved.origin[head] = rig.local_rot[head];
+    saved.enabled[head] = false;
+    let expected = saved.rotations[head];
+    let document = document::Document::capture(rig, &source, "Selective disabled joint".into(), 4);
+    for mode in [document::LoadMode::Selective, document::LoadMode::SelectiveRotations] {
+        let mut destination = data::Session::new(SubjectPose::capture(rig, &frame).unwrap());
+        destination.toggle_joint(head, None);
+        let pose = Arc::make_mut(&mut destination.pose);
+        pose.rotations[head] = (rig.local_rot[head] * Quat::from_rotation_x(-0.5)).normalize();
+        pose.rotations[neck] = (rig.local_rot[neck] * Quat::from_rotation_y(0.2)).normalize();
+        let keep = pose.rotations[neck];
+        assert!(destination.edited(head));
+        assert!(document.apply(rig, &mut destination, mode, frame.model));
+        assert!(destination.pose.enabled[head], "selective load must re-enable an already off joint");
+        assert!(destination.pose.rotations[head].abs_diff_eq(expected, 1e-6));
+        assert!(
+            destination.pose.rotations[neck].abs_diff_eq(keep, 1e-6),
+            "edited posed joints stay untouched"
+        );
+    }
+}
+
+#[test]
+fn poser_joint_rework_disabled_pelvis_exports_no_bvh_translation_when_unlocked() {
+    let (world, _) = fixture();
+    let rig = &world.avatar_lib.rig;
+    let frame = Frame::new(&world).unwrap();
+    let mut pose = SubjectPose::capture(rig, &frame).unwrap();
+    pose.enabled[rig.pelvis] = false;
+    pose.positions[rig.pelvis] += Vec3::new(0.4, -0.2, 0.3);
+    pose.rotations[rig.pelvis] = Quat::from_rotation_z(0.7);
+    let actual = bvh::encode(rig, &pose, true).unwrap();
+    pose.positions[rig.pelvis] = rig.local_pos[rig.pelvis];
+    pose.rotations[rig.pelvis] = Quat::IDENTITY;
+    assert_eq!(actual, bvh::encode(rig, &pose, true).unwrap());
+}
+
+#[test]
+fn poser_joint_rework_row_and_finger_switches_toggle_without_selecting_and_mirror_in_one_undo() {
+    use crate::ui::widgets::elide_tests::Frames;
+    for hands in [false, true] {
+        for side in [Side::Left, Side::Right, Side::Mirror] {
+            let (world, mut editor) = selected_fixture();
+            let rig = &world.avatar_lib.rig;
+            let frame = editor.editor_frame(&world).unwrap();
+            editor.set_pose_side(side, rig, &frame);
+            editor.poser.filter = if hands { "mHandIndex" } else { "mElbow" }.into();
+            let name = match (hands, side) {
+                (false, Side::Right) => "mElbowRight",
+                (false, _) => "mElbowLeft",
+                (true, Side::Right) => "mHandIndex1Right",
+                (true, _) => "mHandIndex1Left",
+            };
+            let bone = rig.names[name];
+            let other = editor.mirrors.counterpart(bone).unwrap();
+            let selected = editor.selected;
+            let before = editor.poser.sessions[&world.agent_id].pose.clone();
+            let mut frames = Frames::new();
+            let p = crate::theme::Theme::default().palette();
+            let right_edge = std::cell::Cell::new(0.0);
+            let mut draw = |ui: &mut egui::Ui| {
+                ui.set_width(240.0);
+                right_edge.set(ui.max_rect().right());
+                if hands {
+                    editor.hands_panel(ui, &p, rig, &frame);
+                } else {
+                    editor.bone_list(ui, &p, rig, &frame);
+                }
+            };
+            for _ in 0..3 {
+                frames.run(Vec::new(), &mut draw);
+            }
+            let shapes = frames.shapes(Vec::new(), &mut draw);
+            let switches: Vec<_> = shapes
+                .iter()
+                .filter_map(|shape| match shape {
+                    egui::Shape::Rect(r) if r.rect.size() == widgets::SWITCH_SIZE => Some(r.rect),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(switches.len(), if hands { 3 } else { 1 });
+            assert!(
+                switches.iter().all(|r| r.right() <= right_edge.get() + 0.01),
+                "finger switches fit the narrow joint column"
+            );
+            frames.run(click(switches[0].center()), &mut draw);
+            assert_eq!(editor.selected, selected, "the switch must not select its row");
+            let session = editor.poser.sessions.get_mut(&world.agent_id).unwrap();
+            assert!(!session.pose.enabled[bone]);
+            assert_eq!(session.pose.enabled[other], side != Side::Mirror);
+            assert_eq!(session.undo.len(), 1, "Mirror toggles both in one history entry");
+            assert_eq!(session.pose.rotations, before.rotations, "the stored pose is retained");
+            session.history(false);
+            assert!(session.pose.enabled[bone] && session.pose.enabled[other]);
+            session.history(true);
+            assert!(!session.pose.enabled[bone]);
+            assert_eq!(session.pose.enabled[other], side != Side::Mirror);
+            let mut draw = |ui: &mut egui::Ui| {
+                ui.set_width(240.0);
+                if hands {
+                    editor.hands_panel(ui, &p, rig, &frame);
+                } else {
+                    editor.bone_list(ui, &p, rig, &frame);
+                }
+            };
+            frames.run(click(egui::pos2(switches[0].left() - 12.0, switches[0].center().y)), &mut draw);
+            assert_eq!(editor.selected, Some(bone), "the rest of the cell still selects");
+            assert!(!editor.poser.sessions[&world.agent_id].pose.enabled[bone]);
+        }
+    }
+}
+
+#[test]
+fn poser_joint_rework_duplicate_pelvis_rows_have_independent_switch_hit_targets() {
+    use crate::ui::widgets::elide_tests::Frames;
+    let (world, mut editor) = selected_fixture();
+    let rig = &world.avatar_lib.rig;
+    let frame = editor.editor_frame(&world).unwrap();
+    let p = crate::theme::Theme::default().palette();
+    let mut frames = Frames::new();
+    let mut draw = |ui: &mut egui::Ui| {
+        ui.set_width(300.0);
+        editor.bone_list(ui, &p, rig, &frame);
+    };
+    for _ in 0..3 {
+        frames.run(Vec::new(), &mut draw);
+    }
+    let shapes = frames.shapes(Vec::new(), &mut draw);
+    let first = shapes
+        .iter()
+        .find_map(|shape| match shape {
+            egui::Shape::Rect(r) if r.rect.size() == widgets::SWITCH_SIZE => Some(r.rect),
+            _ => None,
+        })
+        .unwrap();
+    frames.run(click(first.center()), &mut draw);
+    let session = &editor.poser.sessions[&world.agent_id];
+    assert!(
+        !session.pose.enabled[rig.pelvis],
+        "the avatar-position row changes the pelvis exactly once"
+    );
+    assert_eq!(session.undo.len(), 1);
+}
+
+#[test]
+fn poser_joint_rework_off_joint_slider_ignores_pointer_edits() {
+    use crate::ui::widgets::elide_tests::{Frames, painted};
+    for enabled in [true, false] {
+        let (world, mut editor) = selected_fixture();
+        let rig = &world.avatar_lib.rig;
+        let frame = editor.editor_frame(&world).unwrap();
+        let bone = editor.selected.unwrap();
+        if !enabled {
+            editor.toggle_pose_joint(bone);
+        }
+        let before = editor.poser.sessions[&world.agent_id].pose.rotations[bone];
+        let undo = editor.poser.sessions[&world.agent_id].undo.len();
+        let mut frames = Frames::new();
+        let p = crate::theme::Theme::default().palette();
+        let mut draw = |ui: &mut egui::Ui| {
+            ui.set_width(650.0);
+            editor.joint_controls(ui, &p, rig, &frame);
+        };
+        for _ in 0..3 {
+            frames.run(Vec::new(), &mut draw);
+        }
+        let texts = frames.run(Vec::new(), &mut draw);
+        let x = painted(&texts, "X").rect;
+        // Sliders change while the pointer is held, unlike a button's release click.
+        let events = click(egui::pos2(x.right() + 20.0, x.center().y));
+        frames.run(events[..2].to_vec(), &mut draw);
+        frames.run(events[2..].to_vec(), &mut draw);
+        let session = &editor.poser.sessions[&world.agent_id];
+        assert_eq!(!session.pose.rotations[bone].abs_diff_eq(before, 1e-6), enabled);
+        assert_eq!(session.undo.len(), undo + usize::from(enabled));
+    }
+}
+
+#[test]
+fn poser_joint_rework_live_ancestor_keeps_animation_priority_over_child_pin() {
+    let (world, _) = fixture();
+    let rig = &world.avatar_lib.rig;
+    let frame = Frame::new(&world).unwrap();
+    let neck = rig.names["mNeck"];
+    let head = rig.names["mHead"];
+    let mut pose = SubjectPose::capture(rig, &frame).unwrap();
+    pose.locks.insert(head, frame.joints[head]);
+    pose.enabled[neck] = false;
+    let mut animated = rig.local_rot.clone();
+    animated[neck] = (animated[neck] * Quat::from_rotation_z(0.3)).normalize();
+    let mut positions = rig.local_pos.clone();
+    positions[neck] += Vec3::new(0.03, -0.02, 0.01);
+    let actual = pose.matrices_with_animation(rig, frame.model, &animated, &positions, Vec3::ZERO);
+    let parent = rig.parent[neck].unwrap();
+    let expected = actual[parent] * Mat4::from_scale_rotation_translation(pose.scales[neck], animated[neck], positions[neck]);
+    assert!(
+        actual[neck].abs_diff_eq(expected, 1e-5),
+        "a descendant pin cannot pose an off ancestor"
+    );
+    assert!(actual[head].is_finite());
+}
+
 pub(super) fn projector(point: Vec3) -> Projector {
     let eye = point + Vec3::new(-2.0, -3.0, 0.3);
     Projector {
@@ -345,6 +629,104 @@ fn poser_static_layer_keeps_fk_ancestors_scales_and_world_locks() {
             .abs_diff_eq(scaled.scales[chest], 1e-5)
     );
 }
+
+#[test]
+fn poser_shape_changes_rebase_pose_and_undo_onto_the_new_rest() {
+    let (world, mut editor) = fixture();
+    let rig = world.avatar_lib.rig.clone();
+    let head = rig.names["mHead"];
+    let chest = rig.names["CHEST"];
+    let hip = rig.pelvis;
+    let initial_rest = Arc::new(crate::scene::anim::SkeletonBase {
+        local_pos: rig.local_pos.clone(),
+        scale: rig.scale.clone(),
+    });
+    editor.poser.sessions.get_mut(&world.agent_id).unwrap().rebase(initial_rest.clone());
+    let frame = Frame::new(&world).unwrap();
+    editor.select(head, &rig, &frame);
+    let head_position = editor.poser.sessions[&world.agent_id].pose.positions[head];
+    editor.poser_transform(&rig, &frame, head_position, Quat::from_rotation_z(0.4), true);
+    let session = editor.poser.sessions.get_mut(&world.agent_id).unwrap();
+    session.checkpoint();
+    let posed_head = session.pose.rotations[head];
+    let old_hip = session.pose.positions[hip];
+    let old_hip_world = session.pose.matrices(&rig, frame.model)[hip].w_axis.z;
+    let mut changed_rest = (*initial_rest).clone();
+    changed_rest.scale[chest] *= 1.3;
+    changed_rest.local_pos[hip].z += 0.12;
+    session.rebase(Arc::new(changed_rest));
+
+    let session = &editor.poser.sessions[&world.agent_id];
+    assert_eq!(session.pose.rotations[head], posed_head);
+    assert!((session.pose.scales[chest] - rig.scale[chest] * 1.3).length() < 1e-5);
+    assert!((session.pose.positions[hip] - (old_hip + Vec3::new(0.0, 0.0, 0.12))).length() < 1e-5);
+    assert!(session.edited(head));
+    assert!(!session.edited(chest));
+    let matrices = session.pose.matrices(&rig, frame.model);
+    assert!((matrices[hip].w_axis.z - old_hip_world - 0.12).abs() < 1e-4);
+
+    let session = editor.poser.sessions.get_mut(&world.agent_id).unwrap();
+    session.history(false);
+    assert!((session.pose.scales[chest] - rig.scale[chest] * 1.3).length() < 1e-5);
+    assert!((session.pose.positions[hip] - (rig.local_pos[hip] + Vec3::new(0.0, 0.0, 0.12))).length() < 1e-5);
+    session.history(true);
+    assert_eq!(session.pose.rotations[head], posed_head);
+    assert!((session.pose.scales[chest] - rig.scale[chest] * 1.3).length() < 1e-5);
+    assert!((session.pose.positions[hip] - (old_hip + Vec3::new(0.0, 0.0, 0.12))).length() < 1e-5);
+
+    // A redo entry follows the rest too: undo, return to the first shape, redo.
+    session.history(false);
+    session.rebase(initial_rest);
+    session.history(true);
+    assert_eq!(session.pose.rotations[head], posed_head);
+    assert!((session.pose.scales[chest] - rig.scale[chest]).length() < 1e-5);
+    assert!((session.pose.positions[hip] - old_hip).length() < 1e-5);
+}
+
+#[test]
+fn poser_rebase_from_a_flat_rest_axis_takes_the_new_rest_scale() {
+    // Shape sliders can drive a joint's rest scale to zero on one axis
+    // (#1249); the pose's ratio to it must not blow the joint up.
+    let (world, mut editor) = fixture();
+    let rig = world.avatar_lib.rig.clone();
+    let chest = rig.names["CHEST"];
+    let rest = crate::scene::anim::SkeletonBase {
+        local_pos: rig.local_pos.clone(),
+        scale: rig.scale.clone(),
+    };
+    let mut flat = rest.clone();
+    flat.scale[chest].x = 0.0;
+    let session = editor.poser.sessions.get_mut(&world.agent_id).unwrap();
+    session.rebase(Arc::new(flat));
+    session.rebase(Arc::new(rest));
+    assert!(session.pose.scales[chest].is_finite());
+    assert!((session.pose.scales[chest] - rig.scale[chest]).length() < 1e-5);
+}
+
+#[test]
+fn poser_a_rest_axis_still_flat_after_another_shape_change_keeps_the_pose_valid() {
+    // Pose, a slider flattens the chest's X (#1249), then another slider
+    // changes the rest while that axis stays flat: the pose and its undo
+    // steps must stay usable, not be dropped for a zero scale.
+    let (world, mut editor) = fixture();
+    let rig = world.avatar_lib.rig.clone();
+    let chest = rig.names["CHEST"];
+    let neck = rig.names["NECK"];
+    let rest = crate::scene::anim::SkeletonBase {
+        local_pos: rig.local_pos.clone(),
+        scale: rig.scale.clone(),
+    };
+    let mut flat = rest.clone();
+    flat.scale[chest].x = 0.0;
+    let mut flat_taller = flat.clone();
+    flat_taller.scale[neck] *= 1.2;
+    let session = editor.poser.sessions.get_mut(&world.agent_id).unwrap();
+    session.rebase(Arc::new(flat));
+    session.rebase(Arc::new(flat_taller));
+    let scale = session.pose.scales[chest];
+    assert!(super::data::scale_valid(scale), "chest scale {scale} is out of the poser's bounds");
+    assert!(session.pose.scales.iter().all(|s| super::data::scale_valid(*s)));
+}
 fn assert_attached(rig: &Rig, pose: &SubjectPose, reference: &SubjectPose, model: Mat4) {
     let matrices = pose.matrices(rig, model);
     for (bone, parent) in rig.parent.iter().enumerate() {
@@ -463,6 +845,74 @@ fn poser_selects_and_rotates_every_animation_joint_without_breaking_the_hierarch
 }
 
 #[test]
+fn poser_shoulder_chains_stop_before_the_spine_and_joint_only_moves_no_other_joint() {
+    let (world, mut editor) = fixture();
+    let rig = &world.avatar_lib.rig;
+    let base = editor.poser.sessions[&world.agent_id].base.clone();
+    let mut chain_pose = (*base).clone();
+    for name in ["mShoulderLeft", "mShoulderRight"] {
+        let shoulder = rig.names[name];
+        let collar = rig.parent[shoulder].unwrap();
+        let before = chain_pose.clone();
+        let world_pose = chain_pose.matrices(rig, Mat4::IDENTITY);
+        let target = world_pose[shoulder].w_axis.truncate() + Vec3::new(0.05, 0.03, -0.02);
+        assert!(chain_pose.move_joint(rig, shoulder, target, false));
+        for ancestor in ["mChest", "mTorso", "mSpine1", "mSpine2", "mSpine3", "mSpine4"] {
+            if let Some(&bone) = rig.names.get(ancestor) {
+                assert_eq!(chain_pose.rotations[bone], before.rotations[bone], "{ancestor} rotated for {name}");
+            }
+        }
+        assert_ne!(
+            chain_pose.rotations[collar], before.rotations[collar],
+            "the collar should bend for {name}"
+        );
+    }
+
+    let shoulder = rig.names["mShoulderLeft"];
+    let before = (*base).clone();
+    let matrices = before.matrices(rig, Mat4::IDENTITY);
+    let target = matrices[shoulder].w_axis.truncate() + Vec3::new(0.08, -0.04, 0.02);
+    let mut direct = before.clone();
+    assert!(direct.move_joint(rig, shoulder, target, true));
+    assert_eq!(direct.rotations, before.rotations);
+    for bone in 0..rig.len() {
+        if bone != shoulder {
+            assert_eq!(
+                direct.positions[bone], before.positions[bone],
+                "{} position changed",
+                rig.canonical_names[bone]
+            );
+        }
+    }
+    assert_ne!(direct.positions[shoulder], before.positions[shoulder]);
+
+    editor.symmetry = true;
+    editor.poser.move_joint_only = true;
+    let frame = editor.editor_frame(&world).unwrap();
+    editor.select(shoulder, rig, &frame);
+    editor.position = frame.model.inverse().transform_point3(frame.joints[shoulder].w_axis.truncate()) + Vec3::new(0.1, 0.0, 0.0);
+    assert!(editor.commit_poser_manipulation(rig, &frame, false));
+    let pose = &editor.poser.sessions[&world.agent_id].pose;
+    let right = rig.names["mShoulderRight"];
+    assert_ne!(pose.positions[shoulder], base.positions[shoulder]);
+    assert_ne!(pose.positions[right], base.positions[right], "mirror mode moves the opposite joint");
+    assert_eq!(pose.rotations, base.rotations);
+}
+
+#[test]
+fn poser_joint_only_setting_defaults_off_and_persists() {
+    let default = Config::default();
+    assert!(!default.move_joint_only);
+    let mut enabled = default;
+    enabled.move_joint_only = true;
+    let encoded = serde_json::to_vec(&enabled).unwrap();
+    let decoded: Config = serde_json::from_slice(&encoded).unwrap();
+    assert!(decoded.move_joint_only);
+    let old: Config = serde_json::from_str("{}").unwrap();
+    assert!(!old.move_joint_only, "older saved preferences default the new option off");
+}
+
+#[test]
 fn poser_world_pins_and_imported_translations_cannot_detach_children() {
     let (world, editor) = fixture();
     let rig = &world.avatar_lib.rig;
@@ -471,7 +921,7 @@ fn poser_world_pins_and_imported_translations_cannot_detach_children() {
     let wrist = rig.names["mWristLeft"];
     let before = pose.matrices(rig, Mat4::IDENTITY);
     let target = before[wrist].w_axis.truncate() + Vec3::new(0.1, -0.15, -0.2);
-    assert!(pose.move_joint(rig, wrist, target));
+    assert!(pose.move_joint(rig, wrist, target, false));
     let pinned = pose.matrices(rig, Mat4::IDENTITY)[wrist];
     pose.locks.insert(wrist, pinned);
     for model in [Mat4::IDENTITY, Mat4::from_translation(Vec3::splat(10.0))] {
@@ -587,9 +1037,22 @@ fn poser_closing_and_ik_switch_release_every_subject_unless_keep_pose_is_explici
     assert!(!editor.poser.active);
     assert!(editor.pose_layers(&world).is_empty());
 }
+/// The demo animesh without DemoSim's "you own this" update flag, so only
+/// its OwnerID decides whose it is.
+fn animesh_not_flagged_ours() -> Vec<aurora_net::objects::ObjectUpdate> {
+    demo::animesh_objects(demo::ANIMESH_MESH)
+        .into_iter()
+        .map(|mut o| {
+            o.update_flags &= !crate::ui::context::flags::OBJECT_YOU_OWNER;
+            o
+        })
+        .collect()
+}
 #[test]
-fn poser_subjects_require_ownership_or_consent_and_losing_ownership_drops_only_that_layer() {
-    let (mut world, mut editor) = fixture();
+fn an_animesh_whose_owner_id_is_not_sent_is_ours_by_its_update_flags() {
+    // the simulator sends OwnerID only with ObjectProperties: a rezzed
+    // animesh not selected yet is known as ours by OBJECT_YOU_OWNER alone
+    let (mut world, _) = fixture();
     world.apply(NetEvent::ObjectUpdates {
         handle: 1,
         objects: demo::animesh_objects(demo::ANIMESH_MESH),
@@ -600,10 +1063,39 @@ fn poser_subjects_require_ownership_or_consent_and_losing_ownership_drops_only_t
         .find(|(_, o)| o.key.local_id == 9200)
         .map(|(i, o)| (i, o.full_id))
         .unwrap();
+    assert!(world.objects.get(index).unwrap().owner_id.is_nil());
+    assert_eq!(subjects::eligibility_reason(&world, id), None);
+    world.objects.get_mut(index).unwrap().update_flags &= !crate::ui::context::flags::OBJECT_YOU_OWNER;
+    assert_eq!(subjects::eligibility_reason(&world, id), Some("not-owned"));
+    world.objects.get_mut(index).unwrap().owner_id = Uuid::from_u128(77);
+    world.objects.get_mut(index).unwrap().update_flags |= crate::ui::context::flags::OBJECT_YOU_OWNER;
+    assert_eq!(
+        subjects::eligibility_reason(&world, id),
+        Some("not-owned"),
+        "a known other owner wins"
+    );
+}
+#[test]
+fn poser_subjects_require_ownership_or_consent_and_losing_ownership_drops_only_that_layer() {
+    let (mut world, mut editor) = fixture();
+    world.apply(NetEvent::ObjectUpdates {
+        handle: 1,
+        objects: animesh_not_flagged_ours(),
+    });
+    let (index, id) = world
+        .objects
+        .iter()
+        .find(|(_, o)| o.key.local_id == 9200)
+        .map(|(i, o)| (i, o.full_id))
+        .unwrap();
     assert!(!subjects::allowed(&world, id));
     world.objects.get_mut(index).unwrap().owner_id = world.agent_id;
-    assert!(subjects::allowed(&world, id));
+    assert!(
+        !world.avatar_poses.contains_key(&id) && subjects::allowed(&world, id),
+        "a still owned animesh, never posed by an animation yet, is offered"
+    );
     world.avatar_poses.insert(id, world.avatar_poses[&world.agent_id].clone());
+    assert!(subjects::allowed(&world, id));
     editor.pick_subject(&world, id);
     assert_eq!(editor.pose_layers(&world).len(), 2);
     let head = world.avatar_lib.rig.names["mHead"];
@@ -623,6 +1115,103 @@ fn poser_subjects_require_ownership_or_consent_and_losing_ownership_drops_only_t
     assert_eq!(layers.len(), 1);
     assert!(layers.contains_key(&world.agent_id));
     assert_eq!(editor.poser.subject, world.agent_id);
+}
+#[test]
+fn poser_animesh_menu_has_a_name_instead_of_a_local_id_when_properties_are_missing() {
+    use crate::ui::widgets::elide_tests::{Frames, painted};
+    let (mut world, mut editor) = fixture();
+    world.apply(NetEvent::ObjectUpdates {
+        handle: 1,
+        objects: animesh_not_flagged_ours(),
+    });
+    let (index, id) = world
+        .objects
+        .iter()
+        .find(|(_, o)| o.key.local_id == 9200)
+        .map(|(i, o)| (i, o.full_id))
+        .unwrap();
+    world.objects.get_mut(index).unwrap().owner_id = world.agent_id;
+    world.avatar_poses.insert(id, world.avatar_poses[&world.agent_id].clone());
+    let mut frames = Frames::new();
+    let p = crate::theme::Theme::default().palette();
+    crate::ui::widgets::place_floater(&frames.ctx, "poser", egui::pos2(30.0, 30.0), egui::vec2(880.0, 760.0));
+    let frame = editor.editor_frame(&world).unwrap();
+    let mut draw = |ui: &mut egui::Ui| editor.poser_ui(ui.ctx(), &p, &world, &frame);
+    for _ in 0..3 {
+        frames.run(Vec::new(), &mut draw);
+    }
+    frames
+        .ctx
+        .data_mut(|d| d.insert_temp(egui::Id::unique("poser-subjects-open"), true));
+    let mut texts = Vec::new();
+    for _ in 0..3 {
+        texts = frames.run(Vec::new(), &mut draw);
+    }
+    assert!(painted(&texts, aurora_i18n::tr!("poser-animesh")).rect.is_positive());
+}
+#[test]
+fn poser_animesh_subject_uses_object_name_in_menu_and_requests_missing_properties_once() {
+    use crate::ui::widgets::elide_tests::{Frames, painted};
+    let (mut world, mut editor) = fixture();
+    world.apply(NetEvent::ObjectUpdates {
+        handle: 1,
+        objects: animesh_not_flagged_ours(),
+    });
+    let (index, id) = world
+        .objects
+        .iter()
+        .find(|(_, o)| o.key.local_id == 9200)
+        .map(|(i, o)| (i, o.full_id))
+        .unwrap();
+    world.objects.get_mut(index).unwrap().owner_id = world.agent_id;
+    world.avatar_poses.insert(id, world.avatar_poses[&world.agent_id].clone());
+    let mut frames = Frames::new();
+    let p = crate::theme::Theme::default().palette();
+    crate::ui::widgets::place_floater(&frames.ctx, "poser", egui::pos2(30.0, 30.0), egui::vec2(880.0, 760.0));
+    let frame = editor.editor_frame(&world).unwrap();
+    let mut draw = |ui: &mut egui::Ui| editor.poser_ui(ui.ctx(), &p, &world, &frame);
+    for _ in 0..3 {
+        frames.run(Vec::new(), &mut draw);
+    }
+    frames
+        .ctx
+        .data_mut(|d| d.insert_temp(egui::Id::unique("poser-subjects-open"), true));
+    let mut texts = Vec::new();
+    for _ in 0..3 {
+        texts = frames.run(Vec::new(), &mut draw);
+    }
+    assert!(painted(&texts, aurora_i18n::tr!("poser-animesh")).rect.is_positive());
+    drop(draw);
+    assert_eq!(editor.take_poser_requests(), vec![Request::ObjectName(id)]);
+    let mut draw = |ui: &mut egui::Ui| editor.poser_ui(ui.ctx(), &p, &world, &frame);
+    for _ in 0..3 {
+        texts = frames.run(Vec::new(), &mut draw);
+    }
+    drop(draw);
+    assert!(
+        editor.take_poser_requests().is_empty(),
+        "the outstanding property request is rate-limited"
+    );
+    let props = aurora_net::build::ObjectProps {
+        object_id: id,
+        name: "My Animesh Subject".to_owned(),
+        ..Default::default()
+    };
+    editor.update_poser_subject_names(&[props]);
+    let mut draw = |ui: &mut egui::Ui| editor.poser_ui(ui.ctx(), &p, &world, &frame);
+    for _ in 0..3 {
+        texts = frames.run(Vec::new(), &mut draw);
+    }
+    assert!(painted(&texts, "My Animesh Subject").rect.is_positive());
+    assert!(
+        !texts
+            .iter()
+            .any(|t| t.source == format!("Animesh {}", world.objects.get(index).unwrap().key.local_id))
+    );
+    assert!(
+        editor.take_poser_requests().is_empty(),
+        "the property request is rate-limited while the response is pending"
+    );
 }
 fn click(pos: egui::Pos2) -> Vec<egui::Event> {
     vec![
@@ -1354,6 +1943,7 @@ fn poser_exports_nothing_of_a_captured_animation_through_any_format() {
         scales: rig.scale.clone(),
         locks: Default::default(),
         origin: rig.local_rot.clone(),
+        enabled: vec![true; rig.len()],
     });
     assert!(decoded.apply(rig, &mut other, document::LoadMode::All, Mat4::IDENTITY));
     assert!(

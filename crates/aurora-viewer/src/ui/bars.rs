@@ -116,7 +116,12 @@ pub enum BarAction {
     /// Advanced › Request Admin Status (true) / Leave Admin Status (false).
     AdminStatus(bool),
     Admin(AdminAction),
+    /// Advanced › Animation Speed: global session-only keyframe rate.
+    AnimationSpeed(f32),
+    /// Advanced › Animation Speed: local-avatar slow motion.
+    ToggleSlowMotionAnimations,
     ToggleWaterWalk,
+    ToggleAoMini,
     ToggleSwimming,
     MoveLockOptions,
     MovementEnhancer,
@@ -305,6 +310,8 @@ pub struct StatusInfo<'a> {
     /// A script holds a control and no RLVa lock forbids letting it go:
     /// Advanced › Release Keys is enabled (`app::release_keys::enabled`).
     pub release_keys: bool,
+    pub animation_speed: f32,
+    pub slow_motion_animations: bool,
     /// The grid has a Marketplace (World › SL Marketplace is shown only on
     /// the Second Life grids, GridCheck "secondlife").
     pub marketplace: bool,
@@ -1523,6 +1530,35 @@ fn main_menus(ui: &mut egui::Ui, p: &Palette, panels: &mut Panels, st: &StatusIn
             if menu::check(ui, p, "camera-off", quiet, st.quiet_snapshots, true) {
                 *action = BarAction::ToggleQuietSnapshots;
             }
+            menu::submenu(
+                ui,
+                p,
+                "player-play-filled",
+                aurora_i18n::tr!("ui-bars-animation-speed"),
+                true,
+                |ui| {
+                    if menu::item(ui, p, "player-skip-forward-filled", aurora_i18n::tr!("ui-bars-animation-faster")) {
+                        *action = BarAction::AnimationSpeed(crate::scene::anim::adjusted_animation_speed(st.animation_speed, 0.1));
+                    }
+                    if menu::item(ui, p, "player-skip-back-filled", aurora_i18n::tr!("ui-bars-animation-slower")) {
+                        *action = BarAction::AnimationSpeed(crate::scene::anim::adjusted_animation_speed(st.animation_speed, -0.1));
+                    }
+                    if menu::item(ui, p, "refresh", aurora_i18n::tr!("ui-bars-animation-reset")) {
+                        *action = BarAction::AnimationSpeed(1.0);
+                    }
+                    menu::separator(ui, p);
+                    if menu::check(
+                        ui,
+                        p,
+                        "player-pause-filled",
+                        aurora_i18n::tr!("ui-bars-slow-motion-animations"),
+                        st.slow_motion_animations,
+                        true,
+                    ) {
+                        *action = BarAction::ToggleSlowMotionAnimations;
+                    }
+                },
+            );
             // Advanced › Media Streams Backup: the parcel stream list to
             // and from an XML file (Streamlist.xml_import / xml_export)
             menu::submenu(
@@ -2499,6 +2535,7 @@ pub fn run_command(ctx: &egui::Context, cmd: &str, panels: &mut Panels) -> BarAc
         "appearance" => toggle("appearance", &mut panels.appearance),
         "avatar_studio" => panels.avatar_studio = !panels.avatar_studio,
         "ao" => toggle("ao", &mut panels.ao),
+        "ao_mini" => return BarAction::ToggleAoMini,
         "minimap" => panels.minimap = !panels.minimap,
         "worldmap" => toggle("worldmap", &mut panels.world_map),
         "regiontracker" => toggle(super::region_tracker::WINDOW, &mut panels.region_tracker),
@@ -2640,6 +2677,7 @@ fn command_active(cmd: &str, panels: &Panels, flying: bool, seated: bool, mousel
         "avatar_studio" => panels.avatar_studio,
         "money_tracker" => panels.money_tracker,
         "experiences" => panels.experiences,
+        "ao_mini" => panels.ao_mini,
         "minimap" => panels.minimap,
         "worldmap" => panels.world_map,
         "places" => panels.places,
@@ -2929,6 +2967,10 @@ pub struct MicButton<'a> {
     pub open_prefs: bool,
     /// Output: the mode switch changed.
     pub mode_changed: bool,
+    /// Voice output: the device, or empty for the main audio output.
+    pub voice_output_device: String,
+    /// Output: the voice output device was changed.
+    pub voice_output_changed: bool,
     /// Key (or mouse button) of push-to-talk, shown with the hold mode.
     pub key: Option<crate::keybinds::Binding>,
     /// Microphone and audio output in use ("" = the system's default) and
@@ -3208,6 +3250,7 @@ fn mic_panel(ui: &mut egui::Ui, p: &Palette, icons: &Icons, mic: &mut MicButton,
                 "mic_panel_input",
                 &mut mic.input_device,
                 mic.input_devices,
+                None,
             ),
             (
                 "headphones-filled",
@@ -3215,9 +3258,18 @@ fn mic_panel(ui: &mut egui::Ui, p: &Palette, icons: &Icons, mic: &mut MicButton,
                 "mic_panel_output",
                 &mut mic.output_device,
                 mic.output_devices,
+                None,
+            ),
+            (
+                "headphones-filled",
+                aurora_i18n::tr!("ui-options-voice-output"),
+                "mic_panel_voice_output",
+                &mut mic.voice_output_device,
+                mic.output_devices,
+                Some(aurora_i18n::tr!("ui-options-same-as-audio-output")),
             ),
         ];
-        for (icon, name, id, device, list) in devices {
+        for (icon, name, id, device, list, default_label) in devices {
             ui.horizontal(|ui| {
                 // the icons stand in the column of the modes' icons
                 ui.spacing_mut().item_spacing.x = 0.0;
@@ -3227,8 +3279,15 @@ fn mic_panel(ui: &mut egui::Ui, p: &Palette, icons: &Icons, mic: &mut MicButton,
                 hover.on_hover_text(name);
                 ui.add_space(9.0);
                 let width = ui.available_width();
-                let (changed, open) = super::options::device_combo(ui, id, device, list, width, mic.devices_listing);
+                let (changed, open) = if let Some(default_label) = default_label {
+                    super::options::named_combo(ui, id, device, list, width, default_label)
+                } else {
+                    super::options::device_combo(ui, id, device, list, width, mic.devices_listing)
+                };
                 mic.devices_changed |= changed;
+                if id == "mic_panel_voice_output" {
+                    mic.voice_output_changed |= changed;
+                }
                 *list_open |= open;
             });
         }
@@ -3939,8 +3998,10 @@ mod tests {
         ctx: egui::Context,
         input: String,
         output: String,
+        voice_output: String,
         /// Outputs of the last frame.
         changed: bool,
+        voice_output_changed: bool,
         listed: bool,
         open_prefs: bool,
         /// The microphone's state, kept from frame to frame.
@@ -3962,6 +4023,7 @@ mod tests {
                 denied: self.denied.clone(),
                 input_device: self.input.clone(),
                 output_device: self.output.clone(),
+                voice_output_device: self.voice_output.clone(),
                 input_devices: &devices,
                 output_devices: &devices,
                 ..Default::default()
@@ -3982,7 +4044,9 @@ mod tests {
             output.textures_delta.clear();
             self.input = mic.input_device.clone();
             self.output = mic.output_device.clone();
+            self.voice_output = mic.voice_output_device.clone();
             self.changed = mic.devices_changed;
+            self.voice_output_changed = mic.voice_output_changed;
             self.listed = mic.list_devices;
             self.open_prefs = mic.open_prefs;
             self.on = mic.on;
@@ -4162,6 +4226,7 @@ mod tests {
     #[test]
     fn microphone_panel_stays_open_while_its_device_lists_are_used() {
         let default = aurora_i18n::tr!("ui-options-system-default");
+        let same_as_audio = aurora_i18n::tr!("ui-options-same-as-audio-output");
         let mut bench = Bench::default();
         bench.frame(vec![]);
         assert!(!bench.panel_shown());
@@ -4172,6 +4237,7 @@ mod tests {
         // the microphone: its list unfolds over the panel, which stays
         let combos = bench.texts(default);
         assert_eq!(combos.len(), 2, "one combo per device, both on the system's default");
+        assert_eq!(bench.texts(same_as_audio).len(), 1, "voice initially follows the audio output");
         bench.click(combos[0]);
         for _ in 0..3 {
             assert!(bench.panel_shown(), "unfolding a device list must not close the panel");
@@ -4187,6 +4253,7 @@ mod tests {
         // then the audio output, in the same visit of the panel
         let combos = bench.texts(default);
         assert_eq!(combos.len(), 1, "only the output is still on the system's default");
+        assert_eq!(bench.texts(same_as_audio).len(), 1);
         bench.click(combos[0]);
         assert!(bench.panel_shown());
         let entry = *bench.texts("Device A").first().expect("the list of outputs is unfolded");
@@ -4196,6 +4263,24 @@ mod tests {
         for _ in 0..3 {
             assert!(bench.panel_shown());
         }
+
+        // Voice output has its own choice and an explicit follow-main option.
+        let combo = bench.texts(same_as_audio)[0];
+        bench.click(combo);
+        assert!(bench.panel_shown());
+        let entry = *bench.texts("Device B").last().expect("the voice output list is unfolded");
+        bench.click(entry);
+        assert!(bench.changed, "voice output changes are included in the device action");
+        assert!(bench.voice_output_changed, "the voice output change is exposed separately");
+        assert_eq!(bench.voice_output, "Device B");
+        assert!(bench.panel_shown());
+
+        let combo = *bench.texts("Device B").last().expect("the voice output is selected");
+        bench.click(combo);
+        let follow = *bench.texts(same_as_audio).first().expect("the follow-main option is in the list");
+        bench.click(follow);
+        assert!(bench.voice_output_changed);
+        assert!(bench.voice_output.is_empty(), "empty voice output follows the audio output");
 
         // a click away from the panel and its button closes it
         bench.click(egui::pos2(50.0, 50.0));
@@ -4310,6 +4395,16 @@ mod tests {
             assert_eq!(command_active(command.id, &panels, false, false, false), active);
             assert_eq!((panels.appearance, panels.inventory, panels.snapshot), before);
         }
+    }
+
+    #[test]
+    fn mini_ao_toolbar_command_is_account_action_and_lights_when_open() {
+        let ctx = egui::Context::default();
+        let mut panels = Panels::from_settings(&crate::settings::Settings::default());
+        assert!(matches!(run_command(&ctx, "ao_mini", &mut panels), BarAction::ToggleAoMini));
+        assert!(!command_active("ao_mini", &panels, false, false, false));
+        panels.ao_mini = true;
+        assert!(command_active("ao_mini", &panels, false, false, false));
     }
 
     #[test]

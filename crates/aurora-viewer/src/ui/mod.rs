@@ -199,6 +199,7 @@ pub struct Panels {
     pub appearance: bool,
     pub avatar_studio: bool,
     pub ao: bool,
+    pub ao_mini: bool,
     pub people_tab: u8,
     /// The torn-off Contacts window (ContactsTornOff).
     pub contacts: bool,
@@ -296,6 +297,7 @@ impl Panels {
             appearance: settings.show_appearance,
             avatar_studio: false,
             ao: settings.show_ao,
+            ao_mini: false,
             people_tab: settings.people_tab.min(1),
             contacts: false,
             about_land: false,

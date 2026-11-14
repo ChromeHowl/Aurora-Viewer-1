@@ -25,6 +25,10 @@ owned animesh roots, then every nearby avatar with its consent action (see
 Consent); Privacy › "Who can ask to pose my avatar" is its last entry. Other subjects must be within 50 m, in the same region and unmuted.
 Several subjects can retain independent poses at once. Eligibility is
 checked every frame; losing it removes the corresponding local pose.
+An active pose follows shape and worn-mesh rest changes: joint positions and
+scales are rebased while authored rotations, locks and undo history are kept.
+This extends the Legacy Viewer behavior, which does not rebase an open pose
+after a shape change.
 
 ### Compact window
 
@@ -156,6 +160,11 @@ are lit. Mirror, Reset joint and the world pin apply to all of them, as in
 the Legacy Viewer's multi-select joint lists. Dragging another joint of the
 selection makes it lead the others. Changing tabs keeps only the joints
 the new tab shows, and the Side selector swaps a selected pair's lead.
+The **Pose this joint** switch in each row or finger cell and in the selected
+joint pane lets the current animation move that joint again. Off joints have
+hollow markers and greyed transform controls; their saved pose values stay
+available when switched back on. Mirror changes both sides in one undo step.
+
 Only the active tab's joints and shafts are visible and selectable. Changing
 tabs selects a joint in that group and replaces the previous group's gizmo.
 
@@ -179,6 +188,8 @@ rings, shown in amber when the pointer comes near it: dragging it turns the
 joint about the line from the camera to the joint, in the pointer's
 direction. The axis rings win where they are close; locks, Mirror and undo
 apply as for the axis rings.
+A pin below a joint that follows animation can move with that animation:
+the live channels take priority over the pin.
 Scale has local X/Y/Z cube handles and a central uniform-scale cube. Drag an
 axis cube outward to enlarge that channel, or drag the central cube right/up
 to enlarge all three channels. Scale values stay bounded and keep their
@@ -225,7 +236,8 @@ otherwise, and "Open a file".
 Load accepts Aurora pose documents, native `.anim` files and `.bvh` files,
 up to 4 MiB. Animation imports sample their first frame. The four load modes
 are All, Rotations only, Unedited joints and Selective rotations. Selective
-loads preserve joints already edited in the current pose. Loading finishes
+loads preserve joints already edited and still posed in the current pose;
+switched-off joints receive the file values and turn back on. Loading finishes
 on the subject originally chosen, even if the picker changes during I/O.
 World locks are reanchored to the destination subject.
 
@@ -263,13 +275,16 @@ Accepted targets keep a reminder with Withdraw even when Poser is closed.
 Privacy > Who can ask to pose my avatar defaults to **Friends**; Everyone
 and Nobody are also available. Friendship permits a request, never posing
 without acceptance. Muted or blocked requesters do not get a modal. No
-answer after 60 seconds expires the request; refusal and timeout impose a
-10-minute cooldown. Responses require the matching request ID and peer.
+answer after 60 seconds expires the request, followed by a 2-minute wait;
+an explicit refusal keeps its 10-minute wait. The subject menu shows the
+remaining time. Ending an accepted session allows a fresh request immediately;
+a fresh acceptance is still required, and the old request ID stays invalid.
+Responses require the matching request ID and peer.
 Withdrawal, disappearance, region changes, teleport and logout invalidate
 the relevant access. The requester immediately drops an invalid pose and
 receives a notice.
 
-The bridge is version **1.34**, which triggers the existing reprovisioning
+The bridge is version **1.41**, which triggers the existing reprovisioning
 flow. The new service lives in `query.lsl`, separately from the movement
 controller. HTTPS commands use the existing validated query endpoint and
 token. Attachment-to-attachment traffic uses `llRegionSayTo`, request IDs

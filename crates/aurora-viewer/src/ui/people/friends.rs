@@ -1141,7 +1141,12 @@ mod tests {
             rights_given: 0,
             rights_has: 0,
         };
-        let icons = |online| quick_actions(&friend(online), None).iter().map(|(icon, _)| *icon).collect::<Vec<_>>();
+        let icons = |online| {
+            quick_actions(&friend(online), None)
+                .iter()
+                .map(|(icon, _)| *icon)
+                .collect::<Vec<_>>()
+        };
         for icon in ["send-filled", "car-filled"] {
             assert!(icons(true).contains(&icon), "{icon} online");
             assert!(!icons(false).contains(&icon), "{icon} offline");

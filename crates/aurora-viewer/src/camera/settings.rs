@@ -5,6 +5,19 @@
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoCameraMove {
+    PoserOpenFraming,
+    PoserSelectionFraming,
+    AutomaticTracking,
+    FollowEyes,
+    MovementReset,
+}
+
+pub fn camera_auto_move_allowed(posing: bool, setting: bool, _cause: AutoCameraMove) -> bool {
+    !posing || setting
+}
+
 #[cfg(test)]
 mod first_person_tests {
     use super::*;
@@ -33,17 +46,35 @@ mod first_person_tests {
     }
 
     #[test]
+    fn poser_camera_preference_gates_all_automatic_move_causes() {
+        for cause in [AutoCameraMove::PoserOpenFraming, AutoCameraMove::PoserSelectionFraming] {
+            assert!(camera_auto_move_allowed(true, true, cause));
+            assert!(!camera_auto_move_allowed(true, false, cause));
+            assert!(camera_auto_move_allowed(false, false, cause));
+        }
+        for cause in [
+            AutoCameraMove::AutomaticTracking,
+            AutoCameraMove::FollowEyes,
+            AutoCameraMove::MovementReset,
+        ] {
+            assert!(!camera_auto_move_allowed(true, false, cause));
+        }
+    }
+
+    #[test]
     fn first_person_options_default_off_and_keep_a_saved_choice() {
         let migrated: CameraSettings = serde_json::from_str("{}").unwrap();
         assert!(!migrated.show_avatar_in_mouselook);
         assert!(!migrated.mouselook_follow_eyes);
         assert_eq!(migrated.third_person_follow_joint, None);
         assert_eq!(migrated.third_person_follow_intensity, 100);
+        assert!(migrated.auto_move_while_posing);
         let chosen = CameraSettings {
             show_avatar_in_mouselook: true,
             mouselook_follow_eyes: true,
             third_person_follow_joint: Some(CameraFollowJoint::Head),
             third_person_follow_intensity: 75,
+            auto_move_while_posing: false,
             ..migrated
         };
         let saved = serde_json::to_string(&chosen).unwrap();
@@ -52,6 +83,7 @@ mod first_person_tests {
         assert!(loaded.mouselook_follow_eyes);
         assert_eq!(loaded.third_person_follow_joint, Some(CameraFollowJoint::Head));
         assert_eq!(loaded.third_person_follow_intensity, 75);
+        assert!(!loaded.auto_move_while_posing);
     }
 }
 
@@ -372,6 +404,8 @@ pub struct CameraSettings {
     pub disable_wheel_zoom: bool,
     /// ClickOnAvatarKeepsCamera.
     pub click_avatar_keeps_camera: bool,
+    /// Allow automatic camera movements initiated while editing a pose.
+    pub auto_move_while_posing: bool,
     /// FSResetCameraOnMovement.
     pub reset_on_movement: bool,
     /// FSResetCameraOnTP.
@@ -475,6 +509,7 @@ impl Default for CameraSettings {
             ignore_sim_constraints: false,
             disable_wheel_zoom: false,
             click_avatar_keeps_camera: false,
+            auto_move_while_posing: true,
             reset_on_movement: true,
             reset_on_teleport: true,
             reset_view_turns_avatar: false,

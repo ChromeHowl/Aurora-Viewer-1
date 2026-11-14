@@ -34,8 +34,8 @@ mod audio_mute;
 mod avatar_render_settings;
 mod bridge;
 mod busy_pause;
-mod gaming_mode;
 mod follow_system;
+mod gaming_mode;
 mod movelock;
 mod object_export;
 mod particle_editor;
@@ -168,6 +168,7 @@ mod uninstall;
 mod update_notice;
 mod viewer_stats;
 mod viewfinder;
+mod water_volumes;
 mod wearable_editor;
 mod wearable_favorites;
 mod world_click_demo;
@@ -182,7 +183,12 @@ enum Screen {
 /// What a held Hypergrid teleport does once accepted.
 enum SuitcaseGo {
     /// A named destination (navigation bar, links, history), resolved again.
-    Named { destination: String, pos: Vec3, look_at: Vec3 },
+    Named {
+        destination: String,
+        pos: Vec3,
+        look_at: Vec3,
+        portal: bool,
+    },
     /// The world map's teleport to its tracked spot, sent as it was.
     Map {
         command: Box<NetCommand>,
@@ -319,6 +325,9 @@ enum MouseMode {
     /// The middle button held over the world: Catznip's Settings-MouseCam
     /// (app/mouse_cam.rs).
     MouseCam,
+    /// Left on our avatar with ClickOnAvatarKeepsCamera: aim at the hit and
+    /// orbit without turning until we move, then mouse steer (Legacy Viewer).
+    AvatarKeepOrbit,
 }
 
 /// Aurora also uses a held right button to orbit, unlike LLToolPie::handleRightMouseDown
@@ -450,6 +459,10 @@ pub struct App {
     movement_ui: ui::movement::MovementUi,
     movement_runtime: crate::movement::Runtime,
     movement_probe: (Option<Instant>, bool, Option<Vec3>),
+    /// Prim water around our avatar (#2008), and the water height the last
+    /// movement frame used (a volume's top, else the region's).
+    water_volumes: water_volumes::Detector,
+    movement_water: Option<f32>,
     pass_wall_at: Option<Instant>,
     /// The fly override's first-use caution is up (ui::fly_override).
     fly_override_caution: bool,
@@ -1637,6 +1650,29 @@ fn open_notification_to_type(
     Some(conversation)
 }
 
+fn apply_poser_focus_request(
+    camera: &mut crate::camera::Camera,
+    agent: &mut crate::agent::AgentState,
+    settings: &crate::camera::CameraSettings,
+    posing: bool,
+    focus: Option<(Vec3, crate::camera::AutoCameraMove)>,
+) {
+    if let Some((focus, cause)) = focus
+        && crate::camera::camera_auto_move_allowed(posing, settings.auto_move_while_posing, cause)
+    {
+        let distance = if cause == crate::camera::AutoCameraMove::PoserOpenFraming {
+            4.2
+        } else {
+            2.8
+        };
+        camera.frame_poser_joint(focus, distance, agent, settings);
+    }
+}
+
+fn world_press_stops_for_poser_subject(posing: bool, alt_camera_gesture: bool, on_subject: bool) -> bool {
+    posing && !alt_camera_gesture && on_subject
+}
+
 impl App {
     // Growing editor state must not accumulate large return-value temporaries
     // on the Windows main stack while the avatar library is being loaded.
@@ -1690,6 +1726,7 @@ impl App {
         let mut media = crate::media::MediaManager::default();
         media.set_pack_dir(plugin_pack.dir());
         let out_device = (!settings.audio.output_device.is_empty()).then(|| settings.audio.output_device.clone());
+        let voice_output = aurora_audio::voice_stream_for(&settings.audio.output_device, &settings.audio.voice_output_device);
         let lib = Arc::new(AvatarLibrary::load());
         // the asset cache store: its key first (the credential store, read
         // here rather than by the first streamer thread), then the folders
@@ -1815,6 +1852,8 @@ impl App {
             movement_ui: Default::default(),
             movement_runtime: Default::default(),
             movement_probe: (None, false, None),
+            water_volumes: Default::default(),
+            movement_water: None,
             pass_wall_at: None,
             fly_override_caution: false,
             force_agent_update: false,
@@ -2140,6 +2179,10 @@ impl App {
                 Ok(e) => {
                     let o = e.output_info();
                     log::info!("audio: {} ({} Hz, {} canaux)", o.device_name, o.sample_rate, o.channels);
+                    match voice_output {
+                        aurora_audio::VoiceStream::Same => e.set_voice_output_device(None),
+                        aurora_audio::VoiceStream::Separate(name) => e.set_voice_output_device(Some(name)),
+                    }
                     Some(e)
                 }
                 Err(e) => {
@@ -2322,9 +2365,17 @@ impl App {
         self.send_from(cmd, uuid::Uuid::nil());
     }
 
-    fn send_from(&mut self, mut cmd: NetCommand, actor: uuid::Uuid) {
+    fn send_from(&mut self, cmd: NetCommand, actor: uuid::Uuid) {
+        self.send_from_origin(cmd, actor, false);
+    }
+
+    fn send_from_origin(&mut self, mut cmd: NetCommand, actor: uuid::Uuid, portal: bool) {
         if let NetCommand::SetAlwaysRun(run) = &mut cmd {
             *run &= !self.vr_walk_override.active();
+        }
+        if portal && !self.world.rlva_allows_portal_crossing() {
+            self.world.apply(NetEvent::viewer_teleport_failed(aurora_i18n::tr!("rlva-blocked")));
+            return;
         }
         // a region that does not bake: our own bakes stand for the server's
         if let NetCommand::RequestServerAppearance { cof_version } = cmd
@@ -2444,7 +2495,7 @@ impl App {
         }
         // LLAgent::startTeleportRequest: a teleport waits while the maturity
         // preference is not in sync with the server (TELEPORT_PENDING)
-        self.named_teleport.observe(&cmd, actor);
+        self.named_teleport.observe(&cmd, actor, portal);
         if !self.world.maturity.synced()
             && matches!(
                 cmd,
@@ -2456,7 +2507,7 @@ impl App {
             )
         {
             log::info!("teleport: waiting for the maturity preference");
-            self.world.maturity.hold(cmd, actor);
+            self.world.maturity.hold(cmd, actor, portal);
             return;
         }
         // AURORA_DEMO_EXPERIENCE: the simulator and the capabilities
@@ -3502,6 +3553,8 @@ impl App {
         if !self.demo {
             self.settings.release_hover_account();
         }
+        // a parcel's saved preset goes with the session
+        self.panels.time_of_day = self.settings.time_of_day;
         self.hover_height_ui = Default::default();
         self.follow_ui = Default::default();
         self.portal_ui = Default::default();
@@ -3665,9 +3718,9 @@ impl App {
             if !self.settings.rlva_enabled {
                 self.named_teleport.cancel_scripts();
             }
-            if let Some((actor, result)) = self.named_teleport.resolve(request, result) {
+            if let Some((actor, portal, result)) = self.named_teleport.resolve(request, result) {
                 match result {
-                    Ok(command) => self.send_deferred_teleport(command, actor),
+                    Ok(command) => self.send_deferred_teleport(command, actor, portal),
                     Err(reason) => {
                         self.world.apply(NetEvent::viewer_teleport_failed(reason));
                     }
@@ -4157,12 +4210,14 @@ impl App {
                     self.area_search_feed.on_closed_properties(&props);
                 }
                 self.world.ik_targets.on_properties(&props);
+                self.water_volumes.on_properties(&self.world, &props);
                 self.report_abuse_properties(&props);
                 self.world.on_hud_properties(&props);
                 self.scene.particles.on_properties(&props);
                 self.interactions.on_properties(&props);
                 self.object_profile.on_properties(&props);
                 let props = self.area_search_build_properties(props, &area_reads);
+                self.ik_editor.update_poser_subject_names(&props);
                 self.build.on_properties(&self.world, props);
             }
             NetEvent::PayPrice { object, default, buttons } => self.interactions.on_prices(object, default, buttons),
@@ -4792,18 +4847,22 @@ impl App {
             // modifiers held now choose the drag (AltGr: Ctrl + Alt)
             let (_, ctrl) = self.mouse_alt_ctrl();
             let focus_tool = self.build.open && self.build.tool == crate::build::Tool::Focus && !ctrl && !self.shift;
-            let mode = match self.mouse_mode {
-                MouseMode::Steer => crate::camera::ToolMode::Zoom,
-                MouseMode::MouseCam => self.mouse_cam.tool_mode(ctrl, self.shift),
-                _ if focus_tool => match self.build.focus_mode {
-                    crate::build::FocusMode::Zoom => crate::camera::ToolMode::Zoom,
-                    crate::build::FocusMode::Orbit => crate::camera::ToolMode::Orbit,
-                    crate::build::FocusMode::Pan => crate::camera::ToolMode::Pan,
-                },
-                _ => crate::camera::ToolMode::from_mods(ctrl, self.shift),
-            };
             let width = self.gfx.as_ref().map(|g| g.renderer.size().0 as f32).unwrap_or(1280.0);
-            self.camera.drag(mode, dx, dy, width, &mut self.world.agent);
+            if self.mouse_mode == MouseMode::AvatarKeepOrbit {
+                self.camera.avatar_keep_orbit_drag(dx, dy, width, &mut self.world.agent);
+            } else {
+                let mode = match self.mouse_mode {
+                    MouseMode::Steer => crate::camera::ToolMode::Zoom,
+                    MouseMode::MouseCam => self.mouse_cam.tool_mode(ctrl, self.shift),
+                    _ if focus_tool => match self.build.focus_mode {
+                        crate::build::FocusMode::Zoom => crate::camera::ToolMode::Zoom,
+                        crate::build::FocusMode::Orbit => crate::camera::ToolMode::Orbit,
+                        crate::build::FocusMode::Pan => crate::camera::ToolMode::Pan,
+                    },
+                    _ => crate::camera::ToolMode::from_mods(ctrl, self.shift),
+                };
+                self.camera.drag(mode, dx, dy, width, &mut self.world.agent);
+            }
         } else if self.right_drag {
             if !self.right_gesture.motion(dx, dy, self.egui_ctx.pixels_per_point()) {
                 return; // maybe a click: do not move the camera yet
@@ -5683,6 +5742,13 @@ impl App {
             (self.world.objects.get(idx)?.full_id == self.world.agent_id).then_some(p)
         });
         let on_avatar = avatar_hit.is_some();
+        // The poser owns presses on our posed body even when its overlay has
+        // no handle there. Do this before click actions, camera focus, and
+        // avatar steering can observe the press. Alt remains the explicit
+        // camera gesture and continues through this path.
+        if world_press_stops_for_poser_subject(self.ik_editor.posing(), alt, on_avatar) {
+            return;
+        }
         // a media face takes the click (LLToolPie::handleMediaClick)
         self.media.build_mode = self.build.open;
         // "Object view" of the Controls window: the click is Alt's
@@ -5790,21 +5856,27 @@ impl App {
                 self.hold_focus_cursor();
             }
         } else if let (Some(p), Some(ray)) = (avatar_hit, ray) {
-            // ClickOnAvatarKeepsCamera (LLToolPie::handleLeftClickPick).
-            // Unlike LLToolCamera::pickCallback (lltoolfocus.cpp), keep the
-            // focus too when enabled: a plain press must not reframe (#1243).
+            // ClickOnAvatarKeepsCamera (LLToolPie::handleLeftClickPick):
+            // always LLToolCamera::pickCallback on the hit, then only when the
+            // option is off call setFocusOnAvatar(true) (snap behind + steer).
+            // On: keep camera position, aim at the touched spot, orbit while
+            // stationary; movement / RMB promotes to mouse steer (Legacy Viewer).
             let s = &self.settings.camera;
+            let object = own_idx.and_then(|i| crate::camera::pick_focus_object(&self.world, i, now));
+            self.camera.alt_focus(p, object, ray, &mut self.world.agent, s);
             if !s.click_avatar_keeps_camera {
-                let object = own_idx.and_then(|i| crate::camera::pick_focus_object(&self.world, i, now));
-                self.camera.alt_focus(p, object, ray, &mut self.world.agent, s);
                 self.camera.set_focus_on_avatar(true, true, true, &mut self.world.agent, s);
             }
             if self.settings.mmo_mouse_buttons {
                 self.begin_mmo_orbit();
             } else if self.settings.left_drag_avatar_moves_camera && !self.right_drag {
                 self.begin_avatar_orbit();
-            } else {
+            } else if !self.settings.camera.click_avatar_keeps_camera {
                 self.begin_mouse_steer();
+            } else {
+                self.camera.begin_drag(false);
+                self.mouse_mode = MouseMode::AvatarKeepOrbit;
+                self.set_mouselook_grab(true);
             }
         } else if crate::autopilot::takes_ground_double_click(crate::autopilot::Press {
             double,
@@ -6965,6 +7037,16 @@ impl App {
             {
                 engine.set_output_device((!a.output_device.is_empty()).then(|| a.output_device.clone()));
             }
+            if self
+                .applied_audio
+                .as_ref()
+                .is_none_or(|p| p.output_device != a.output_device || p.voice_output_device != a.voice_output_device)
+            {
+                match aurora_audio::voice_stream_for(&a.output_device, &a.voice_output_device) {
+                    aurora_audio::VoiceStream::Same => engine.set_voice_output_device(None),
+                    aurora_audio::VoiceStream::Separate(name) => engine.set_voice_output_device(Some(name)),
+                }
+            }
             // same order as AUDIO_CHANNELS
             for (i, ch) in aurora_audio::Channel::ALL.iter().enumerate() {
                 let fade = if *ch == aurora_audio::Channel::Music { gain } else { 1.0 };
@@ -7394,7 +7476,7 @@ impl App {
     /// A Hypergrid teleport from the home grid (a `gatekeeper:region` name)
     /// while worn items are outside My Suitcase: held for the question,
     /// once per teleport.
-    fn suitcase_held(&mut self, asked: &str, resolved: &str, pos: Vec3, look_at: Vec3) -> bool {
+    fn suitcase_held(&mut self, asked: &str, resolved: &str, pos: Vec3, look_at: Vec3, portal: bool) -> bool {
         if std::mem::take(&mut self.suitcase_passed) {
             return false;
         }
@@ -7405,6 +7487,7 @@ impl App {
             destination: asked.to_owned(),
             pos,
             look_at,
+            portal,
         };
         self.suitcase_ask_for(grid, go)
     }
@@ -7513,9 +7596,20 @@ impl App {
         }
         log::info!("hypergrid: teleport accepted with worn items left behind");
         let started = match ask.go {
-            SuitcaseGo::Named { destination, pos, look_at } => {
+            SuitcaseGo::Named {
+                destination,
+                pos,
+                look_at,
+                portal,
+            } => {
+                if portal && !self.world.rlva_allows_portal_crossing() {
+                    self.world.apply(NetEvent::TeleportFailed {
+                        reason: aurora_i18n::tr!("rlva-blocked").into(),
+                    });
+                    return;
+                }
                 self.suitcase_passed = true;
-                let started = self.teleport_to_location_looking(destination, pos, look_at);
+                let started = self.teleport_to_location_looking_origin(destination, pos, look_at, portal);
                 // consumed by the question's check, unless the retry
                 // stopped before it (the destination no longer resolves)
                 self.suitcase_passed = false;
@@ -7556,6 +7650,15 @@ impl App {
     }
 
     fn teleport_to_location_looking(&mut self, region: String, pos: Vec3, look_at: Vec3) -> bool {
+        self.teleport_to_location_looking_origin(region, pos, look_at, false)
+    }
+
+    fn teleport_to_location_looking_origin(&mut self, region: String, pos: Vec3, look_at: Vec3, portal: bool) -> bool {
+        if portal && !self.world.rlva_allows_portal_crossing() {
+            self.world
+                .system_notice(aurora_i18n::tr!("rlva-blocked"), crate::world::notice_topics::Topic::Warning);
+            return false;
+        }
         let asked = region.clone();
         let Some(region) = self.grid_region(&region) else {
             return false;
@@ -7583,12 +7686,12 @@ impl App {
             return false;
         }
         // asked once RLVa allows it: held for its question, not started yet
-        if !local && self.suitcase_held(&asked, &region, pos, look_at) {
+        if !local && self.suitcase_held(&asked, &region, pos, look_at, portal) {
             return false;
         }
         self.begin_teleport(format!("{} ({:.0}, {:.0}, {:.0})", region, pos.x, pos.y, pos.z), !local);
         if local {
-            self.send(command);
+            self.send_from_origin(command, uuid::Uuid::nil(), portal);
         } else if self.demo {
             // Only inter-region demo teleports simulate a connection delay.
             aurora_net::transition::begin(
@@ -7599,7 +7702,7 @@ impl App {
             self.demo_tp_start = Some(Instant::now());
             self.demo_tp_dest = Some(pos);
         } else {
-            self.send(command);
+            self.send_from_origin(command, uuid::Uuid::nil(), portal);
         }
         true
     }
@@ -8376,6 +8479,11 @@ impl App {
             return;
         }
         let was_drag = self.right_drag;
+        if pressed && self.mouse_mode == MouseMode::AvatarKeepOrbit {
+            // Legacy Viewer: RMB while holding the kept-camera left drag starts walk/steer
+            self.camera.fold_orbit(&mut self.world.agent);
+            self.begin_mouse_steer();
+        }
         let held_on_avatar = matches!(self.mouse_mode, MouseMode::Steer | MouseMode::AvatarOrbit);
         self.right_drag = pressed && (!over_ui || held_on_avatar) && self.in_world();
         if pressed {
@@ -8607,11 +8715,11 @@ impl App {
     /// A named lookup or maturity response can arrive after a new lock.
     /// Finish the matching user's progress/history through the normal failure
     /// path when that delayed action is refused; scripts retain their actor.
-    fn send_deferred_teleport(&mut self, command: NetCommand, actor: uuid::Uuid) {
-        if actor.is_nil() && !self.user_teleport_allowed(&command) {
+    fn send_deferred_teleport(&mut self, command: NetCommand, actor: uuid::Uuid, portal: bool) {
+        if (portal && !self.world.rlva_allows_portal_crossing()) || (actor.is_nil() && !self.user_teleport_allowed(&command)) {
             self.world.apply(NetEvent::viewer_teleport_failed(aurora_i18n::tr!("rlva-blocked")));
         } else {
-            self.send_from(command, actor);
+            self.send_from_origin(command, actor, portal);
         }
     }
 
@@ -9133,6 +9241,11 @@ impl App {
             // (app_settings/key_bindings.xml).
             i.stop = k(Action::StopMoving) && !self.world.agent.is_sitting();
         }
+        // The movement keys alone: the seated camera keys below answer to
+        // them, not to the Controls window's buttons nor to a joystick or
+        // gamepad, which push the avatar directly (LLViewerJoystick::agentPush,
+        // LLFloaterMove) and never reach camera_move_forward_sitting & co.
+        let move_keys = i;
         // the Controls window's buttons, held like their keys
         let held = |a: Action| self.controls_held.contains(&a);
         i.forward |= held(Action::Forward);
@@ -9235,6 +9348,51 @@ impl App {
         if self.world.rlva.has("jump") && !self.world.agent.flying {
             i.up = false;
         }
+        // While seated in third person, movement keys zoom and orbit the
+        // camera instead of moving the avatar or resetting the view, unless a
+        // script took the control, a sit camera is set or the avatar runs
+        // (SeatedCameraKeys::of: camera_move_forward_sitting & co). `i.run`
+        // is the Legacy Viewer's mbTempRun: a double-tap run, the joystick's
+        // run button, and nothing under RLVa @temprun.
+        // The headset owns the keys in VR, as for the camera keys below.
+        let sitting_cam = self.vr_camera.is_none() && self.world.agent.is_sitting() && !self.camera.mouselook() && self.in_world();
+        let SeatedCameraKeys {
+            zoom_in: sit_zoom_in,
+            zoom_out: sit_zoom_out,
+            orbit_cw: sit_orbit_cw,
+            orbit_ccw: sit_orbit_ccw,
+            orbit_up: sit_orbit_up,
+            orbit_down: sit_orbit_down,
+        } = if sitting_cam {
+            SeatedCameraKeys::of(
+                &move_keys,
+                &self.world.script_controls,
+                self.camera.sit_camera_active(),
+                self.always_run,
+                i.run,
+            )
+        } else {
+            SeatedCameraKeys::default()
+        };
+
+        if sit_zoom_in {
+            i.forward = false;
+        }
+        if sit_zoom_out {
+            i.back = false;
+        }
+        if sit_orbit_cw {
+            i.turn_left = false;
+        }
+        if sit_orbit_ccw {
+            i.turn_right = false;
+        }
+        if sit_orbit_up {
+            i.up = false;
+        }
+        if sit_orbit_down {
+            i.down = false;
+        }
         // nudge phase: the first 0.25 s of a press makes small steps
         let since = |s: &mut Option<Instant>, held: bool| -> bool {
             if !held {
@@ -9284,7 +9442,18 @@ impl App {
         } else {
             i.resets_camera(self.crouch_toggle.latched())
         };
+        let moving = moving
+            && crate::camera::camera_auto_move_allowed(
+                self.ik_editor.posing(),
+                self.settings.camera.auto_move_while_posing,
+                crate::camera::AutoCameraMove::MovementReset,
+            );
         let gamepad_movement = gamepad && self.joystick.motion.player_movement_input();
+        if moving && self.mouse_mode == MouseMode::AvatarKeepOrbit {
+            // ClickOnAvatarKeepsCamera: walking (or RMB walk) takes mouse steer
+            self.camera.fold_orbit(&mut self.world.agent);
+            self.begin_mouse_steer();
+        }
         if self.vr_mode.is_none()
             && moving
             && !self.input.resets_camera(self.crouch_toggle.latched())
@@ -9333,9 +9502,23 @@ impl App {
             A::CamRollRight,
         ];
         let mut rate = [0.0f32; 12];
+        let mut unlock = false;
         for (n, a) in CAMERA_KEYS.into_iter().enumerate() {
             let key = self.vr_camera.is_none() && !typing && self.settings.keybinds.held(a, &self.down, m);
-            if self.in_world() && (key || self.controls_held.contains(&a)) {
+            let explicit = key || self.controls_held.contains(&a);
+            let sitting_active = match n {
+                0 => sit_orbit_cw,
+                1 => sit_orbit_ccw,
+                2 => sit_orbit_up,
+                3 => sit_orbit_down,
+                4 => sit_zoom_in,
+                5 => sit_zoom_out,
+                _ => false,
+            };
+            if self.in_world() && (explicit || sitting_active) {
+                if explicit {
+                    unlock = true;
+                }
                 let held = self.cam_key_since[n].get_or_insert(now).elapsed().as_secs_f32();
                 rate[n] = if held < NUDGE_TIME { 0.05 + held * 0.95 / NUDGE_TIME } else { 1.0 };
             } else {
@@ -9345,6 +9528,9 @@ impl App {
         // the photo viewfinder's camera pad, held like the keys
         if let Some(pad) = self.viewfinder_pad(dt) {
             for (r, p) in rate.iter_mut().zip(pad) {
+                if p > 0.0 {
+                    unlock = true;
+                }
                 *r = r.max(p);
             }
         }
@@ -9362,7 +9548,8 @@ impl App {
             roll_left: rate[10],
             roll_right: rate[11],
         };
-        self.camera.apply_keys(keys, &mut self.world.agent, &self.settings.camera, dt);
+        self.camera
+            .apply_keys(keys, unlock, &mut self.world.agent, &self.settings.camera, dt);
         self.camera.joystick_pitch(i.joystick_pitch, dt, gamepad);
         if gamepad
             && (!moving || self.world.agent.is_sitting() || self.camera.gamepad_pan_follows_player())
@@ -9440,7 +9627,7 @@ impl App {
         let Some(path) = self.local_env_path() else {
             return;
         };
-        match self.world.eep.saved_local().filter(|_| self.settings.env_persist) {
+        match self.world.eep.saved_session().filter(|_| self.settings.env_persist) {
             Some(data) => {
                 if let Some(dir) = path.parent() {
                     let _ = std::fs::create_dir_all(dir);
@@ -10170,6 +10357,12 @@ impl App {
         if self.demo && std::env::var("AURORA_DEMO_PARCEL_VISIBILITY").is_ok_and(|mode| mode == "crossings") {
             crate::demo::parcel_visibility::check_crossings(&self.world, self.frame_count);
         }
+        if self.demo
+            && let Some(mode) = crate::demo::parcel_env::mode()
+        {
+            crate::demo::parcel_env::frame(&mut self.world, &mut self.panels.time_of_day, &mode, self.frame_count);
+            crate::demo::parcel_visibility::update_agent_parcel(&mut self.world, "", self.frame_count);
+        }
         for c in self.world.land.take_commands() {
             self.send(c);
         }
@@ -10183,7 +10376,7 @@ impl App {
         if !self.settings.rlva_enabled {
             self.world.maturity.cancel_script_teleports();
         }
-        for (actor, c) in self.world.maturity.take_commands() {
+        for (actor, c, portal) in self.world.maturity.take_commands() {
             if matches!(
                 c,
                 NetCommand::TeleportTo { .. }
@@ -10192,7 +10385,7 @@ impl App {
                     | NetCommand::TeleportLandmark(_)
                     | NetCommand::AcceptLure { .. }
             ) {
-                self.send_deferred_teleport(c, actor);
+                self.send_deferred_teleport(c, actor, portal);
             } else {
                 self.send_from(c, actor);
             }
@@ -10224,12 +10417,15 @@ impl App {
                 self.send(c);
             }
         }
-        for c in self.world.take_map_commands() {
-            if let NetCommand::TeleportTo { handle, .. } = &c {
+        for mut c in self.world.take_map_commands() {
+            if matches!(c, NetCommand::TeleportTo { .. }) {
                 let join = self.world.prepare_friend_join(&c);
                 let flight_target = self.world.friend_teleport_avatar(&c);
+                // Friend intents match the map's tile command; convert only
+                // afterwards, before local/remote UI and the RLVa preflight.
+                self.world.normalize_map_teleport(&mut c);
                 let dest = self.world.map.track.as_ref().map(|t| t.label.clone()).unwrap_or_default();
-                let show = Some(*handle) != self.world.main_region;
+                let show = matches!(&c, NetCommand::TeleportTo { handle, .. } if Some(*handle) != self.world.main_region);
                 let accepted = if join.is_none()
                     && let Some(avatar) = flight_target
                 {
@@ -10803,6 +10999,7 @@ impl App {
             if self.env_scan && self.env_ui.scan_left != 0 {
                 self.env_ui.scan_left = crate::world::env_select::scan_step(&mut self.world.inventory);
             }
+            self.parcel_environment_frame();
             self.save_local_environment();
             for id in self.world.eep.take_failed() {
                 // FailedToFindSettings
@@ -10946,6 +11143,8 @@ impl App {
         self.update_wind_sound(dt);
         self.update_thunder();
         let mut late_camera_frame = None;
+        let mut late_camera_settings = None;
+        let mut late_poser_auto_moves = true;
         let mut late_controls = None;
         if self.in_world() {
             self.update_sounds();
@@ -11018,36 +11217,58 @@ impl App {
                 self.end_mouselook_zoom();
             }
             self.follow_awaited_zoom();
+            let poser_auto_moves = crate::camera::camera_auto_move_allowed(
+                self.ik_editor.posing(),
+                self.settings.camera.auto_move_while_posing,
+                crate::camera::AutoCameraMove::AutomaticTracking,
+            );
+            let poser_eye_follow = crate::camera::camera_auto_move_allowed(
+                self.ik_editor.posing(),
+                self.settings.camera.auto_move_while_posing,
+                crate::camera::AutoCameraMove::FollowEyes,
+            );
+            let mut camera_settings = self.settings.camera.clone();
+            if !poser_auto_moves {
+                camera_settings.track_focus_object = false;
+                camera_settings.reset_on_movement = false;
+            }
+            if !poser_eye_follow {
+                camera_settings.mouselook_follow_eyes = false;
+            }
             let frame = crate::camera::FrameInput {
                 dt,
                 aspect: self.camera_aspect(),
                 now: world_now(),
                 steering: self.mouse_mode == MouseMode::Steer,
                 build_mode: self.build.open,
-                edit_tracking: self
-                    .camera
-                    .focus_object_id()
-                    .filter(|id| self.build.edits_object(&self.world, id))
-                    .map(|_| self.settings.build.follow_edit_object),
+                edit_tracking: if poser_auto_moves {
+                    self.camera
+                        .focus_object_id()
+                        .filter(|id| self.build.edits_object(&self.world, id))
+                        .map(|_| self.settings.build.follow_edit_object)
+                } else {
+                    Some(false)
+                },
                 eye_offset: None,
                 follow_joint_offset: None,
                 draw_distance: self.settings.draw_distance,
                 region_width: self.world.main().map_or(256.0, |r| r.heightmap.size_x as f32),
             };
-            if frame.edit_tracking.is_some()
-                || self.camera.needs_animated_eyes(&self.world.agent, &self.settings.camera)
-                || self.camera.needs_animated_joint(&self.settings.camera)
+            if (poser_auto_moves && frame.edit_tracking.is_some())
+                || (poser_auto_moves && self.camera.needs_animated_eyes(&self.world.agent, &camera_settings))
+                || (poser_auto_moves && self.camera.needs_animated_joint(&camera_settings))
             {
                 // Evaluate the focused edit selection after the local drag,
                 // and first-person eyes after this frame's animation.
                 late_camera_frame = Some(frame);
+                late_camera_settings = Some(camera_settings.clone());
+                late_poser_auto_moves = poser_auto_moves;
             } else {
                 if self.vr_camera.is_some() {
-                    self.camera
-                        .update_vr(&mut self.world, &self.settings.camera, &frame, self.vr_rig_yaw);
+                    self.camera.update_vr(&mut self.world, &camera_settings, &frame, self.vr_rig_yaw);
                     self.vr_counter_body_motion();
                 } else {
-                    self.camera.update(&mut self.world, &self.settings.camera, &frame);
+                    self.camera.update(&mut self.world, &camera_settings, &frame);
                 }
             }
             if self.demo
@@ -11145,7 +11366,7 @@ impl App {
             if !self.world.agent.flying && self.world.rlva.has("jump") {
                 c.control_flags &= !control::UP_POS;
             }
-            if late_camera_frame.is_some() && self.camera.needs_animated_eyes(&self.world.agent, &self.settings.camera) {
+            if late_camera_frame.is_some() && poser_auto_moves && self.camera.needs_animated_eyes(&self.world.agent, &camera_settings) {
                 late_controls = Some(c);
             } else {
                 self.net.set_controls(c);
@@ -11516,7 +11737,10 @@ impl App {
             if !self.egui_ctx.input(|i| i.pointer.any_down()) && self.ik_editor.sync_poser_settings(&mut self.settings.poser) {
                 self.settings.save();
             }
-            self.scene.poser = self.ik_editor.pose_layers(&self.world);
+            let poser = self
+                .ik_editor
+                .pose_layers_with_base(&self.world, |id| self.scene.skeleton_base(&id));
+            self.scene.poser = poser;
             self.outfit_portrait_pose();
             self.ik_editor.tick_pose_storage(&self.scene.jobs, &self.egui_ctx, &self.world);
             if !self.scene.poser.is_empty() {
@@ -11705,23 +11929,24 @@ impl App {
             self.flush_build();
             let camera_changed = late_camera_frame.is_some() || panned;
             if let Some(mut frame) = late_camera_frame {
+                let camera_settings = late_camera_settings.unwrap_or_else(|| self.settings.camera.clone());
                 frame.eye_offset = self.scene.eyes_offset(&self.world, &self.world.agent_id);
                 frame.follow_joint_offset = self
                     .settings
                     .camera
                     .third_person_follow_joint
                     .and_then(|joint| self.scene.joint_offset(&self.world, &self.world.agent_id, joint.rig_name()));
-                if self.camera.needs_animated_eyes(&self.world.agent, &self.settings.camera)
-                    || self.camera.needs_animated_joint(&self.settings.camera)
+                if late_poser_auto_moves
+                    && (self.camera.needs_animated_eyes(&self.world.agent, &camera_settings)
+                        || self.camera.needs_animated_joint(&camera_settings))
                 {
                     frame.now = now;
                 }
                 if self.vr_camera.is_some() {
-                    self.camera
-                        .update_vr(&mut self.world, &self.settings.camera, &frame, self.vr_rig_yaw);
+                    self.camera.update_vr(&mut self.world, &camera_settings, &frame, self.vr_rig_yaw);
                     self.vr_counter_body_motion();
                 } else {
-                    self.camera.update(&mut self.world, &self.settings.camera, &frame);
+                    self.camera.update(&mut self.world, &camera_settings, &frame);
                 }
                 if let Some(controls) = late_controls {
                     // AgentUpdate must describe the displayed eye and aim,
@@ -13339,7 +13564,10 @@ impl App {
             crate::link_preview::configure_sites(&self.settings.link_previews.picture_sites, crate::demo::picture_sites());
             sync_auto_render_scale(&mut self.settings, gfx.window.scale_factor());
             gfx.renderer.apply_settings(self.settings.render_settings());
-            self.panels.time_of_day = self.settings.time_of_day;
+            // (a parcel's saved preset is not in the settings: it stays shown)
+            if !self.world.eep.parcel_held() {
+                self.panels.time_of_day = self.settings.time_of_day;
+            }
             self.egui_ctx.set_zoom_factor(ui_scale(&self.settings));
             self.disk_cache.set_limit_mb(self.settings.cache_size_mb);
             self.net.set_bandwidth(bandwidth_kbps(&self.settings));
@@ -15990,6 +16218,14 @@ impl App {
             }
             BarAction::ShowHuds(visible) => self.set_show_huds(visible),
             BarAction::ToggleHuds => self.set_show_huds(!self.settings.show_huds),
+            BarAction::ToggleAoMini => {
+                let saved = self.settings.ao.accounts.entry(self.world.agent_id).or_default();
+                saved.mini_open = !saved.mini_open;
+                self.panels.ao_mini = saved.mini_open;
+                if !self.demo {
+                    self.settings.save();
+                }
+            }
             BarAction::HudZoom(zoom) => self.world.hud_zoom = zoom.clamp(0.1, 1.0),
             BarAction::None => {}
             BarAction::IkEdit => {
@@ -16277,6 +16513,14 @@ impl App {
                 log::info!("quiet snapshots: {}", !self.settings.snapshot.sound);
             }
             BarAction::ReleaseKeys => self.release_keys(),
+            BarAction::AnimationSpeed(speed) => {
+                self.scene.animation_speed = speed.clamp(0.1, 2.0);
+                log::info!("animation speed: {:.1}x", self.scene.animation_speed);
+            }
+            BarAction::ToggleSlowMotionAnimations => {
+                self.scene.slow_motion_animations = !self.scene.slow_motion_animations;
+                log::info!("slow motion animations: {}", self.scene.slow_motion_animations);
+            }
             BarAction::ToggleWaterWalk => self.toggle_water_walk(),
             BarAction::ToggleSwimming => self.toggle_swimming(),
             BarAction::MoveLockOptions => self.movelock_ui.open = true,
@@ -17838,6 +18082,14 @@ impl App {
                         ui::layout::set_move_area(&ctx, screen);
                         self.ik_editor.over_viewfinder = true;
                         self.ik_editor.show(&ctx, &p, &self.world, projector);
+                        let focus = self.ik_editor.take_poser_focus(&self.world);
+                        apply_poser_focus_request(
+                            &mut self.camera,
+                            &mut self.world.agent,
+                            &self.settings.camera,
+                            self.ik_editor.posing(),
+                            focus,
+                        );
                         self.ik_editor.over_viewfinder = false;
                     }
                     // the posing consent too, poser open or not: a request
@@ -18153,6 +18405,8 @@ impl App {
                     fly_override: self.world.fly_override,
                     quiet_snapshots: !self.settings.snapshot.sound,
                     release_keys: release_keys::enabled(&self.world),
+                    animation_speed: self.scene.animation_speed,
+                    slow_motion_animations: self.scene.slow_motion_animations,
                     parcel_landmark,
                     can_set_home: self.world.can_set_home(),
                     can_go_home: self.world.rlva_can_teleport_home(),
@@ -18328,6 +18582,7 @@ impl App {
                     ear: self.settings.audio.voice_ear,
                     noise_suppression: self.settings.audio.voice_noise_suppression,
                     output_device: self.settings.audio.output_device.clone(),
+                    voice_output_device: self.settings.audio.voice_output_device.clone(),
                     input_devices: &self.options_ui.input_devices,
                     output_devices: &self.options_ui.output_devices,
                     devices_listing: self.options_ui.devices_listing,
@@ -18613,13 +18868,14 @@ impl App {
                 }
                 self.mic_on = mic.on;
                 self.mic_button_held = mic.held;
-                if mic.mode_changed || mic.devices_changed || mic.processing_changed {
+                if mic.mode_changed || mic.devices_changed || mic.voice_output_changed || mic.processing_changed {
                     // the audio engine and the voice follow the settings
                     self.settings.audio.mic_hold = mic.hold;
                     self.settings.audio.voice_ear = mic.ear;
                     self.settings.audio.voice_noise_suppression = mic.noise_suppression;
                     self.settings.audio.input_device = std::mem::take(&mut mic.input_device);
                     self.settings.audio.output_device = std::mem::take(&mut mic.output_device);
+                    self.settings.audio.voice_output_device = std::mem::take(&mut mic.voice_output_device);
                     self.settings.save();
                 }
                 let (open_prefs, list_devices, open_processing) = (mic.open_prefs, mic.list_devices, mic.open_processing);
@@ -18657,6 +18913,14 @@ impl App {
                     },
                 );
                 self.ik_editor.show(&ctx, &p, &self.world, projector);
+                let focus = self.ik_editor.take_poser_focus(&self.world);
+                apply_poser_focus_request(
+                    &mut self.camera,
+                    &mut self.world.agent,
+                    &self.settings.camera,
+                    self.ik_editor.posing(),
+                    focus,
+                );
                 if !self.ik_editor.posing() {
                     self.ik_editor.request_object_data(&mut self.world, Instant::now());
                     self.build.out.extend(self.ik_editor.take_prim_requests());
@@ -19647,6 +19911,7 @@ impl App {
                             destination: "hop://hg.example-grid.org:80/Harbor%20Plaza/128/128/25".into(),
                             pos: Vec3::new(128.0, 128.0, 25.0),
                             look_at: Vec3::X,
+                            portal: false,
                         },
                         grid: "hg.example-grid.org:80".into(),
                         names: [
@@ -20586,8 +20851,9 @@ impl App {
                 self.settings.appearance_tab = u8::try_from(self.appearance_ui.tab).unwrap_or(0);
                 self.settings.show_ao = self.panels.ao;
                 // (the photo's time of day is its own layer, never saved)
-                if self.panels.time_of_day != self.settings.time_of_day {
-                    self.settings.time_of_day = self.panels.time_of_day;
+                let time_of_day = self.world.eep.session_time_of_day(self.panels.time_of_day);
+                if time_of_day != self.settings.time_of_day {
+                    self.settings.time_of_day = time_of_day;
                 }
                 if let Some(msg) = self.world.alerts.pop_front() {
                     log::info!("alert: {msg}");
@@ -20954,6 +21220,15 @@ impl ApplicationHandler for App {
         });
         if std::env::var_os("AURORA_DEMO").is_some() {
             self.demo = true;
+            // the starting session speed only: Advanced › Animation Speed
+            // still changes it live
+            if let Some(speed) = std::env::var("AURORA_DEMO_ANIM_SPEED")
+                .ok()
+                .and_then(|v| v.trim().parse::<f32>().ok())
+                .filter(|v| v.is_finite())
+            {
+                self.scene.animation_speed = crate::scene::anim::adjusted_animation_speed(speed, 0.0);
+            }
             if let Ok(modes) = std::env::var("AURORA_DEMO_VOICE_PREFS") {
                 for mode in modes.split(',') {
                     let a = &mut self.settings.audio;
@@ -22128,6 +22403,9 @@ impl ApplicationHandler for App {
             }
             if let Ok(mode) = std::env::var("AURORA_DEMO_PARCEL_VISIBILITY") {
                 crate::demo::parcel_visibility::install(&mut self.world, &mut self.settings, &mode);
+            }
+            if crate::demo::parcel_env::mode().is_some() {
+                crate::demo::parcel_visibility::install(&mut self.world, &mut self.settings, "off");
             }
             // AURORA_DEMO_APPLINKS: a link of each `secondlife:///app/...`
             // command, in a conversation and in the bubbles
@@ -24576,6 +24854,61 @@ fn automatic_fly_held(since: &mut Option<Instant>, up: bool, enabled: bool, now:
     now.duration_since(*since.get_or_insert(now)).as_secs_f32() > FLY_TIME
 }
 
+/// The movement keys a seated avatar hands to the camera: W / S zoom, A / D
+/// orbit around the avatar, E / C tilt it (camera_move_forward_sitting,
+/// camera_move_backward_sitting, camera_spin_around_cw_sitting,
+/// camera_spin_around_ccw_sitting, camera_spin_over_sitting and
+/// camera_spin_under_sitting, indra/newview/llviewerinput.cpp, originally
+/// LGPL 2.1). Each key goes to the avatar instead when its Legacy condition
+/// says so.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct SeatedCameraKeys {
+    zoom_in: bool,
+    zoom_out: bool,
+    /// The turn-left key: spin_around_cw (the camera orbits right).
+    orbit_cw: bool,
+    /// The turn-right key: spin_around_ccw (the camera orbits left).
+    orbit_ccw: bool,
+    orbit_up: bool,
+    orbit_down: bool,
+}
+
+impl SeatedCameraKeys {
+    /// What the held `keys` do while seated in third person.
+    ///
+    /// - A script that took a control outright keeps it (forwardGrabbed,
+    ///   backwardGrabbed, rotateGrabbed, upGrabbed, downGrabbed: only the
+    ///   controls taken without pass-on; a pass-on hold does not stop the
+    ///   camera).
+    /// - A script-defined sit camera (sitCameraEnabled) keeps every key.
+    /// - A / D also go to the avatar while it runs: `getRunning()`, that is
+    ///   Always Run (`always_run`, mbAlwaysRun) or a temporary run
+    ///   (`temp_run`, mbTempRun: double-tap, joystick run button).
+    /// - W / S go to the avatar while it runs only by a temporary run:
+    ///   `getRunning() && !getAlwaysRun()`. With Always Run on they zoom,
+    ///   even after a double-tap (the Legacy Viewer never sets mbTempRun
+    ///   while Always Run is on).
+    /// - E / C have no run condition.
+    fn of(
+        keys: &MoveInput,
+        script: &aurora_net::script_controls::ScriptControls,
+        sit_camera: bool,
+        always_run: bool,
+        temp_run: bool,
+    ) -> Self {
+        let running = always_run || temp_run;
+        let temp_running = temp_run && !always_run;
+        Self {
+            zoom_in: keys.forward && !script.forward_grabbed() && !sit_camera && !temp_running,
+            zoom_out: keys.back && !script.backward_grabbed() && !sit_camera && !temp_running,
+            orbit_cw: keys.turn_left && !script.rotate_grabbed() && !sit_camera && !running,
+            orbit_ccw: keys.turn_right && !script.rotate_grabbed() && !sit_camera && !running,
+            orbit_up: keys.up && !script.up_grabbed() && !sit_camera,
+            orbit_down: keys.down && !script.down_grabbed() && !sit_camera,
+        }
+    }
+}
+
 /// Name of the swapchain's presentation mode for the profile and the bug
 /// reports; `unknown` until the renderer has answered a frame.
 fn present_mode_name(mode: Option<aurora_render::wgpu::PresentMode>) -> &'static str {
@@ -24670,6 +25003,21 @@ mod tests {
         assert!(clouds_choice(Some("aurora"), false, false));
         assert!(!clouds_choice(Some("legacy"), true, true), "before / after on the same sky");
         assert!(clouds_choice(Some("other"), true, false), "an unknown value changes nothing");
+    }
+
+    #[test]
+    fn world_press_does_not_fall_through_for_unhandled_poser_subject_clicks() {
+        let stops_world_press = super::world_press_stops_for_poser_subject;
+        assert!(stops_world_press(true, false, true), "body press cannot reach world steering/focus");
+        assert!(!stops_world_press(true, true, true), "Alt camera gesture remains available");
+        assert!(
+            !stops_world_press(true, false, false),
+            "clicks away from the posed subject keep normal behavior"
+        );
+        assert!(
+            !stops_world_press(false, false, true),
+            "outside posing, subject click keeps normal behavior"
+        );
     }
 
     #[test]
@@ -24774,6 +25122,138 @@ mod tests {
         assert!(!super::synthetic_press(true, Released));
         assert!(!super::synthetic_press(false, Pressed));
         assert!(!super::synthetic_press(false, Released));
+    }
+
+    /// Seated keys against the script controls and the run state, as the
+    /// Legacy Viewer's camera_*_sitting functions decide them.
+    mod seated_camera_keys {
+        use super::super::SeatedCameraKeys;
+        use crate::agent::MoveInput;
+        use aurora_net::control;
+        use aurora_net::script_controls::ScriptControls;
+
+        /// W, S, A, D, E and C all held.
+        fn all_held() -> MoveInput {
+            MoveInput {
+                forward: true,
+                back: true,
+                turn_left: true,
+                turn_right: true,
+                up: true,
+                down: true,
+                ..Default::default()
+            }
+        }
+
+        fn of(script: &ScriptControls, sit_camera: bool, always_run: bool, temp_run: bool) -> SeatedCameraKeys {
+            SeatedCameraKeys::of(&all_held(), script, sit_camera, always_run, temp_run)
+        }
+
+        fn all_to_the_camera() -> SeatedCameraKeys {
+            SeatedCameraKeys {
+                zoom_in: true,
+                zoom_out: true,
+                orbit_cw: true,
+                orbit_ccw: true,
+                orbit_up: true,
+                orbit_down: true,
+            }
+        }
+
+        #[test]
+        fn free_seat_gives_every_key_to_the_camera() {
+            assert_eq!(of(&ScriptControls::default(), false, false, false), all_to_the_camera());
+        }
+
+        #[test]
+        fn a_key_not_held_stays_with_the_avatar() {
+            let keys = MoveInput {
+                forward: true,
+                ..Default::default()
+            };
+            let seated = SeatedCameraKeys::of(&keys, &ScriptControls::default(), false, false, false);
+            assert_eq!(
+                seated,
+                SeatedCameraKeys {
+                    zoom_in: true,
+                    ..Default::default()
+                }
+            );
+        }
+
+        #[test]
+        fn controls_taken_outright_keep_their_key() {
+            for (flag, key) in [
+                (control::AT_POS, "zoom_in"),
+                (control::AT_NEG, "zoom_out"),
+                (control::YAW_POS, "orbit_cw and orbit_ccw"),
+                (control::YAW_NEG, "orbit_cw and orbit_ccw"),
+                (control::UP_POS, "orbit_up"),
+                (control::UP_NEG, "orbit_down"),
+            ] {
+                let mut script = ScriptControls::default();
+                script.apply(true, flag, false);
+                let seated = of(&script, false, false, false);
+                let mut expected = all_to_the_camera();
+                match flag {
+                    control::AT_POS => expected.zoom_in = false,
+                    control::AT_NEG => expected.zoom_out = false,
+                    control::YAW_POS | control::YAW_NEG => {
+                        expected.orbit_cw = false;
+                        expected.orbit_ccw = false;
+                    }
+                    control::UP_POS => expected.orbit_up = false,
+                    _ => expected.orbit_down = false,
+                }
+                assert_eq!(seated, expected, "{key} goes to the script");
+            }
+        }
+
+        #[test]
+        fn controls_passed_on_do_not_stop_the_camera() {
+            // llTakeControls(..., TRUE, ...): the script listens, the camera
+            // keeps its keys (mControlsTakenCount only, not the pass-on count)
+            let mut script = ScriptControls::default();
+            script.apply(
+                true,
+                control::AT_POS | control::AT_NEG | control::YAW_POS | control::YAW_NEG | control::UP_POS | control::UP_NEG,
+                true,
+            );
+            assert!(script.any());
+            assert_eq!(of(&script, false, false, false), all_to_the_camera());
+        }
+
+        #[test]
+        fn a_sit_camera_keeps_every_key_for_the_avatar() {
+            assert_eq!(of(&ScriptControls::default(), true, false, false), SeatedCameraKeys::default());
+        }
+
+        #[test]
+        fn a_temporary_run_sends_every_walk_and_turn_key_to_the_avatar() {
+            let seated = of(&ScriptControls::default(), false, false, true);
+            assert!(!seated.zoom_in && !seated.zoom_out, "W / S push the avatar");
+            assert!(!seated.orbit_cw && !seated.orbit_ccw, "A / D turn the avatar");
+            assert!(seated.orbit_up && seated.orbit_down, "E / C have no run condition");
+        }
+
+        #[test]
+        fn always_run_sends_the_turn_keys_to_the_avatar_but_not_w_and_s() {
+            let seated = of(&ScriptControls::default(), false, true, false);
+            assert!(seated.zoom_in && seated.zoom_out, "getRunning() && !getAlwaysRun() is false");
+            assert!(!seated.orbit_cw && !seated.orbit_ccw, "getRunning() is true");
+            assert!(seated.orbit_up && seated.orbit_down);
+        }
+
+        #[test]
+        fn a_double_tap_under_always_run_still_zooms() {
+            // Aurora marks a double-tap run even with Always Run on; the Legacy
+            // Viewer never does (run_forward checks !getRunning()), so W / S
+            // behave as with Always Run alone
+            assert_eq!(
+                of(&ScriptControls::default(), false, true, true),
+                of(&ScriptControls::default(), false, true, false)
+            );
+        }
     }
 
     #[test]

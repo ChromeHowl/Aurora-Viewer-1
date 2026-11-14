@@ -17,6 +17,17 @@ pub(super) enum Operation {
     WorldLock,
 }
 impl Editor {
+    /// One undo step for the chosen joint and, in Mirror mode, its counterpart.
+    pub(super) fn toggle_pose_joint(&mut self, bone: usize) {
+        let counterpart = (self.poser.side == Side::Mirror).then(|| self.mirrors.counterpart(bone)).flatten();
+        if let Some(session) = self.poser.sessions.get_mut(&self.poser.subject) {
+            session.toggle_joint(bone, counterpart);
+            self.refresh = true;
+            self.gizmo.cancel();
+            self.poser.scale_gizmo.cancel();
+            self.poser.drag_checkpoint = false;
+        }
+    }
     pub(super) fn pose_operation(&mut self, rig: &Rig, frame: &Frame, operation: Operation) {
         self.mirrors.initialize(rig);
         // the joint actions go to every selected joint, as the Legacy
@@ -352,6 +363,7 @@ impl Editor {
             .sessions
             .get(&self.poser.subject)
             .is_some_and(|s| s.pose.locks.contains_key(&bone));
+        let enabled = self.poser.sessions.get(&self.poser.subject).is_some_and(|s| s.pose.enabled[bone]);
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
@@ -386,138 +398,164 @@ impl Editor {
                         }
                     });
                 }
+                let mut joint_enabled = enabled;
+                if widgets::switch_labeled(ui, p, &mut joint_enabled, aurora_i18n::tr!("poser-joint-pose"))
+                    .on_hover_text(aurora_i18n::tr!("poser-joint-pose-tip"))
+                    .changed()
+                {
+                    self.toggle_pose_joint(bone);
+                }
+                if !joint_enabled {
+                    ui.label(egui::RichText::new(aurora_i18n::tr!("poser-joint-off")).size(11.5).color(p.muted));
+                }
             });
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                self.reset_button(ui, p, rig, frame);
-                let paired = self.mirrors.counterpart(bone).is_some();
-                if widgets::icon_button(ui, p, "arrows-horizontal", aurora_i18n::text("poser-mirror"), paired) {
-                    self.pose_operation(rig, frame, Operation::Mirror);
-                }
-                if widgets::icon_toggle(ui, p, "pin-filled", aurora_i18n::text("poser-world-lock"), locked) {
-                    self.pose_operation(rig, frame, Operation::WorldLock);
-                }
+            ui.add_enabled_ui(enabled, |ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    self.reset_button(ui, p, rig, frame);
+                    let paired = self.mirrors.counterpart(bone).is_some();
+                    if widgets::icon_button(ui, p, "arrows-horizontal", aurora_i18n::text("poser-mirror"), paired) {
+                        self.pose_operation(rig, frame, Operation::Mirror);
+                    }
+                    let pin_tip = format!(
+                        "{}\n{}",
+                        aurora_i18n::tr!("poser-world-lock"),
+                        aurora_i18n::tr!("poser-world-lock-animation-tip")
+                    );
+                    if widgets::icon_toggle(ui, p, "pin-filled", &pin_tip, locked) {
+                        self.pose_operation(rig, frame, Operation::WorldLock);
+                    }
+                });
             });
         });
         ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            let modes = [
-                (aurora_i18n::text("poser-mode-rotation"), false),
-                (aurora_i18n::text("poser-mode-position"), false),
-                (aurora_i18n::text("poser-mode-scale"), false),
-            ];
-            let animation_active = self.clip.active;
-            if animation_active && self.clip.restrict_pose_transform(&mut self.poser.transform) {
-                self.tool = Tool::Rotate;
-                self.poser.cancel_scale_gizmo();
-            }
-            let available_modes = if animation_active { &modes[..2] } else { &modes[..] };
-            let changed = widgets::segmented(ui, p, &mut self.poser.transform, available_modes);
-            if changed {
-                self.tool = if self.poser.transform == 0 { Tool::Rotate } else { Tool::Move };
-                self.gizmo.cancel();
-                self.poser.scale_gizmo.cancel();
-            }
-            ui.label(
-                egui::RichText::new(aurora_i18n::text(
-                    ["poser-hint-rotation", "poser-hint-position", "poser-hint-scale"][self.poser.transform.min(2)],
-                ))
-                .size(12.0)
-                .color(p.muted),
-            );
-        });
-        ui.add_space(6.0);
-        let Some(session) = self.poser.sessions.get(&self.poser.subject) else {
-            return;
-        };
-        let pose = session.pose.clone();
-        let base = session.base.clone();
-        let base_point = (self.poser.transform == 1).then(|| base.matrices(rig, frame.model)[bone].w_axis.truncate());
-        let Some(mut value) = self.joint_value(rig, frame, bone) else {
-            return;
-        };
-        let mut edited = false;
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 16.0;
-            ui.vertical(|ui| {
-                let (rect, response) = ui.allocate_exact_size(egui::vec2(TRACKBALL, TRACKBALL), Sense::drag());
-                if self.poser.transform == 0 {
-                    response.clone().on_hover_text(aurora_i18n::tr!("poser-fine-adjustment"));
+        ui.add_enabled_ui(enabled, |ui| {
+            ui.horizontal(|ui| {
+                let modes = [
+                    (aurora_i18n::text("poser-mode-rotation"), false),
+                    (aurora_i18n::text("poser-mode-position"), false),
+                    (aurora_i18n::text("poser-mode-scale"), false),
+                ];
+                let animation_active = self.clip.active;
+                if animation_active && self.clip.restrict_pose_transform(&mut self.poser.transform) {
+                    self.tool = Tool::Rotate;
+                    self.poser.cancel_scale_gizmo();
                 }
-                let painter = ui.painter();
-                let center = rect.center();
-                let radius = TRACKBALL / 2.0 - 14.0;
-                painter.circle_filled(center, TRACKBALL / 2.0, p.bar);
-                painter.circle_stroke(center, TRACKBALL / 2.0, Stroke::new(1.0, p.raised));
-                if let Some(cam) = self.poser.camera {
-                    let parent = rig.parent[bone]
-                        .map_or(frame.model, |b| frame.joints[b])
-                        .to_scale_rotation_translation()
-                        .1;
-                    // the joint's own axes for rotation and scale, the
-                    // avatar's for position (its values' frame)
-                    let axes = match self.poser.transform {
-                        1 => frame.model.to_scale_rotation_translation().1,
-                        _ => (parent * pose.rotations[bone]).normalize(),
-                    };
+                let available_modes = if animation_active { &modes[..2] } else { &modes[..] };
+                let changed = widgets::segmented(ui, p, &mut self.poser.transform, available_modes);
+                if changed {
+                    self.tool = if self.poser.transform == 0 { Tool::Rotate } else { Tool::Move };
+                    self.gizmo.cancel();
+                    self.poser.scale_gizmo.cancel();
+                }
+                ui.label(
+                    egui::RichText::new(aurora_i18n::text(match self.poser.transform.min(2) {
+                        0 => "poser-hint-rotation",
+                        1 if self.poser.move_joint_only => "poser-hint-position-only",
+                        1 => "poser-hint-position",
+                        _ => "poser-hint-scale",
+                    }))
+                    .size(12.0)
+                    .color(p.muted),
+                );
+            });
+            if self.poser.transform == 1 {
+                widgets::switch_labeled(ui, p, &mut self.poser.move_joint_only, aurora_i18n::tr!("poser-move-joint-only"))
+                    .on_hover_text(aurora_i18n::text("poser-move-joint-only-hint"));
+            }
+            ui.add_space(6.0);
+            let Some(session) = self.poser.sessions.get(&self.poser.subject) else {
+                return;
+            };
+            let pose = session.pose.clone();
+            let base = session.base.clone();
+            let base_point = (self.poser.transform == 1).then(|| base.matrices(rig, frame.model)[bone].w_axis.truncate());
+            let Some(mut value) = self.joint_value(rig, frame, bone) else {
+                return;
+            };
+            let mut edited = false;
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 16.0;
+                ui.vertical(|ui| {
+                    let (rect, response) = ui.allocate_exact_size(egui::vec2(TRACKBALL, TRACKBALL), Sense::drag());
                     if self.poser.transform == 0 {
-                        painter.circle_stroke(center, radius, Stroke::new(1.5, p.muted_dim));
+                        response.clone().on_hover_text(aurora_i18n::tr!("poser-fine-adjustment"));
                     }
-                    for axis in 0..3 {
-                        let dir = axes * Vec3::AXES[axis];
-                        let end = center + trackball::project(&cam, dir) * radius;
-                        let color = crate::build::draw::fade(
-                            crate::build::draw::axis_color(p, axis),
-                            if dir.dot(cam.at) > 0.0 { 0.45 } else { 1.0 },
-                        );
-                        painter.line_segment([center, end], Stroke::new(2.5, color));
-                        if self.poser.transform == 2 {
-                            painter.rect_filled(
-                                egui::Rect::from_center_size(end, egui::Vec2::splat(10.0)),
-                                0.0, // theme-guard: content — the scale gizmo's square handles
-                                color,
+                    let painter = ui.painter();
+                    let center = rect.center();
+                    let radius = TRACKBALL / 2.0 - 14.0;
+                    painter.circle_filled(center, TRACKBALL / 2.0, p.bar);
+                    painter.circle_stroke(center, TRACKBALL / 2.0, Stroke::new(1.0, p.raised));
+                    if let Some(cam) = self.poser.camera {
+                        let parent = rig.parent[bone]
+                            .map_or(frame.model, |b| frame.joints[b])
+                            .to_scale_rotation_translation()
+                            .1;
+                        // the joint's own axes for rotation and scale, the
+                        // avatar's for position (its values' frame)
+                        let axes = match self.poser.transform {
+                            1 => frame.model.to_scale_rotation_translation().1,
+                            _ => (parent * pose.rotations[bone]).normalize(),
+                        };
+                        if self.poser.transform == 0 {
+                            painter.circle_stroke(center, radius, Stroke::new(1.5, p.muted_dim));
+                        }
+                        for axis in 0..3 {
+                            let dir = axes * Vec3::AXES[axis];
+                            let end = center + trackball::project(&cam, dir) * radius;
+                            let color = crate::build::draw::fade(
+                                crate::build::draw::axis_color(p, axis),
+                                if dir.dot(cam.at) > 0.0 { 0.45 } else { 1.0 },
                             );
-                        } else if self.poser.transform == 1 {
-                            painter.circle_filled(end, 3.5, color);
+                            painter.line_segment([center, end], Stroke::new(2.5, color));
+                            if self.poser.transform == 2 {
+                                painter.rect_filled(
+                                    egui::Rect::from_center_size(end, egui::Vec2::splat(10.0)),
+                                    0.0, // theme-guard: content — the scale gizmo's square handles
+                                    color,
+                                );
+                            } else if self.poser.transform == 1 {
+                                painter.circle_filled(end, 3.5, color);
+                            }
+                        }
+                        painter.circle_filled(center, 4.0, p.ink);
+                        if self.poser.transform == 0 && response.dragged() {
+                            let (pointer_delta, fine) = ui.input(|i| (i.pointer.delta(), i.modifiers.shift));
+                            let d = trackball::drag_delta(pointer_delta, self.poser.sensitivity, fine);
+                            let local = trackball::rotate(&cam, parent, pose.rotations[bone], d);
+                            let q = if self.poser.delta {
+                                base.rotations[bone].inverse() * local
+                            } else {
+                                local
+                            };
+                            let (z, y, x) = q.to_euler(EulerRot::ZYX);
+                            value = Vec3::new(x, y, z) * 180.0 / std::f32::consts::PI;
+                            edited = true;
                         }
                     }
-                    painter.circle_filled(center, 4.0, p.ink);
-                    if self.poser.transform == 0 && response.dragged() {
-                        let (pointer_delta, fine) = ui.input(|i| (i.pointer.delta(), i.modifiers.shift));
-                        let d = trackball::drag_delta(pointer_delta, self.poser.sensitivity, fine);
-                        let local = trackball::rotate(&cam, parent, pose.rotations[bone], d);
-                        let q = if self.poser.delta {
-                            base.rotations[bone].inverse() * local
-                        } else {
-                            local
-                        };
-                        let (z, y, x) = q.to_euler(EulerRot::ZYX);
-                        value = Vec3::new(x, y, z) * 180.0 / std::f32::consts::PI;
-                        edited = true;
-                    }
-                }
-                ui.allocate_ui_with_layout(egui::vec2(TRACKBALL, 30.0), egui::Layout::top_down(egui::Align::Center), |ui| {
-                    ui.set_width(TRACKBALL);
-                    ui.label(
-                        egui::RichText::new(aurora_i18n::text(
-                            ["poser-ball-rotation", "poser-ball-position", "poser-ball-scale"][self.poser.transform.min(2)],
-                        ))
-                        .size(11.0)
-                        .color(p.muted_dim),
-                    );
+                    ui.allocate_ui_with_layout(egui::vec2(TRACKBALL, 30.0), egui::Layout::top_down(egui::Align::Center), |ui| {
+                        ui.set_width(TRACKBALL);
+                        ui.label(
+                            egui::RichText::new(aurora_i18n::text(
+                                ["poser-ball-rotation", "poser-ball-position", "poser-ball-scale"][self.poser.transform.min(2)],
+                            ))
+                            .size(11.0)
+                            .color(p.muted_dim),
+                        );
+                    });
+                });
+                ui.vertical(|ui| {
+                    ui.add_space(TRACKBALL / 2.0 - 60.0);
+                    edited |= self.axis_sliders(ui, p, &mut value, base_point);
+                    ui.add_space(4.0);
+                    // beside the trackball the column is narrow: the French and a
+                    // larger font take two lines
+                    widgets::switch_labeled_wrapped(ui, p, &mut self.poser.delta, aurora_i18n::tr!("poser-delta"));
                 });
             });
-            ui.vertical(|ui| {
-                ui.add_space(TRACKBALL / 2.0 - 60.0);
-                edited |= self.axis_sliders(ui, p, &mut value, base_point);
-                ui.add_space(4.0);
-                // beside the trackball the column is narrow: the French and a
-                // larger font take two lines
-                widgets::switch_labeled_wrapped(ui, p, &mut self.poser.delta, aurora_i18n::tr!("poser-delta"));
-            });
+            if edited {
+                self.apply_joint_value(rig, frame, bone, value);
+            }
         });
-        if edited {
-            self.apply_joint_value(rig, frame, bone, value);
-        }
         ui.add_space(14.0);
         bones::caption(ui, p, aurora_i18n::text("poser-whole-pose"));
         ui.horizontal_wrapped(|ui| {

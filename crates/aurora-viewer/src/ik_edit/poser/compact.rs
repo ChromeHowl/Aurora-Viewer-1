@@ -289,19 +289,20 @@ impl Editor {
         let session = self.poser.sessions.get(&self.poser.subject);
         let enabled = session.is_some_and(|s| s.enabled);
         let count = session.map_or(0, |s| (0..rig.len()).filter(|b| s.edited(*b)).count());
-        let initials_of = |id: Uuid| subjects::subject_short_name(world, id);
+        let names = self.poser.subject_names.clone();
+        let initials_of = |id: Uuid| subjects::subject_short_name(world, &names, id);
         let mut others: Vec<(Uuid, String)> = self
             .poseable_others(world)
             .into_iter()
-            .map(|id| (id, subjects::subject_short_name(world, id)))
+            .map(|id| (id, subjects::subject_short_name(world, &names, id)))
             .collect();
         // you first, then by name
         others.sort_by(|a, b| (a.0 != world.agent_id, &a.1).cmp(&(b.0 != world.agent_id, &b.1)));
         // you are "You"; a resident by their display name alone
         let name = if self.poser.subject == world.agent_id {
-            subjects::subject_name(world, self.poser.subject)
+            subjects::subject_name(world, &self.poser.subject_names, self.poser.subject)
         } else {
-            subjects::subject_short_name(world, self.poser.subject)
+            subjects::subject_short_name(world, &self.poser.subject_names, self.poser.subject)
         };
         let now = ui.input(|i| i.time);
         // a profile picture is a resident's: an animesh (an object) has none,

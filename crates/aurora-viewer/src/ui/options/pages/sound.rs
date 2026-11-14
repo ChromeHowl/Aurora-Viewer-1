@@ -4,7 +4,7 @@
 //! voice and the microphone.
 
 use super::super::cx::{Custom, Cx, Nothing, field};
-use super::super::{SLIDER_W, binding_cell, device_combo, parse_uuid_text, uuid_text};
+use super::super::{SLIDER_W, binding_cell, device_combo, named_combo, parse_uuid_text, uuid_text};
 use crate::ui::widgets;
 use egui::Vec2;
 
@@ -73,6 +73,22 @@ fn volumes(cx: &mut Cx) {
             },
         );
         cx.row_with(
+            tr!("ui-options-voice-output"),
+            tr!("ui-options-voice-output-used-for-voice-chat"),
+            &field!(audio.voice_output_device),
+            |ui, s, st, _| {
+                named_combo(
+                    ui,
+                    "voice_audio_out",
+                    &mut s.audio.voice_output_device,
+                    &st.output_devices,
+                    SLIDER_W + 40.0,
+                    tr!("ui-options-same-as-audio-output"),
+                )
+                .0
+            },
+        );
+        cx.row_with(
             tr!("ui-options-microphone"),
             tr!("ui-options-input-used-for-voice"),
             &field!(audio.input_device),
@@ -102,12 +118,12 @@ fn volumes(cx: &mut Cx) {
                 modified: move |s: &crate::settings::Settings, d: &crate::settings::Settings| {
                     s.audio.volume[i] != d.audio.volume[i]
                         || s.audio.muted[i] != d.audio.muted[i]
-                        || s.audio.enabled[i] != d.audio.enabled[i]
+                        || s.audio.channel_on(i) != d.audio.channel_on(i)
                 },
                 reset: move |s: &mut crate::settings::Settings, d: &crate::settings::Settings| {
                     s.audio.volume[i] = d.audio.volume[i];
                     s.audio.muted[i] = d.audio.muted[i];
-                    s.audio.enabled[i] = d.audio.enabled[i];
+                    *s.audio.channel_box(i) = d.audio.channel_on(i);
                 },
             };
             cx.wide().row(name, "", &t, |ui, s| {
@@ -148,9 +164,12 @@ fn volumes(cx: &mut Cx) {
                     ch = true;
                 }
                 if i > 0 {
-                    ch |= widgets::checkbox(ui, &p, &mut a.enabled[i], "")
-                        .on_hover_text(tr!("ui-options-enable-this-channel"))
-                        .changed();
+                    let tip = if i == crate::settings::VOICE_CHANNEL {
+                        tr!("ui-options-enable-voice")
+                    } else {
+                        tr!("ui-options-enable-this-channel")
+                    };
+                    ch |= widgets::checkbox(ui, &p, a.channel_box(i), "").on_hover_text(tip).changed();
                 } else {
                     // the master has no enable box: its room kept, so that
                     // its slider lines up with the channels' (the row is
