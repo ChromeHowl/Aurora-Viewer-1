@@ -279,8 +279,10 @@ fn animation_wait_timeout_and_key_release() {
         None,
     );
     m.tick(now, &BTreeSet::new());
+    // MAX_WAIT_ANIM_SECS is 60 seconds, not 30
+    assert!(m.tick(now + Duration::from_secs(59), &BTreeSet::new()).is_empty());
     assert_eq!(
-        m.tick(now + Duration::from_secs(30), &BTreeSet::new()),
+        m.tick(now + Duration::from_secs(60), &BTreeSet::new()),
         [Effect::Chat("timeout".into())]
     );
     m.stop(id);

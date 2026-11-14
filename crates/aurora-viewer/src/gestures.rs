@@ -13,6 +13,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
+/// LLGestureMgr's MAX_WAIT_ANIM_SECS: the longest a "wait for animations"
+/// step holds a gesture.
+const MAX_WAIT_ANIMATIONS: Duration = Duration::from_secs(60);
+
 #[derive(Debug, PartialEq)]
 pub enum Effect {
     Animation(Uuid, bool),
@@ -267,7 +271,7 @@ impl Manager {
     }
 
     /// Requested animations remain pending until a simulator signal confirms
-    /// them. Waiting for animations times out after 30 seconds like Firestorm.
+    /// them. Waiting for animations times out after 60 seconds (MAX_WAIT_ANIM_SECS).
     #[cfg(test)]
     pub fn tick(&mut self, now: Instant, signaled: &BTreeSet<Uuid>) -> Vec<Effect> {
         self.tick_ready(now, signaled, |_| true)
@@ -322,7 +326,7 @@ impl Manager {
                         } else if flags & WAIT_TIME != 0 {
                             elapsed.as_secs_f64() < f64::from(*seconds)
                         } else if flags & WAIT_ANIMATIONS != 0 {
-                            (!p.requested.is_empty() || !p.observed.is_empty()) && elapsed < Duration::from_secs(30)
+                            (!p.requested.is_empty() || !p.observed.is_empty()) && elapsed < MAX_WAIT_ANIMATIONS
                         } else {
                             false
                         };
