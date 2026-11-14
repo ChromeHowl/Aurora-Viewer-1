@@ -346,17 +346,6 @@ mod tests {
     use aurora_llsd::llsd_map;
 
     #[test]
-    fn a_mute_update_says_the_new_state() {
-        let (session, agent) = (Uuid::from_u128(7), Uuid::from_u128(8));
-        let body = mute_update_body(session, agent, true);
-        assert_eq!(body["method"].as_str(), "mute update");
-        assert_eq!(body["session-id"].as_uuid(), session);
-        assert_eq!(body["params"]["agent_id"].as_uuid(), agent);
-        assert!(body["params"]["mute_info"]["text"].as_bool());
-        assert!(!mute_update_body(session, agent, false)["params"]["mute_info"]["text"].as_bool());
-    }
-
-    #[test]
     fn a_mute_update_forbids_or_allows_the_text_as_a_value() {
         let (session, agent) = (Uuid::from_u128(1), Uuid::from_u128(2));
         let forbid = mute_update_body(session, agent, false);
