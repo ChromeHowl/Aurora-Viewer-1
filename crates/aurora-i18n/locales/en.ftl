@@ -905,6 +905,10 @@ inventory-count-tooltip = Items: { $items }
     Folders: { $folders }
 inventory-syncing = Synchronizing…
 inventory-synced = Synchronized
+inventory-sync-incomplete = Some folders could not be loaded
+inventory-limit-title = Inventory could not be fully loaded
+inventory-limit-body = Your inventory is experiencing issues. Please contact support.
+inventory-limit-body-status = Your inventory is experiencing issues (status { $status }). Please contact support.
 inventory-tab-all = All
 inventory-tab-recent = Recent
 inventory-tab-worn = Worn
@@ -3574,6 +3578,10 @@ ui-context-send-im = Send IM
 ui-contacts-send-im = Send IM...
 ui-inventory-dialogs-give-to = Give to
 ui-inventory-dialogs-give = Give
+ui-inventory-dialogs-give-to-many = { $name } + { $count ->
+    [one] { $number } person
+   *[other] { $number } people
+}
 ui-inventory-dialogs-and-more = { $count ->
     [one] and { $number } more
    *[other] and { $number } more
@@ -4579,6 +4587,7 @@ ui-options-loading-and-teleport-screens-show-your-last-view-blurred = Loading an
 ui-inventory-dialogs-no-copy = no copy
 ui-inventory-dialogs-no-transfer = no transfer
 ui-inventory-dialogs-left-out = left out
+ui-inventory-dialogs-no-copy-one-resident = A no-copy item can only be given to one resident at a time.
 ui-inventory-dialogs-not-given = { $count ->
     [one] { $number } item can't be given and will be left out.
    *[other] { $number } items can't be given and will be left out.
@@ -11417,7 +11426,7 @@ ui-group-notices-saved = Saved
 ui-group-notices-attachment = Attachment
 ui-group-notices-subject = Subject
 ui-group-notices-message = Message…
-ui-group-notices-drop = Drag an item from the inventory (copy + transfer)
+ui-group-notices-drop = Drag an item or landmark from Inventory, Favorites, or Places (copy + transfer)
 ui-group-notices-not-attachable = This item cannot be attached: it must be copyable and transferable, and not worn.
 ui-group-notices-remove-attachment = Remove the attachment
 ui-group-notices-send = { $count ->
@@ -14449,6 +14458,8 @@ inventory-favorites-show-parent-folders = Show parent folders in Favorites
 inventory-favorites-show-parent-folders-help = Show favorites in their original folder tree. Off by default: favorites appear directly in the list; a favorite folder keeps its contents.
 inventory-folder-colors = Folder colors
 inventory-folder-colors-help = Add "Folder color…" to a folder's menu, to give its icon a color of your choice. The colors are kept in this viewer only: nobody else sees them.
+inventory-folder-colors-inherit = New folders take their parent's color
+inventory-folder-colors-inherit-help = A folder you create inside a colored folder gets the same color.
 inventory-folder-color = Folder color…
 inventory-folder-color-title = Folder color
 inventory-folder-color-custom = Custom color
@@ -14456,6 +14467,7 @@ inventory-folder-color-restore = Restore default
 inventory-folder-color-private = Only you see these colors.
 inventory-folder-color-many = { $count } folders
 inventory-folder-color-none = Select a folder to color it.
+inventory-folder-color-subfolders = Also color its subfolders ({ $count })
 
 area-search-group = Group
 area-search-last-owner = Last owner
@@ -14727,6 +14739,35 @@ ui-options-chat-logs-clear = Clear conversation log…
 ui-options-chat-logs-clear-title = Clear the conversation log?
 ui-options-chat-logs-clear-text = This will delete the logs of previous conversations, and any backups of that file. The transcripts are not touched.
 ui-options-chat-logs-clear-confirm = Clear
+wearable-favorites-all = All Favorites
+wearable-favorites-empty = Drag wearable items here to add to list.
+wearable-favorites-no-match = No matching items found.
+wearable-favorites-filter = Filter Wearables
+wearable-favorites-new-folder-tip = Create new favorites folder
+wearable-favorites-rename-folder-tip = Rename selected favorites folder
+wearable-favorites-delete-folder-tip = Delete selected favorites folder
+wearable-favorites-import = Import favourites from the Legacy Viewer
+wearable-favorites-import-tip = Links the wearables favourited in the Legacy Viewer into these favourites, with their folders. Nothing is copied or moved, and the Legacy Viewer's favourites stay as they are.
+wearable-favorites-options-tip = Wearable favorites options
+wearable-favorites-remove-tip = Remove wearable from favorites list
+wearable-favorites-sort-name = Sort by name
+wearable-favorites-sort-recent = Sort by most recent
+wearable-favorites-sort-type = Sort by type name
+wearable-favorites-assign = Assign to Folder
+wearable-favorites-new-folder-prompt = Enter a name for the new Favorite Wearables folder:
+wearable-favorites-new-folder-default = New Folder
+wearable-favorites-rename-prompt = Enter a new name for Favorite Wearables folder { $name }:
+wearable-favorites-delete-confirm =
+    Delete Favorite Wearables folder "{ $name }"?
+
+    This removes the folder and its favorite links only. Original inventory items are not deleted.
+wearable-favorites-delete-refused =
+    The folder "{ $name }" holds original inventory items, not only links, so it is not deleted. Move the originals out of it first.
+wearable-favorites-delete-unloaded =
+    The folder "{ $name }" has not finished loading, so it is not deleted. Wait for its contents to load, then try again.
+wearable-favorites-invalid-name =
+    Could not create Favorite Wearables folder "{ $name }".
+    Folder names cannot contain / or \.
 
 # Parcel radio state and stream failures
 music-state-error = Can't play: { $reason }

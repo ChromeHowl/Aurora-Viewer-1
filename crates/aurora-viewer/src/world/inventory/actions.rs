@@ -705,6 +705,8 @@ pub fn ungroup(inv: &Inventory, id: Uuid, protected: &HashSet<Uuid>, worn: &Hash
 
 pub fn demo_mutate(inv: &mut Inventory, agent: Uuid, change: Mutation) -> Result<aurora_net::inventory::operations::Reply, String> {
     let mut created = std::collections::HashMap::new();
+    // the folders made, as AIS acknowledges them in its reply
+    let mut made = Vec::new();
     let mut removed = change.removed;
     for op in change.operations {
         match op {
@@ -714,17 +716,19 @@ pub fn demo_mutate(inv: &mut Inventory, agent: Uuid, change: Mutation) -> Result
                 name,
                 type_default,
             } => {
+                let info = aurora_net::inventory::InvFolder {
+                    id,
+                    parent,
+                    name,
+                    type_default,
+                    version: 1,
+                    ..Default::default()
+                };
+                made.push(info.clone());
                 inv.folders.insert(
                     id,
                     super::Folder {
-                        info: aurora_net::inventory::InvFolder {
-                            id,
-                            parent,
-                            name,
-                            type_default,
-                            version: 1,
-                            ..Default::default()
-                        },
+                        info,
                         children: Vec::new(),
                         items: Vec::new(),
                         state: FetchState::Fetched,
@@ -853,7 +857,7 @@ pub fn demo_mutate(inv: &mut Inventory, agent: Uuid, change: Mutation) -> Result
         .collect();
     Ok(aurora_net::inventory::operations::Reply {
         contents,
-        folders: Vec::new(),
+        folders: made,
         moves_queued: false,
         refresh: change.refresh,
         copies: change.copies,
@@ -1098,7 +1102,10 @@ pub fn request_tree(inv: &mut Inventory, root: Uuid) -> bool {
         if f.state != FetchState::Fetched {
             complete = false;
         }
-        if f.state == FetchState::Unknown && requests.len() + inv.queue.len() < 16 {
+        if !inv.too_big.contains(&id)
+            && matches!(f.state, FetchState::Unknown | FetchState::Failed)
+            && requests.len() + inv.queue.len() < 16
+        {
             requests.push(id);
         }
         todo.extend(f.children.iter().copied());

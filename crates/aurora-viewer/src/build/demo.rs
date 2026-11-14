@@ -15,11 +15,13 @@
 //!   faces-picker-badges-local | faces-picker-material-badges-local: applied local previews.
 //!   faces-close: close view of one selected face for material readability.
 //!   faces-complex: closed torus and disconnected mesh islands, with holes.
+//!   multi-mesh-materials: select two separate mesh roots in the Materials panel.
 //!   create-delete | create-ready: create and select a basic prim, then
 //!   delete it (ready leaves the new prim for the human).
 //!   contents-copy | contents-move | contents-move-plain | contents-ready:
 //!   take an item into inventory or show the move warning (ready stops).
 //!   contents-properties: open a task item in the shared properties panel.
+//!   contents-properties-multi: open three items at once, one window each.
 //!   contents-multi | contents-rename-ready: show task multi-selection or rename.
 //!   contents-move-many: drop every item into inventory at once (two no-copy
 //!   items share one move warning).
@@ -43,7 +45,8 @@
 //!
 //! `AURORA_DEMO_BUILD_TAB` shows a section: general | rights | object | transform |
 //! shape | features | texture | contents, the texture tab with `:pbr`, `:bp` or
-//! `:media` (e.g. `texture:bp`); `:bp-normal` / `:bp-specular` select empty
+//! `:media` (e.g. `texture:bp`); `:bp-alpha` paints the selection with the
+//! built-in Transparent texture; `:bp-normal` / `:bp-specular` select empty
 //! legacy map channels, and opens `+weights`, `+grid`, `+media`
 //! (e.g. `general+weights+grid`); `contents+permissions` opens bulk rights.
 //! `AURORA_DEMO_BUILD_HANDLES=<percent>` sets the edit handle size.
@@ -76,7 +79,8 @@ pub enum Step {
     CreationPreview(usize),
     Delete,
     Contents,
-    ContentsProperties,
+    /// Properties of the first n items, one window each.
+    ContentsProperties(usize),
     ContentsSelection(bool),
     TakeTask(bool),
     /// Every item, selected and dropped together on the inventory root.
@@ -94,6 +98,8 @@ pub enum Step {
     ReplaceApply,
     /// "Place on surface" on or off.
     Place(bool),
+    /// Paint the selection with the built-in Transparent texture.
+    TransparentDiffuse,
     /// Its Auto rotate, with that side.
     PlaceRotate(super::place::Side),
 }
@@ -223,12 +229,15 @@ pub fn apply_tab(tool: &mut BuildTool) {
     };
     tool.ui.tex_tab = match sub.trim() {
         "pbr" => 1,
-        "bp" | "classic" | "bp-normal" | "bp-specular" => 0,
+        "bp" | "classic" | "bp-normal" | "bp-specular" | "bp-alpha" => 0,
         "media" => 2,
         _ => tool.ui.tex_tab,
     };
     // The scenario's tab, not the one its selection would open on.
-    if matches!(sub.trim(), "pbr" | "bp" | "classic" | "bp-normal" | "bp-specular" | "media") {
+    if matches!(
+        sub.trim(),
+        "pbr" | "bp" | "classic" | "bp-normal" | "bp-specular" | "bp-alpha" | "media"
+    ) {
         tool.keep_texture_tab();
     }
     match sub.trim() {
@@ -392,6 +401,24 @@ pub fn steps(spec: &str, frame: u64, tool: &BuildTool, world: &World, s: &BuildS
             _ => Vec::new(),
         };
     }
+    if parts[0] == "multi-mesh-materials" {
+        let objects: Vec<usize> = [99620, 99622]
+            .into_iter()
+            .filter_map(|local_id| {
+                world
+                    .objects
+                    .iter()
+                    .find_map(|(idx, object)| (object.key.local_id == local_id).then_some(idx))
+            })
+            .collect();
+        return match frame {
+            215 => vec![Step::Open(Tool::Edit, EditMode::Move, 6)],
+            220 if objects.len() == 2 => vec![Step::SelectMany(objects)],
+            227 => vec![Step::Focus(false)],
+            235 => vec![Step::CloseView],
+            _ => Vec::new(),
+        };
+    }
     if matches!(parts[0], "link" | "link-ready" | "link-denied") {
         return match frame {
             215 => vec![Step::Open(Tool::Edit, EditMode::Move, 6)],
@@ -476,7 +503,8 @@ pub fn steps(spec: &str, frame: u64, tool: &BuildTool, world: &World, s: &BuildS
             215 => vec![Step::Open(Tool::Edit, EditMode::Move, 6)],
             220 => object.into_iter().map(Step::Select).collect(),
             225 => vec![Step::Contents],
-            260 if parts[0] == "contents-properties" => vec![Step::ContentsProperties],
+            260 if parts[0] == "contents-properties" => vec![Step::ContentsProperties(1)],
+            260 if parts[0] == "contents-properties-multi" => vec![Step::ContentsProperties(3)],
             260 if matches!(parts[0], "contents-multi" | "contents-rename-ready") => {
                 vec![Step::ContentsSelection(parts[0] == "contents-rename-ready")]
             }
@@ -556,7 +584,9 @@ pub fn steps(spec: &str, frame: u64, tool: &BuildTool, world: &World, s: &BuildS
             215 => vec![Step::Open(Tool::Edit, EditMode::Face, 6), Step::Linked(false)],
             220 => object.into_iter().map(Step::Select).collect(),
             227 => vec![Step::Focus(false)],
-            235 if matches!(parts[0], "faces-close" | "faces-complex") || parts[0].starts_with("faces-picker") => vec![Step::CloseView],
+            235 if matches!(parts[0], "faces-close" | "faces-complex") || parts[0].starts_with("faces-picker") => {
+                vec![Step::CloseView]
+            }
             _ if parts[0] == "faces-ready" => Vec::new(),
             240 if parts[0] == "faces-complex" => pick(99620, 0, false),
             240 => pick(99620, u8::MAX, false),
@@ -652,6 +682,7 @@ pub fn steps(spec: &str, frame: u64, tool: &BuildTool, world: &World, s: &BuildS
         215 => vec![Step::Open(t, m, land)],
         280 if parts[0] == "material-deselect" => vec![Step::CloseEditor],
         220 if object.is_some() => object.into_iter().map(Step::Select).collect(),
+        230 if bp_alpha_demo() => vec![Step::TransparentDiffuse],
         220 => vec![Step::Cursor(x, y), Step::Press],
         // land brush / selection: held (land: no release), others released
         226 if t != Tool::Land => vec![Step::Release],
@@ -698,6 +729,16 @@ pub fn steps(spec: &str, frame: u64, tool: &BuildTool, world: &World, s: &BuildS
         351 if edge.is_some() => vec![Step::Release],
         _ => Vec::new(),
     }
+}
+
+fn bp_alpha_demo() -> bool {
+    std::env::var("AURORA_DEMO_BUILD_TAB").is_ok_and(|value| {
+        value
+            .split('+')
+            .next()
+            .and_then(|head| head.split(':').nth(1))
+            .is_some_and(|sub| sub.trim() == "bp-alpha")
+    })
 }
 
 fn x_start(tool: &BuildTool) -> f32 {

@@ -908,6 +908,10 @@ inventory-count-tooltip = Objets : { $items }
     Dossiers : { $folders }
 inventory-syncing = Synchronisation…
 inventory-synced = Synchronisé
+inventory-sync-incomplete = Certains dossiers n’ont pas pu être chargés
+inventory-limit-title = L’inventaire n’a pas pu être entièrement chargé
+inventory-limit-body = Votre inventaire rencontre des problèmes. Veuillez contacter le support.
+inventory-limit-body-status = Votre inventaire rencontre des problèmes (statut { $status }). Veuillez contacter le support.
 inventory-tab-all = Tout
 inventory-tab-recent = Récents
 inventory-tab-worn = Portés
@@ -3577,6 +3581,10 @@ ui-context-send-im = Envoyer un IM
 ui-contacts-send-im = Envoyer un IM...
 ui-inventory-dialogs-give-to = Donner à
 ui-inventory-dialogs-give = Donner
+ui-inventory-dialogs-give-to-many = { $name } + { $count ->
+    [one] { $number } personne
+   *[other] { $number } personnes
+}
 ui-inventory-dialogs-and-more = { $count ->
     [one] et { $number } autre
    *[other] et { $number } autres
@@ -4585,6 +4593,7 @@ ui-options-loading-and-teleport-screens-show-your-last-view-blurred = Les écran
 ui-inventory-dialogs-no-copy = non copiable
 ui-inventory-dialogs-no-transfer = non transférable
 ui-inventory-dialogs-left-out = exclu
+ui-inventory-dialogs-no-copy-one-resident = Un objet non copiable ne peut être donné qu’à un seul résident à la fois.
 ui-inventory-dialogs-not-given = { $count ->
     [one] { $number } élément ne peut pas être donné : il sera ignoré.
    *[other] { $number } éléments ne peuvent pas être donnés : ils seront ignorés.
@@ -11422,7 +11431,7 @@ ui-group-notices-saved = Enregistré
 ui-group-notices-attachment = Pièce jointe
 ui-group-notices-subject = Sujet
 ui-group-notices-message = Message…
-ui-group-notices-drop = Glisser un objet de l'inventaire (copie + transfert)
+ui-group-notices-drop = Glisser un objet ou un repère depuis l'inventaire, les favoris ou les lieux (copie + transfert)
 ui-group-notices-not-attachable = Cet objet ne peut pas être joint : il doit être copiable et transférable, et ne pas être porté.
 ui-group-notices-remove-attachment = Retirer la pièce jointe
 ui-group-notices-send = { $count ->
@@ -14457,6 +14466,8 @@ inventory-favorites-show-parent-folders = Afficher les dossiers parents dans les
 inventory-favorites-show-parent-folders-help = Affiche les favoris dans leur arborescence d’origine. Désactivé par défaut : les favoris apparaissent directement dans la liste ; un dossier favori conserve son contenu.
 inventory-folder-colors = Couleurs des dossiers
 inventory-folder-colors-help = Ajoute « Couleur du dossier… » au menu d'un dossier, pour donner à son icône la couleur de votre choix. Les couleurs restent dans cette visionneuse : personne d'autre ne les voit.
+inventory-folder-colors-inherit = Les nouveaux dossiers prennent la couleur de leur parent
+inventory-folder-colors-inherit-help = Un dossier que vous créez dans un dossier coloré reçoit la même couleur.
 inventory-folder-color = Couleur du dossier…
 inventory-folder-color-title = Couleur du dossier
 inventory-folder-color-custom = Couleur personnalisée
@@ -14464,6 +14475,7 @@ inventory-folder-color-restore = Rétablir par défaut
 inventory-folder-color-private = Ces couleurs ne sont visibles que par vous.
 inventory-folder-color-many = { $count } dossiers
 inventory-folder-color-none = Sélectionnez un dossier pour le colorer.
+inventory-folder-color-subfolders = Colorer aussi ses sous-dossiers ({ $count })
 
 area-search-group = Groupe
 area-search-last-owner = Dernier propriétaire
@@ -14736,6 +14748,35 @@ ui-options-chat-logs-clear = Vider le journal des conversations…
 ui-options-chat-logs-clear-title = Vider le journal des conversations ?
 ui-options-chat-logs-clear-text = Cela supprimera les journaux des conversations précédentes, ainsi que toute copie de sauvegarde de ce fichier. Les transcriptions ne sont pas touchées.
 ui-options-chat-logs-clear-confirm = Vider
+wearable-favorites-all = Tous les favoris
+wearable-favorites-empty = Faites glisser les objets ici pour les ajouter à la liste.
+wearable-favorites-no-match = Aucun élément ne correspond.
+wearable-favorites-filter = Filtrer les objets
+wearable-favorites-new-folder-tip = Créer un nouveau dossier de favoris
+wearable-favorites-rename-folder-tip = Renommer le dossier de favoris sélectionné
+wearable-favorites-delete-folder-tip = Supprimer le dossier de favoris sélectionné
+wearable-favorites-import = Importer les favoris du Legacy Viewer
+wearable-favorites-import-tip = Ajoute à ces favoris, avec leurs dossiers, des liens vers les objets à porter mis en favoris dans le Legacy Viewer. Rien n'est copié ni déplacé, et les favoris du Legacy Viewer restent tels quels.
+wearable-favorites-options-tip = Options des vêtements préférés
+wearable-favorites-remove-tip = Retirer de la liste des vêtements préférés
+wearable-favorites-sort-name = Trier par nom
+wearable-favorites-sort-recent = Trier par date
+wearable-favorites-sort-type = Trier par type
+wearable-favorites-assign = Assigner au dossier
+wearable-favorites-new-folder-prompt = Saisissez un nom pour le nouveau dossier des vêtements préférés :
+wearable-favorites-new-folder-default = Nouveau dossier
+wearable-favorites-rename-prompt = Saisissez un nouveau nom pour le dossier des vêtements préférés { $name } :
+wearable-favorites-delete-confirm =
+    Supprimer le dossier des vêtements préférés « { $name } » ?
+
+    Seuls le dossier et ses liens sont supprimés. Les éléments d’origine de l’inventaire ne sont pas supprimés.
+wearable-favorites-delete-refused =
+    Le dossier « { $name } » contient des éléments d’origine de l’inventaire, pas seulement des liens : il n’est pas supprimé. Déplacez d’abord les éléments d’origine hors du dossier.
+wearable-favorites-delete-unloaded =
+    Le dossier « { $name } » n’a pas fini de se charger : il n’est pas supprimé. Attendez que son contenu soit chargé, puis réessayez.
+wearable-favorites-invalid-name =
+    Impossible de créer le dossier des vêtements préférés « { $name } ».
+    Les noms de dossier ne peuvent pas contenir / ou \.
 
 # Parcel radio state and stream failures
 music-state-error = Lecture impossible : { $reason }

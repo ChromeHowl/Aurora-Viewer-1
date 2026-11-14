@@ -256,6 +256,9 @@ pub mod seat_kill;
 /// (AURORA_DEMO_SET_NOTICES).
 #[path = "demo_set_notices.rs"]
 pub mod set_notices;
+/// Many Orion-like friends for multi-share (#3074; AURORA_DEMO_SHARE=multi).
+#[path = "demo_share.rs"]
+pub mod share;
 /// Freeze, region console and voice moderation (AURORA_DEMO_FREEZE,
 /// AURORA_DEMO_SIM_CONSOLE, AURORA_DEMO_VOICE_MODERATION).
 #[path = "demo_sim_extras.rs"]
@@ -896,6 +899,10 @@ fn demo_raw() -> Llsd {
             .into_iter()
             .map(|(id, given, has)| llsd_map! {"buddy_id" => id, "buddy_rights_given" => given, "buddy_rights_has" => has}),
     );
+    // AURORA_DEMO_SHARE=multi: dozens of Orion-like friends for the Share picker
+    buddies.extend(share::friends().into_iter().map(|(id, given, has)| {
+        llsd_map! {"buddy_id" => id, "buddy_rights_given" => given, "buddy_rights_has" => has}
+    }));
     let mut raw = llsd_map! {
         "inventory-root" => Llsd::Array(vec![llsd_map!{"folder_id" => u(1)}]),
         // an adult account that wants every rating (the search window's boxes);
@@ -3053,6 +3060,9 @@ pub fn demo_reply(cmd: &aurora_net::NetCommand) -> Vec<NetEvent> {
             vec![NetEvent::Names(
                 ids.iter()
                     .map(|id| {
+                        if let Some((first, last, _)) = share::name(id) {
+                            return (*id, first, last);
+                        }
                         if let Some((first, last, _)) = group::member_name(id) {
                             return (*id, first.to_owned(), last.to_owned());
                         }
@@ -3090,6 +3100,13 @@ pub fn demo_reply(cmd: &aurora_net::NetCommand) -> Vec<NetEvent> {
                             (first.as_str(), "Resident", sample.display_name)
                         } else {
                             names[(id.as_u128() & 0xFF) as usize % names.len()]
+                        };
+                        // AURORA_DEMO_SHARE: Orion Example 001… override the cycle
+                        let owned = share::name(id);
+                        let (first, last, dn) = if let Some((ref f, ref l, ref d)) = owned {
+                            (f.as_str(), l.as_str(), d.as_str())
+                        } else {
+                            (first, last, dn)
                         };
                         let username = if last == "Resident" {
                             first.to_lowercase()
@@ -4312,6 +4329,26 @@ pub fn complex_face_selection_events() -> Vec<NetEvent> {
     events
 }
 
+/// Two independent mesh roots for the offline multi-object material editor test.
+pub fn multi_mesh_materials_events() -> Vec<NetEvent> {
+    let mut events = complex_face_selection_events();
+    for event in &mut events {
+        if let NetEvent::ObjectUpdates { objects, .. } = event {
+            for object in objects.iter_mut().filter(|object| matches!(object.local_id, 99620 | 99622)) {
+                object.volume = aurora_prim::VolumeParams {
+                    sculpt: Some(SculptParams {
+                        texture: FACE_SELECTION_MESH,
+                        sculpt_type: LL_SCULPT_TYPE_MESH,
+                    }),
+                    ..Default::default()
+                };
+                object.rotation = Quat::IDENTITY;
+            }
+        }
+    }
+    events
+}
+
 /// AURORA_DEMO_BAN: the south-east lot (x >= 192 m, y < 64 m) is banned.
 pub fn ban_collision() -> NetEvent {
     let mut bitmap = vec![0u8; 64 * 64 / 8];
@@ -4455,6 +4492,29 @@ pub fn friend_location(world: &mut crate::world::World) {
     }
 }
 
+/// The capabilities of the offline demo. The `AURORA_DEMO_INVENTORY` `fetch`
+/// mode adds the inventory ones, so the background walk takes the AIS path
+/// and a cold load can be shown.
+fn caps() -> std::collections::HashMap<String, String> {
+    let mut caps: std::collections::HashMap<String, String> = [("GetDisplayNames".to_owned(), "demo://names".to_owned())]
+        .into_iter()
+        .chain(sim_extras::caps())
+        .collect();
+    if crate::world::inventory::demo::big().is_some_and(|big| big.fetch) {
+        for (name, url) in [
+            ("InventoryAPIv3", "demo://inventory"),
+            ("LibraryAPIv3", "demo://library"),
+            ("FetchInventoryDescendents2", "demo://fetch-inventory"),
+            ("FetchLibDescendents2", "demo://fetch-library"),
+            ("FetchInventory2", "demo://items"),
+            ("FetchLib2", "demo://lib-items"),
+        ] {
+            caps.insert(name.to_owned(), url.to_owned());
+        }
+    }
+    caps
+}
+
 pub fn events() -> Vec<NetEvent> {
     let agent = Uuid::from_u128(0xA0E0_A6E1_0000_0000_0000_0000_0000_0001);
     let login = LoginResponse {
@@ -4481,16 +4541,11 @@ pub fn events() -> Vec<NetEvent> {
     let mut ev = vec![
         NetEvent::LoggedIn(Arc::new(login)),
         NetEvent::MainRegionChanged { handle: HANDLE },
-        // only the People API (names) is simulated, and what the
-        // scenarios of sim_extras add
+        // only the People API (names) is simulated, what the scenarios of
+        // sim_extras add, and the inventory capabilities of a `fetch` demo
         NetEvent::Capabilities {
             handle: HANDLE,
-            caps: Arc::new(
-                [("GetDisplayNames".to_owned(), "demo://names".to_owned())]
-                    .into_iter()
-                    .chain(sim_extras::caps())
-                    .collect(),
-            ),
+            caps: Arc::new(caps()),
         },
         NetEvent::RegionHandshake(Arc::new(RegionInfo {
             handle: HANDLE,

@@ -902,6 +902,10 @@ inventory-count-tooltip = アイテム：{ $items }
     フォルダ：{ $folders }
 inventory-syncing = 同期しています…
 inventory-synced = 同期済み
+inventory-sync-incomplete = 一部のフォルダーを読み込めませんでした
+inventory-limit-title = インベントリを完全に読み込めませんでした
+inventory-limit-body = インベントリで問題が発生しています。サポートにお問い合わせください。
+inventory-limit-body-status = インベントリで問題が発生しています（ステータス { $status }）。サポートにお問い合わせください。
 inventory-tab-all = すべて
 inventory-tab-recent = 最新
 inventory-tab-worn = 着用中
@@ -3561,6 +3565,9 @@ ui-context-send-im = ＩＭを送信
 ui-contacts-send-im = ＩＭを送信…
 ui-inventory-dialogs-give-to = 渡す相手
 ui-inventory-dialogs-give = 渡す
+ui-inventory-dialogs-give-to-many = { $name } + { $count ->
+    *[other] { $number }人
+}
 ui-inventory-dialogs-and-more = { $count ->
     [one] ほか{ $number }件
    *[other] ほか{ $number }件
@@ -4561,6 +4568,7 @@ ui-options-loading-and-teleport-screens-show-your-last-view-blurred = 読み込�
 ui-inventory-dialogs-no-copy = コピー不可
 ui-inventory-dialogs-no-transfer = 譲渡不可
 ui-inventory-dialogs-left-out = 除外
+ui-inventory-dialogs-no-copy-one-resident = コピー不可のアイテムは一度に1人の住人にしか渡せません。
 ui-inventory-dialogs-not-given = { $count ->
     [one] { $number }個のアイテムは渡せないため、除外されます。
    *[other] { $number }個のアイテムは渡せないため、除外されます。
@@ -11353,7 +11361,7 @@ ui-group-notices-saved = 保存済み
 ui-group-notices-attachment = 添付物
 ui-group-notices-subject = 件名
 ui-group-notices-message = メッセージ…
-ui-group-notices-drop = インベントリからアイテムをドラッグ（コピー＋譲渡可）
+ui-group-notices-drop = インベントリ、お気に入り、場所からアイテムまたはランドマークをドラッグ（コピー・譲渡可）
 ui-group-notices-not-attachable = このアイテムは添付できません：コピー可能かつ譲渡可能で、着用していないものである必要があります。
 ui-group-notices-remove-attachment = 添付を削除
 ui-group-notices-send = { $count ->
@@ -14361,6 +14369,8 @@ inventory-favorites-show-parent-folders = お気に入りに親フォルダを�
 inventory-favorites-show-parent-folders-help = お気に入りを元のフォルダ階層で表示します。既定ではオフです。オフの場合、お気に入りを一覧に直接表示し、お気に入りのフォルダ内の内容は引き続き表示できます。
 inventory-folder-colors = フォルダの色
 inventory-folder-colors-help = フォルダのメニューに「フォルダの色…」を追加し、アイコンを好きな色にできるようにします。色はこのビューアにだけ保存され、ほかの人には表示されません。
+inventory-folder-colors-inherit = 新しいフォルダに親フォルダの色を付ける
+inventory-folder-colors-inherit-help = 色の付いたフォルダ内に作成したフォルダに、同じ色が付きます。
 inventory-folder-color = フォルダの色…
 inventory-folder-color-title = フォルダの色
 inventory-folder-color-custom = カスタムカラー
@@ -14368,6 +14378,7 @@ inventory-folder-color-restore = デフォルトに戻す
 inventory-folder-color-private = この色はあなたにだけ表示されます。
 inventory-folder-color-many = { $count }個のフォルダ
 inventory-folder-color-none = 色を付けるフォルダを選択してください。
+inventory-folder-color-subfolders = サブフォルダにも色を付ける（{ $count }）
 
 area-search-group = グループ
 area-search-last-owner = 前のオーナー
@@ -14638,6 +14649,35 @@ ui-options-chat-logs-clear = 会話の記録をクリア…
 ui-options-chat-logs-clear-title = 会話の記録をクリアしますか？
 ui-options-chat-logs-clear-text = これにより、過去の会話のログ、およびそのファイルのすべてのバックアップが削除されます。会話履歴のテキストは削除されません。
 ui-options-chat-logs-clear-confirm = クリア
+wearable-favorites-all = 全てのお気に入り
+wearable-favorites-empty = 装着可能な着用物やＨＵＤをドラッグしてリストに追加します。
+wearable-favorites-no-match = アイテムが見つかりませんでした。
+wearable-favorites-filter = フィルタ
+wearable-favorites-new-folder-tip = 新しいお気に入りフォルダを作成
+wearable-favorites-rename-folder-tip = 選択したお気に入りフォルダの名前を変更
+wearable-favorites-delete-folder-tip = 選択したお気に入りフォルダを削除
+wearable-favorites-import = Legacy Viewerのお気に入りをインポート
+wearable-favorites-import-tip = Legacy Viewerでお気に入りにした着用物へのリンクを、フォルダごとこのお気に入りに追加します。コピーや移動は行わず、Legacy Viewerのお気に入りはそのまま残ります。
+wearable-favorites-options-tip = お気に入りのオプション
+wearable-favorites-remove-tip = お気に入りをリストから削除
+wearable-favorites-sort-name = 名前で並べ替え
+wearable-favorites-sort-recent = 新しい順に並べ替え
+wearable-favorites-sort-type = 種類で並べ替え
+wearable-favorites-assign = フォルダに割り当て
+wearable-favorites-new-folder-prompt = 新しいお気に入りの着用物のフォルダ名を入力してください：
+wearable-favorites-new-folder-default = 新しいフォルダ
+wearable-favorites-rename-prompt = お気に入りの着用物のフォルダ「{ $name }」の新しい名前を入力してください：
+wearable-favorites-delete-confirm =
+    お気に入りの着用物のフォルダ「{ $name }」を削除してもよろしいですか？
+
+    フォルダとその中のお気に入りリンクのみが削除されます。元のインベントリアイテムは削除されません。
+wearable-favorites-delete-refused =
+    フォルダ「{ $name }」にはリンクだけでなく元のインベントリアイテムが入っているため、削除されません。先に元のアイテムをフォルダの外へ移動してください。
+wearable-favorites-delete-unloaded =
+    フォルダ「{ $name }」はまだ読み込みが完了していないため、削除されません。内容の読み込みが終わってからもう一度お試しください。
+wearable-favorites-invalid-name =
+    お気に入りの着用物のフォルダ「{ $name }」を作成できませんでした。
+    フォルダ名に「/」または「\」を含めることはできません。
 
 # Parcel radio state and stream failures
 music-state-error = 再生できません：{ $reason }

@@ -59,6 +59,10 @@ pub struct Inventory {
     /// after `ITEM_FETCH_ATTEMPTS`: broken links, which outfits skip instead
     /// of waiting for them (LLViewerInventoryItem::getIsBrokenLink).
     pub missing_items: HashSet<Uuid>,
+    /// Folders the server refuses even at depth 0: over its per-folder reply
+    /// limit (the Legacy Viewer's InventoryLimitReachedAIS). Their direct
+    /// items cannot be read; search and refresh do not ask again in a loop.
+    pub too_big: HashSet<Uuid>,
     /// Failed item reads (network, server error), by attempt.
     pub item_failures: HashMap<Uuid, u8>,
     /// Failed item reads to ask for again (`take_item_retries`).
@@ -244,9 +248,14 @@ impl Inventory {
         }
     }
 
-    pub fn apply(&mut self, contents: Vec<FolderContents>) {
+    /// Apply folder snapshots. A snapshot older than the contents already
+    /// confirmed locally is not applied: the folder is queued again, like
+    /// AISUpdate::parseCategory's stale-folder refetch (llaisapi.cpp).
+    /// Returns the folders that were stale and queued.
+    pub fn apply(&mut self, contents: Vec<FolderContents>) -> Vec<Uuid> {
         self.generation += 1;
         let mut refreshed: HashMap<Uuid, HashSet<Uuid>> = HashMap::new();
+        let mut stale = Vec::new();
         for mut c in contents {
             // Inventory versions advance as copies arrive (Firestorm's
             // LLInventoryModel::accountForUpdate). A delayed pre-copy HTTP
@@ -256,6 +265,7 @@ impl Inventory {
                 .get(&c.folder_id)
                 .is_some_and(|f| f.state == FetchState::Fetched && c.version < f.info.version)
             {
+                stale.push(c.folder_id);
                 continue;
             }
             let library = self.folders.get(&c.folder_id).map(|f| f.library).unwrap_or(false);
@@ -302,6 +312,9 @@ impl Inventory {
                 f.state = FetchState::Fetched;
                 f.info.version = c.version;
             }
+            // A folder that fits again (the resident split it, or a later read
+            // succeeded) is no longer over the limit.
+            self.too_big.remove(&c.folder_id);
             self.repair_item_parents(&mut c.items, parents::ItemSource::Snapshot);
             self.add_items_inner(c.items);
             self.sort_children(c.folder_id);
@@ -331,6 +344,13 @@ impl Inventory {
             self.pending_parent_repairs.retain(|id| self.repaired_parents.contains_key(id));
             self.deferred_parents.retain(|id, _| self.items.contains_key(id));
         }
+        for id in &stale {
+            if let Some(folder) = self.folders.get_mut(id) {
+                folder.state = FetchState::Unknown;
+            }
+            self.request(*id);
+        }
+        stale
     }
 
     /// Items fetched by id (FetchInventory2), listed in their folder when
@@ -430,6 +450,12 @@ impl Inventory {
                 && !parent.children.contains(&id)
             {
                 parent.children.push(id);
+            }
+            // LLInventoryModel::processBulkUpdateInventory: scheduleFolderFetch
+            // on each folder so a gift or unpack sorts by its contents without
+            // waiting for the user to expand it (#3025).
+            if self.folders.get(&id).is_some_and(|f| !matches!(f.state, FetchState::Fetched)) {
+                self.request(id);
             }
         }
         self.repair_item_parents(&mut items, parents::ItemSource::Simulator);
@@ -1069,6 +1095,31 @@ mod tests {
             assert_eq!(inv.folders[&child].items, vec![copied.id]);
             assert!(inv.items.contains_key(&Uuid::from_u128(723)), "copy keeps the original");
         }
+    }
+
+    /// #3025: a folder delivered by BulkUpdate must be fetched so its date
+    /// (newest descendant) sorts it with its contents, without waiting for expand.
+    #[test]
+    fn server_updated_folders_are_queued_for_fetch() {
+        let mut inv = fixture();
+        let id = Uuid::from_u128(9801);
+        inv.server_updated(
+            vec![InvFolder {
+                id,
+                parent: inv.root,
+                name: "Gift folder".into(),
+                type_default: -1,
+                version: -1,
+                ..Default::default()
+            }],
+            Vec::new(),
+        );
+        assert_eq!(inv.folders[&id].state, FetchState::Fetching);
+        assert!(
+            inv.queue.iter().any(|(queued, _)| *queued == id),
+            "descendent fetch queued: {:?}",
+            inv.queue
+        );
     }
 
     #[test]
