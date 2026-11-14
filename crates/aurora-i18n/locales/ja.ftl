@@ -14504,3 +14504,4 @@ joystick-layout-positional = 位置に基づく
 
 joystick-layout-auto = 自動
 joystick-layout-xinput = XInput
+ui-options-draw-distance-stepping-hint = ログイン後と別のリージョンへのテレポート後、描画距離を32mから始め、負荷に合わせて設定値まで広げます。オブジェクトの読み込みが終わりフレームが軽い間は2秒ごとに倍にし、そうでない間は待ち、重いフレームが続くと一段戻します。

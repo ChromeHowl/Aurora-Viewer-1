@@ -14587,3 +14587,4 @@ joystick-layout-positional = Positional
 
 joystick-layout-auto = Automatic
 joystick-layout-xinput = XInput
+ui-options-draw-distance-stepping-hint = After logging in and after a teleport to another region, the draw distance starts at 32 m and grows back to yours as the load allows: it doubles every 2 seconds while objects have finished loading and frames are fast, waits while they are not, and steps back one level if frames stay too heavy.
