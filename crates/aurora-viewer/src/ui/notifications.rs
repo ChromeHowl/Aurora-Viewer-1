@@ -1483,16 +1483,16 @@ mod tests {
         }
     }
 
-    /// In the Legacy toast style, French Mute Owner wraps under Accept /
-    /// Discard and must keep the same left edge as those buttons (#2932).
+    /// In the Legacy toast style, a Mute Owner that wraps under Accept /
+    /// Discard must keep the same left edge as those buttons (#2932). The
+    /// card is narrowed to force the wrap the long French label causes,
+    /// because switching the process-wide language here raced with the
+    /// other tests that compare the interface text.
     #[test]
-    fn legacy_object_offer_wrapped_buttons_keep_the_text_indent_in_french() {
-        let previous = aurora_i18n::language().to_owned();
-        aurora_i18n::select("fr", Some("fr"));
+    fn legacy_object_offer_wrapped_buttons_keep_the_text_indent() {
         let mute = aurora_i18n::tr!("ui-notifications-mute-owner");
         let accept = aurora_i18n::tr!("ui-notifications-accept");
         let discard = aurora_i18n::tr!("ui-notifications-discard");
-        assert_eq!(mute, "Ignorer le propriétaire");
 
         let ctx = egui::Context::default();
         let theme = crate::theme::Theme::default();
@@ -1501,10 +1501,10 @@ mod tests {
         let icons = Icons::default();
         let world = World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
         let mut list = Notifications::default();
-        let body = "Un objet nommé Distributeur appartenant à Jane Doe vous a donné cet objet :\nNote de bienvenue";
+        let body = "An object named Dispenser owned by Jane Doe gave you this item:\nWelcome note";
         list.push(
             Kind::Inventory,
-            "Distributeur",
+            "Dispenser",
             body,
             Data::Inventory {
                 from: JANE,
@@ -1513,8 +1513,8 @@ mod tests {
                 object: Uuid::nil(),
                 task: true,
                 task_offer: Some(crate::world::inventory_offers::TaskOffer {
-                    object_name: "Distributeur".into(),
-                    item_name: "Note de bienvenue".into(),
+                    object_name: "Dispenser".into(),
+                    item_name: "Welcome note".into(),
                     from_group: false,
                     own_object: false,
                 }),
@@ -1532,7 +1532,7 @@ mod tests {
                     ..Default::default()
                 },
                 |ui| {
-                    ui.set_width(320.0);
+                    ui.set_width(240.0);
                     card(
                         ui,
                         &p,
@@ -1582,7 +1582,6 @@ mod tests {
             "wrapped Mute Owner must not lose the Legacy indent: mute={mute_rect:?} accept={accept_rect:?}"
         );
 
-        aurora_i18n::select(&previous, Some(&previous));
     }
 
     #[test]
