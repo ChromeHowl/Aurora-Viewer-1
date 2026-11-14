@@ -14541,7 +14541,6 @@ ui-options-attached-particles-hint = Draw the particles of what avatars wear: sp
 
 # Preferences › Graphics: progressive draw distance (FSRenderFarClipStepping)
 ui-options-draw-distance-stepping = Progressive draw distance
-ui-options-draw-distance-stepping-hint = After logging in and after a teleport to another region, the draw distance starts at 32 m and doubles back up to yours, so that what is near loads first.
 
 # Panorama viewer (ui/panorama.rs)
 panorama-reset = Reset the view
