@@ -3,7 +3,10 @@
 use super::*;
 use crate::scene::{anim::BoundAnim, jobs::Jobs};
 use aurora_assets::Animation;
-use std::{collections::HashSet, sync::Arc};
+use std::{
+    collections::{BTreeSet, HashSet},
+    sync::Arc,
+};
 pub(super) mod document;
 pub(super) mod files;
 #[cfg(test)]
@@ -12,6 +15,7 @@ mod picker;
 #[cfg(test)]
 mod tests;
 mod timeline;
+mod together;
 mod ui;
 use document::{Document, FPS, MAX_FRAME};
 pub use files::Prepared;
@@ -84,7 +88,18 @@ pub(super) struct State {
     undo: Vec<Arc<Document>>,
     redo: Vec<Arc<Document>>,
     clipboard: Vec<document::Keyframe>,
+    /// Keys copied from the timeline with their spacing. Only one of the two
+    /// clipboards holds something: the last copy wins.
+    key_clipboard: Vec<document::CopiedKey>,
+    /// The press of a box: Shift or Ctrl went down over the lanes. The box
+    /// starts once that press becomes a drag, wherever it began.
+    key_box_armed: bool,
     drag_key: Option<(usize, u32, u32)>,
+    /// The keys picked in the timeline, as (bone, frame): a drag of one of
+    /// them moves them all, Delete removes them all.
+    pub(super) selected_keys: BTreeSet<(usize, u32)>,
+    /// A box drawn over the lanes to pick the keys inside it.
+    key_box: Option<timeline::KeyBox>,
     /// Presses the timeline's shortcuts acted on, until egui's next pass.
     taken_keys: Vec<(egui::Key, egui::Modifiers)>,
     timeline_zoom: f32,
@@ -104,10 +119,17 @@ pub(super) struct State {
     timeline_tracks: Option<(u64, Arc<Vec<TimelineTrack>>)>,
     preview_revision: Option<u64>,
     selection_sync: Option<(usize, u64, u64, Option<u64>)>,
+    /// When the fields of an edited joint were last read from the pose
+    /// (`authoring::sync_authored_selection`).
+    pub(super) authored_sync: Option<((usize, u64, u64, Option<u64>, u64), u8)>,
+    /// Counts the edits of the pose, for `authored_sync`.
+    pub(super) edits: u64,
     building: bool,
     preview: Option<Preview>,
     pub(super) capture: Option<Capture>,
     pub(super) modified: HashSet<usize>,
+    /// The joints that follow the selected one (`together`).
+    pub(super) together: Vec<usize>,
     pub(super) translations: HashSet<usize>,
     clear_after: Option<u64>,
     clear_bones: Vec<usize>,
@@ -141,7 +163,11 @@ impl Default for State {
             undo: Vec::new(),
             redo: Vec::new(),
             clipboard: Vec::new(),
+            key_clipboard: Vec::new(),
+            key_box_armed: false,
             drag_key: None,
+            selected_keys: BTreeSet::new(),
+            key_box: None,
             taken_keys: Vec::new(),
             timeline_zoom: 1.0,
             timeline_start: 0,
@@ -160,10 +186,13 @@ impl Default for State {
             timeline_tracks: None,
             preview_revision: None,
             selection_sync: None,
+            authored_sync: None,
+            edits: 0,
             building: false,
             preview: None,
             capture: None,
             modified: HashSet::new(),
+            together: Vec::new(),
             translations: HashSet::new(),
             clear_after: None,
             clear_bones: Vec::new(),
@@ -276,6 +305,8 @@ impl State {
         self.undo.clear();
         self.redo.clear();
         self.drag_key = None;
+        self.selected_keys.clear();
+        self.key_box = None;
     }
     /// Whether another document would push the current one out of the
     /// drafts. With no current document there is nothing to lose.
@@ -348,7 +379,12 @@ impl State {
             }
         }
     }
+    /// What `authoring::sync_authored_selection` reads the fields again on.
+    pub(super) fn authored_sync_key(&self, bone: usize) -> (usize, u64, u64, Option<u64>, u64) {
+        (bone, self.cursor.to_bits(), self.revision, self.preview_revision, self.edits)
+    }
     pub(super) fn mark(&mut self, goal: &Goal) {
+        self.edits = self.edits.wrapping_add(1);
         self.playing = false;
         self.clear_bones.retain(|b| *b != goal.bone);
         if goal.mode == Mode::Direct {
@@ -451,9 +487,7 @@ impl State {
             }
         }
         if let Some((action, document)) = self.take_file_action() {
-            let import_skeleton = matches!(action, files::Action::Load)
-                .then(|| skeleton.cloned().map(Arc::new))
-                .flatten();
+            let import_skeleton = action.needs_skeleton().then(|| skeleton.cloned().map(Arc::new)).flatten();
             files::start(jobs, ctx, self.tx.clone(), document, action, rig.clone(), import_skeleton);
         }
         if let Some(document) = &self.document {
@@ -613,19 +647,38 @@ impl Editor {
         }
     }
 
+    /// Copy the picked keys when several are picked, else the pose of the
+    /// frame, as before multi-key selection: a single picked key is the one
+    /// a click on the lanes leaves, and Copy pose must keep working there.
     pub(super) fn studio_copy_clip_keyframe(&mut self) {
         if let Some(document) = &self.clip.document {
-            self.clip.clipboard = document.copy_keyframe(self.clip.frame);
+            if self.clip.selected_keys.len() > 1 {
+                self.clip.key_clipboard = document.copy_keys(&self.clip.selected_keys);
+                self.clip.clipboard.clear();
+            } else {
+                self.clip.clipboard = document.copy_keyframe(self.clip.frame);
+                self.clip.key_clipboard.clear();
+            }
         }
     }
 
+    pub(super) fn has_clip_clipboard(&self) -> bool {
+        !self.clip.clipboard.is_empty() || !self.clip.key_clipboard.is_empty()
+    }
+
+    /// Paste at the playhead what was copied last: keys keep their spacing
+    /// from there and are picked once pasted.
     pub(super) fn studio_paste_clip_keyframe(&mut self) {
-        if self.clip.clipboard.is_empty() {
+        if !self.has_clip_clipboard() {
             return;
         }
         self.clip.checkpoint();
         if let Some(document) = self.clip.document.as_mut() {
-            Arc::make_mut(document).paste_keyframe(self.clip.frame, &self.clip.clipboard);
+            if self.clip.key_clipboard.is_empty() {
+                Arc::make_mut(document).paste_keyframe(self.clip.frame, &self.clip.clipboard);
+            } else {
+                self.clip.selected_keys = Arc::make_mut(document).paste_keys(self.clip.frame, &self.clip.key_clipboard);
+            }
             self.clip.changed();
         }
     }
@@ -634,6 +687,31 @@ impl Editor {
         self.clip.checkpoint();
         if let Some(document) = self.clip.document.as_mut() {
             Arc::make_mut(document).remove_keyframe(self.clip.frame);
+            self.clip.changed();
+        }
+        self.clip_seek(self.clip.frame);
+    }
+
+    /// Whether Delete has picked keys to remove: at least one of them on a
+    /// track the user authored (the hidden rest keys of a draft stay).
+    pub(super) fn has_deletable_key_selection(&mut self) -> bool {
+        let Some(tracks) = self.clip.timeline_tracks() else { return false };
+        self.clip.selected_keys.iter().any(|(bone, frame)| {
+            tracks
+                .iter()
+                .any(|track| track.bone == *bone && track.authored && track.keys.binary_search(frame).is_ok())
+        })
+    }
+
+    /// Delete every picked key in one step of the undo history.
+    pub(super) fn studio_delete_selected_keys(&mut self) {
+        if !self.has_deletable_key_selection() {
+            return;
+        }
+        self.clip.checkpoint();
+        let keys = std::mem::take(&mut self.clip.selected_keys);
+        if let Some(document) = self.clip.document.as_mut() {
+            Arc::make_mut(document).remove_selected_keys(&keys);
             self.clip.changed();
         }
         self.clip_seek(self.clip.frame);
@@ -1031,6 +1109,18 @@ impl Editor {
         let bones: Vec<_> = match capture {
             Capture::Bone(b) => {
                 let mut selected = vec![b];
+                // the joints selected with it are keyed with it
+                if self.selected == Some(b) {
+                    let followers = self.clip_followers();
+                    for bone in followers {
+                        selected.push(bone);
+                        if self.symmetry
+                            && let Some(other) = self.mirrors.counterpart(bone)
+                        {
+                            selected.push(other);
+                        }
+                    }
+                }
                 if self.symmetry
                     && let Some(other) = self.mirrors.counterpart(b)
                 {
@@ -1048,6 +1138,8 @@ impl Editor {
                         result.push(bone);
                     }
                 }
+                result.sort_unstable();
+                result.dedup();
                 result
             }
             Capture::Modified | Capture::AutoKeyModified => self.clip.modified.iter().copied().collect(),

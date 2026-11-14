@@ -228,7 +228,7 @@ leaving and returning, crossing from either side, closing/replacing/expiry,
 late arrival discovery, failed/restricted destinations and teleport cancellation.
 Cross a freshly placed portal without first retreating, then use its arrival return twice. Send several travelers through the same source: destination observers must see one aperture with one unchanged expiry, including late discovery. Private destination observers see a redacted label unless authorized; Friends grants come only from the original creator, while each traveler keeps a personal return. Verify no return is created after a failed, canceled or redirected-to-another-region teleport.
 
-`AURORA_DEMO_PORTALS=drop-friends|drop-public|drop-friends-hover|drop-public-hover|drop-invalid|drop-focus`
+`AURORA_DEMO_PORTALS=drop-friends|drop-public|drop-friends-hover|drop-public-hover|drop-invalid|drop-focus|drop-toggle|drop-toggle-public`
 drags an inventory landmark over the world. Hover scenarios retain the cargo;
 the others release it at frame 560. Shift changes at frame 500 in public modes:
 capture around 530 for the access preview and 700 for the created portal or
@@ -237,6 +237,12 @@ props. The landmark stays in inventory. Ctrl insertion and other inventory drops
 retain their normal behavior.
 `drop-focus` keeps the inventory open with keyboard focus during the drag;
 after release it stays open and logs that keyboard focus returned to the scene.
+`drop-toggle|drop-toggle-public` hold the landmark and press Shift at frame 498,
+release it eight frames later and repeat, four presses in all; `drop-toggle`
+releases the last one at 554 and rests on Friends, `drop-toggle-public` keeps it
+held and rests on Public. Capture around 600 and compare with
+`drop-friends-hover` or `drop-public-hover`: the access hint must keep the size
+of its text, on one line, however many toggles came before (#2636).
 
 `drop-places|drop-places-hover|drop-favorites|drop-favorites-public|drop-favorites-hover`
 uses the shared Places/Favorites landmark cargo with Places open. Hover modes
@@ -1822,6 +1828,14 @@ when unfocused") is ignored during a screenshot.
 - **`AURORA_DEMO_CHATCMD="calc 2+2;rolld 2 20"`**: lines typed in the chat
   bar at frame 240, separated by `;` (chat bar commands: `calc`, `rolld`,
   `gtp`…).
+- **Chat bar Enter** ([#3349](https://github.com/Aurora-Viewer/Aurora-Viewer/issues/3349)): no new demo
+  variable. With `AURORA_DEMO=1` (the ordinary chat bar), at a normal frame
+  rate and again with `AURORA_FPS_LIMIT=10`: type a line, Enter, Enter, type,
+  twenty times. Each line is sent and the avatar stays still. Preferences ›
+  Chat › Nearby chat › "Keep the chat bar active after sending" on (the
+  default): Enter on the empty bar leaves the keyboard in the bar. Escape, or
+  a click in the world, returns to moving. With that preference off: Enter
+  after a message lets the bar go, and the next Enter takes it back.
 
 ## Objects and building
 
@@ -2509,11 +2523,13 @@ the first two added faces at 705 and 725. A single click selects only the
 top of B at 745. Shift removes this last face at 765: the selection and the
 highlighting disappear, and "Select a face" stays available to leave this
 mode. Capture just after these steps: a brief highlight marks the faces on
-the click, then a violet outer halo identifies them without covering the
-materials. The halo follows their visible coverage, without triangle
-diagonals or UV seams. `faces-invisible` repeats these gestures on fully
-transparent prims: only the selected faces become visible through their
-marking. `faces-ready` stops before the clicks for the human test.
+the click, then a violet outer halo identifies them, and the face-select
+pattern of the Legacy Viewer lies on each selected face, white at half
+opacity along its texture mapping (#2505), also when "Show highlight" is
+off, which hides the halo alone. The halo follows their visible coverage,
+without triangle diagonals or UV seams. `faces-invisible` repeats these
+gestures on fully transparent prims: only the selected faces become visible
+through their marking. `faces-ready` stops before the clicks for the human test.
 Shift + click adds or removes a face, including on another object; removing
 the last face of a prim deselects it. Without Shift, the previous selection
 is replaced.
@@ -2522,6 +2538,27 @@ is replaced.
 highlight fades in 0.7 s and only the outer halo remains. Capture at 626 and
 700 to compare the brief tint and the fully cleared surface. The eye button
 "Show selection again" in Materials restarts the marking.
+
+`faces-mapping,object:99620` textures the three cubes, each with its own
+mapping, and selects a side face of A at 625, of A2 at 645 and of B at 665.
+A has the tiles repeated 3 × 2, offset (0.25, 0.1) and turned 30°; A2 is
+stretched to 2 × 3 × 1.5 m in planar mapping, repeated 2 × 2 and turned
+15°; B is a PBR material whose base color is repeated 2 × 3, offset
+(0.2, 0.1) and turned 0.6 rad. Capture at 700: on each face, the pattern
+(one square frame with a rounded cross per repeat) lies exactly over the
+tiles, at their repeats, offset and rotation; changing them in the Texture
+tab moves it. Offline the grid texture IMG_FACE_SELECT cannot load: the
+shader draws its stand-in, the same frame and cross. On the grid the
+texture is fetched the first time Select face is chosen and replaces the
+stand-in once loaded.
+
+`faces-texgen,object:99620` textures the cubes as `faces-mapping`, frames
+the 2 m cube A closely, selects its side face at 625 and switches that
+face's mapping Default ↔ Planar at 655 with the Texture tab's edit. Capture
+at 650 then 690: the tiles and the face-select pattern both go from three
+large turned repeats to the dense planar grid (two repeats per metre times
+3 × 2). On a 0.5 m prim, the default size, the two mappings are the same
+by the Legacy Viewer's formula, so the switch shows no change there.
 
 `faces-complex,object:99620` adds a closed torus, a mesh of which a single
 face comprises three curved islands with holes, and a cut hollow cylinder.
@@ -2948,6 +2985,12 @@ relaunch: a change closes the dialogs open).
 **`AURORA_DEMO_BUILD="mode,x,y[,part,dx,dy]"`** — script of the build
 tools. Modes: `move`, `rotate`, `stretch`, `face`, `align`, `grab`,
 `focus`, `create`, `land`, `select`, `select-join`.
+Ctrl+1 to Ctrl+5 follow the key position (Focus, Move, Edit, Create, Land),
+including a French AZERTY layout where the 4 key types `'`. There is no demo
+that changes the operating-system layout. The unit test feeds that event
+(logical quote, physical 4). On a French AZERTY keyboard, Windows or Linux,
+Ctrl+1 to Ctrl+5 open those tools, Ctrl+4 does not also move or play a
+gesture, and a QWERTY keyboard is unchanged.
 `AURORA_DEMO_BUILD_FRAME` changes its start frame.
 `select-join,620,540,xy,140,-80` simulates a multi-parcel reply with no unique
 owner and the same area as the selected rectangle. After frame 635, Join must
@@ -6201,6 +6244,7 @@ before (`amis`, `groupes`, `repere`, `historique`…) are still accepted.
 | `AURORA_DEMO_AVATAR_STUDIO=1|white|reveal|cycle|pedestal|t-pose|a-pose|grounding|hover-height|hover-menu|environment|pose-cycle|pose-menu|lighting-menu|animation-editor|animation-editor-hover|animation-jump` | Studio backdrop, transitions, grounded poses, display hover height, lighting, menu previews and the native animation editor |
 | `AURORA_DEMO_OUTFITS=<count>[,closed][,scroll][,locate]` | A large wardrobe in the Appearance demo: generated outfits, the window closed, scrolled or located on the current outfit |
 | `AURORA_DEMO_OUTFIT_RESTORE=warm\|cold` | The outfit's attachments restored at login against a region that puts part of it back by itself |
+| `AURORA_DEMO_INITIAL_OUTFIT=1\|Name\|Name,male\|Name,female` | A fake first login that wears the named My Outfits folder (#3411) |
 | `AURORA_DEMO_SHAPE=<mode>` | Worn shape editor and permission scenarios |
 | `AURORA_DEMO_SHAPE_XML=<file>` | With `AURORA_DEMO_SHAPE`: imports an appearance XML into the shape draft |
 | `AURORA_DEMO_SHAPE_XML_EXPORT=<file>` | With `AURORA_DEMO_SHAPE`: exports the shape draft to an appearance XML |
@@ -6235,6 +6279,7 @@ before (`amis`, `groupes`, `repere`, `historique`…) are still accepted.
 | `AURORA_DEMO_TP_CONFIRM=<origin>` | Teleport confirmation on screen |
 | `AURORA_DEMO_SEARCH=<tab>[:text]` | "Search" on a tab (or Aurora's "all" chip), search done |
 | `AURORA_DEMO_SEARCH_WEB=<page>` | Page loaded by the Web tab of "Search" in demo; `teleport` opens the offline link test |
+| `AURORA_DEMO_EVENT_TIMES=1` | The demo events start from the next hour, to try their times in SLT and local time |
 | `AURORA_DEMO_GRID_HELP=<page>` | Help › Knowledge base shown, opening this page |
 | `AURORA_DEMO_MARKETPLACE=<page>` | Marketplace window open at start on this page |
 | `AURORA_DEMO_WEB_BROWSER=<page>` | Toolbar web browser window open at start on this page |
@@ -7578,8 +7623,10 @@ failure. Grid validation and any paid upload are performed by the human.
   belongs to an account.
 - **`AURORA_DEMO_COLORBLIND=protan|deutan|tritan|mono[:strength]`**: the
   interface adapted to a colour vision deficiency for this run, as
-  Preferences › Accessibility › Colour blindness does, without touching the
-  saved settings (`:0.5` for half the strength). `14` of
+  Preferences › Accessibility › Color blindness does, without touching the
+  saved settings (`:0.5` for half the strength). English labels use American
+  spelling. In Preferences, search "color": Accent color, Color blindness,
+  Interface colors, and Color vision must all appear. `14` of
   `AURORA_DEMO_OPTIONS` opens that page, with its preview of the status
   dots. What to look for (compare with a capture without the variable):
   `protan` / `deutan` turn success and online blue, `tritan` turns warnings
@@ -7604,8 +7651,8 @@ failure. Grid validation and any paid upload are performed by the human.
   their text, icons and pictures stay solid; click a window then the world
   to see it change between active and inactive.
 - **`AURORA_DEMO_COLORS=accent:<hex>,surface:<hex>,text:<hex>`**: the
-  interface colours for this run, any of the three, as Preferences ›
-  Appearance › Skin › Interface colours does, without touching the saved
+  interface colors for this run, any of the three, as Preferences ›
+  Appearance › Skin › Interface colors does, without touching the saved
   settings (for example `accent:#14B8A6` for a teal accent, or
   `accent:#EC4899,surface:#3A2433,text:#FCE7F3` for a pink interface).
   What to look for: the accent on the main buttons, switches, sliders,
@@ -7631,8 +7678,12 @@ failure. Grid validation and any paid upload are performed by the human.
   order (the default chat window shows the last four).
   What to see: no square in the labels, the floating text,
   the chat and its list; all the characters of a line sitting on the same
-  baseline. Compare with `AURORA_FONT_FALLBACK=0` (squares everywhere
-  except Cyrillic, Greek, emojis and a few symbols). Visible limits: flags,
+  baseline. One name is small capitals (`ᴄᴅᴇꜰᴊᴋᴏᴘꜱᴜᴠᴡᴢ` and `ᴥ`); the
+  symbols line includes `♱ ♰ ✞`; the other-scripts line includes Kannada,
+  Oriya and the other Indic letters, plus `𓆩 ꕤ ᥫ 𐙚 𖤐 ꨄ`. Compare with
+  `AURORA_FONT_FALLBACK=0` (squares for everything the embedded Noto Sans
+  also lacks: Georgian, CJK, Arabic, the rare scripts; the small capitals
+  stay, because that Noto face is now always in the family). Visible limits: flags,
   skin tones and ZWJ sequences not composed; emojis
   monochrome outside the chat. On a system without the expected fonts
   (see `ui/fonts/fallback.rs`, verified on Windows 11), the squares
@@ -8058,6 +8109,11 @@ failure. Grid validation and any paid upload are performed by the human.
   (also in the window's title bar) opens Preferences › Chat on "YouTube
   videos". Moving YouTube's own volume slider logs `video volume kept at
   N %`, and the next video starts at that level.
+  A click on a window laid over the playing card or the player window must
+  not start or stop the video or give the page the keyboard (#3436): move
+  Inventory over the embed and click it. A click on the uncovered page still
+  reaches the video. The web browser and a profile page under another window
+  follow the same rule.
 - **`AURORA_DEMO_VIDEO_VOLUME=<0-100>`**: demo only, the level YouTube's
   player is set to when a video starts (what Preferences › Chat › Video
   volume keeps). With `AURORA_DEMO_PREVIEW_PLAY=window` and `0`, the
@@ -9050,7 +9106,8 @@ Human grid validation: remember MFA for account A and B, restart the viewer, the
   island, its left and right edges on the island's, down to the work
   area's bottom; the compact view where it stands); the clock (#453):
   `clocklocal` (local time instead of the saved time, so a click on the
-  clock does not change it in that run), `noseconds` (without its
+  clock does not change it in that run), `clockslt` (SLT the same way),
+  `noseconds` (without its
   seconds), `clock12` / `clock24` (12 / 24 hours instead of the saved
   format; Auto writes the `clock:` log line at startup with the system's
   12 or 24 hours). In demo the network's graphs show a synthetic minute of
@@ -9746,6 +9803,16 @@ Human grid validation: remember MFA for account A and B, restart the viewer, the
   A text containing `page` (for example `people:page`) answers a full
   page: "> 100 found" and the Next button; a text containing
   `xyz` finds nothing ("'xyz' not found").
+- **`AURORA_DEMO_EVENT_TIMES=1`** (with `AURORA_DEMO_SEARCH=events`): the
+  demo events start at the next whole hour, then 2, 5, 8, 12 and 26 hours
+  later, instead of their fixed October dates, so the list reads "Today"
+  and "Tomorrow" and crosses midnight. A left click on the clock switches
+  every event time between SLT and local time (#1754): the Legacy look's
+  Date column and the details' Date field ("11/04 14:00" in SLT, the
+  directory's text; "11/04 23:00 CET" in local time), Aurora's event cards
+  ("Today · 14:00 SLT" / "Today · 23:00 CET", the day following local
+  midnight) and the date banner of the details: the hours from start to
+  end ("16:00–17:00", "23:00–01:00 (+1)" past midnight) over the zone.
 - **`AURORA_DEMO_SEARCH_WEB=<page>`**: the address the Web tab loads in
   demo (a local `file:///…` page is enough to try back, forward,
   reload and the address). Set it to `teleport` for the bundled offline
@@ -10302,6 +10369,19 @@ objects, 3 prims), with the bake, texture and skeleton lines of each step.
 The demo has no bakes nor streamed textures, so the counts of downloads
 are 0; the downloads themselves need a grid test.
 
+**`AURORA_DEMO_INITIAL_OUTFIT=1|Name|Name,male|Name,female`** — a fake first
+login, like the Legacy Viewer's `FakeInitialOutfitName` (`llstartup.cpp`).
+`1` names the folder "Starter Outfit" and female; a name uses that folder
+and female; `Name,male` or `Name,female` sets the gender (a comma in the
+name stays in the name). The demo login reply says `ever_logged_in` is N
+and carries `initial-outfit`. My Outfits gains that folder with one shirt,
+and a Current Outfit folder is added. After login the shirt is linked from
+Current Outfit (inventory, or Appearance › Worn). The gender of a named
+outfit is that outfit's own shape; this demo shirt has no shape, so
+`,male` only changes the login field. The no-folder path (standard
+wearables, male shape param 80) is covered by unit tests, not this switch.
+A real brand-new Second Life account is a grid check the human registers.
+
 **`AURORA_DEMO_OUTFIT_RESTORE=warm|cold`** — the login restore of the
 outfit's attachments (`world/outfit.rs`) against a demo region that behaves
 like the busy region of the 2026-10-27 grid logs: it puts back by itself
@@ -10848,6 +10928,19 @@ separate searches enabled and disabled; that preference controls only the text.
   closes), then Right at 700 (it opens again). Capture at 690 (the folder
   closed and selected) and 720 (open). The log reports the selection and
   the folder's state at both points.
+- `keyboard-down`, `aurora-keyboard-down`: click the demo object at frame
+  650, then press Down eight times, every four frames from 660 to 688: the
+  selection passes the bottom of the list, which scrolls to it. Capture at
+  720; the log reports the selected row and whether it was drawn whole
+  inside the list. Run it with Preferences › Font scale above 1 too.
+- `keyboard-type`, `aurora-keyboard-type`: click the demo object at frame
+  650, type "Demo s" at 665 and "il" at 667 (the letters add up: Demo
+  silhouette is selected), press Up at 700 (the typed word ends) and type
+  "n" at 705 (No-copy object, the first "n" below, is selected). Capture
+  at 690 and 720.
+  The log reports the selection at 666, 690 and 720. Manually check the
+  1.5 s pause that starts a new word, a click ending it, and that typing in
+  the search or rename field still goes to the field.
 - `clipboard`: expanded inventory to test Ctrl+C / Ctrl+X / Ctrl+V on
   items, folders and multiple selections. Choose the destination
   folder (or one of its items) before pasting. The search and
@@ -11151,7 +11244,7 @@ What the inventory must show with these scenarios:
 
 | Variable | Effect |
 |---|---|
-| `AURORA_DEMO_MEDIA=<url>`, `1` or `mini` | Media on a prim; `mini` uses Mini controls (buttons, no address) |
+| `AURORA_DEMO_MEDIA=<url>`, `1`, `mini` or `links` | Media on a prim; `mini` uses Mini controls (buttons, no address), `links` is the `secondlife://` link reproduction page |
 | `AURORA_DEMO_PARCEL_MEDIA=<url>` or `1` | Parcel media |
 | `AURORA_DEMO_MEDIA_CLICK="x,y[,x2,y2][,edit\|paste]"` | Clicks on the media |
 | `AURORA_DEMO_MEDIA_CLICK_FRAME=<n>` | Starting frame of these clicks |
@@ -11440,6 +11533,13 @@ What the inventory must show with these scenarios:
   `AURORA_DEMO_MEDIA_CLICK_FRAME` changes
   the starting frame to let the plugin load; also works with
   `AURORA_DEMO_HUDS=media`.
+- **`AURORA_DEMO_MEDIA=links`**: the page of a prim in front of the avatar
+  holds a `secondlife:///app/chat/824619/…` and a `secondlife://<region>/…`
+  link, each as an anchor and as a script navigation. A click on a chat
+  link makes the demo's listener answer "Heard on channel 824619: …" in
+  nearby chat; a click on a place link opens that place's profile. This is
+  the reproduction of #3518 (a `secondlife://` link of a media-on-a-prim
+  page did nothing).
 - **Media plugins.** The media scenarios need Aurora's media plugins pack
   (SLPlugin, CEF, LibVLC; on Linux GStreamer instead of LibVLC, from the
   system). A viewer that finds no plugins asks first (the card "Download

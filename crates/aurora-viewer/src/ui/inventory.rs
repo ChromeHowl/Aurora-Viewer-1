@@ -40,6 +40,7 @@ pub use embedded::save_focused as document_save_focused;
 pub(crate) mod drag;
 mod embedded;
 mod folder_colors;
+pub(crate) mod hidden_folders;
 pub use folder_colors::{demo as folder_colors_demo, demo_frame as folder_colors_demo_frame, inherit as folder_colors_inherit};
 mod hover;
 pub use hover::demo_events as hover_demo_events;
@@ -570,6 +571,8 @@ pub struct InventoryUi {
     /// The list's focus target that opened this document window, so closing
     /// it hands the keyboard back there (see `clipboard::return_focus_to`).
     document_owner: Option<egui::Id>,
+    /// Letters typed into the focused list (LLFolderView's type-ahead).
+    type_ahead: keyboard::TypeAhead,
     visible: Vec<Uuid>,
     pub clipboard: Vec<Uuid>,
     pub cut: bool,
@@ -775,6 +778,7 @@ impl InventoryUi {
     /// LLFolderView::startRenamingSelectedItem: edit and select the name in place.
     pub fn begin_rename(&mut self, inv: &Inventory, id: Uuid) {
         self.keyboard_selection = false;
+        self.type_ahead.clear();
         self.selected = Some(id);
         self.selection.clear();
         self.selection.insert(id);
@@ -982,6 +986,7 @@ impl InventoryUi {
     fn select(&mut self, ui: &egui::Ui, id: Uuid, secondary: bool) {
         clipboard::request_focus(ui, self);
         self.keyboard_selection = false;
+        self.type_ahead.clear();
         if secondary && self.selection.contains(&id) {
             self.selected = Some(id);
             return;
@@ -1658,7 +1663,7 @@ fn search_scroll(
     if let Some(offset) = st.scroll_restore.take() {
         scroll = scroll.vertical_scroll_offset(offset);
     }
-    let row_height = rows::row_height(st);
+    let row_height = rows::row_height(ui, p, st);
     if navigated {
         st.scroll_hold = None;
     }
@@ -1704,6 +1709,7 @@ fn search_rows(
     range: std::ops::Range<usize>,
 ) {
     tree_spacing(ui);
+    let row_height = rows::row_height(ui, p, st);
     // Keep the complete order for Shift selection, while drawing only rows
     // intersecting the viewport. No arbitrary 500-item result limit.
     let rows = st.result_tree.rows[range].to_vec();
@@ -1725,8 +1731,12 @@ fn search_rows(
             );
             st.result_width = st.result_width.max(width);
         }
-        ui.horizontal(|ui| {
-            ui.set_min_height(rows::row_height(st));
+        // A Legacy row's own row centres its contents; this one places it at
+        // the top, so the row is as tall as it. Centred here, a row that starts
+        // at the theme's interact height sits lower and grows past `row_height`.
+        let legacy = st.aurora.is_none();
+        let draw = |ui: &mut egui::Ui| {
+            ui.set_min_height(row_height);
             ui.spacing_mut().item_spacing.x = 0.0;
             ui.add_space(row.depth.min(24) as f32 * ui.spacing().indent);
             if row.folder {
@@ -1738,7 +1748,12 @@ fn search_rows(
             } else {
                 item_row(ui, p, icons, inv, &row.id, st, prefs, facts, actions);
             }
-        });
+        };
+        if legacy {
+            ui.horizontal_top(draw);
+        } else {
+            ui.horizontal(draw);
+        }
     }
 }
 
@@ -4883,7 +4898,7 @@ mod tests {
         outside.parent = Uuid::from_u128(8002);
         inv.add_items(vec![nested, outside]);
         let mut st = InventoryUi {
-            search: "instructions".into(),
+            search: inv.items[&Uuid::from_u128(8103)].name.clone(),
             ..Default::default()
         };
         folder_window_frame(&ctx, &mut inv, root, &mut st);

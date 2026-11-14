@@ -4,33 +4,28 @@
 //! `PushExpEnvironment` messages of experience environment controllers.
 use super::*;
 
-/// The LLSD document of a generic message parameter (notation, XML or binary,
-/// as LLSDSerialize::deserialize reads it).
+/// The LLSD document of a generic message parameter.
+///
+/// `LLDispatcher::unpackMessage` strips one trailing NUL from the packed
+/// string before `LLSDSerialize::deserialize`. The simulator writes the
+/// C++ header (`<? llsd/notation ?>`), which is not the compact
+/// `<?llsd/notation?>` prefix.
 fn document(bytes: &[u8]) -> Option<aurora_llsd::Llsd> {
-    if bytes.len() > 1024 * 1024 {
+    if bytes.len() > 1024 * 1024 || bytes.is_empty() {
         return None;
     }
-    let bytes = bytes.trim_ascii_start();
-    // LLSDSerialize::deserialize accepts spaced and case-insensitive codec
-    // headers, including the standard "<? llsd/notation ?>" serializer form.
-    if let Some(header) = bytes.strip_prefix(b"<?")
-        && let Some(end) = header.windows(2).position(|w| w == b"?>")
-    {
-        let name = header[..end].trim_ascii();
-        let body = header[end + 2..].trim_ascii_start();
-        if name.eq_ignore_ascii_case(b"llsd/notation") {
-            return aurora_llsd::from_notation(body).ok();
-        }
-        if name.eq_ignore_ascii_case(b"llsd/binary") {
-            return aurora_llsd::from_binary(body).ok().map(|(document, _)| document);
-        }
-        if name.eq_ignore_ascii_case(b"llsd/xml") {
-            return aurora_llsd::from_xml(body).ok();
-        }
-    }
-    aurora_llsd::from_notation(bytes)
-        .or_else(|_| aurora_llsd::from_xml(bytes))
-        .or_else(|_| aurora_llsd::from_binary(bytes).map(|(document, _)| document))
+    let stripped = match bytes.split_last() {
+        Some((0, rest)) if !rest.is_empty() => rest,
+        _ => bytes,
+    };
+    aurora_llsd::deserialize(stripped)
+        .or_else(|_| {
+            if stripped.len() == bytes.len() {
+                Err(aurora_llsd::LlsdError::Invalid("no trailing nul"))
+            } else {
+                aurora_llsd::deserialize(bytes)
+            }
+        })
         .ok()
 }
 
@@ -104,7 +99,7 @@ impl Session<'_> {
                     // diagnostics; an invalid document must not fail silently.
                     log::warn!("PushExpEnvironment ignored: invalid recipient, experience, action or serialized document");
                 }
-            }
+            },
             _ => {}
         }
     }
@@ -216,6 +211,30 @@ mod tests {
                 matches!(decoded, Some(NetEvent::ExperienceEnvironment { experience: id, message: ref value }) if id == experience && value == &message),
                 "serializer document was dropped"
             );
+        }
+    }
+
+    #[test]
+    fn a_full_environment_push_keeps_the_serialize_header_and_the_packed_nul() {
+        let agent = Uuid::from_u128(1);
+        let experience = Uuid::parse_str("340191e2-a7e7-11ed-9ef6-0242ac110003").unwrap();
+        let asset = Uuid::parse_str("03189ca5-3838-0912-86ad-dfb434e8ed69").unwrap();
+        let mut push = b"<? llsd/notation ?>\n{'action':'PushFullEnvironment','action_data':{'asset_id':u03189ca5-3838-0912-86ad-dfb434e8ed69,'transition_time':r3},'Permission':i17,'OwnerID':u607763b1-9b52-4649-bf2f-57d2dc2f219c}".to_vec();
+        push.push(0);
+        match environment(
+            agent,
+            agent,
+            experience,
+            &[&push, b"Continental EEP control - LOBBY\0", b"The Continental Club\0"],
+        ) {
+            Some(NetEvent::ExperienceEnvironment { experience: id, message }) => {
+                assert_eq!(id, experience);
+                assert_eq!(message["action"].as_str(), "PushFullEnvironment");
+                assert_eq!(message["action_data"]["asset_id"].as_uuid(), asset);
+                assert_eq!(message["action_data"]["transition_time"].as_f32(), 3.0);
+                assert_eq!(message["Permission"].as_i32(), 17);
+            }
+            other => panic!("unexpected {other:?}"),
         }
     }
 

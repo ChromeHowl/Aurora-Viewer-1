@@ -560,8 +560,12 @@ pub fn target(view: &str, inv: &Inventory) -> Option<Uuid> {
         | "clipboard-window"
         | "keyboard"
         | "keyboard-fold"
+        | "keyboard-down"
         | "aurora-keyboard"
         | "aurora-keyboard-fold"
+        | "aurora-keyboard-down"
+        | "keyboard-type"
+        | "aurora-keyboard-type"
         | "aurora-keyboard-wide" => 8100,
         "animation"
         | "animation-open"

@@ -938,10 +938,11 @@ pub struct Settings {
     /// With it, the system lines of the conversations (calls, automatic
     /// replies) too (off, the human's choice of 2026-10-24).
     pub compact_im_system_lines: bool,
-    /// The local chat bar keeps the keyboard after a message is sent; Enter
-    /// on the empty bar gives it back to the world (the Legacy Viewer's
-    /// CloseChatOnReturn off). On by default (human choice of 2026-10-16);
-    /// off, the bar lets go after sending.
+    /// The local chat bar keeps the keyboard after a message is sent, and
+    /// an empty Enter leaves it there (the Legacy Viewer's CloseChatOnReturn
+    /// off, FSNearbyChatControl::autohide). On by default (human choice of
+    /// 2026-10-16, empty Enter kept since #3349). Off, sending lets the
+    /// keyboard go and the next Enter takes the bar back.
     pub chat_keep_focus: bool,
     /// Aurora extension, Enter toggles typing: Enter on an empty field gives
     /// the keyboard back to the world in every conversation too (IMs and
@@ -5697,6 +5698,21 @@ mod tests {
             .join(uuid::Uuid::new_v4().to_string());
         std::fs::create_dir_all(&dir).expect("scratch folder");
         dir.join("settings.json")
+    }
+
+    #[test]
+    fn glow_off_survives_saving_and_loading_settings() {
+        let path = scratch_settings_file();
+        let settings = Settings {
+            glow: false,
+            ..Settings::default()
+        };
+
+        settings.save_to(&path);
+        let loaded = Settings::load_from(&path);
+
+        assert!(!loaded.glow);
+        let _ = std::fs::remove_dir_all(path.parent().expect("settings directory"));
     }
 
     fn read_back(path: &Path) -> serde_json::Value {

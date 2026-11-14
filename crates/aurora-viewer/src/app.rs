@@ -67,6 +67,8 @@ mod describe;
 mod dev_toolbox;
 mod folders;
 mod hover_pick;
+#[path = "mcp_bridge.rs"]
+pub(crate) mod mcp_bridge;
 mod texture_picker;
 mod typing_pointer;
 use folders::chat_log_root;
@@ -169,6 +171,7 @@ mod wearable_favorites;
 mod world_click_demo;
 mod worn_demo;
 
+#[derive(Debug)]
 enum Screen {
     Login,
     Loading { since: Instant },
@@ -203,10 +206,10 @@ struct SuitcaseAsk {
 struct Gfx {
     /// Before the window: the renderer's surface, made from the window's
     /// raw handles, goes first (the renderer also keeps the window until
-    /// then, `Renderer::new`).
+    /// then, `Renderer::new`). `None` in `--offscreen-gpu` headless mode.
     renderer: Renderer,
-    egui_state: egui_winit::State,
-    window: Arc<Window>,
+    egui_state: Option<egui_winit::State>,
+    window: Option<Arc<Window>>,
     /// Revealed only once the renderer has presented its first image.
     shown: bool,
     maximize_on_show: bool,
@@ -1170,6 +1173,7 @@ pub struct App {
     gesture_state: gestures::State,
     imports: crate::imports::Imports,
     blender_live: crate::blender_live::Live,
+    mcp_bridge: mcp_bridge::McpBridge,
     task_transfer: std::collections::VecDeque<ui::inventory::task_drop::PendingTransfer>,
     /// "Copy to inventory" of objects' contents (app/contents_copy.rs).
     contents_copies: contents_copy::ContentsCopies,
@@ -2191,6 +2195,7 @@ impl App {
             gesture_state: Default::default(),
             imports: Default::default(),
             blender_live: Default::default(),
+            mcp_bridge: Default::default(),
             task_transfer: Default::default(),
             contents_copies: Default::default(),
             world_edits: Default::default(),
@@ -2661,6 +2666,21 @@ impl App {
                 self.on_app_event(NetEvent::InventoryEdited { request: *request, result });
                 return;
             }
+            if crate::demo::initial_outfit_request().is_some()
+                && let NetCommand::UpdateOutfit { request, change } = &cmd
+            {
+                let owner = self.world.agent_id;
+                let contents = crate::demo::initial_outfit_applied(
+                    owner,
+                    |folder| self.world.inventory.folders.get(&folder).map(|f| f.info.version).unwrap_or(0),
+                    change,
+                );
+                self.on_app_event(NetEvent::OutfitUpdated {
+                    request: *request,
+                    result: Ok(contents),
+                });
+                return;
+            }
             if crate::world::received_items::demo_accept(&mut self.world, &cmd) {
                 return;
             }
@@ -3116,6 +3136,7 @@ impl App {
                         }
                         if let Some(folder) = self.world.inventory.folders.get(&c.folder_id)
                             && matches!(folder.info.type_default, 46..=48)
+                            && !crate::demo::initial_outfit_folder(c.folder_id)
                         {
                             c.version = folder.info.version;
                             c.folders = folder
@@ -3556,6 +3577,7 @@ impl App {
     }
 
     fn on_app_event(&mut self, ev: NetEvent) {
+        self.mcp_observe_event(&ev);
         if matches!(&ev, NetEvent::AgentMovementComplete { .. })
             && let Some(recovery) = &mut self.follow_recovery
         {
@@ -4131,6 +4153,7 @@ impl App {
             }
             NetEvent::HoverParcel { handle, parcel } => self.on_hover_parcel(handle, parcel),
             NetEvent::LoginProgress { message, fraction } => {
+                log::info!("NetEvent::LoginProgress: '{message}' ({fraction})");
                 self.loading_stage = message.clone();
                 self.login_progress = Some((message, fraction));
             }
@@ -4143,6 +4166,9 @@ impl App {
                 previous_session,
                 next_server,
             } => {
+                log::warn!(
+                    "NetEvent::LoginFailed: error='{error}', mfa={mfa_required}, tos={tos_required}, crit={critical_required}, bad_cred={bad_credentials}, prev={previous_session}, next={next_server:?}"
+                );
                 // A refused login spends its code, whatever the reason: the next
                 // attempt sends none, so the server can ask for a new one
                 // (LLLoginInstance::constructAuthParams starts with an empty
@@ -4187,6 +4213,7 @@ impl App {
                 }
             }
             NetEvent::LoggedIn(l) => {
+                log::info!("NetEvent::LoggedIn: agent_id={}, session_id={}", l.agent_id, l.session_id);
                 self.parcel_music
                     .enter(!self.demo && self.settings.parcel_music_accounts.contains(&l.agent_id));
                 self.session_started(l.session_id);
@@ -6903,7 +6930,7 @@ impl App {
         let minimized = self
             .gfx
             .as_ref()
-            .and_then(|g| g.window.is_minimized())
+            .and_then(|g| g.window.as_ref().and_then(|w| w.is_minimized()))
             .map(|minimized| effective_window_state(self.focused, minimized, self.vr_camera.is_some()).1);
         if !self.minimized_mute.update(self.settings.audio.mute_when_minimized, minimized) {
             return;
@@ -6997,6 +7024,14 @@ impl App {
 
     /// Log out, save the window, layout, inventory cache and settings, exit.
     fn shutdown(&mut self, event_loop: &ActiveEventLoop) {
+        self.shutdown_inner(Some(event_loop));
+    }
+
+    pub(crate) fn shutdown_headless(&mut self) {
+        self.shutdown_inner(None);
+    }
+
+    fn shutdown_inner(&mut self, event_loop: Option<&ActiveEventLoop>) {
         self.instances.leave();
         // closed while the graphics card still holds a frame, from its
         // notice or not: reported, and the next start offers the safe
@@ -7034,16 +7069,17 @@ impl App {
         if let Some(g) = self
             .gfx
             .as_ref()
-            .filter(|g| forced_window_size().is_none() && g.window.fullscreen().is_none())
+            .filter(|g| forced_window_size().is_none() && g.window.as_ref().is_some_and(|w| w.fullscreen().is_none()))
+            && let Some(win) = &g.window
         {
-            self.settings.window_maximized = g.window.is_maximized();
+            self.settings.window_maximized = win.is_maximized();
             // when maximized, keep the restored size / position recorded below
-            if !self.settings.window_maximized && !g.window.is_minimized().unwrap_or(false) {
-                let s = g.window.inner_size();
-                let sf = g.window.scale_factor();
+            if !self.settings.window_maximized && !win.is_minimized().unwrap_or(false) {
+                let s = win.inner_size();
+                let sf = win.scale_factor();
                 self.settings.window_width = (s.width as f64 / sf) as u32;
                 self.settings.window_height = (s.height as f64 / sf) as u32;
-                if let Ok(p) = g.window.outer_position() {
+                if let Ok(p) = win.outer_position() {
                     self.settings.window_x = Some(p.x);
                     self.settings.window_y = Some(p.y);
                 }
@@ -7076,7 +7112,9 @@ impl App {
         if self.restart_into_vr {
             restart_with_vr(self.vr_requested_mode);
         }
-        event_loop.exit();
+        if let Some(el) = event_loop {
+            el.exit();
+        }
     }
 
     fn record_inventory_logout(&mut self) {
@@ -7105,20 +7143,20 @@ impl App {
             return;
         }
         self.geom_changed = None;
-        let Some(g) = &self.gfx else {
+        let Some(win) = self.gfx.as_ref().and_then(|g| g.window.as_ref()) else {
             return;
         };
-        if g.window.fullscreen().is_some() || g.window.is_maximized() || g.window.is_minimized().unwrap_or(false) {
+        if win.fullscreen().is_some() || win.is_maximized() || win.is_minimized().unwrap_or(false) {
             return;
         }
-        let s = g.window.inner_size();
+        let s = win.inner_size();
         if s.width == 0 || s.height == 0 {
             return;
         }
-        let sf = g.window.scale_factor();
+        let sf = win.scale_factor();
         self.settings.window_width = (s.width as f64 / sf) as u32;
         self.settings.window_height = (s.height as f64 / sf) as u32;
-        if let Ok(p) = g.window.outer_position() {
+        if let Ok(p) = win.outer_position() {
             self.settings.window_x = Some(p.x);
             self.settings.window_y = Some(p.y);
         }
@@ -7132,7 +7170,7 @@ impl App {
         if self.capture.is_some() || forced_window_size().is_some() {
             return;
         }
-        let Some(window) = self.gfx.as_ref().map(|g| g.window.clone()) else {
+        let Some(window) = self.gfx.as_ref().and_then(|g| g.window.clone()) else {
             return;
         };
         let entering = self.settings.window_fullscreen;
@@ -7730,7 +7768,11 @@ impl App {
             Request::Profile(id) => self.profile_ui.open(&mut self.world, id),
             Request::GroupProfile(id) => self.group_profile_ui.open(&mut self.world, id),
             Request::PasteVector(which) => {
-                let text = self.gfx.as_mut().and_then(|g| g.egui_state.clipboard_text()).unwrap_or_default();
+                let text = self
+                    .gfx
+                    .as_mut()
+                    .and_then(|g| g.egui_state.as_mut()?.clipboard_text())
+                    .unwrap_or_default();
                 self.build.paste_vector(&mut self.world, &self.settings.build, which, &text);
             }
             Request::CopyKeys => self
@@ -10065,7 +10107,37 @@ impl App {
         self.world.map.overlays.retain(|h, _| regions.contains_key(h));
     }
 
+    pub(crate) fn init_offscreen_gfx(&mut self) -> anyhow::Result<()> {
+        if self.gfx.is_some() {
+            return Ok(());
+        }
+        let w = self.settings.window_width.max(1280);
+        let h = self.settings.window_height.max(720);
+        let gpu = std::env::var("AURORA_GPU").unwrap_or_else(|_| self.settings.gpu_adapter.clone());
+        aurora_render::pipeline_cache::configure(crate::settings::cache_dir().join("pipelines"), aurora_version::version());
+        let mut renderer = Renderer::new_offscreen(w, h, false, &gpu)?;
+        renderer.apply_settings(self.settings.render_settings());
+        self.note_gpus(&renderer);
+        self.gfx = Some(Gfx {
+            window: None,
+            shown: true,
+            maximize_on_show: false,
+            renderer,
+            egui_state: None,
+        });
+        log::info!("offscreen GPU renderer ready ({w}x{h}, windowless)");
+        Ok(())
+    }
+
+    pub(crate) fn tick_headless(&mut self) -> bool {
+        self.frame_inner(None)
+    }
+
     fn frame(&mut self, event_loop: &ActiveEventLoop) {
+        let _ = self.frame_inner(Some(event_loop));
+    }
+
+    fn frame_inner(&mut self, event_loop: Option<&ActiveEventLoop>) -> bool {
         // the input this frame reads came with the events just handled: its
         // time to the screen starts here (Performance › latency, pacing.rs)
         if let Some(g) = &mut self.gfx {
@@ -10074,7 +10146,11 @@ impl App {
         }
         self.sync_minimized_mute();
         // a window behind gives its textures back (texture_budget::Background)
-        let minimized = self.gfx.as_ref().and_then(|g| g.window.is_minimized()).unwrap_or(false);
+        let minimized = self
+            .gfx
+            .as_ref()
+            .and_then(|g| g.window.as_ref().and_then(|w| w.is_minimized()))
+            .unwrap_or(false);
         let presenting = self.gfx.as_ref().is_some_and(|g| g.renderer.vr_engaged());
         let (focused, minimized) = effective_window_state(self.focused, minimized, presenting);
         self.scene.textures.set_window_state(focused, minimized);
@@ -10116,8 +10192,8 @@ impl App {
         }
         if self.demo && crate::demo::projector_bench_done() {
             log::info!("projector benchmark end");
-            self.shutdown(event_loop);
-            return;
+            self.shutdown_inner(event_loop);
+            return false;
         }
         if self.demo && self.frame_count == 650 && std::env::var_os("AURORA_DEMO_EXIT").is_some() {
             self.request_exit();
@@ -10220,8 +10296,8 @@ impl App {
             }
         }
         if self.updater.poll(&mut self.settings, &mut self.login_info, self.net.runtime()) {
-            self.shutdown(event_loop);
-            return;
+            self.shutdown_inner(event_loop);
+            return false;
         }
         self.update_notice();
         self.update_render_info();
@@ -10258,8 +10334,8 @@ impl App {
         if let Some(action) = self.exit_prompt.finish(!self.in_world() || self.demo, now) {
             match action {
                 ui::exit::Action::Quit => {
-                    self.shutdown(event_loop);
-                    return;
+                    self.shutdown_inner(event_loop);
+                    return false;
                 }
                 ui::exit::Action::Logout => self.back_to_login(None),
                 ui::exit::Action::Cancel => {}
@@ -10300,8 +10376,10 @@ impl App {
         if let Some(t) = self.quit_at
             && now >= t
         {
-            event_loop.exit();
-            return;
+            if let Some(el) = event_loop {
+                el.exit();
+            }
+            return false;
         }
 
         // logo / icons
@@ -10312,8 +10390,10 @@ impl App {
             if let Some((rgba, w, h)) = l.icon
                 && let Ok(icon) = winit::window::Icon::from_rgba(rgba, w, h)
             {
-                if let Some(g) = &self.gfx {
-                    g.window.set_window_icon(Some(icon.clone()));
+                if let Some(g) = &self.gfx
+                    && let Some(win) = &g.window
+                {
+                    win.set_window_icon(Some(icon.clone()));
                 }
                 self.window_icon = Some(icon);
             }
@@ -10478,6 +10558,13 @@ impl App {
                 self.send(command);
             }
             for cmd in std::mem::take(&mut self.world.outfit.commands) {
+                if let NetCommand::UpdateOutfit { request, .. } = &cmd
+                    && self.appearance_ui.pending.is_none()
+                {
+                    // Interactive wears set this before send. Without it the
+                    // OutfitUpdated reply is dropped (app.rs OutfitUpdated).
+                    self.appearance_ui.pending = Some((*request, self.world.outfit.pending_sync));
+                }
                 self.send(cmd);
             }
             // block list, groups and group chat sessions
@@ -10627,7 +10714,8 @@ impl App {
         // AURORA_DEMO_LINK's lost link, before the frame takes the window
         self.demo_link_lost();
         let Some(mut gfx) = self.gfx.take() else {
-            return;
+            self.update_mcp_bridge(None);
+            return true;
         };
         self.options_ui.vr_default_resolution = gfx.renderer.vr_default_resolution();
         if let Some(pose) = gfx.renderer.vr_head_pose() {
@@ -10665,6 +10753,7 @@ impl App {
         }
         self.local_bakes.apply(&mut self.scene, &mut gfx.renderer);
         self.update_blender_live(&mut gfx.renderer);
+        self.update_mcp_bridge(Some(&mut gfx.renderer));
         let t_up = Instant::now();
         let (w, h) = gfx.renderer.size();
         // a photo drawn at its own size this frame: its proportions, the
@@ -10969,13 +11058,15 @@ impl App {
             }
             if mode.starts_with("build-") && self.frame_count == 450 {
                 // Exercise the actual menu transitions in both opening orders.
-                self.handle_actions(
-                    UiActions {
-                        bar: BarAction::Build(1),
-                        ..Default::default()
-                    },
-                    event_loop,
-                );
+                if let Some(el) = event_loop {
+                    self.handle_actions(
+                        UiActions {
+                            bar: BarAction::Build(1),
+                            ..Default::default()
+                        },
+                        el,
+                    );
+                }
                 self.settings.build.edit_linked = true;
                 let root = crate::demo::action_id(crate::demo::hand_ik::ROOT);
                 if let Some(index) = self.world.objects.index_of_uuid(&root)
@@ -11012,14 +11103,16 @@ impl App {
                         );
                     }
                 }
-                if mode == "build-before" {
+                if mode == "build-before"
+                    && let Some(el) = event_loop
+                {
                     for _ in 0..2 {
                         self.handle_actions(
                             UiActions {
                                 bar: BarAction::IkEdit,
                                 ..Default::default()
                             },
-                            event_loop,
+                            el,
                         );
                     }
                 }
@@ -11294,6 +11387,7 @@ impl App {
             }
             self.scene.poser = self.ik_editor.pose_layers(&self.world);
             self.outfit_portrait_pose();
+            self.mcp_bridge.apply_poses(&mut self.scene.poser);
             self.ik_editor.tick_pose_storage(&self.scene.jobs, &self.egui_ctx, &self.world);
             if !self.scene.poser.is_empty() {
                 self.scene.ik_edit = Default::default();
@@ -11344,13 +11438,13 @@ impl App {
                 },
             );
             self.frame_profile.lap(Lap::Complexity);
-            let hud_size = gfx.window.inner_size();
-            self.world.hud_area = self.hud_area([hud_size.width, hud_size.height]);
+            let (hud_w, hud_h) = gfx.renderer.size();
+            self.world.hud_area = self.hud_area([hud_w, hud_h]);
             self.world.hud_aspect = match (self.snapshots.capturing, self.world.hud_area) {
                 // the HUD laid out for the photo's proportions
                 (Some(spec), _) => spec.width as f32 / spec.height.max(1) as f32,
                 (None, Some([left, top, right, bottom])) => (right - left) / (bottom - top).max(1.0),
-                (None, None) => hud_size.width as f32 / hud_size.height.max(1) as f32,
+                (None, None) => hud_w as f32 / hud_h.max(1) as f32,
             };
             if self.build.hud_selected(&self.world) && !self.huds_shown() {
                 self.build.deselect_all(&self.world);
@@ -11361,7 +11455,7 @@ impl App {
                 .scene
                 .lists
                 .hud_view
-                .map(|view| self.world.hud_view([hud_size.width, hud_size.height], view.min_x, view.max_x));
+                .map(|view| self.world.hud_view([hud_w, hud_h], view.min_x, view.max_x));
             self.update_hud_drag(drag_view);
             if let Some(view) = drag_view {
                 self.keep_scaled_huds_accessible(view);
@@ -11445,10 +11539,22 @@ impl App {
             // Use face coverage while highlighting local appearances. Actual
             // build selection, wire outlines and edits stay untouched; its
             // ordinary face overlay returns when the mode is switched off.
-            let mut selected_faces = if self.imports.local_status.revealing() {
-                self.imports.appearance_status(&self.world.objects).faces
+            let revealing = self.imports.local_status.revealing();
+            let build_faces = if revealing {
+                Default::default()
             } else {
                 self.build.face_selection(&self.world, &self.settings.build)
+            };
+            // (TE mode's faces also show the face-select pattern)
+            let pattern = if revealing {
+                Default::default()
+            } else {
+                self.build.face_picks(&self.world)
+            };
+            let mut selected_faces = if revealing {
+                self.imports.appearance_status(&self.world.objects).faces
+            } else {
+                build_faces
             };
             if let Some((object, face)) = ui::texture_picker::pipette::highlighted(&self.egui_ctx)
                 && face < 64
@@ -11462,6 +11568,7 @@ impl App {
                 *selected_faces.entry(idx).or_default() |= mask;
             }
             self.scene.set_face_selection(&mut self.world, selected_faces);
+            self.scene.set_face_pattern(&pattern);
             if std::mem::take(&mut self.build.ui.reveal_faces) {
                 self.scene.reveal_selected_faces();
             }
@@ -11563,6 +11670,9 @@ impl App {
                     language: aurora_i18n::language(),
                 };
                 self.media.update(&mut self.world, &mut self.scene, &mut gfx.renderer, &frame);
+                for url in std::mem::take(&mut self.media.links) {
+                    self.on_ctx_action(crate::ui::web_view::clicked_link_action(&url));
+                }
                 self.options_ui.media_plugins = self
                     .media
                     .plugins_found()
@@ -11719,10 +11829,9 @@ impl App {
                 .update(&mut gfx.renderer, &self.world, &mut self.scene.meshes, &physics);
             self.scene.physics_shapes.append(&mut self.scene.lists);
             let huds_shown = self.huds_shown();
-            self.scene
-                .build_huds(&self.world, [hud_size.width, hud_size.height], huds_shown, |id| {
-                    gfx.renderer.records.get(id).map(|r| Mat4::from_cols_array_2d(&r.model))
-                });
+            self.scene.build_huds(&self.world, [hud_w, hud_h], huds_shown, |id| {
+                gfx.renderer.records.get(id).map(|r| Mat4::from_cols_array_2d(&r.model))
+            });
             self.frame_profile.lap(Lap::Lists);
             if self.demo && std::env::var_os("AURORA_DEMO_ANIMESH").is_some() && self.frame_count.is_multiple_of(120) {
                 self.scene.log_demo_animesh(&self.world);
@@ -12264,6 +12373,10 @@ impl App {
                     .unwrap_or_else(|| self.scene.selection_pulse(Instant::now(), false))
             },
             selection_scale: self.egui_ctx.pixels_per_point(),
+            face_select_texture: {
+                let wanted = self.build.face_mode() || !self.scene.pattern_faces.is_empty();
+                self.scene.face_select_texture(&mut gfx.renderer, wanted)
+            },
             vr_origin: self.world.main_region,
             vr_revision: self.vr_revision,
             view,
@@ -12404,7 +12517,15 @@ impl App {
             self.system_fonts_pending = !ui::fonts::apply(&self.egui_ctx, &ui_font(&self.settings));
         }
         ui::fonts::preview::release_unused(&self.egui_ctx);
-        let mut raw = gfx.egui_state.take_egui_input(&gfx.window);
+        let mut raw = if let (Some(egui_state), Some(win)) = (&mut gfx.egui_state, &gfx.window) {
+            egui_state.take_egui_input(win)
+        } else {
+            let (rw, rh) = gfx.renderer.size();
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(rw as f32, rh as f32))),
+                ..Default::default()
+            }
+        };
         raw.events.extend(self.alt_text.drain(..).map(egui::Event::Text));
         self.demo_script_input(&mut raw);
         // Synthetic preedit uses the ordinary focused Conversations editor.
@@ -12472,8 +12593,12 @@ impl App {
                             | "resize-right"
                             | "keyboard"
                             | "keyboard-fold"
+                            | "keyboard-down"
                             | "aurora-keyboard"
                             | "aurora-keyboard-fold"
+                            | "aurora-keyboard-down"
+                            | "keyboard-type"
+                            | "aurora-keyboard-type"
                             | "aurora-keyboard-wide"
                             | "enter-key"
                     ) || v.starts_with("note-")
@@ -12741,12 +12866,13 @@ impl App {
             && (self.inventory_ui.native_clipboard_changed()
                 || raw.events.iter().any(|event| matches!(event, egui::Event::WindowFocused(true))))
         {
-            self.inventory_ui.clipboard_changed(egui_state.clipboard_text().as_deref());
+            self.inventory_ui
+                .clipboard_changed(egui_state.as_mut().and_then(|s| s.clipboard_text()).as_deref());
         }
         self.text_menu.before(
             &ctx,
             &mut raw,
-            || egui_state.clipboard_text(),
+            || egui_state.as_mut().and_then(|s| s.clipboard_text()),
             self.demo.then_some(self.frame_count),
         );
         let mut inventory_drop = Vec::new();
@@ -12787,7 +12913,7 @@ impl App {
             self.layout_autosave.after_pass(&ctx, Instant::now());
         }
         if self.ik_editor.take_binding_paste_request() {
-            let text = egui_state.clipboard_text().unwrap_or_default();
+            let text = egui_state.as_mut().and_then(|s| s.clipboard_text()).unwrap_or_default();
             self.ik_editor.paste_binding(&self.world, &text);
         }
         ui::chat::previews::clipboard_update(&ctx, &mut full.platform_output);
@@ -12803,7 +12929,7 @@ impl App {
         ) {
             let position = winit::dpi::PhysicalPosition::new(anchor.x * ctx.pixels_per_point(), anchor.y * ctx.pixels_per_point());
             if (self.cursor_pos.0 - position.x).abs() > 0.5 || (self.cursor_pos.1 - position.y).abs() > 0.5 {
-                if gfx.window.set_cursor_position(position).is_ok() {
+                if gfx.window.as_ref().is_some_and(|w| w.set_cursor_position(position).is_ok()) {
                     self.cursor_pos = (position.x, position.y);
                 } else {
                     self.numeric_drag.cancel();
@@ -13000,8 +13126,9 @@ impl App {
                 self.plate_hover,
             );
         }
-        gfx.egui_state
-            .handle_platform_output_with_event_loop(&gfx.window, event_loop, full.platform_output);
+        if let (Some(egui_state), Some(win), Some(el)) = (&mut gfx.egui_state, &gfx.window, event_loop) {
+            egui_state.handle_platform_output_with_event_loop(win, el, full.platform_output);
+        }
         self.perf.ui_ms = t_ui.elapsed().as_secs_f32() * 1000.0;
         self.frame_profile.lap(Lap::Hover);
         self.evict_ui_images(&full.shapes);
@@ -13062,14 +13189,18 @@ impl App {
             crate::autoreplace::set_enabled(self.settings.auto_replace);
             crate::link_trust::configure(&self.settings.trusted_sites);
             crate::link_preview::configure_sites(&self.settings.link_previews.picture_sites, crate::demo::picture_sites());
-            sync_auto_render_scale(&mut self.settings, gfx.window.scale_factor());
+            if let Some(win) = &gfx.window {
+                sync_auto_render_scale(&mut self.settings, win.scale_factor());
+            }
             gfx.renderer.apply_settings(self.settings.render_settings());
             self.panels.time_of_day = self.settings.time_of_day;
             self.egui_ctx.set_zoom_factor(ui_scale(&self.settings));
             self.disk_cache.set_limit_mb(self.settings.cache_size_mb);
             self.net.set_bandwidth(bandwidth_kbps(&self.settings));
         }
-        self.handle_actions(actions, event_loop);
+        if let Some(el) = event_loop {
+            self.handle_actions(actions, el);
+        }
         if self.vr_at_start && self.in_world() {
             // the scene around has a moment to arrive before the headset
             let since = *self.vr_world_since.get_or_insert_with(Instant::now);
@@ -13243,11 +13374,13 @@ impl App {
         self.busy_pause_frame(gfx.renderer.vr_engaged());
         if stats.presented && !gfx.shown {
             gfx.shown = true;
-            // On Windows, maximizing can show even a hidden window. Defer
-            // it until its client area already contains a rendered image;
-            // shown once, with the focus (window_show.rs)
-            crate::window_show::show(&gfx.window, gfx.maximize_on_show);
-            log::info!("startup window shown after the first presented frame");
+            if let Some(win) = &gfx.window {
+                // On Windows, maximizing can show even a hidden window. Defer
+                // it until its client area already contains a rendered image;
+                // shown once, with the focus (window_show.rs)
+                crate::window_show::show(win, gfx.maximize_on_show);
+                log::info!("startup window shown after the first presented frame");
+            }
             // a recovery's old window goes once its successor is on screen;
             // hidden first, as a render thread left behind in the driver
             // keeps it (`Renderer::new`)
@@ -13255,7 +13388,9 @@ impl App {
                 old.set_visible(false);
             }
             crate::splash::shown();
-            crate::crash::watch_window(&gfx.window);
+            if let Some(win) = &gfx.window {
+                crate::crash::watch_window(win);
+            }
             crate::crash::demo_freeze();
             crate::crash::demo_thread_death();
         }
@@ -13270,8 +13405,8 @@ impl App {
             // the render thread is gone (its panic is in the log): nothing
             // more can be shown, leave cleanly
             self.gfx = Some(gfx);
-            self.shutdown(event_loop);
-            return;
+            self.shutdown_inner(event_loop);
+            return false;
         }
         // a background thread the session cannot go on without panicked
         // (crash/threads.rs): leave cleanly, the crash window says which
@@ -13279,14 +13414,16 @@ impl App {
             log::error!("the {thread} thread stopped after a panic: ending the session");
             crate::crash::failure(&format!("The {thread} thread stopped after a panic."));
             self.gfx = Some(gfx);
-            self.shutdown(event_loop);
-            return;
+            self.shutdown_inner(event_loop);
+            return false;
         }
         self.frame_profile.lap(Lap::Render);
         // frame limiter; vsync already paces at the rate of the screen the
         // window is on now (it may have moved, the screen may have changed
         // its mode)
-        self.screen_rate.poll(&gfx.window, Instant::now());
+        if let Some(win) = &gfx.window {
+            self.screen_rate.poll(win, Instant::now());
+        }
         let monitor_hz = self.screen_rate.hz();
         let timed = self.capture.is_some() || self.frame_profile.enabled();
         let cap = frame_cap(
@@ -13709,15 +13846,17 @@ impl App {
             if self.frame_count == crate::demo::attention::MINIMIZE_AT
                 && mode != "front"
                 && let Some(g) = &self.gfx
+                && let Some(w) = &g.window
             {
-                g.window.set_minimized(true);
+                w.set_minimized(true);
             }
             if self.frame_count == crate::demo::attention::RESTORE_AT
                 && mode == "capture"
                 && let Some(g) = &self.gfx
+                && let Some(w) = &g.window
             {
-                g.window.set_minimized(false);
-                g.window.focus_window();
+                w.set_minimized(false);
+                w.focus_window();
                 self.notif_ui.open = true;
             }
             let agent = self.world.agent_id;
@@ -13897,6 +14036,7 @@ impl App {
         // {
         //     self.bug_report.captured(w, h, pixels);
         // }
+        self.mcp_on_captured(&mut gfx.renderer);
         self.report_abuse_captured(&mut gfx.renderer);
         if self.inventory_images.capturing.is_some()
             && let Some((w, h, pixels)) = gfx.renderer.captured.take()
@@ -13955,19 +14095,29 @@ impl App {
         self.crash_frame();
         self.end_deep_profile(&gfx.renderer);
         self.monitor_frame(&gfx.renderer);
-        self.crash_state(&gfx.renderer, &gfx.window);
+        if let Some(win) = &gfx.window {
+            self.crash_state(&gfx.renderer, win);
+        }
         self.gpu_stall_frame(&gfx.renderer);
         self.gfx = Some(gfx);
         if let Some(safe) = self.gpu_stall.recover.take() {
-            if !self.recover_from_gpu_loss(event_loop, safe) {
-                crate::crash::gpu_lost();
-                self.close_while_gpu_stalled(event_loop);
+            if let Some(el) = event_loop {
+                if !self.recover_from_gpu_loss(el, safe) {
+                    crate::crash::gpu_lost();
+                    self.close_while_gpu_stalled(el);
+                }
+            } else {
+                self.shutdown_headless();
             }
-            return;
+            return false;
         }
         if std::mem::take(&mut self.gpu_stall.close) {
-            self.close_while_gpu_stalled(event_loop);
-            return;
+            if let Some(el) = event_loop {
+                self.close_while_gpu_stalled(el);
+            } else {
+                self.shutdown_headless();
+            }
+            return false;
         }
         self.release_postponed_cursor();
         // the clicks whose depth came back with this frame's hand-over
@@ -15011,6 +15161,11 @@ impl App {
                                 .alt_focus(point, Some(object), ray, &mut self.world.agent, &self.settings.camera);
                         }
                     }
+                    crate::build::demo::Step::TexGenToggle => {
+                        // TEM_TEX_GEN_MASK / TEX_GEN_PLANAR (LLTextureEntry)
+                        self.build.edit_faces(&mut self.world, |f, _, _| f.media_flags ^= 0x02);
+                        self.flush_build();
+                    }
                     crate::build::demo::Step::CloseView => {
                         if let Some(idx) = self.build.sel_prims(&self.world).first().copied()
                             && let Some((point, _, _)) = crate::scene::Scene::object_transform(&self.world, idx, Instant::now(), 0)
@@ -15239,6 +15394,7 @@ impl App {
                 _ => {}
             }
         }
+        true
     }
 
     /// Demo keys reach the avatar: the text field the demo windows opened
@@ -17300,7 +17456,9 @@ impl App {
             &self.ui_images,
         );
         ui::widgets::set_perceptual_volume(&ctx, self.settings.audio.perceptual_volume);
-        ui::bars::clock::set_chat_format(self.system_island().clock_format, self.settings.chat_time_seconds);
+        let island = self.system_island();
+        ui::bars::clock::set_chat_format(island.clock_format, self.settings.chat_time_seconds);
+        ui::bars::clock::set_zone(island.clock_zone);
         let beacon_hovered = !ctx.is_pointer_over_egui() && !ctx.egui_wants_pointer_input() && self.beacon_hover();
         self.beacon_hit = None;
         let mut t = Instant::now();
@@ -17352,6 +17510,31 @@ impl App {
                     self.login_form.show_mfa = false;
                     self.login_form.error = None;
                     self.start_login();
+                }
+                if !self.demo && self.frame_count <= 2 {
+                    if let Some(login) = crate::cli::take_login() {
+                        self.settings.username = if login.last.eq_ignore_ascii_case("Resident") {
+                            login.first
+                        } else {
+                            format!("{} {}", login.first, login.last)
+                        };
+                        self.login_form.password = login.password;
+                        self.login_form.editing = false;
+                        self.login_form.show_mfa = false;
+                        self.login_form.error = None;
+                        self.start_login();
+                    } else if crate::cli::get().autologin {
+                        self.sync_remembered_password();
+                        let key = (self.settings.login_uri(), self.settings.username.trim().to_lowercase());
+                        if self.login_form.stored.is_none() && self.login_form.password.is_empty() {
+                            self.login_form.stored = crate::credentials::load(&key.0, &key.1);
+                        }
+                        self.sync_remembered_mfa(&key);
+                        self.login_form.editing = false;
+                        self.login_form.show_mfa = false;
+                        self.login_form.error = None;
+                        self.start_login();
+                    }
                 }
                 if self.demo_mfa_challenge.is_some_and(|at| std::time::Instant::now() >= at)
                     && std::env::var("AURORA_DEMO_LOGIN").as_deref() == Ok("next-server")
@@ -17981,6 +18164,11 @@ impl App {
                 // when the chat bar shows (#1009, #2696); also, for this run,
                 // with either bars, AURORA_DEMO_BARS=autohide and `window…`,
                 // and `chatstart`: Enter pressed at frame 300 on a draft
+                // Preferences › Aurora › System folders, for the inventory trees
+                ui::inventory::hidden_folders::sync(
+                    &self.settings.inventory.hidden_system_folders,
+                    self.settings.inventory.hide_empty_folders,
+                );
                 let demo_chat_bar = if self.demo { ui::bars::demo::get() } else { Default::default() };
                 self.chat_ui.bar_mode = demo_chat_bar.chat_bar.unwrap_or(self.settings.chat_bar);
                 let autohide_chat_bar = self.chat_ui.bar_mode.hides();
@@ -20590,11 +20778,11 @@ impl ApplicationHandler for App {
         let egui_state = self.egui_state_for(&window, &renderer);
         let layout_watch = crate::keybinds::LayoutWatch::new(&window);
         self.gfx = Some(Gfx {
-            window,
+            window: Some(window),
             shown: false,
             maximize_on_show: self.settings.window_maximized && !self.settings.window_fullscreen && !capture,
             renderer,
-            egui_state,
+            egui_state: Some(egui_state),
             layout_watch,
         });
         if std::env::var_os("AURORA_DEMO").is_some() {
@@ -21972,10 +22160,14 @@ impl ApplicationHandler for App {
                     || invisible_manipulation
                     || multi_mesh_materials
                     || std::env::var("AURORA_DEMO_BUILD").is_ok_and(|v| v.starts_with("faces-complex,"));
+                let mapping =
+                    std::env::var("AURORA_DEMO_BUILD").is_ok_and(|v| v.starts_with("faces-mapping,") || v.starts_with("faces-texgen,"));
                 let mut events = if multi_mesh_materials {
                     crate::demo::multi_mesh_materials_events()
                 } else if complex {
                     crate::demo::complex_face_selection_events()
+                } else if mapping {
+                    crate::demo::face_mapping_events()
                 } else {
                     crate::demo::face_selection_events(invisible)
                 };
@@ -22839,8 +23031,12 @@ impl ApplicationHandler for App {
                         view.as_str(),
                         "keyboard"
                             | "keyboard-fold"
+                            | "keyboard-down"
                             | "aurora-keyboard"
                             | "aurora-keyboard-fold"
+                            | "aurora-keyboard-down"
+                            | "keyboard-type"
+                            | "aurora-keyboard-type"
                             | "aurora-keyboard-wide"
                             | "link-icons"
                             | "aurora-link-icons"
@@ -23147,17 +23343,18 @@ impl ApplicationHandler for App {
                     }
                 }
             }
-            // AURORA_DEMO_MEDIA=<url> (1: a test page): a screen with media
-            // on a prim east of the start position, playing at once
+            // AURORA_DEMO_MEDIA=<url> (1: a test page, links: the
+            // secondlife:// link reproduction page): a screen with media on
+            // a prim east of the start position, playing at once
             if let Some(v) = std::env::var_os("AURORA_DEMO_MEDIA") {
                 let v = v.to_string_lossy().into_owned();
                 // Mini controls: the same page, with the address hidden
                 // (LLMediaEntry::MINI, LLPanelPrimMediaControls::updateShape).
                 let mini = v == "mini";
-                let url = if v == "1" || v.is_empty() || mini {
-                    crate::demo::demo_media_page().to_string()
-                } else {
-                    v
+                let url = match v.as_str() {
+                    "1" | "" | "mini" => crate::demo::demo_media_page().to_string(),
+                    "links" => crate::demo::demo_media_links_page(),
+                    _ => v,
                 };
                 let (ev, object, face) = crate::demo::media_screen();
                 if let Some(e) = self.world.apply(ev) {
@@ -23405,6 +23602,17 @@ impl ApplicationHandler for App {
         {
             return;
         }
+        // egui-winit drops text while Ctrl is held. Preserve a real Windows
+        // layout character (Ctrl+Alt+2 -> @) for its focused text field.
+        #[cfg(target_os = "windows")]
+        if let WindowEvent::KeyboardInput { event: key, .. } = &event
+            && let Some(text) = self.ctrl_alt_text(key)
+        {
+            if let Some(graphics) = &mut self.gfx {
+                graphics.egui_state.egui_input_mut().events.push(egui::Event::Text(text));
+            }
+            return;
+        }
         // VR exit owns Escape before egui, pickers, chat or camera shortcuts.
         if self.gfx.as_ref().is_some_and(|g| g.renderer.vr_engaged())
             && let WindowEvent::KeyboardInput { event: key, .. } = &event
@@ -23413,7 +23621,9 @@ impl ApplicationHandler for App {
             && let Some(gfx) = &self.gfx
         {
             gfx.renderer.set_vr_enabled(false);
-            gfx.window.request_redraw();
+            if let Some(w) = &gfx.window {
+                w.request_redraw();
+            }
             return;
         }
 
@@ -23535,12 +23745,16 @@ impl ApplicationHandler for App {
             let full = self
                 .gfx
                 .as_ref()
-                .map_or(self.settings.window_fullscreen, |g| g.window.fullscreen().is_some());
+                .and_then(|g| g.window.as_ref())
+                .map_or(self.settings.window_fullscreen, |w| w.fullscreen().is_some());
             self.settings.window_fullscreen = !full;
             self.apply_fullscreen_setting();
             return;
         }
         let Some(g) = self.gfx.as_mut() else {
+            return;
+        };
+        let (Some(win), Some(egui_state)) = (&g.window, &mut g.egui_state) else {
             return;
         };
         let resp = if chat_pass || web_tab || lens_shortcut || held_pointer || altgr_shortcut || claim_over_focus {
@@ -23549,7 +23763,7 @@ impl ApplicationHandler for App {
                 repaint: true,
             }
         } else {
-            g.egui_state.on_window_event(&g.window, &event)
+            egui_state.on_window_event(win, &event)
         };
         match &event {
             WindowEvent::CloseRequested => {
@@ -23557,7 +23771,7 @@ impl ApplicationHandler for App {
             }
             WindowEvent::Resized(s) => {
                 ui::menu::window_geometry_changed(&self.egui_ctx);
-                if sync_auto_render_scale(&mut self.settings, g.window.scale_factor()) {
+                if sync_auto_render_scale(&mut self.settings, win.scale_factor()) {
                     g.renderer.apply_settings(self.settings.render_settings());
                 }
                 g.renderer.resize(s.width, s.height);
@@ -23568,7 +23782,7 @@ impl ApplicationHandler for App {
                 // Moving the window to a display of another scale recomputes
                 // the automatic world resolution before the Resized event that
                 // winit sends next.
-                if sync_auto_render_scale(&mut self.settings, g.window.scale_factor()) {
+                if sync_auto_render_scale(&mut self.settings, win.scale_factor()) {
                     g.renderer.apply_settings(self.settings.render_settings());
                 }
             }
@@ -24029,8 +24243,10 @@ impl ApplicationHandler for App {
                 return;
             };
             if self.numeric_drag.active() {
-                if let Some(g) = &mut self.gfx {
-                    g.egui_state.on_mouse_motion(delta);
+                if let Some(g) = &mut self.gfx
+                    && let Some(egui_state) = &mut g.egui_state
+                {
+                    egui_state.on_mouse_motion(delta);
                 }
                 return;
             }
@@ -24057,8 +24273,10 @@ impl ApplicationHandler for App {
             // producing frames until a real presentation makes it visible,
             // including when the render thread returns the previous frame.
             self.frame(event_loop);
-        } else if let Some(g) = &self.gfx {
-            g.window.request_redraw();
+        } else if let Some(g) = &self.gfx
+            && let Some(w) = &g.window
+        {
+            w.request_redraw();
         }
     }
 }
