@@ -3140,6 +3140,8 @@ impl App {
             {
                 self.world.apply(NetEvent::Balance(balance - price));
             }
+            // a poke to a demo resident is poked back (AURORA_DEMO_POKE)
+            crate::demo::poke::sent(&cmd);
             let events = match self.demo_fetch.as_ref() {
                 Some(source) => crate::world::inventory::demo::fetch_reply(&cmd, &self.world.inventory, source, &mut self.demo_faults)
                     .unwrap_or_else(|| crate::demo::demo_reply(&cmd)),
@@ -10675,6 +10677,7 @@ impl App {
                 on: self.settings.group_notices_in_chat,
                 subjects: self.settings.group_notice_subjects_in_chat,
             };
+            self.world.pokes.enabled = self.settings.pokes;
             self.world.group_titles = self.settings.group_titles;
             self.world.portal_sources = self.portal_sources();
             self.world.show_back_slurl = self.settings.show_back_slurl;
@@ -14014,6 +14017,14 @@ impl App {
         if self.demo && crate::demo::im_announce::active() {
             let agent = self.world.agent_id;
             for event in crate::demo::im_announce::events(self.frame_count, agent) {
+                if let Some(e) = self.world.apply(event) {
+                    self.on_app_event(e);
+                }
+            }
+        }
+        if self.demo && crate::demo::poke::active() {
+            let agent = self.world.agent_id;
+            for event in crate::demo::poke::events(self.frame_count, agent) {
                 if let Some(e) = self.world.apply(event) {
                     self.on_app_event(e);
                 }
@@ -19752,6 +19763,7 @@ impl App {
                     restart,
                     presence_at,
                     classic_bars,
+                    still: self.settings.reduce_motion,
                 };
                 // the cards read the world for their links' names (#898): the
                 // lists leave it while they are drawn, then come back
@@ -19806,6 +19818,16 @@ impl App {
                         continue;
                     }
                     self.update_notice_answer(id, &r);
+                    // a poke card's Poke back: the card stays for the next one
+                    if matches!(r, crate::world::notifications::Response::Poke) {
+                        if let Some(from) = self.world.notifications.list.iter().find_map(|n| match n.data {
+                            crate::world::notifications::Data::Poke { from, .. } if n.id == id => Some(from),
+                            _ => None,
+                        }) {
+                            self.on_ctx_action(ui::context::CtxAction::Poke(from));
+                        }
+                        continue;
+                    }
                     if matches!(r, crate::world::notifications::Response::Open)
                         && let Some(object) = self.world.notifications.list.iter().find_map(|n| match n.data {
                             crate::world::notifications::Data::Delivery { object } if n.id == id => Some(object),
@@ -19848,6 +19870,8 @@ impl App {
                     }
                 }
                 self.world.record_notification_history();
+                // the jabs of the pokes sent, over everything
+                ui::poke::paint_jabs(&ctx, &p, &self.skin.icons, self.settings.reduce_motion);
                 t = self.ui_parts.lap(Part::UiMenus, t);
                 let mut open = self.panels.about_land && self.world.rlva_can_view_parcel();
                 // the mini-map's image of the selection's region, for the header

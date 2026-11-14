@@ -365,6 +365,7 @@ impl World {
             },
             session,
             new_session,
+            poke: false,
         });
     }
 
@@ -612,6 +613,7 @@ impl World {
                 kind: crate::ui_sound::ImKind::Group,
                 session: group,
                 new_session: true,
+                poke: false,
             });
         }
     }

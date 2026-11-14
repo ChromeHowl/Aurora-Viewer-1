@@ -72,6 +72,8 @@ pub struct ToastEnv<'a> {
     /// full-width bars are shown (their room has no margin of its own).
     pub presence_at: crate::settings::PresencePosition,
     pub classic_bars: bool,
+    /// Reduce animations: a poke card does not jiggle (`ui/poke.rs`).
+    pub still: bool,
 }
 
 /// Show the Conversations window for a clicked card: opened if closed,
@@ -89,6 +91,8 @@ fn toast_seconds(n: &Notification, message_seconds: f64) -> f64 {
         Data::Message { .. } => message_seconds,
         // ShowMyComplexityChanges (the notice's expiry)
         Data::Complexity { seconds } => f64::from(seconds),
+        // long enough to poke back
+        Data::Poke { .. } => TOAST_OFFER,
         _ if n.interactive() => TOAST_OFFER,
         _ => TOAST_INFO,
     }
@@ -221,6 +225,35 @@ pub(super) fn time_width(ui: &egui::Ui, time: &str) -> f32 {
     })
 }
 
+/// Side of an icon action of a poke card (Poke back, Send IM).
+const ACTION: f32 = 20.0;
+
+/// An icon action of a card, drawn like its close cross (the card's cover
+/// takes the click): its rectangle. Greyed out when not `enabled`.
+fn action_slot(ui: &mut egui::Ui, p: &Palette, icons: &Icons, icon: &str, enabled: bool) -> egui::Rect {
+    let (r, _) = ui.allocate_exact_size(Vec2::splat(ACTION), egui::Sense::hover());
+    let hot = enabled && ui.rect_contains_pointer(r);
+    if hot {
+        ui.painter().rect_filled(r, ui.visuals().window_corner_radius, p.raised);
+    }
+    if let Some(t) = icons.get(icon) {
+        let color = if !enabled {
+            p.muted_dim
+        } else if hot {
+            p.ink
+        } else {
+            p.muted
+        };
+        ui.painter().image(
+            t.id(),
+            egui::Rect::from_center_size(r.center(), Vec2::splat(14.0)),
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            color,
+        );
+    }
+    r
+}
+
 /// The card of a friend online / offline or of the messages of a
 /// conversation: their picture, the name, the start of the last message.
 /// Clicking the card opens the conversation (`Notification::opens`), its
@@ -238,9 +271,16 @@ pub(super) fn person_card(
     let (who, status, count) = match n.data {
         Data::Presence { who, online } => (who, Some(if online { Status::Online } else { Status::Offline }), 1),
         Data::Message { from, count, .. } => (from, None, count),
+        // the count is in its text ("poked you (3 times)")
+        Data::Poke { from, .. } => (from, None, 1),
         _ => return None,
     };
+    // a poke card: Poke back (while a poke may go to them) and Send IM
+    let poke = matches!(n.data, Data::Poke { .. });
+    let poke_back = if poke { super::poke::button(ui.ctx(), world, &who) } else { None };
     let mut close = egui::Rect::NOTHING;
+    let mut poke_rect = egui::Rect::NOTHING;
+    let mut im_rect = egui::Rect::NOTHING;
     let mut name_hover = None;
     let surface = if toast { p.panel } else { p.raised.gamma_multiply(0.55) };
     // a toast floats at its own width, a card fills its list
@@ -285,22 +325,45 @@ pub(super) fn person_card(
                     });
                 });
                 let shown = world.notification_body(n);
-                if !shown.is_empty() {
+                if poke {
+                    // "👉 poked you (3 times)", its two actions at the end
+                    ui.horizontal(|ui| {
+                        let actions = 2.0 * ACTION + 4.0;
+                        ui.allocate_ui(Vec2::new((ui.available_width() - actions).max(40.0), 18.0), |ui| {
+                            name_hover = name_hover.or(text::person_body(ui, p, env.emoji, &n.body, &n.name_links));
+                        });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.spacing_mut().item_spacing.x = 4.0;
+                            im_rect = action_slot(ui, p, icons, "message-circle-filled", true);
+                            if let Some(b) = &poke_back {
+                                poke_rect = action_slot(ui, p, icons, super::poke::ICON, b.enabled);
+                            }
+                        });
+                    });
+                } else if !shown.is_empty() {
                     let text = message_excerpt(world, &shown);
                     name_hover = name_hover.or(text::person_body(ui, p, env.emoji, &text, &n.name_links));
                 }
             });
         });
     };
-    let frame = if toast {
-        super::widgets::overlay(ui, p, egui::Margin::same(8), body).response
+    let draw = |ui: &mut egui::Ui| {
+        if toast {
+            super::widgets::overlay(ui, p, egui::Margin::same(8), body).response
+        } else {
+            egui::Frame::new()
+                .fill(surface)
+                .corner_radius(ui.visuals().window_corner_radius)
+                .inner_margin(egui::Margin::same(8))
+                .show(ui, body)
+                .response
+        }
+    };
+    // a poke card jiggles when it comes out and at each new poke
+    let frame = if poke {
+        super::poke::jiggle(ui, who, n.id, env.still, draw)
     } else {
-        egui::Frame::new()
-            .fill(surface)
-            .corner_radius(ui.visuals().window_corner_radius)
-            .inner_margin(egui::Margin::same(8))
-            .show(ui, body)
-            .response
+        draw(ui)
     };
     // the whole card answers the click, over its text: the cross hides it,
     // the rest opens what it is about
@@ -310,16 +373,26 @@ pub(super) fn person_card(
         egui::Sense::click(),
     );
     let on_close = cover.hover_pos().is_some_and(|pos| close.contains(pos));
-    if n.opens() && !on_close && cover.hovered() {
+    let on_poke = cover.hover_pos().is_some_and(|pos| poke_rect.contains(pos));
+    let on_im = cover.hover_pos().is_some_and(|pos| im_rect.contains(pos));
+    let poke_enabled = poke_back.as_ref().is_some_and(|b| b.enabled);
+    if n.opens() && !on_close && !(on_poke && !poke_enabled) && cover.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
     let tip = if on_close {
-        if toast {
+        if poke {
+            // a poke card is a toast only: closing it is the end of it
+            aurora_i18n::tr!("common-close")
+        } else if toast {
             aurora_i18n::tr!("ui-notifications-hide-keep-in-bell")
         } else {
             aurora_i18n::tr!("common-close")
         }
-    } else if matches!(n.data, Data::Message { .. }) {
+    } else if on_poke && let Some(b) = &poke_back {
+        if b.enabled { aurora_i18n::tr!("ui-poke-back") } else { b.tip }
+    } else if on_im {
+        aurora_i18n::tr!("ui-context-send-im")
+    } else if matches!(n.data, Data::Message { .. } | Data::Poke { .. }) {
         aurora_i18n::tr!("ui-notifications-open-conversation")
     } else if n.opens() {
         aurora_i18n::tr!("ui-notifications-send-im")
@@ -328,6 +401,13 @@ pub(super) fn person_card(
     };
     let cover = if tip.is_empty() { cover } else { cover.on_hover_text(tip) };
     if cover.clicked() {
+        if on_poke {
+            // greyed out (offline, just poked): nothing
+            return poke_enabled.then_some(Response::Poke);
+        }
+        if on_im {
+            return Some(Response::Open);
+        }
         if !on_close && let Some(target) = name_hover {
             text::open(ui.ctx(), target);
             return None;
@@ -475,6 +555,7 @@ pub(super) fn card(
                 Data::None
                 | Data::Presence { .. }
                 | Data::Message { .. }
+                | Data::Poke { .. }
                 | Data::RegionRestart
                 | Data::RegionMessage { .. }
                 | Data::Complexity { .. } => {}
@@ -1076,7 +1157,7 @@ pub fn show(
                                         answers.push((n.id, Response::Dismiss));
                                         continue;
                                     }
-                                    let r = if matches!(n.data, Data::Message { .. }) {
+                                    let r = if matches!(n.data, Data::Message { .. } | Data::Poke { .. }) {
                                         person_card(ui, p, icons, world, env, &mut nui.wanted_pics, n, false)
                                     } else {
                                         card(ui, p, icons, world, env.images, &mut nui.wanted_images, n, false, false)
@@ -1114,15 +1195,17 @@ pub fn show(
                             nui.toasts.retain(|(t, _)| *t != id);
                             continue;
                         }
-                        let r = if matches!(n.data, Data::Presence { .. } | Data::Message { .. }) {
+                        let r = if matches!(n.data, Data::Presence { .. } | Data::Message { .. } | Data::Poke { .. }) {
                             person_card(ui, p, icons, world, env, &mut nui.wanted_pics, n, true)
                         } else {
                             card(ui, p, icons, world, env.images, &mut nui.wanted_images, n, true, false)
                         };
                         match r {
                             // closing a toast only hides it: the offer waits in
-                            // the list (a scripted window too, until answered)
-                            Some(Response::Dismiss) if !matches!(n.data, Data::Dialog { .. }) => {
+                            // the list (a scripted window too, until answered);
+                            // a poke card, a toast only, is answered (its count
+                            // ends)
+                            Some(Response::Dismiss) if !matches!(n.data, Data::Dialog { .. } | Data::Poke { .. }) => {
                                 nui.toasts.retain(|(t, _)| *t != id);
                                 nui.hidden.insert(id);
                             }

@@ -357,6 +357,7 @@ fn frames_with(size: Vec2, classic: bool, at: PresencePosition, center: Center) 
                 restart: None,
                 presence_at: at,
                 classic_bars: classic,
+                still: false,
             };
             crate::ui::notification_center::show(ui.ctx(), &p, &icons, &world, &mut list, &mut history, &mut notif, &mut env, false);
         });
@@ -472,6 +473,7 @@ impl Clicks {
                 restart: None,
                 presence_at: at,
                 classic_bars: false,
+                still: false,
             };
             answers = crate::ui::notification_center::show(
                 ui.ctx(),

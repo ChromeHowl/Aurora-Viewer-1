@@ -2780,6 +2780,16 @@ ui-options-notify-above = Seulement au-delà d'un montant
 ui-options-notify-above-hint = Les montants inférieurs n'affichent pas de notification.
 ui-options-notify-threshold = Montant
 ui-options-notify-threshold-hint = Seuls les paiements au-delà de ce montant affichent une notification.
+ui-options-pokes = Pokes
+ui-options-pokes-hint = Envoyez et recevez des pokes : un « coucou » en un clic 👉. Un poke reçu s'affiche sur une carte avec Renvoyer un poke. Désactivé, les boutons Poke sont masqués et un poke arrive comme un message ordinaire.
+ui-poke = Envoyer un poke
+ui-poke-back = Renvoyer un poke
+ui-poke-offline = Hors ligne : un poke ne part que vers un résident en ligne.
+ui-poke-cooling = Poke envoyé : patientez un instant.
+notifications-poke-body = { $count ->
+    [1] 👉 vous a envoyé un poke
+   *[other] 👉 vous a envoyé un poke ({ $count } fois)
+    }
 ui-options-conversations-own-windows = Ouvrir les conversations dans leur propre fenêtre
 ui-options-conversations-own-windows-hint = Une conversation ouverte depuis un nom, une notification ou un appel s'ouvre dans sa propre fenêtre au lieu de la fenêtre Conversations. Le chat local y reste.
 ui-options-send-typing = Signaler quand j'écris

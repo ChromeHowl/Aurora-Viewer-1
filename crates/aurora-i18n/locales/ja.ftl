@@ -2764,6 +2764,16 @@ ui-options-notify-above = 一定額を超える場合のみ
 ui-options-notify-above-hint = それ以下の金額は通知しません。
 ui-options-notify-threshold = 金額
 ui-options-notify-threshold-hint = この金額を超える支払いのみ通知します。
+ui-options-pokes = つつく
+ui-options-pokes-hint = ワンクリックで「やあ」と伝える「つつく」👉を送受信します。つつかれると「つつき返す」のあるカードが表示されます。オフにすると「つつく」ボタンは非表示になり、つつかれても通常のメッセージとして届きます。
+ui-poke = つつく
+ui-poke-back = つつき返す
+ui-poke-offline = オフライン：つつけるのはオンラインの住人だけです。
+ui-poke-cooling = つついたばかりです。少しお待ちください。
+notifications-poke-body = { $count ->
+    [1] 👉 あなたをつつきました
+   *[other] 👉 あなたをつつきました（{ $count }回）
+    }
 ui-options-conversations-own-windows = 会話を個別のウィンドウで開く
 ui-options-conversations-own-windows-hint = 名前、通知、通話から開いた会話を、会話ウィンドウではなく個別のウィンドウに表示します。近くのチャットは会話ウィンドウに残ります。
 ui-options-send-typing = 入力中であることを通知

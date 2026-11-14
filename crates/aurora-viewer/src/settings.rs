@@ -853,6 +853,11 @@ pub struct Settings {
     pub balance_shows_received: bool,
     /// The same for L$ spent, in red.
     pub balance_shows_spent: bool,
+    /// Preferences › Chat › Conversations: send and receive pokes
+    /// (`world/pokes.rs`). On by default: a poke needs both viewers to
+    /// read it. Off, no Poke button shows and a poke arrives as an
+    /// ordinary IM.
+    pub pokes: bool,
     /// Mini-map and world map options (Firestorm MiniMap* / Map* settings).
     pub maps: MapSettings,
     /// "Search": last tab, rating boxes and land limits.
@@ -2338,6 +2343,7 @@ impl Default for Settings {
             notify_money_threshold: 200,
             balance_shows_received: true,
             balance_shows_spent: true,
+            pokes: true,
             maps: MapSettings::default(),
             search: Default::default(),
             show_people: true,

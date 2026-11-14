@@ -441,15 +441,19 @@ fn row(ui: &mut egui::Ui, c: &mut Ctx, data: &super::RadarData, st: &mut PeopleU
     let width = ui.available_width().min(ui.clip_rect().right() - ui.cursor().left()).max(0.0);
     let bounds = Rect::from_min_size(ui.cursor().min, Vec2::new(width, RICH_H));
     let widths = [RECEIVED_W, GRANTED_W];
+    // the room of the hover actions: one more while pokes are on
+    let most = 6 + usize::from(c.world.pokes.enabled);
     let end = rows::end_before(
         bounds,
-        rows::names_left(bounds) + rows::actions_width_for(6, 18.0) + PARTS_GAP,
+        rows::names_left(bounds) + rows::actions_width_for(most, 18.0) + PARTS_GAP,
         &widths,
         PARTS_GAP,
         false,
     );
     let right = end.items.last().map_or(bounds.right(), |r| r.left()) - PARTS_GAP;
-    let count = action_count(f);
+    // like the teleport offer, only for a friend online
+    let poke = crate::ui::poke::button(ui.ctx(), c.world, &f.id).filter(|_| f.online);
+    let count = action_count(f) + usize::from(poke.is_some());
     let (rect, resp) = rows::allocate(ui, f.id, Vec2::new(width, RICH_H));
     widgets::reveal_search_selection(
         ui,
@@ -483,7 +487,7 @@ fn row(ui: &mut egui::Ui, c: &mut Ctx, data: &super::RadarData, st: &mut PeopleU
     // Keep the permission cells anchored when hover actions appear, as
     // LLAvatarListItem::showPermissions / updateChildren reserve their slots.
     let slot = rows::actions_slot(rect, left, right, count, rows::BUTTON);
-    let actions = hot.then(|| (quick_actions(f), slot));
+    let actions = hot.then(|| (quick_actions(f, poke.as_ref()), slot));
     rows::picture(ui, p, c.world, identity, data.pics.get(&f.id), f.id, &line.name, false);
     let mut clicked_right = false;
     if let Some(cell) = end.items.first() {
@@ -552,13 +556,17 @@ fn action_count(f: &Friend) -> usize {
     4 + 2 * usize::from(f.online)
 }
 
-/// Profile, IM, a teleport offered to or requested from a friend online, the
+/// Profile, IM, a poke (`ui/poke.rs`, its tooltip saying why when it cannot
+/// go now), a teleport offered to or requested from a friend online, the
 /// contact sheet, then the whole menu.
-fn quick_actions(f: &Friend) -> Vec<(&'static str, &'static str)> {
+fn quick_actions(f: &Friend, poke: Option<&crate::ui::poke::Button>) -> Vec<(&'static str, &'static str)> {
     let mut b = vec![
         ("user-filled", aurora_i18n::tr!("common-view-profile")),
         ("message-circle-filled", aurora_i18n::tr!("ui-context-send-im")),
     ];
+    if let Some(poke) = poke {
+        b.push((crate::ui::poke::ICON, poke.tip));
+    }
     if f.online {
         b.push(("send-filled", aurora_i18n::tr!("common-offer-teleport")));
         b.push(("car-filled", aurora_i18n::tr!("common-request-teleport")));
@@ -570,13 +578,18 @@ fn quick_actions(f: &Friend) -> Vec<(&'static str, &'static str)> {
 
 fn hover_actions(ui: &mut egui::Ui, c: &mut Ctx, st: &mut PeopleUi, f: &Friend, slot: Rect, buttons: &[(&str, &str)]) {
     let mut menu_open = false;
+    // the poke greyed out while it cannot go (just poked): its tooltip says why
+    let poke_on = crate::ui::poke::button(ui.ctx(), c.world, &f.id).is_some_and(|b| b.enabled);
+    let enabled = |i: usize| buttons.get(i).is_none_or(|(icon, _)| *icon != crate::ui::poke::ICON || poke_on);
     for ((icon, _), resp) in buttons
         .iter()
-        .zip(rows::actions(ui, c.p, slot, buttons, ("people-friend-act", f.id)))
+        .zip(rows::actions_if(ui, c.p, slot, buttons, ("people-friend-act", f.id), enabled))
     {
         match *icon {
             "user-filled" if resp.clicked() => c.actions.push(super::PeopleAction::Profile(f.id)),
             "message-circle-filled" if resp.clicked() => c.actions.push(super::PeopleAction::OpenIm(f.id)),
+            // greyed out, its clicks are only caught (not the row's)
+            crate::ui::poke::ICON if resp.clicked() && poke_on => context::request(ui.ctx(), CtxAction::Poke(f.id)),
             "send-filled" if resp.clicked() => c.actions.push(super::PeopleAction::OfferTeleport(f.id)),
             "car-filled" if resp.clicked() => context::request(ui.ctx(), CtxAction::RequestTeleport(f.id)),
             "info-circle-filled" if resp.clicked() => {
@@ -875,7 +888,7 @@ mod tests {
                             fixed_name = Some(layout);
                         }
                         if hot {
-                            assert_eq!(quick.len(), 6, "{width}: every quick action remains visible");
+                            assert_eq!(quick.len(), 7, "{width}: every quick action remains visible");
                             if width <= 400.0 {
                                 assert!(
                                     name.pos.x + name.galley.size().x > quick[0].rect.right(),
@@ -1127,13 +1140,13 @@ mod tests {
             rights_given: 0,
             rights_has: 0,
         };
-        let icons = |online| quick_actions(&friend(online)).iter().map(|(icon, _)| *icon).collect::<Vec<_>>();
+        let icons = |online| quick_actions(&friend(online), None).iter().map(|(icon, _)| *icon).collect::<Vec<_>>();
         for icon in ["send-filled", "car-filled"] {
             assert!(icons(true).contains(&icon), "{icon} online");
             assert!(!icons(false).contains(&icon), "{icon} offline");
         }
-        assert_eq!(quick_actions(&friend(true)).len(), action_count(&friend(true)));
-        assert_eq!(quick_actions(&friend(false)).len(), action_count(&friend(false)));
+        assert_eq!(quick_actions(&friend(true), None).len(), action_count(&friend(true)));
+        assert_eq!(quick_actions(&friend(false), None).len(), action_count(&friend(false)));
     }
 
     #[test]

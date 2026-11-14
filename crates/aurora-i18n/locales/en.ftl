@@ -2777,6 +2777,16 @@ ui-options-notify-above = Only above an amount
 ui-options-notify-above-hint = Smaller amounts show no notification.
 ui-options-notify-threshold = Amount
 ui-options-notify-threshold-hint = Only payments above this amount show a notification.
+ui-options-pokes = Pokes
+ui-options-pokes-hint = Send and receive pokes: a one-click "hey" 👉. A poke you get shows a card with Poke back. When off, the Poke buttons are hidden and a poke arrives as an ordinary message.
+ui-poke = Poke
+ui-poke-back = Poke back
+ui-poke-offline = Offline: pokes only go to residents who are online.
+ui-poke-cooling = Just poked: wait a moment.
+notifications-poke-body = { $count ->
+    [1] 👉 poked you
+   *[other] 👉 poked you ({ $count } times)
+    }
 ui-options-conversations-own-windows = Open conversations in their own window
 ui-options-conversations-own-windows-hint = A conversation opened from a name, a notification or a call opens in its own window instead of the Conversations window. The nearby chat stays there.
 ui-options-send-typing = Say when I am typing

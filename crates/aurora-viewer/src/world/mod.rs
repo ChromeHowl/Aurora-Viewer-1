@@ -83,6 +83,7 @@ pub mod payments;
 pub mod place_details;
 pub mod place_snapshots;
 pub mod pointat;
+pub mod pokes;
 pub mod portals;
 pub mod poser_consent;
 pub mod profiles;
@@ -671,6 +672,8 @@ pub struct World {
     pub inventory_offers: inventory_offers::InventoryOffers,
     /// Residents' direct payments, as cards in their conversations.
     pub payments: payments::Payments,
+    /// Pokes sent and received (`pokes.rs`).
+    pub pokes: pokes::Pokes,
     /// The content rating chosen during the session and its sync with the
     /// server.
     pub maturity: maturity::MaturityPreference,
@@ -1107,6 +1110,7 @@ impl World {
             teleport_invites: teleport_invites::TeleportInvites::default(),
             inventory_offers: inventory_offers::InventoryOffers::default(),
             payments: payments::Payments::default(),
+            pokes: pokes::Pokes::default(),
             maturity: maturity::MaturityPreference::default(),
             set_home: home::SetHome::default(),
             user_info: user_info::UserInfoState::default(),
@@ -4959,11 +4963,13 @@ impl World {
             if !im.from_name.is_empty() {
                 self.social.names.entry(im.from_agent_id).or_insert_with(|| im.from_name.clone());
             }
-            // UISndNewIncomingIMSession (by the IM mode)
+            // UISndNewIncomingIMSession (by the IM mode); a poke's card
+            // takes the place of its toast (pokes.rs)
             self.im_messages.push(ImMessage {
                 kind: ImKind::Private,
                 session: im.from_agent_id,
                 new_session: !self.social.has_session(&im.from_agent_id),
+                poke: self.takes_poke(&im.message, im.offline),
             });
             let from = self
                 .social
@@ -5513,6 +5519,12 @@ impl World {
     /// Answer a notification: messages to send and a URL to open.
     pub fn respond_notification(&mut self, id: u64, r: notifications::Response) -> (Vec<aurora_net::NetCommand>, Option<String>) {
         let data = self.notifications.list.iter().find(|n| n.id == id).map(|n| n.data.clone());
+        // a poke card closed: the next poke starts a new count
+        if let Some(notifications::Data::Poke { from, .. }) = data
+            && matches!(r, notifications::Response::Dismiss)
+        {
+            self.pokes.forget(&from);
+        }
         if let Some(notifications::Data::RlvaQuery { from, exceptions }) = data {
             self.rlva_answer_im_query(from, exceptions, &r);
             self.notifications.respond(id, r, |_| Uuid::nil(), Uuid::nil());
@@ -5886,6 +5898,15 @@ impl World {
     /// disturb with the Legacy Viewer's toasts, group chats by their own
     /// preference.
     pub fn notify_message(&mut self, m: &ImMessage, in_sight: bool) {
+        // a poke: its card, in sight or not, whatever the toast preferences
+        // (Poke back is what it is for); its line is in the conversation
+        if m.poke {
+            if let Some(line) = self.resident_line(m) {
+                let (from, name) = (line.source, line.from.clone());
+                self.notify_poke(from, name);
+            }
+            return;
+        }
         let prefs = self.notifications.toasts;
         let wanted = match m.kind {
             ImKind::Group => prefs.group_im,
@@ -5945,6 +5966,12 @@ impl World {
                 who
             }
             notifications::Data::Message { session, .. } => session,
+            // a poke's Send IM: their conversation, and the streak ends
+            notifications::Data::Poke { from, .. } => {
+                self.social.session_mut(from);
+                self.pokes.forget(&from);
+                from
+            }
             _ => return None,
         };
         self.notifications.list.retain(|n| n.id != id);
