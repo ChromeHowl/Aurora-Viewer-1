@@ -8628,6 +8628,10 @@ Human grid validation: remember MFA for account A and B, restart the viewer, the
   name in its text and no picture of its own, Nova's two under another:
   two headers. The option shows only with the Aurora style: with
   `compact`, `:on` changes nothing, since each Compact row names its sender.
+  sub-settings. Last comes "Aurora Demo (gagged)", a gag we wear talking
+  for us: its line shows our profile picture where the other objects show
+  the cube, in every style, the compact rows and the cards above the chat
+  bar included.
 - **`AURORA_DEMO_CONV=bubbles[:busy|group|local|legacy]`**: the Conversations
   window as a messenger, placed at 700 x 560 px. Without a suffix, the
   conversation with an online friend over two days: their bubbles on the
