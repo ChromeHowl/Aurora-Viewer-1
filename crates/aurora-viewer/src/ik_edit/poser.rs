@@ -10,7 +10,6 @@ use std::{
 };
 
 mod bones;
-mod bvh;
 mod compact;
 mod controls;
 mod data;
@@ -22,6 +21,7 @@ mod silhouette;
 mod storage;
 mod subjects;
 mod together;
+mod total;
 mod trackball;
 mod ui;
 mod world_hints;
@@ -591,20 +591,16 @@ impl Editor {
                     }
                 }
                 storage::Loaded::Animation(animation, mode) => {
-                    let mut pose = ik::LocalPose {
+                    let start = ik::LocalPose {
                         rotations: session.pose.rotations.clone(),
                         positions: session.pose.positions.clone(),
                     };
-                    let sample = ik::animations::Sample {
-                        animation: Arc::new(BoundAnim::bind(animation, &world.avatar_lib.rig)),
-                        frame: 0,
-                        time_seconds: None,
-                    };
-                    ik::animations::apply(&world.avatar_lib.rig, &mut pose, Vec3::ZERO, &[sample]);
+                    let (pose, anim_base) = total::load(&world.avatar_lib.rig, animation, start);
                     let selective = matches!(mode, document::LoadMode::Selective | document::LoadMode::SelectiveRotations);
                     let rotations = matches!(mode, document::LoadMode::Rotations | document::LoadMode::SelectiveRotations);
                     let edited: Vec<_> = (0..world.avatar_lib.rig.len()).map(|b| session.edited(b)).collect();
                     session.checkpoint();
+                    session.anim_base = Some(Arc::new(anim_base));
                     let current = Arc::make_mut(&mut session.pose);
                     for (bone, edited) in edited.iter().enumerate() {
                         if selective && *edited {
@@ -625,7 +621,6 @@ impl Editor {
             }
             self.refresh = true;
         }
-        self.clip.prepared.append(&mut self.poser.storage.prepared);
     }
     fn poser_transform(&mut self, rig: &Rig, frame: &Frame, position: Vec3, rotation: Quat, rotated: bool) {
         let Some(bone) = self.selected else { return };

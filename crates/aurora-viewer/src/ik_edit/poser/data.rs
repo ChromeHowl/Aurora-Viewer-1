@@ -85,6 +85,9 @@ pub(super) struct Session {
     pub enabled: bool,
     pub undo: Vec<Arc<Pose>>,
     pub redo: Vec<Arc<Pose>>,
+    /// The animation loaded as the base (Load > an animation file): what
+    /// Save total animation applies the changes to.
+    pub anim_base: Option<Arc<total::AnimBase>>,
 }
 impl Session {
     pub fn new(pose: Pose) -> Self {
@@ -95,6 +98,7 @@ impl Session {
             enabled: true,
             undo: Vec::new(),
             redo: Vec::new(),
+            anim_base: None,
         }
     }
     pub fn checkpoint(&mut self) {
@@ -124,6 +128,7 @@ impl Session {
     /// getJointExportRotation, indra/newview/fsposeranimator.cpp, writes the
     /// change and not the base too). A change, not a filter on edited joints,
     /// so that touching a joint does not bring its captured rotation along.
+    #[cfg(test)]
     pub fn authored(&self, rig: &Rig, model: Mat4) -> Option<Pose> {
         let resolved = self.pose.snapshot(rig, model)?;
         let pose = Pose {
