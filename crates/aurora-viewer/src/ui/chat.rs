@@ -220,6 +220,9 @@ pub struct ChatUi {
     /// A conversation's notices too (its sub-option, off), given every
     /// frame by the app.
     pub compact_im_notices: bool,
+    /// Emotes join their sender's group in the Aurora style
+    /// (Preferences › Chat, off), given every frame by the app.
+    pub group_emotes: bool,
     /// The nearby chat's field shows its channel selector (Preferences ›
     /// Chat, off by default), given every frame by the app.
     pub show_channel: bool,
@@ -352,6 +355,9 @@ impl ChatUi {
             compose::Volume::Whisper => ranges.whisper,
             compose::Volume::Say => ranges.say,
             compose::Volume::Shout => ranges.shout,
+        }
+    }
+
     /// Route text started from the world to the Nearby field that will
     /// actually receive keyboard focus (LLViewerWindow::handleKey).
     pub fn start_nearby_with(&mut self, ctx: &egui::Context, main_open: bool, text: &str) {
@@ -715,6 +721,8 @@ impl ChatUi {
 /// Count residents whose known range is within the selected nearby chat range.
 pub(crate) fn earshot_count(entries: impl IntoIterator<Item = Option<f32>>, range: f32) -> usize {
     entries.into_iter().filter(|distance| distance.is_some_and(|d| d <= range)).count()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NearbyTypingTarget {
     Detached,
@@ -2687,6 +2695,7 @@ fn conversation_lines(ui: &mut egui::Ui, p: &Palette, l: Lines, st: &mut ChatUi,
             };
             let width = (ui.available_width() * 2.0).round() / 2.0;
             let clearing_filter = view.is_filtered() && filter.is_empty();
+            view.set_group_emotes(st.group_emotes);
             let changed = view.sync(
                 &view::Source {
                     lines,
