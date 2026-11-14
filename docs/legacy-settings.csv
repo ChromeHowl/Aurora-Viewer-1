@@ -1643,11 +1643,11 @@ RadarLeaveChannelAlert,Boolean,unreviewed,,field `enter_scripts`,Toggles whether
 RadarLegacyChannelAlertRefreshUUID,String,unreviewed,,named in Aurora: aurora-viewer/src/world/radar.rs:87,"UUID of sound asset that when detected, will request a full radar channel alert update"
 RadarNameFormat,U32,unreviewed,,field `name_format`,"0=DisplayName,1=Username,2=Displayname/Username,3=Username/Displayname"
 RadarReportChatRangeEnter,Boolean,unreviewed,,field `chat_enter`,Display a chat message when avatar enters chat distance
-RadarReportChatRangeLeave,Boolean,unreviewed,,,Display a chat message when avatar leaves chat distance
-RadarReportDrawRangeEnter,Boolean,unreviewed,,field `chat_enter`,Display a chat message when avatar enters draw distance
-RadarReportDrawRangeLeave,Boolean,unreviewed,,,Display a chat message when avatar leaves draw distance
-RadarReportSimRangeEnter,Boolean,unreviewed,,field `chat_enter`,Display a chat message when avatar enteres local region
-RadarReportSimRangeLeave,Boolean,unreviewed,,,Display a chat message when avatar leaves local region
+RadarReportChatRangeLeave,Boolean,unreviewed,,field `chat_leave`,Display a chat message when avatar leaves chat distance
+RadarReportDrawRangeEnter,Boolean,unreviewed,,field `draw_enter`,Display a chat message when avatar enters draw distance
+RadarReportDrawRangeLeave,Boolean,unreviewed,,field `draw_leave`,Display a chat message when avatar leaves draw distance
+RadarReportSimRangeEnter,Boolean,unreviewed,,field `region_enter`,Display a chat message when avatar enteres local region
+RadarReportSimRangeLeave,Boolean,unreviewed,,field `region_leave`,Display a chat message when avatar leaves local region
 RadioLandBrushAction,S32,unreviewed,,field `land_action`,"Last selected land modification operation (0 = flatten, 1 = raise, 2 = lower, 3 = smooth, 4 = roughen, 5 = revert)"
 RecentItemsSortOrder,U32,unreviewed,,,"Specifies sort key for recent inventory items (+0 = name, +1 = date, +2 = folders always by name, +4 = system folders to top)"
 RecentJumpThresholdSecs,F32,unreviewed,,named in Aurora: aurora-viewer/src/agent.rs:197,Seconds after jump input during which landing finish-anim is suppressed to avoid interrupting rapid successive jumps.

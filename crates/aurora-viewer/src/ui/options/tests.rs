@@ -691,6 +691,16 @@ fn the_modified_settings_are_counted_on_their_pages() {
 }
 
 #[test]
+fn the_radar_reports_are_in_the_chat_preferences_and_off_by_default() {
+    let d = Settings::default();
+    assert!(!d.radar.region_enter && !d.radar.region_leave && !d.radar.chat_enter && !d.radar.chat_leave);
+    let paths = collected();
+    for path in ["radar.region_enter", "radar.region_leave", "radar.chat_enter", "radar.chat_leave", "radar.toasts"] {
+        assert!(paths.iter().any(|(page, p)| *page == Page::Chat && p == path), "{path} on the Chat page");
+    }
+}
+
+#[test]
 fn the_simulator_version_notice_has_a_switch_off_by_default() {
     let mut s = Settings::default();
     assert!(!s.sim_version_alert);
