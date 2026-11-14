@@ -128,6 +128,7 @@ mod photo_reel;
 mod physics_editor;
 mod plate_click;
 mod pointing;
+mod pose_stand;
 mod quick_prefs;
 mod region_restart;
 mod region_window;
@@ -605,6 +606,8 @@ pub struct App {
     /// Last walk-key press (for double-tap running) and the active temporary run.
     last_tap: Option<(u8, Instant)>,
     temp_run: Option<u8>,
+    /// @temprun as of the last RLVa update, to catch its changes.
+    rlva_temprun: bool,
     /// "Always run" (Ctrl+R).
     always_run: bool,
     /// The Controls window (`ui/controls.rs`), the keys its buttons and
@@ -673,6 +676,9 @@ pub struct App {
     /// What the simulator was told of the static eyes animation since the
     /// last arrival (FSStaticEyes).
     static_eyes: crate::world::lookat::StaticEyes,
+    /// What the simulator was asked about the Bento idle pose: the same
+    /// rule as the static eyes, asked again after every arrival.
+    bento_idle: crate::world::lookat::StaticEyes,
     /// The world point the cursor was over last frame, and the object it
     /// lies on (the hover pick of the cursor icon), for the look-at.
     look_hover: Option<(Option<usize>, Vec3)>,
@@ -901,6 +907,8 @@ pub struct App {
     grid_status_was_open: bool,
     /// The conversation log's window (`app/conversation_log.rs`).
     conversation_log_ui: ui::conversation_log::ConversationLogUi,
+    /// The toolbar's pose stand (`app/pose_stand.rs`).
+    pose_stand: crate::pose_stand::Stand,
     about: about::About,
     /// Preferences › Remove Aurora from this computer (`app/uninstall.rs`).
     uninstall: uninstall::Uninstall,
@@ -1834,6 +1842,7 @@ impl App {
             cursor_pos: (0.0, 0.0),
             last_tap: None,
             temp_run: None,
+            rlva_temprun: false,
             always_run: false,
             controls_ui: Default::default(),
             controls_held: Vec::new(),
@@ -1859,6 +1868,7 @@ impl App {
             cam_key_since: [None; 12],
             look_at_privacy: None,
             static_eyes: Default::default(),
+            bento_idle: Default::default(),
             look_hover: None,
             hover_tips: Default::default(),
             look_at_fades: Default::default(),
@@ -1998,6 +2008,7 @@ impl App {
             grid_status_listed: false,
             grid_status_was_open: false,
             conversation_log_ui: Default::default(),
+            pose_stand: Default::default(),
             about: Default::default(),
             uninstall: Default::default(),
             stream_titles: Default::default(),
@@ -2272,6 +2283,11 @@ impl App {
                 .system_notice(aurora_i18n::tr!("rlva-blocked"), crate::world::notice_topics::Topic::Warning);
             return;
         }
+        if self.demo
+            && let NetCommand::SetAlwaysRun(run) = cmd
+        {
+            log::info!("demo: SetAlwaysRun({run}) sent");
+        }
         if let NetCommand::GroupTitleUpdate { group, role } = &cmd {
             self.world.group_data.title_sent(*group, *role);
             self.world.region_titles.title_sent(*group, *role);
@@ -2281,7 +2297,7 @@ impl App {
         }
         self.world.rlva_note_attachment_command(&cmd, actor, Instant::now());
         self.world.note_outfit_command(&cmd);
-        self.world.rlva.note_sit_command(&cmd, actor);
+        self.world.rlva_note_sit_command(&cmd, actor);
         if self.world.rlva.enabled()
             && let NetCommand::RezAttachments(items) = &mut cmd
         {
@@ -3289,6 +3305,10 @@ impl App {
     }
 
     fn back_to_login(&mut self, error: Option<String>) {
+        // FSFloaterPoseStand::onClose for the departing account: its AO back on
+        // before the settings are saved and the account state replaced
+        self.close_pose_stand();
+        self.panels.pose_stand = false;
         self.parcel_music.enter(false);
         self.stream_url.clear();
         self.music_fade.reset();
@@ -3478,6 +3498,7 @@ impl App {
         self.region_restart.put_demo(demo);
         self.move_complete_at = None;
         self.static_eyes.on_arrival();
+        self.bento_idle.on_arrival();
         self.set_mouselook_grab(false);
         self.camera = Camera::default();
     }
@@ -4343,6 +4364,7 @@ impl App {
                 self.move_complete_at = Some(Instant::now());
                 // the simulator we land in plays none of our animations yet
                 self.static_eyes.on_arrival();
+                self.bento_idle.on_arrival();
                 self.tp_checks = vec![10.0, 3.0];
                 // New region must learn walk/run again (LLAgent::sendWalkRun
                 // after RegionHandshake, llviewermessage.cpp). Without this
@@ -4983,7 +5005,11 @@ impl App {
     /// mouse steering counts as a forward key, so a double right click runs.
     fn walk_tap(&mut self, group: u8, pressed: bool) {
         if pressed && self.in_world() {
+            // LLAgent::setTempRun: @temprun leaves the double tap a plain walk;
+            // @alwaysrun does not touch it.
             if self.temp_run.is_none()
+                && self.settings.double_tap_run
+                && !self.world.rlva.has("temprun")
                 && let Some((last, at)) = self.last_tap
                 && last == group
                 && at.elapsed().as_secs_f32() < NUDGE_TIME
@@ -5875,6 +5901,16 @@ impl App {
             log::info!("static eyes: {} asked of the simulator", if start { "start" } else { "stop" });
             self.send(NetCommand::AgentAnimation {
                 anim: crate::world::lookat::STATIC_EYES,
+                start,
+            });
+        }
+        // FSPlayDefaultBentoAnimation (LLAgent::setRegion and
+        // stopCurrentAnimations in llagent.cpp, the setting's listener
+        // handlePlayBentoIdleAnimationChanged in llviewercontrol.cpp)
+        if let Some(start) = self.bento_idle.request(self.settings.bento_idle) {
+            log::info!("bento idle pose: {} asked of the simulator", if start { "start" } else { "stop" });
+            self.send(NetCommand::AgentAnimation {
+                anim: reset_skeleton::ANIM_BENTO_IDLE,
                 start,
             });
         }
@@ -6901,6 +6937,8 @@ impl App {
         if self.hud_drag.is_some() {
             self.on_left_release();
         }
+        // FSFloaterPoseStand::onClose(app_quitting): the AO back on
+        self.close_pose_stand();
         if self.in_world() {
             self.release_bridge();
             self.net.send(NetCommand::Logout);
@@ -8851,7 +8889,8 @@ impl App {
         i.down |= self.joystick.motion.crouch;
         i.down = self.crouch_toggle.apply(
             self.settings.crouch_toggle,
-            self.world.agent.flying,
+            // A swimmer descends with the key, as in flight (crouch_toggle.rs).
+            self.world.agent.flying || self.movement_runtime.state.swimming(),
             self.world.agent.is_sitting(),
             i.down,
             i.up || joystick_up,
@@ -8914,8 +8953,11 @@ impl App {
             self.world.agent.record_jump_input(now);
         }
         // agent_jump (indra/newview/llviewerinput.cpp) takes off through
-        // LLAgent::setFlying, which refuses where LLAgent::canFly says no
+        // LLAgent::setFlying, which refuses where LLAgent::canFly says no.
+        // upGrabbed (llTakeControls CONTROL_UP, pass_on false) still sends
+        // the hold to the script but must not start automatic fly.
         if automatic_fly_held(&mut self.up_since, i.up, self.settings.automatic_fly, now)
+            && !self.world.script_controls.up_grabbed()
             && self.movement_runtime.native_fly_allowed()
             && !self.world.agent.flying
             && !self.world.agent.seated
@@ -17845,9 +17887,17 @@ impl App {
                     t.buttons = Some(buttons);
                     demo_toolbar = Some(t);
                 }
-                // AURORA_DEMO_GRID_STATUS: the Grid status button at the end
-                // of the bottom bar, for this run only
-                if self.demo && crate::demo::grid_status::mode().is_some() {
+                // AURORA_DEMO_GRID_STATUS / AURORA_DEMO_POSE_STAND: the Grid
+                // status or the Pose stand button at the end of the bottom
+                // bar, for this run only
+                let demo_command = if crate::demo::grid_status::mode().is_some() {
+                    Some("gridstatus")
+                } else {
+                    crate::demo::pose_stand::mode().map(|_| "pose_stand")
+                };
+                if self.demo
+                    && let Some(command) = demo_command
+                {
                     let layout = if classic_bars {
                         layout.clone()
                     } else {
@@ -17857,7 +17907,7 @@ impl App {
                         .take()
                         .unwrap_or_else(|| self.settings.toolbar.clone().unwrap_or_default());
                     let mut buttons = t.buttons(&layout).to_vec();
-                    if let Some(c) = ui::toolbar::COMMANDS.iter().find(|c| c.id == "gridstatus")
+                    if let Some(c) = ui::toolbar::COMMANDS.iter().find(|c| c.id == command)
                         && !buttons.iter().any(|b| b.command == c.id)
                     {
                         buttons.push(ui::skin::ToolButton {
@@ -19499,6 +19549,7 @@ impl App {
                     &mut self.settings,
                     &mut self.panels.omnifilter,
                 );
+                self.pose_stand_window(&ctx, &p);
                 self.avatar_align_window(&ctx, &p);
                 if let Some(ui::voice_controls::Action::LeaveCall) = self.voice_controls_ui.show(
                     &ctx,
@@ -20621,6 +20672,13 @@ impl ApplicationHandler for App {
                 crate::world::radar::ANIM_AGENT_TYPE,
                 Arc::new(crate::scene::anim::BoundAnim::bind(crate::demo::typing_animation(), &rig)),
             );
+            if crate::demo::pose_stand::mode().is_some() {
+                for (id, anim) in crate::demo::pose_stand::animations() {
+                    self.scene
+                        .anims
+                        .insert(id, Arc::new(crate::scene::anim::BoundAnim::bind(anim, &rig)));
+                }
+            }
             if crate::demo::water::mode().is_some() {
                 self.scene.anims.insert(
                     crate::demo::water::CONTACT_ANIM,

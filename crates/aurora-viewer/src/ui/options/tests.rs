@@ -309,6 +309,7 @@ const BEFORE: &[&str] = &[
     "world_mouse_walk",
     "left_drag_avatar_moves_camera",
     "arrows_strafe",
+    "double_tap_run",
     "arrow_keys_always_move",
     "letter_keys_move",
     "walk_backwards_without_turning",

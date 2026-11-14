@@ -1694,6 +1694,21 @@ fn rlva_im_ranges_and_nametag_distances_follow_exclusions_and_strict_exceptions(
 }
 
 #[test]
+fn run_restrictions_each_leave_the_other_kind_of_run() {
+    let mut world = crate::world::World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
+    world.rlva.configure(true);
+    let run = NetCommand::SetAlwaysRun(true);
+    let walk = NetCommand::SetAlwaysRun(false);
+    command(&mut world.rlva, A, "@alwaysrun=n");
+    assert!(world.rlva_allows_command(&run, Uuid::nil()), "@alwaysrun leaves the double tap");
+    command(&mut world.rlva, A, "@alwaysrun=y,temprun=n");
+    assert!(world.rlva_allows_command(&run, Uuid::nil()), "@temprun leaves Always run");
+    command(&mut world.rlva, A, "@alwaysrun=n");
+    assert!(!world.rlva_allows_command(&run, Uuid::nil()), "both leave nothing that may run");
+    assert!(world.rlva_allows_command(&walk, Uuid::nil()));
+}
+
+#[test]
 fn rlva_stand_return_waits_for_a_successful_sit_and_is_cancelled_by_disabling() {
     let mut w = crate::world::World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
     w.rlva.configure(true);
@@ -1702,9 +1717,9 @@ fn rlva_stand_return_waits_for_a_successful_sit_and_is_cancelled_by_disabling() 
     w.rlva.stand_origin = Some(origin);
     w.rlva_update_stand();
     assert!(w.rlva.stand_return.is_none(), "an unanswered sit is not a stand");
-    w.agent.ground_sit = true;
+    w.agent.seated = true;
     w.rlva_update_stand();
-    w.agent.ground_sit = false;
+    w.agent.seated = false;
     w.rlva_update_stand();
     assert_eq!(w.rlva.stand_return, Some(origin));
     let c = NetCommand::TeleportTo {
@@ -1890,11 +1905,14 @@ fn rlva_watchdog_folder_locks_resolved_once_match_single_checks() {
     item(&mut world, 0xC001, collar, Some(collar_item));
     let cuff = item(&mut world, 0xC002, cuffs, None);
     let shirt = item(&mut world, 0xC003, other, None);
+    // the shirt lives outside #RLV too, worn through its link in #RLV/Cuffs
+    item(&mut world, 0xC004, cuffs, Some(shirt));
+    let free = item(&mut world, 0xC005, other, None);
     for n in 0..2000 {
         item(&mut world, 0xD000 + n, other, None);
     }
     let handle = world.main_region.unwrap();
-    for (n, worn) in [collar_item, cuff, shirt].into_iter().enumerate() {
+    for (n, worn) in [collar_item, cuff, shirt, free].into_iter().enumerate() {
         world.objects.upsert(
             handle,
             crate::demo::outfit_attachment(&aurora_net::AttachRequest {
@@ -1935,9 +1953,28 @@ fn rlva_watchdog_folder_locks_resolved_once_match_single_checks() {
         world.rlva_folder_allowed_in(&locks, other, false, Uuid::nil()),
         "outside #RLV stays free"
     );
+    // RlvFolderLocks::getLockedItems: a worn item is locked by the folder of
+    // any of its links under #RLV, not only by its own folder (issue #2677)
+    assert!(
+        !world.rlva_can_remove(collar_item, Uuid::nil()),
+        "worn through a link in the issuer's folder"
+    );
+    assert!(!world.rlva_can_remove(cuff, Uuid::nil()), "worn from the named folder");
+    assert!(
+        !world.rlva_can_remove(shirt, Uuid::nil()),
+        "worn through a link in the named folder"
+    );
+    assert!(world.rlva_can_remove(free, Uuid::nil()), "no link in a locked folder");
     world.rlva_watchdog_tick(std::time::Instant::now());
     world.rlva_watchdog_tick(std::time::Instant::now());
     assert!(world.rlva.watchdog.rejected.is_empty(), "nothing worn is rejected");
+    assert_eq!(
+        world.rlva.watchdog.checked.as_ref().expect("checked").locked,
+        BTreeSet::from([collar_item, cuff, shirt]),
+        "the watchdog holds the linked items too"
+    );
+    command(&mut world.rlva, cuff, "@detachthis:Cuffs=y");
+    assert!(world.rlva_can_remove(shirt, Uuid::nil()), "released with the rule");
 }
 
 /// The watchdog keeps its lock checks, and the folder locks their inventory

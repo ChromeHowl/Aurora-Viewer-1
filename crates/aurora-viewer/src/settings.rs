@@ -620,6 +620,12 @@ pub struct Settings {
     /// Viewer always does; Preferences › Avatars › Animations). Off, our
     /// avatar keeps its pose. Camera framing is controlled independently.
     pub customize_animation: bool,
+    /// FSPlayDefaultBentoAnimation: a priority 0 Bento pose plays under
+    /// every other animation, so hands, mouth, wings and tail fall back to
+    /// a natural pose instead of staying stuck where the last animation
+    /// left them (off, as in the Legacy Viewer; Preferences › Avatars ›
+    /// Animations).
+    pub bento_idle: bool,
     pub script_editor: crate::ui::scripts::settings::ScriptSettings,
     pub username: String,
     pub remember_username: bool,
@@ -1182,6 +1188,9 @@ pub struct Settings {
     pub rlva: crate::world::rlva::preferences::Preferences,
     pub pose_requests: crate::world::poser_consent::Preferences,
     pub poser: crate::ik_edit::poser::Config,
+    /// The pose stand's lock and last pose (FSPoseStandLock,
+    /// FSPoseStandLastSelectedPose).
+    pub pose_stand: crate::pose_stand::Settings,
     /// Automatic responses and the kept online status modes.
     pub autoresponse: crate::world::status::AutoResponse,
     /// The chat bar as a command line (FSCmdLine*, Preferences › Chat ›
@@ -1435,6 +1444,10 @@ pub struct Settings {
     /// Off by default: the drag steers the avatar (LLToolPie::startCameraSteering).
     pub left_drag_avatar_moves_camera: bool,
     pub arrows_strafe: bool,
+    /// Aurora extension: pressing a walk key twice quickly runs while held
+    /// (agent_handle_doubletap_run, always on in the Legacy Viewer). On by
+    /// default.
+    pub double_tap_run: bool,
     /// The arrow keys (and Page Up / Down, Home) move the avatar while the
     /// chat bar has the keyboard, even with text in it; an empty bar always
     /// lets them through. The Legacy Viewer's `ArrowKeysAlwaysMove`, off by
@@ -2197,6 +2210,7 @@ impl Default for Settings {
             shape_height_feet: false,
             customize_animation: true,
             appearance_camera_movement: true,
+            bento_idle: false,
             imports: Default::default(),
             script_editor: Default::default(),
             username: String::new(),
@@ -2419,6 +2433,7 @@ impl Default for Settings {
             rlva: Default::default(),
             pose_requests: Default::default(),
             poser: Default::default(),
+            pose_stand: Default::default(),
             autoresponse: Default::default(),
             chat_commands: Default::default(),
             keywords: Default::default(),
@@ -2508,6 +2523,7 @@ impl Default for Settings {
             destinations_wide: true,
             invert_mouse: false,
             arrows_strafe: false,
+            double_tap_run: true,
             world_mouse_walk: false,
             left_drag_avatar_moves_camera: false,
             arrow_keys_always_move: false,
