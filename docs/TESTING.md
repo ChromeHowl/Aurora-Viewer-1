@@ -5943,7 +5943,7 @@ before (`amis`, `groupes`, `repere`, `historique`…) are still accepted.
 | `AURORA_DEMO_MAP=1`, `mini` or words among `search:<text>`, `drawer:<tab>`, `landmarks`, `friend`, `legacy`, `switch`, `show-on-map`, `show-link`, `coordinates`, `beacon[-click|-offscreen]` | Maps, search, drawer, landmarks, followed friend, side panel layout, layout switched with the map open, Show on map, coordinate entry and clickable 3D beacon |
 | `AURORA_DEMO_NOTIF=1`, `AURORA_DEMO_STATUSMENU=1` or `invisible`, `AURORA_DEMO_MICMENU=1`, `AURORA_DEMO_NAVEDIT=1` | Notification list, status menu, microphone panel, location field |
 | `AURORA_DEMO_PARCEL_NAME=<text>` | Any parcel name in the place island (odd names, line breaks) |
-| `AURORA_DEMO_BARS=<words>` | Top and bottom bars: islands and dock, Legacy bars, place island, favourites, menus, balance, clock, hidden interface, immersive mode, chat autohide; `profiles` / `fpspresets`: saved graphics fixtures / FPS hover card |
+| `AURORA_DEMO_BARS=<words>` | Top and bottom bars: islands and dock, Legacy bars, place island, favourites, menus, balance, clock, hidden interface, immersive mode, chat bar autohide / Conversations window only; `profiles` / `fpspresets`: saved graphics fixtures / FPS hover card |
 | `AURORA_DEMO_TOASTS=1\|bell\|click\|minimized\|emote` | Friend online/offline and IM toasts, unread pill, Conversations button flash, click on an IM card, emotes |
 | `AURORA_DEMO_CONV_BUTTON=1\|mute\|still\|menu` | The Conversations button flashing for nearby chat and an IM, nearby chat left out, Reduce motion, its right-click menu |
 | `AURORA_DEMO_ATTENTION=1\|front\|capture` | Taskbar flashes and system notifications for messages, mentions and offers arriving in the background |
@@ -5958,6 +5958,7 @@ before (`amis`, `groupes`, `repere`, `historique`…) are still accepted.
 | `AURORA_DEMO_REGION_MESSAGE=1` | Messages to the whole region in the middle of the screen (#1404), one waiting behind the other |
 | `AURORA_DEMO_SIM_VERSION=1\|on` | The region's simulator version changes during the run: no notice by default, one with `on` |
 | `AURORA_DEMO_OBJECT_IM=off\|region\|parcel\|strict` | Objects' messages from near and far, with the filter of Preferences › Privacy set for this run |
+| `AURORA_DEMO_OMNIFILTER=1` | The Omnifilter on with demo rules (never saved): chat, an IM and script dialogs hidden, replaced or answered; the Rules Editor open |
 | `AURORA_DEMO_ABOUT=info\|licences\|libraries[:end]` | Help › About Aurora Viewer opens on its Info, Licences or Libraries tab |
 | `AURORA_DEMO_VOICE_CONTROLS=1` | The toolbar's Voice controls window opens (frame 600) on the nearby channel with three demo residents; with `AURORA_DEMO_CALL=conference` on the call's channel |
 | `AURORA_DEMO_COLLISIONS=1\|chat` | Residents bump, push and hit the agent; the "Bumps, pushes & hits" window opens on the list |
@@ -5967,6 +5968,7 @@ before (`amis`, `groupes`, `repere`, `historique`…) are still accepted.
 | `AURORA_DEMO_CONV=1`, `AURORA_DEMO_TALK=1` | Group conversation, open microphone |
 | `AURORA_DEMO_CHAT_LINES=1\|legacy\|volumes[:lines]\|stagger\|legacy:stagger` | Nearby chat above the chat bar, optionally limited to 0–50 wrapped text lines; `stagger` says the lines one at a time |
 | `AURORA_DEMO_OBJECT_CHAT=aurora\|compact\|bubbles\|legacy\|lines[:on][:im][:imlines][:inspect]` | Residents talking among objects in the nearby chat, in a style; `on` makes what no person sent compact and quiet; `im` the friend's conversation, `imlines` its system lines compact |
+| `AURORA_DEMO_EMOTES=aurora\|compact[:on]` | A resident's line, emote and line in the nearby chat of a workspace style; `on` groups the emotes with their sender's messages (Aurora style only) |
 | `AURORA_DEMO_TYPING=1` | We type in the nearby chat from our arrival on: typing animation, dots on our plate |
 | `AURORA_DEMO_CONV=bubbles[:busy\|group\|local\|legacy]` | Conversations as a messenger: bubbles, head with picture and status; or the legacy lines |
 | `AURORA_DEMO_CONV=aurora[:flag…]` | Conversations in Aurora's workspace (column, head, grouped messages, members, calls), roomy or compact |
@@ -6004,7 +6006,7 @@ before (`amis`, `groupes`, `repere`, `historique`…) are still accepted.
 | `AURORA_DEMO_THUMBNAILS=bar\|top\|off` | The conversations' thumbnails beside the chat bar, at the top right or hidden, for the run (#1134) |
 | `AURORA_DEMO_SNOOZE=<seconds>[,auto][,ask]` | Tess writes in the group chat every 6 s; its snooze lasts `<seconds>`; `auto` snoozes it at the 14th second, `ask` asks the duration first |
 | `AURORA_DEMO_CONFERENCE=1\|<seconds>` | A conference invitation every 20 s (or `<seconds>`), from a stranger then a friend in turn |
-| `AURORA_DEMO_CONV_SCROLL=up\|new` | The friend's conversation, long, shown from its top: the button back to the latest messages; `new` with three messages come in (with `AURORA_DEMO_CONV`) |
+| `AURORA_DEMO_CONV_SCROLL=up\|new` | The friend's conversation, long, shown from its top: no button with `up`; `new` with three messages come in and the button back to the latest messages (with `AURORA_DEMO_CONV`) |
 | `AURORA_DEMO_CONV_LINE_MENU=1` | Open a visible message's context menu in Aurora or Compact (with `AURORA_DEMO_CONV`) |
 | `AURORA_DEMO_CONV_MODERATE=menu\|eject\|ban\|banned\|error\|ban-all\|unban-all\|ban-all-run\|profile` | A group chat's moderator options on a member: the menu, the eject and ban questions, a ban sent, a refused text mute, a ban in all our groups and its report, the profile's menu (with `AURORA_DEMO_CONV=aurora:group`) |
 | `AURORA_DEMO_PROFILE=<avatar>[:tab\|edit\|compact\|form\|publish]` | An avatar's profile window |
@@ -6059,6 +6061,7 @@ before (`amis`, `groupes`, `repere`, `historique`…) are still accepted.
 | `AURORA_DEMO_FREEZE=1` or `<seconds>` | The avatar frozen by an estate manager, then released |
 | `AURORA_DEMO_SIM_CONSOLE=1` or `open` | The region console of estate managers (Advanced › Region console) |
 | `AURORA_DEMO_GRID_STATUS=open\|new\|none\|error` | Help › Grid status: the grid's incidents, and its toolbar button's flash |
+| `AURORA_DEMO_CONVERSATION_LOG=open\|name\|filter\|off\|empty\|live` | The conversation log window with demo conversations |
 
 ### Details
 
@@ -6973,6 +6976,19 @@ failure. Grid validation and any paid upload are performed by the human.
   `region` hides the first, `parcel` the first, fourth and sixth,
   `strict` the friend's too. Each hidden message logs one line
   `object message from … dropped`. Capture around frame 1000.
+- **`AURORA_DEMO_OMNIFILTER=1`**: the Omnifilter (Communicate ›
+  Omnifilter) on for this run with five rules of its own in the Default
+  set, kept in memory only (`omnifilter.xml` is not touched; the switch
+  is saved in the demo's own profile only). The Rules Editor opens at frame 640; at 60
+  frames a second, from frame 700: a resident "Shouty McShout" whose line
+  is hidden, an object's advertising line replaced by
+  "Omnifilter Replacement: (advertising hidden)", an ordinary line that
+  passes, an IM "free L$" dropped (no conversation opens), the "Greeter
+  Board" menu answered "Yes" one second later without being shown (the
+  log says `script dialog answered`), and the fountain's menu, which no
+  rule matches, shown as usual. The fifth rule is disabled and takes
+  nothing. Each match logs `omnifilter: rule "…" matched` and appears in
+  the editor's log with its SLT time. Capture around frame 1000.
 - **`AURORA_DEMO_PRESENCE=<place>`**: the friends' online / offline toasts
   of Aurora's notification center at `top-left`, `top-center`,
   `top-right`, `bottom-left`, `bottom-center` or `bottom-right`, for this
@@ -7194,7 +7210,11 @@ failure. Grid validation and any paid upload are performed by the human.
   Windows notification (on Linux, one from the desktop's notification
   service) per arrival, a click brings the window back on the conversation,
   the nearby chat or the bell's list. The log says `taskbar flash` and
-  `system notification shown (<what a click opens>)`, never the text.
+  `system notification shown (<what a click opens>, <category>)`, never
+  the text; the category (`im.received`, `x-aurora.mention`…) and the
+  `x-aurora-thread` hint go with it on Linux, the toast's `Group` on
+  Windows (the conversation's id, `presence` for a friend online or
+  offline, else `nearby-chat`, `notifications` or `window`).
   `front` keeps the window in front: nothing flashes and nothing is shown.
   `capture` brings the window back at frame 1150 with the bell's list open:
   capture with `AURORA_FPS_LIMIT=60` at frame 1300. The first notification
@@ -7608,14 +7628,14 @@ failure. Grid validation and any paid upload are performed by the human.
 - **`AURORA_DEMO_CONV_SCROLL=up|new`**: with `AURORA_DEMO_CONV=aurora`,
   `aurora:compact`, `bubbles` or `bubbles:legacy` (the friend's
   conversation), forty earlier messages come before the scenario's lines and
-  the conversation opens on its top. A button fades in over the bottom of
-  the lines, above the field: "Jump to the latest messages" with `up`;
-  with `new` the friend writes three messages once the top is shown and it
-  reads "3 new messages". A click brings the last message back against the
-  field and the button fades out; a message written then shows at once,
-  the lines following the end again. Scrolling back down by hand also hides
-  it once the end is less than half the height in sight away (with nothing
-  new).
+  the conversation opens on its top. With `up` no button shows over the
+  lines (nothing new, #2364); with `new` the friend writes three messages
+  once the top is shown and a button fades in over the bottom of the lines,
+  above the field: "3 new messages". A click brings the last message back
+  against the field and the button fades out; a message written then shows
+  at once, the lines following the end again. Scrolling up again brings no
+  button back until the friend writes; scrolling back down to the end by
+  hand also hides it.
 
 - **`AURORA_DEMO_FRIEND_LOCATION=allowed|denied|offline|altitude|join-map|join-contact|join-fly|join-fly-blocked|join-fly-late|join-fly-custom`** (#999): removes
   Nova's nearby object and coarse location at frame 60. The online friend
@@ -8320,6 +8340,16 @@ Human grid validation: remember MFA for account A and B, restart the viewer, the
   `AURORA_DEMO_OPTIONS=chat:script-errors` opens that section: the switch
   on, "Also say them on a chat channel" off, its channel (1) among its
   sub-settings.
+- **`AURORA_DEMO_EMOTES=aurora|compact[:on]`**: the nearby chat in the
+  Conversations window of that workspace style (`1` is `aurora`): Tess says
+  a line, an emote ("/me sets a bench down…") and another line, then Nova
+  an emote and a line. Without `:on`, each emote and the line after it
+  open their own header: five headers. `:on` turns Preferences › Chat ›
+  "Group emotes with the sender's messages" on for the run (nothing saved):
+  Tess's three lines under one header, the emote in italics with the
+  name in its text and no picture of its own, Nova's two under another:
+  two headers. The option shows only with the Aurora style: with
+  `compact`, `:on` changes nothing, since each Compact row names its sender.
 - **`AURORA_DEMO_CONV=bubbles[:busy|group|local|legacy]`**: the Conversations
   window as a messenger, placed at 700 x 560 px. Without a suffix, the
   conversation with an online friend over two days: their bubbles on the
@@ -8820,11 +8850,21 @@ Human grid validation: remember MFA for account A and B, restart the viewer, the
   hidden: struck-through screen; with `AURORA_DEMO_HUDS=1` the demo HUDs
   go; nothing saved).
   The chat bar: `autohide` (shown only while it is used, as with
-  Preferences › Chat › "Hide the chat bar when not in use", with either
+  Preferences › Chat › "Chat bar" on "Shown when typing", with either
   bars: with the islands the chat island goes and the dock gets its
   Conversations button back; with `legacy` the toolbar takes the whole
   bar), `chatstart` (autohidden, Enter pressed at frame 300 on the draft
-  "Hello!": the island back, without its button, the keyboard in it).
+  "Hello!": the island back, without its button, the keyboard in it),
+  `window` (Preferences › Chat › Chat bar on "Conversations window only":
+  no chat island nor Legacy chat field, the dock keeps its Conversations
+  button, Enter opens the Conversations window on Nearby chat),
+  `windowenter` (the same, the nearby chat docked back in the window
+  whatever the profile saved, as for the next two, Enter pressed at
+  frame 300 with the window closed: from frame 300 it shows Nearby chat with the keyboard in its
+  field), `windowmin` (opened at frame 100 on Contacts, minimized at 200:
+  at 300 it expands on Nearby chat), `windowreopen` (opened at frame 100
+  on Contacts at 380, 140, 520 × 360, closed at 200: at 300 it comes back
+  at that place and size, on Nearby chat).
   Capture at
   `AURORA_WINDOW_SIZE` 1280, 1536 and 1920 wide with `AURORA_FPS_LIMIT=60`
   at frame 780: at 1280 the place shows the parcel and the region, at
@@ -9609,6 +9649,22 @@ Human grid validation: remember MFA for account A and B, restart the viewer, the
   where the incident is first and marked "New". `none`: a grid without a
   feed ("This grid does not publish its status."); `error`: a feed that
   cannot be read ("The grid status could not be loaded." and the reason).
+- **`AURORA_DEMO_CONVERSATION_LOG=open|name|filter|off|empty|live`** (`1`
+  is `open`): the conversation log filled at frame 590 from memory (no file
+  is read or written) with the demo's residents and groups, then its window
+  opened at frame 600 (capture at frame 640). `open`: by date with friends
+  first (the defaults): the demo friend first, then Nova Example two hours
+  ago with the violet inbox mark of unread offline messages, a group, a
+  resident, a conference and older entries; Loup Example, blocked in the
+  demo, stays hidden until the view menu's Show blocked. `name`: sorted by
+  name.
+  `filter`: "no" typed in the filter, the matching letters in violet.
+  `off`: logging turned off, the entries still listed. `empty`: logging on
+  and nothing from before: only the demo's open group chat, logged as it
+  opens. `live`: an
+  empty log; at frame 600 a message Nova Example sent while we were
+  offline opens a conversation, which the log lists at once with its
+  inbox mark (the log says `conversation log demo: … entries`).
 
 **`AURORA_DEMO_WEARABLE=<type>[:mode]`** opens the shared editor on a worn
 skin, hair, eyes, shirt, pants, shoes, socks, jacket, gloves, undershirt,

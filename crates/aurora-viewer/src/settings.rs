@@ -66,6 +66,27 @@ pub enum ChatThumbnails {
     TopRight,
 }
 
+/// The nearby chat bar (Preferences › Chat, #2696): at the bottom always,
+/// only while it is used (the Legacy Viewer's `AutohideChatBar`, #1009), or
+/// never, the Nearby tab of the Conversations window taking its place
+/// (Aurora's: there Enter always shows the bar, `start_chat` in
+/// indra/newview/llviewerinput.cpp).
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ChatBar {
+    #[default]
+    Always,
+    WhenTyping,
+    ConversationsOnly,
+}
+
+impl ChatBar {
+    /// The bar is not always on screen: the default dock keeps the
+    /// Conversations button.
+    pub fn hides(self) -> bool {
+        self != ChatBar::Always
+    }
+}
+
 /// Where web pages open, like `PreferredBrowserBehavior` and
 /// `LLWeb::useExternalBrowser` in the Legacy Viewer.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -459,6 +480,28 @@ impl DebugView {
 /// The former look-at range slider's maximum, which meant no limit.
 const FORMER_LOOK_AT_UNLIMITED: f32 = 64.0;
 
+/// The conversation log window's view menu (menu_conversation_log_view.xml).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ConversationLogView {
+    /// CallLogSortOrder: by date (1, the default) or by name (0).
+    pub by_date: bool,
+    /// SortFriendsFirst (on).
+    pub friends_first: bool,
+    /// ShowBlockedConvHistory (off).
+    pub show_blocked: bool,
+}
+
+impl Default for ConversationLogView {
+    fn default() -> Self {
+        ConversationLogView {
+            by_date: true,
+            friends_first: true,
+            show_blocked: false,
+        }
+    }
+}
+
 /// The draw distance's range (m): the Legacy Viewer's Graphics slider
 /// (RenderFarClip, panel_preferences_graphics1.xml, 32 to 1024). A region
 /// sends what it allows of it (OpenSim's MaxDrawDistance, 512 by default).
@@ -842,6 +885,10 @@ pub struct Settings {
     /// The times of the conversations' lines, private and group
     /// (FSShowTimestampsIM, on; Preferences › Chat › Conversations).
     pub chat_timestamps_im: bool,
+    /// Seconds in the times of the nearby chat and of the conversations,
+    /// "14:05:09" (Firestorm's FSSecondsinChatTimestamps, off; Preferences ›
+    /// Chat › Nearby chat), whatever the bars' clock shows (#502).
+    pub chat_time_seconds: bool,
     /// The former single switch, read once: its choice goes to both.
     #[serde(rename = "chat_timestamps", skip_serializing)]
     pub(crate) former_chat_timestamps: Option<bool>,
@@ -873,6 +920,10 @@ pub struct Settings {
     /// viewer's notices (#475, off by default; Preferences > Chat). Not in
     /// the Legacy Viewer.
     pub compact_automated_chat: bool,
+    /// An emote ("/me waves") joins its sender's group under one header in
+    /// the Aurora style, instead of standing alone (off by default;
+    /// Preferences > Chat). Not in the Legacy Viewer.
+    pub group_emotes: bool,
     /// With it, the system lines of the conversations (calls, automatic
     /// replies) too (off, the human's choice of 2026-10-24).
     pub compact_im_system_lines: bool,
@@ -881,6 +932,14 @@ pub struct Settings {
     /// CloseChatOnReturn off). On by default (human choice of 2026-10-16);
     /// off, the bar lets go after sending.
     pub chat_keep_focus: bool,
+    /// Aurora extension, Enter toggles typing: Enter on an empty field gives
+    /// the keyboard back to the world in every conversation too (IMs and
+    /// group chats), not only in the nearby chat. Off by default.
+    pub chat_enter_toggles: bool,
+    /// Aurora extension, Enter returns to the last chat field used: from the
+    /// world, Enter focuses the conversation last talked in when its window
+    /// is open, instead of always the chat bar. Off by default.
+    pub chat_enter_last_field: bool,
     /// The nearby chat fields complete a gesture's trigger after `/`, with
     /// the list of the matching ones (FSChatbarGestureAutoCompleteEnable, on).
     pub chat_gesture_autocomplete: bool,
@@ -894,11 +953,15 @@ pub struct Settings {
     /// `@` in a chat field lists the residents of the conversation to mention
     /// (FSUseChatMentionAutoComplete, on).
     pub chat_mention_autocomplete: bool,
-    /// The local chat bar (the chat island) shows only while it is used:
-    /// Enter or a letter key brings it (#1009). The Legacy Viewer's
-    /// `AutohideChatBar`, off by default; with the islands the default dock
-    /// then keeps the Conversations button.
-    pub autohide_chat_bar: bool,
+    /// When the local chat bar (the chat island) shows: always, only while
+    /// it is used (#1009), or never, the Conversations window's Nearby tab
+    /// taking Enter (#2696). With the islands, the default dock keeps the
+    /// Conversations button while the bar hides.
+    pub chat_bar: ChatBar,
+    /// The former switch "Hide the chat bar when not in use", read once:
+    /// on is `ChatBar::WhenTyping`.
+    #[serde(rename = "autohide_chat_bar", skip_serializing)]
+    pub(crate) former_autohide_chat_bar: Option<bool>,
     /// Show Contacts in Conversations (Preferences > Chat, on by default as
     /// the Legacy Viewer's always-present entry; it can be hidden there).
     pub show_contacts_tab: bool,
@@ -1043,6 +1106,13 @@ pub struct Settings {
     pub log_im: bool,
     /// Write the nearby chat too (Firestorm LogNearbyChat, off).
     pub log_nearby: bool,
+    /// Keep the conversation log: who we had an instant message, group chat
+    /// or conference with, and when (the Legacy Viewer's
+    /// KeepConversationLogTranscripts > 0, on). Independent of `log_im`
+    /// here; see `ui/conversation_log.rs`.
+    pub log_conversations: bool,
+    /// The conversation log window's order and filters.
+    pub conversation_log: ConversationLogView,
     /// Reopen the private conversations of the last session at login (the
     /// Legacy Viewer's FSRestoreOpenIMs, off).
     pub reopen_ims: bool,
@@ -1103,6 +1173,9 @@ pub struct Settings {
     pub sim_version_alert: bool,
     /// Object messages from elsewhere dropped (Preferences › Privacy, #623).
     pub object_im_filter: crate::world::object_im_filter::Settings,
+    /// The Omnifilter on or off and its rule set in use (OmnifilterEnabled,
+    /// OmnifilterRuleSetID); the rules are in `omnifilter.xml`.
+    pub omnifilter: crate::omnifilter::Settings,
     pub anti_spam: crate::world::anti_spam::Settings,
     /// Global RLVa opt-in. Session restrictions are never persisted.
     pub rlva_enabled: bool,
@@ -1756,7 +1829,7 @@ pub(crate) fn max_texture_resolution_choice(v: u32) -> u32 {
         .unwrap_or(MAX_TEXTURE_RESOLUTIONS[0])
 }
 
-const SETTINGS_VERSION: u32 = 40;
+const SETTINGS_VERSION: u32 = 41;
 
 /// The world render percentage that draws at the display's logical
 /// resolution, as the Legacy Viewer does on a Mac with RenderHiDPI 0: 50 on
@@ -2249,6 +2322,7 @@ impl Default for Settings {
             chat_font_scale: 1.0,
             chat_timestamps_nearby: true,
             chat_timestamps_im: true,
+            chat_time_seconds: false,
             former_chat_timestamps: None,
             show_chat_channel: false,
             show_recent_emojis: false,
@@ -2258,13 +2332,17 @@ impl Default for Settings {
             script_errors_to_channel: false,
             script_errors_channel: 1,
             compact_automated_chat: false,
+            group_emotes: false,
             compact_im_system_lines: false,
             chat_keep_focus: true,
+            chat_enter_toggles: false,
+            chat_enter_last_field: false,
             chat_gesture_autocomplete: true,
             chat_name_prediction: true,
             colon_emote: false,
             chat_mention_autocomplete: true,
-            autohide_chat_bar: false,
+            chat_bar: ChatBar::Always,
+            former_autohide_chat_bar: None,
             show_contacts_tab: true,
             conversations_own_windows: false,
             send_typing_state: true,
@@ -2313,6 +2391,8 @@ impl Default for Settings {
             im_toast_seconds: 30.0,
             log_im: true,
             log_nearby: false,
+            log_conversations: true,
+            conversation_log: Default::default(),
             reopen_ims: false,
             log_show_history: true,
             log_dated_names: false,
@@ -2333,6 +2413,7 @@ impl Default for Settings {
             script_count_threshold: 100,
             sim_version_alert: false,
             object_im_filter: Default::default(),
+            omnifilter: Default::default(),
             anti_spam: Default::default(),
             rlva_enabled: false,
             rlva: Default::default(),
@@ -3207,6 +3288,18 @@ impl Settings {
             // which only stood in for the active one: they follow the layout
             // the compositor reports first (`keybinds::LayoutWatch`)
             self.defaults_follow_reported_layout = true;
+        }
+        // "Hide the chat bar when not in use" became the "Chat bar" choice:
+        // on is "Shown when typing", off (or absent) "Always shown". Only
+        // earlier files: an older build that saved over a newer file wrote
+        // the switch back beside the choice, which stays
+        let autohide = self.former_autohide_chat_bar.take();
+        if self.settings_version < 41 {
+            self.chat_bar = if autohide == Some(true) {
+                ChatBar::WhenTyping
+            } else {
+                ChatBar::Always
+            };
         }
         if !self.audio.mic_gain.is_finite() {
             self.audio.mic_gain = 1.0;
@@ -4714,6 +4807,42 @@ mod tests {
             ..Settings::default()
         };
         assert!(!chosen.sanitized().chat_keep_focus);
+    }
+
+    /// "Hide the chat bar when not in use" became the "Chat bar" choice
+    /// (#2696): on is "Shown when typing", anything else "Always shown",
+    /// once for earlier files; a choice made since stays.
+    #[test]
+    fn chat_bar_is_always_shown_by_default_and_once_for_earlier_files() {
+        assert_eq!(Settings::default().sanitized().chat_bar, ChatBar::Always);
+        let read = |file: serde_json::Value| serde_json::from_value::<Settings>(file).expect("read settings").sanitized();
+        for version in [0, 16, 33, 34, 35, 36, 37, 38, 39, 40] {
+            let on = read(serde_json::json!({ "settings_version": version, "autohide_chat_bar": true }));
+            assert_eq!(on.chat_bar, ChatBar::WhenTyping, "version {version}");
+            assert_eq!(on.settings_version, SETTINGS_VERSION);
+            let off = read(serde_json::json!({ "settings_version": version, "autohide_chat_bar": false }));
+            assert_eq!(off.chat_bar, ChatBar::Always, "version {version}");
+            let absent = read(serde_json::json!({ "settings_version": version }));
+            assert_eq!(absent.chat_bar, ChatBar::Always, "version {version}");
+        }
+        // saved: the choice, without the former switch
+        let saved =
+            serde_json::to_value(read(serde_json::json!({ "settings_version": 33, "autohide_chat_bar": true }))).expect("serialize");
+        assert_eq!(saved["chat_bar"], serde_json::json!("WhenTyping"));
+        assert!(saved.get("autohide_chat_bar").is_none());
+        // chosen since: kept, even with the switch an older build wrote back
+        for autohide in [None, Some(false), Some(true)] {
+            let mut file = serde_json::json!({ "settings_version": SETTINGS_VERSION, "chat_bar": "ConversationsOnly" });
+            if let Some(on) = autohide {
+                file["autohide_chat_bar"] = serde_json::json!(on);
+            }
+            assert_eq!(read(file).chat_bar, ChatBar::ConversationsOnly, "{autohide:?}");
+        }
+        let again = Settings {
+            chat_bar: ChatBar::Always,
+            ..Settings::default()
+        };
+        assert_eq!(again.sanitized().chat_bar, ChatBar::Always);
     }
 
     /// ArrowKeysAlwaysMove is off in the Legacy Viewer: the arrows move the

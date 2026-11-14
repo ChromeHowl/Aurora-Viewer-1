@@ -70,6 +70,7 @@ pub mod notification_history;
 pub mod notifications;
 pub mod object_im_filter;
 pub mod objects;
+pub mod omnifilter;
 pub mod open_ims;
 pub mod outfit;
 pub mod outfit_backup;
@@ -489,6 +490,12 @@ pub struct World {
     pub beams: beams::Beams,
     /// Object messages from elsewhere (Preferences › Privacy, issue #623).
     pub object_im_filter: object_im_filter::Settings,
+    /// The Omnifilter's rules (`crate::omnifilter`, `world/omnifilter.rs`).
+    pub omnifilter: crate::omnifilter::Engine,
+    /// Answers of matched dialogs waiting for their rule's delay.
+    omnifilter_replies: Vec<(Instant, omnifilter::Reply)>,
+    /// Links a rule opened, for the app.
+    omnifilter_urls: Vec<String>,
     pub anti_spam: anti_spam::Registry,
     pub teleporting: bool,
     /// Since when a teleport to another region waits for that region's
@@ -906,6 +913,9 @@ impl World {
             point_at: pointat::PointAts::default(),
             beams: beams::Beams::default(),
             object_im_filter: object_im_filter::Settings::default(),
+            omnifilter: Default::default(),
+            omnifilter_replies: Vec::new(),
+            omnifilter_urls: Vec::new(),
             anti_spam: Default::default(),
             appearance_counter: 1,
             bake_refreshes: HashMap::new(),
@@ -1055,7 +1065,10 @@ impl World {
         // a setting, not the session's: the arrival's lines follow it too
         let quiet = self.quiet_automated_chat;
         let fly_override = self.fly_override;
+        // the rules are the computer's, not the session's
+        let omnifilter = std::mem::take(&mut self.omnifilter);
         *self = World::new(lib);
+        self.omnifilter = omnifilter;
         self.chat_log = chat_log;
         self.cache_dir = cache_dir;
         self.quiet_automated_chat = quiet;
@@ -3498,6 +3511,16 @@ impl World {
                 object_id,
                 object_name,
                 owner_name,
+                owner_id,
+                message,
+                channel,
+                buttons,
+            } if self.omnifilter_script_dialog(sender, object_id, &object_name, &owner_name, owner_id, &message, channel, &buttons) => None,
+            NetEvent::ScriptDialog {
+                sender,
+                object_id,
+                object_name,
+                owner_name,
                 owner_id: _,
                 message,
                 channel,
@@ -3665,9 +3688,18 @@ impl World {
             }
             NetEvent::LoadUrl {
                 object_name,
+                owner_id,
+                owner_is_group,
+                message,
+                url,
+                ..
+            } if self.omnifilter_load_url(&object_name, owner_id, owner_is_group, &message, &url) => None,
+            NetEvent::LoadUrl {
+                object_name,
                 object_id,
                 message,
                 url,
+                ..
             } => {
                 let body = format!("{message}\n{url}");
                 let object_name = dialog_names::shown(&object_name).into_owned();
@@ -4553,6 +4585,11 @@ impl World {
         if self.receive_hand_contacts(&c, Instant::now()) {
             return;
         }
+        // process_chat_from_simulator: before the debug channel takes its
+        // lines
+        if !self.omnifilter_chat(&mut c) {
+            return;
+        }
         if self.script_debug.route(&c, self.agent_id, Instant::now()) || self.anti_spam_chat(&c) {
             return;
         }
@@ -4679,7 +4716,7 @@ impl World {
         // a message to the whole region, before the rules of conversations
         // (region_messages.rs)
         if region_messages::is_region_message(&im) {
-            if !self.anti_spam_im(&im) {
+            if !self.anti_spam_im(&im) && self.omnifilter_im(&mut im) {
                 self.on_region_message(&im);
             }
             return;
@@ -4688,6 +4725,10 @@ impl World {
             return;
         }
         if self.anti_spam_im(&im) {
+            return;
+        }
+        // processNewMessage: every dialog, before it is handled
+        if !self.omnifilter_im(&mut im) {
             return;
         }
         // IM queries obey the same friends-only policy, before recvim.
@@ -4758,7 +4799,12 @@ impl World {
                 source: im.from_agent_id,
                 origin: Origin::Live,
             };
+            let opened = !self.chat_log.conversations.known.contains(&im.from_agent_id);
             self.conversation_push(im.from_agent_id, line, true);
+            // sessionAdded with has_offline_msg: the log marks it unread
+            if im.offline && opened {
+                self.log_conversation(im.from_agent_id, true);
+            }
             if rlva_filter != rlva::communication::Received::Masked {
                 self.send_autoresponse(&im, autoresponse);
             }
@@ -5038,7 +5084,22 @@ impl World {
         } else {
             None
         };
-        self.ask_attention(attention::Cause::Message, notice);
+        // an offer is told as one; an alert, a notice or an answer as a notice
+        let cause = if matches!(
+            im.dialog,
+            d::LURE_USER
+                | d::GODLIKE_LURE_USER
+                | d::TELEPORT_REQUEST
+                | d::FRIENDSHIP_OFFERED
+                | d::INVENTORY_OFFERED
+                | d::TASK_INVENTORY_OFFERED
+                | d::GROUP_INVITATION
+        ) {
+            attention::Cause::Offer
+        } else {
+            attention::Cause::Message
+        };
+        self.ask_attention(cause, notice);
         true
     }
 
@@ -5597,7 +5658,7 @@ impl World {
                     body: String::new(),
                     open: attention::Open::Conversation(id),
                 };
-                self.ask_attention(attention::Cause::Notice, Some(notice));
+                self.ask_attention(attention::Cause::Presence(online), Some(notice));
             }
             // the line of nearby chat (OnlineOfflinetoNearbyChat), only when
             // asked for: the toast already says it
@@ -5673,6 +5734,16 @@ impl World {
         }
     }
 
+    /// Show `conversation` in the Conversations window. `to_type` gives its
+    /// field the keyboard too, as FSFloaterIM::show → setFocus(true) →
+    /// focusFirstItem (indra/newview/fsfloaterim.cpp) does for a conversation
+    /// the user asked for; a call shows it alone, leaving the keyboard where
+    /// it was.
+    pub fn focus_conversation(&mut self, conversation: Uuid, to_type: bool) {
+        self.social.focus_im = Some(conversation);
+        self.social.focus_im_to_type = to_type;
+    }
+
     /// A friend's or a message's card clicked: it is acknowledged (gone from
     /// the bell, the conversation read) and the conversation to show is
     /// returned — the friend's IM (LLAvatarActions::startIM) or the session
@@ -5692,7 +5763,8 @@ impl World {
             s.unread = 0;
         }
         self.acknowledge_read_messages();
-        self.social.focus_im = Some(session);
+        // a click on the toast or the card: ready to type in
+        self.focus_conversation(session, true);
         Some(session)
     }
 

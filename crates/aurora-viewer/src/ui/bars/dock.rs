@@ -457,6 +457,9 @@ fn emoji_picker(
                 }
                 if let Some(c) = picked.chosen {
                     chat.input.push(c);
+                    // the caret after the emoji, also while Shift keeps the
+                    // picker open
+                    crate::ui::chat::cursor_to_end(ui.ctx(), crate::ui::chat::bar_input_id(), &chat.input);
                     close = !ui.input(|i| i.modifiers.shift);
                 }
                 escape = picked.escape;
@@ -577,7 +580,7 @@ fn open_conversations(ctx: &egui::Context, panels: &mut Panels, chat: &mut crate
 /// chat island's button opens the conversations and counts their unread
 /// lines. Only the default dock leaves it out: a saved dock that holds it
 /// keeps it, and the toolbar's catalogue still offers it. With the chat bar
-/// autohidden (`autohide`, #1009) the island goes away with its button: the
+/// hidden (`ChatBar::hides`, #1009, #2696) the island goes away with its button: the
 /// default dock keeps the skin's Conversations button. Kept from one frame
 /// to the next, built again when the skin's toolbar changes.
 #[derive(Default)]
@@ -1058,7 +1061,7 @@ mod tests {
         let hint = aurora_i18n::tr!("common-nearby-chat");
         let escape = || vec![key(egui::Key::Escape, true, egui::Modifiers::NONE)];
         let mut bench = Bench::new();
-        bench.chat.autohide = true;
+        bench.chat.bar_mode = crate::settings::ChatBar::WhenTyping;
         bench.frame(vec![]);
         bench.frame(vec![]);
         assert!(bench.text_rect(hint).is_none(), "out of use: no field");
@@ -1094,7 +1097,7 @@ mod tests {
 
         // a saved dock without Conversations: the island's button alone
         let mut bench = Bench::new();
-        bench.chat.autohide = true;
+        bench.chat.bar_mode = crate::settings::ChatBar::WhenTyping;
         bench.buttons = Some(DockLayout::default().of(&crate::ui::skin::Layout::default(), false).toolbar.clone());
         bench.frame(vec![]);
         bench.frame(vec![]);

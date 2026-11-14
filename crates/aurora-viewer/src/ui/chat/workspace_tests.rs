@@ -287,6 +287,12 @@ fn a_double_click_selects_one_word_of_a_line() {
     h.settle();
     let (start, end) = h.st.selection.1.bounds().expect("a word is selected");
     assert_eq!((start.seq, start.at, end.at), (end.seq, 6, 10), "\"from\" of \"hello from Jane\"");
+    // a third click selects the whole paragraph instead of clearing it
+    h.frame(vec![button(true)]);
+    h.frame(vec![button(false)]);
+    h.settle();
+    let (start, end) = h.st.selection.1.bounds().expect("the paragraph is selected");
+    assert_eq!((start.seq, start.at, end.at), (end.seq, 0, 15), "\"hello from Jane\"");
 }
 
 #[test]
@@ -2591,15 +2597,27 @@ fn the_tabs_of_the_other_styles_open_the_menu() {
     }
 }
 
-/// Away from the end of a conversation, the button back to the latest
-/// messages shows and counts what came in; its click brings the end back,
-/// where the next line shows at once (#558), in both windows.
+/// The button back to the latest messages shows once others wrote while
+/// the reader was away from the end, with their count; its click brings the
+/// end back, where the next line shows at once (#558). Scrolled up with
+/// nothing new, it stays off the text, before and after (#2364), in both
+/// windows.
 #[test]
 fn the_latest_button_brings_the_end_back() {
-    let jump = aurora_i18n::tr!("ui-chat-latest");
-    let two = aurora_i18n::tr!("ui-chat-latest-new", count = 2usize);
-    let count = |texts: &[crate::ui::widgets::elide_tests::Text], s: &str| texts.iter().filter(|t| t.source == s).count();
-    let has = |texts: &[crate::ui::widgets::elide_tests::Text], s: &str| count(texts, s) > 0;
+    type Texts = [crate::ui::widgets::elide_tests::Text];
+    let new = |n: usize| aurora_i18n::tr!("ui-chat-latest-new", count = n);
+    let two = new(2);
+    let count = |texts: &Texts, s: &str| texts.iter().filter(|t| t.source == s).count();
+    let has = |texts: &Texts, s: &str| count(texts, s) > 0;
+    let button = |texts: &Texts| (1..=3).any(|n| has(texts, &new(n)));
+    // to the top (the demo's way)
+    let up = |h: &mut Harness| {
+        (h.st.demo_scroll, h.st.demo_scrolled) = (Some(JANE), false);
+        h.settle();
+        h.settle();
+        assert!(h.st.demo_scrolled);
+        (0..12).map(|_| h.frame(Vec::new())).last().unwrap_or_default()
+    };
     for style in [ChatStyle::Aurora, ChatStyle::Legacy] {
         let mut h = Harness::new(style);
         for k in 0..60 {
@@ -2609,15 +2627,10 @@ fn the_latest_button_brings_the_end_back() {
         h.st.selected = Some(JANE);
         // never, not even for the frame the conversation is first shown
         for _ in 0..8 {
-            assert!(!has(&h.frame(Vec::new()), jump), "{style:?}: at the end, no button");
+            assert!(!button(&h.frame(Vec::new())), "{style:?}: at the end, no button");
         }
-        // to the top (the demo's way)
-        h.st.demo_scroll = Some(JANE);
-        h.settle();
-        h.settle();
-        assert!(h.st.demo_scrolled, "{style:?}");
-        let texts = (0..12).map(|_| h.frame(Vec::new())).last().unwrap_or_default();
-        assert!(has(&texts, jump), "{style:?}: far from the end");
+        // far from the end, nothing new
+        assert!(!button(&up(&mut h)), "{style:?}: scrolled up, no button");
         // two lines come in, out of sight
         h.world.conversation_line(JANE, line("Jane", JANE, ChatKind::Im, "new 1"));
         h.world.conversation_line(JANE, line("Jane", JANE, ChatKind::Im, "new 2"));
@@ -2628,10 +2641,18 @@ fn the_latest_button_brings_the_end_back() {
         h.click(at);
         let texts = (0..12).map(|_| h.frame(Vec::new())).last().unwrap_or_default();
         assert_eq!(count(&texts, "new 2"), away + 1, "{style:?}: the end in sight");
-        assert!(!has(&texts, &two) && !has(&texts, jump), "{style:?}: the button gone");
+        assert!(!button(&texts), "{style:?}: the button gone");
         // the lines follow the end again
         h.world.conversation_line(JANE, line("Jane", JANE, ChatKind::Im, "after"));
         assert_eq!(count(&h.settle(), "after"), away + 1, "{style:?}");
+        // up again with nothing new: no button, and a click where it was
+        // stays on the text
+        assert!(!button(&up(&mut h)), "{style:?}: up again, no button");
+        h.click(at);
+        for _ in 0..12 {
+            h.frame(Vec::new());
+        }
+        assert!(h.st.views[&Some(JANE)].below() > 0.0, "{style:?}: still away from the end");
     }
 }
 
@@ -2665,4 +2686,100 @@ fn the_column_previews_show_link_labels() {
     );
     assert!(texts.iter().any(|t| t.source.ends_with("ask Lune Étoilée")), "Jane's entry");
     assert!(texts.iter().all(|t| !t.source.contains("secondlife:")), "no raw address anywhere");
+}
+
+/// Adding a resident to a conversation with one resident turns it into a
+/// conference, and the new conference's field takes the keyboard: FSFloaterIM::
+/// addP2PSessionParticipants → startConference → FSFloaterIM::show →
+/// setFocus(true) → focusFirstItem (indra/newview/fsfloaterim.cpp). The
+/// keyboard follows the conference to the server's session id.
+#[test]
+fn a_conference_made_from_a_p2p_chat_takes_the_keyboard() {
+    for style in [ChatStyle::Aurora, ChatStyle::Compact, ChatStyle::Bubbles, ChatStyle::Legacy] {
+        let mut h = Harness::new(style);
+        h.st.selected = Some(JANE);
+        h.st.conv_focus_request = true;
+        h.settle();
+        let field = |c: Uuid| egui::Id::unique(("conv_input", Some(c)));
+        assert!(
+            h.frames.ctx.memory(|m| m.has_focus(field(JANE))),
+            "{style:?}: the P2P field starts with the keyboard"
+        );
+        h.world.convert_to_conference(JANE, vec![BOB]);
+        let temp = h.world.social.focus_im.expect("the new conference is shown");
+        assert!(h.world.social.focus_im_to_type, "{style:?}: ready to type in");
+        h.settle();
+        assert_eq!(h.st.selected, Some(temp));
+        assert!(
+            h.frames.ctx.memory(|m| m.has_focus(field(temp))),
+            "{style:?}: the new conference takes the keyboard"
+        );
+        h.frame(vec![egui::Event::Text("hi".into())]);
+        assert_eq!(h.st.draft_mut(Some(temp)), "hi", "{style:?}");
+        // processSessionInitializedReply: the server's id replaces ours, and
+        // the conversation keeps the keyboard
+        let real = Uuid::from_u128(0xC0FFEE);
+        h.world.apply(aurora_net::NetEvent::SessionStarted {
+            temp_session: temp,
+            session: real,
+            success: true,
+            error: String::new(),
+            agents: Vec::new(),
+        });
+        h.settle();
+        assert_eq!(h.st.selected, Some(real));
+        assert!(
+            h.frames.ctx.memory(|m| m.has_focus(field(real))),
+            "{style:?}: the server's id keeps the keyboard"
+        );
+        h.frame(vec![egui::Event::Text("!".into())]);
+        assert_eq!(h.st.draft_mut(Some(real)), "!", "{style:?}: typing stays in the conference");
+        assert!(h.st.draft_mut(None).is_empty(), "{style:?}: not in the nearby chat");
+    }
+}
+
+/// Send IM and the column's "new conversation" ask for a conversation and
+/// its field takes the keyboard (LLAvatarActions::startIM → FSFloaterIM::show
+/// → setFocus).
+#[test]
+fn a_conversation_the_user_starts_takes_the_keyboard() {
+    for style in [ChatStyle::Aurora, ChatStyle::Compact, ChatStyle::Bubbles, ChatStyle::Legacy] {
+        let mut h = Harness::new(style);
+        h.world.start_text_conference(vec![BOB]);
+        h.settle();
+        assert_eq!(h.st.selected, Some(BOB));
+        assert!(
+            h.frames.ctx.memory(|m| m.has_focus(egui::Id::unique(("conv_input", Some(BOB))))),
+            "{style:?}: Send IM takes the keyboard"
+        );
+    }
+}
+
+/// A new call opens the Conversations window (App::update_voice) but must
+/// not take the keyboard: its conversation is only shown, as a call opener
+/// leaves the caret where it was.
+#[test]
+fn an_outgoing_call_does_not_take_the_keyboard_when_it_opens_the_window() {
+    for style in [ChatStyle::Aurora, ChatStyle::Compact, ChatStyle::Bubbles, ChatStyle::Legacy] {
+        let mut h = Harness::new(style);
+        h.open = false;
+        // the call starts while the Conversations window is closed
+        h.world.focus_conversation(JANE, false);
+        h.frame(Vec::new());
+        // and the app opens the window for it
+        h.open = true;
+        h.settle();
+        assert_eq!(h.st.selected, Some(JANE), "{style:?}: the call's conversation is shown");
+        assert!(
+            h.frames.ctx.memory(|m| m.focused()).is_none(),
+            "{style:?}: a call must not focus its field"
+        );
+        // a conversation the user asks for, on the other hand, is ready to type
+        h.world.focus_conversation(BOB, true);
+        h.settle();
+        assert!(
+            h.frames.ctx.memory(|m| m.has_focus(egui::Id::unique(("conv_input", Some(BOB))))),
+            "{style:?}: a user request takes the keyboard"
+        );
+    }
 }

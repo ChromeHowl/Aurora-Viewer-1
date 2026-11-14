@@ -58,6 +58,7 @@ mod color_picker;
 mod contents_copy;
 mod context_menu;
 mod controls;
+mod conversation_log;
 mod crash_state;
 mod cursor_hold;
 mod derender;
@@ -890,12 +891,16 @@ pub struct App {
     bumps_ui: ui::bumps::BumpsUi,
     /// The toolbar's Voice controls window (`ui/voice_controls.rs`).
     voice_controls_ui: ui::voice_controls::VoiceControlsUi,
+    /// The Omnifilter Rules Editor (`ui/omnifilter.rs`).
+    omnifilter_ui: ui::omnifilter::OmnifilterUi,
     /// Help › Grid status: the grid's feed (`app/grid_status.rs`), whether
     /// its button stands on a toolbar, and whether the window was open
     /// last frame.
     grid_status: crate::grid_status::GridStatus,
     grid_status_listed: bool,
     grid_status_was_open: bool,
+    /// The conversation log's window (`app/conversation_log.rs`).
+    conversation_log_ui: ui::conversation_log::ConversationLogUi,
     about: about::About,
     /// Preferences › Remove Aurora from this computer (`app/uninstall.rs`).
     uninstall: uninstall::Uninstall,
@@ -1518,13 +1523,24 @@ fn sync_auto_render_scale(settings: &mut crate::settings::Settings, scale_factor
 fn show_conversation_to_type(
     ctx: &egui::Context,
     world: &mut crate::world::World,
-    chat: &mut ui::chat::ChatUi,
     conversations_open: &mut bool,
     conversation: uuid::Uuid,
 ) {
-    world.social.focus_im = Some(conversation);
-    chat.conv_focus_request = true;
+    world.focus_conversation(conversation, true);
     ui::notifications::open_conversations(ctx, conversations_open);
+}
+
+/// A conversation the user asked for (`World::focus_conversation(.., true)`)
+/// opens its window, even when it was closed or minimized: a notification
+/// card's "Reply by text", for one, is outside the Conversations window. A
+/// conversation in a window of its own is raised by the chat UI instead.
+fn open_conversations_for_focus(ctx: &egui::Context, world: &crate::world::World, chat: &ui::chat::ChatUi, conversations_open: &mut bool) {
+    if world.social.focus_im_to_type
+        && let Some(conversation) = world.social.focus_im
+        && !chat.in_own_window(conversation)
+    {
+        ui::notifications::open_conversations(ctx, conversations_open);
+    }
 }
 
 /// A conversation's toast or card clicked: acknowledges the notification and
@@ -1534,12 +1550,11 @@ fn show_conversation_to_type(
 fn open_notification_to_type(
     ctx: &egui::Context,
     world: &mut crate::world::World,
-    chat: &mut ui::chat::ChatUi,
     conversations_open: &mut bool,
     id: u64,
 ) -> Option<uuid::Uuid> {
     let conversation = world.open_from_notification(id)?;
-    show_conversation_to_type(ctx, world, chat, conversations_open, conversation);
+    show_conversation_to_type(ctx, world, conversations_open, conversation);
     Some(conversation)
 }
 
@@ -1570,6 +1585,12 @@ impl App {
             settings.defaults_follow_reported_layout = true;
         }
         apply_test_overrides(&mut settings);
+        // AURORA_DEMO_OMNIFILTER: on, on the demo's rules, for this run
+        if std::env::var("AURORA_DEMO").as_deref() == Ok("1")
+            && let Some(omnifilter) = crate::demo::omnifilter::settings()
+        {
+            settings.omnifilter = omnifilter;
+        }
         external_links::apply_grid(&mut settings);
         if std::env::var("AURORA_DEMO").as_deref() == Ok("1")
             && std::env::var_os("AURORA_DEMO_TEXTURE_LIBRARY").is_some()
@@ -1693,6 +1714,11 @@ impl App {
             world: {
                 let mut w = World::new(lib);
                 w.cache_dir = Some(cache_root);
+                // OmnifilterEngine::init (the demo's rules are its own)
+                match crate::demo::omnifilter::rules().filter(|_| std::env::var("AURORA_DEMO").as_deref() == Ok("1")) {
+                    Some(sets) => w.omnifilter = crate::omnifilter::Engine::with_sets(sets),
+                    None => w.omnifilter.load(crate::omnifilter::user_file()),
+                }
                 w
             },
             bridge_runtime: Default::default(),
@@ -1967,9 +1993,11 @@ impl App {
             group_titles_ui: Default::default(),
             bumps_ui: Default::default(),
             voice_controls_ui: Default::default(),
+            omnifilter_ui: Default::default(),
             grid_status: Default::default(),
             grid_status_listed: false,
             grid_status_was_open: false,
+            conversation_log_ui: Default::default(),
             about: Default::default(),
             uninstall: Default::default(),
             stream_titles: Default::default(),
@@ -3091,6 +3119,7 @@ impl App {
             // the demo never reads the PC's real Legacy Viewer folders: its
             // import scenario starts its own import on its own files
             import_at_login: s.log_import_at_login && !self.demo,
+            log_conversations: s.log_conversations,
         };
         // the demo keeps no transcripts unless its scenario asks for them:
         // a run must not change what the next one shows
@@ -3284,6 +3313,7 @@ impl App {
         self.settings.save();
         self.sync_local_picker_bindings();
         self.imports.flush_local_registry();
+        self.world.omnifilter.save_before_exit();
         for entry in &self.imports.entries {
             if let Some(crate::imports::Source::Mesh(draft)) = &entry.source {
                 draft.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -3420,6 +3450,8 @@ impl App {
         self.neighbours_refused = false;
         // the transcripts shown belong to the account that leaves
         self.history_ui = Default::default();
+        // and the conversation log's filter and selection
+        self.conversation_log_ui = Default::default();
         self.chat_import_closed();
         self.chat_ui = ChatUi::from_settings(&self.settings);
         self.ao_agent = uuid::Uuid::nil();
@@ -5103,7 +5135,7 @@ impl App {
             Action::ResetCameraAngles => self.reset_camera_angles(),
             Action::FocusSelection => self.look_at_selection(false),
             Action::ZoomSelection => self.look_at_selection(true),
-            Action::Chat => self.chat_ui.focus_request = true,
+            Action::Chat => self.start_chat(),
             Action::ToggleMic => self.toggle_mic(),
             // the shortcuts of the windows, like their toolbar buttons: a
             // minimized window expands (LLFloaterReg::toggleInstance)
@@ -5970,8 +6002,7 @@ impl App {
                     if !self.world.social.ims.iter().any(|s| s.other == session) {
                         self.world.social.session_mut(session);
                     }
-                    self.world.social.focus_im = Some(session);
-                    self.chat_ui.conv_focus_request = true;
+                    self.world.focus_conversation(session, true);
                     self.notif_ui.open = false;
                     ui::notifications::open_conversations(ctx, &mut self.panels.chat);
                 }
@@ -6861,6 +6892,8 @@ impl App {
         }
         self.sync_local_picker_bindings();
         self.imports.flush_local_registry();
+        // a rule changed just before closing is kept, as at a logout
+        self.world.omnifilter.save_before_exit();
         self.record_inventory_logout();
         // revertBeaconsState when the editors close with the viewer
         self.env_beacons_release();
@@ -6913,7 +6946,9 @@ impl App {
         // the copies of the script editors closed just before (ui/scripts/backup.rs)
         self.script_editors.back_up();
         crate::ui::scripts::backup::flush(Duration::from_secs(2));
+        // the conversation log as it is now (LLConversationLog::cache), then
         // the last lines of the conversations reach their files
+        self.world.chat_log.save_conversations(true);
         self.world.chat_log.flush(Duration::from_secs(2));
         // the recent emojis of a message sent just before
         self.chat_ui.recent_emojis.finish(Duration::from_secs(1));
@@ -8498,7 +8533,7 @@ impl App {
     /// Shows a conversation the user asked for with its field ready to type
     /// in (a notification's toast or card, `show_conversation_to_type`).
     fn show_conversation_to_type(&mut self, id: uuid::Uuid) {
-        show_conversation_to_type(&self.egui_ctx, &mut self.world, &mut self.chat_ui, &mut self.panels.chat, id);
+        show_conversation_to_type(&self.egui_ctx, &mut self.world, &mut self.panels.chat, id);
     }
 
     /// The Conversations window for a conversation the user asked for (Send
@@ -8550,18 +8585,49 @@ impl App {
         }
     }
 
+    /// Enter from the world (start_chat, indra/newview/llviewerinput.cpp):
+    /// `ChatUi::start_chat`; with "Conversations window only" the request
+    /// for the chat bar then goes to the window (`ChatUi::follow_bar_mode`).
+    fn start_chat(&mut self) {
+        let world = &self.world;
+        self.chat_ui.start_chat(&self.egui_ctx, self.panels.chat, |id| {
+            world.social.has_session(id) || world.groups.sessions.contains_key(id)
+        });
+    }
+
+    /// `AURORA_DEMO_BARS=windowenter|windowmin|windowreopen` (#2696): the
+    /// nearby chat docked back in the Conversations window at frame 100,
+    /// that window closed (`windowenter`) or opened on Contacts (placed at
+    /// a spot of its own for `windowreopen`), minimized or closed at 200,
+    /// Enter pressed at 300.
+    fn demo_chat_bar_window(&mut self, mode: ui::bars::demo::WindowEnter, frame: u64) {
+        use ui::bars::demo::WindowEnter;
+        let ctx = self.egui_ctx.clone();
+        match (mode, frame) {
+            (_, 300) => self.start_chat(),
+            (WindowEnter::Closed, _) => {
+                self.chat_ui.demo_dock_nearby();
+                self.panels.chat = false;
+            }
+            (_, 100) => {
+                self.chat_ui.demo_dock_nearby();
+                self.chat_ui.contacts = true;
+                ui::notifications::open_conversations(&ctx, &mut self.panels.chat);
+                if mode == WindowEnter::Reopened {
+                    ui::widgets::place_floater(&ctx, "conversations", egui::pos2(380.0, 140.0), egui::vec2(520.0, 360.0));
+                }
+            }
+            (WindowEnter::Minimized, _) => ui::widgets::minimize_floater(&ctx, "conversations"),
+            (WindowEnter::Reopened, _) => self.panels.chat = false,
+        }
+    }
+
     /// A letter key started the nearby chat: in the Conversations window
     /// when it shows the nearby chat, in the chat bar otherwise, with the
     /// character typed in (LLViewerWindow::handleKey; Firestorm's
     /// FSLetterKeysFocusNearbyChatBar, on by default).
     fn start_chat_with(&mut self, text: &str) {
-        if self.panels.chat && ui::chat::local_chat_shown(&self.egui_ctx, &self.chat_ui) {
-            self.chat_ui.draft_mut(None).push_str(text);
-            self.chat_ui.conv_focus_request = true;
-        } else {
-            self.chat_ui.input.push_str(text);
-            self.chat_ui.focus_request = true;
-        }
+        self.chat_ui.start_nearby_with(&self.egui_ctx, self.panels.chat, text);
     }
 
     /// The chat bar has the keyboard and hands its movement keys to the
@@ -9105,7 +9171,7 @@ impl App {
             }
             ContactsAction::GroupChat(id) => {
                 self.world.ui_sounds.push(UiSound::StartIm);
-                self.world.start_group_chat(id);
+                self.world.start_group_chat(id, true);
                 self.open_conversation_to_type(id);
             }
             ContactsAction::Net(cmd) => {
@@ -9172,6 +9238,7 @@ impl App {
         wanted.extend(self.money_tracker_ui.wanted_pics.drain());
         wanted.extend(self.pay_ui.wanted_pics.drain());
         wanted.extend(self.inventory_ui.wanted_pics.drain());
+        wanted.extend(self.conversation_log_ui.wanted_pics.drain());
         self.refine_ui_copies();
         for agent in wanted {
             self.world.want_profile(agent);
@@ -9230,6 +9297,7 @@ impl App {
         images.extend(self.build.ui.wanted_images.drain());
         images.extend(self.appearance_ui.wanted_images.drain());
         images.extend(self.inventory_ui.wanted_images.drain());
+        images.extend(self.conversation_log_ui.wanted_images.drain());
         images.extend(self.texture_library.wanted_images.drain());
         images.extend(self.worldmap_ui.wanted_images.drain());
         images.extend(self.env_editor.wanted_images.drain());
@@ -9973,6 +10041,13 @@ impl App {
                 }
             }
         }
+        // AURORA_DEMO_BARS=windowenter|windowmin|windowreopen: Enter with the
+        // Conversations window closed, minimized or closed after being placed
+        if self.demo
+            && let Some((mode, frame)) = ui::bars::demo::get().window_enter_at(self.frame_count)
+        {
+            self.demo_chat_bar_window(mode, frame);
+        }
         // AURORA_DEMO_EMOJI_CODES: the keyboard given to the input again once
         // the demo's start has settled (it takes it back at the start)
         if self.demo
@@ -10227,6 +10302,7 @@ impl App {
         self.frame_profile.lap(Lap::Events);
         self.poll_ao();
         self.sync_static_eyes();
+        self.world.omnifilter_frame(self.settings.omnifilter, Instant::now());
         if self.in_world() {
             self.sync_friends_only();
             self.step_gestures();
@@ -13368,6 +13444,17 @@ impl App {
                 }
             }
         }
+        if self.demo && crate::demo::omnifilter::on() {
+            if self.frame_count == crate::demo::omnifilter::OPEN {
+                ui::widgets::open_floater(&self.egui_ctx, ui::omnifilter::WINDOW, &mut self.panels.omnifilter);
+            }
+            let agent = self.world.agent_id;
+            for event in crate::demo::omnifilter::events(self.frame_count, agent) {
+                if let Some(e) = self.world.apply(event) {
+                    self.on_app_event(e);
+                }
+            }
+        }
         if self.demo && crate::demo::object_im::settings().is_some() {
             let agent = self.world.agent_id;
             for event in crate::demo::object_im::events(self.frame_count, agent) {
@@ -13590,7 +13677,7 @@ impl App {
                     _ => None,
                 });
                 if let Some(id) = nova {
-                    open_notification_to_type(&self.egui_ctx, &mut self.world, &mut self.chat_ui, &mut self.panels.chat, id);
+                    open_notification_to_type(&self.egui_ctx, &mut self.world, &mut self.panels.chat, id);
                 }
             }
         }
@@ -15913,7 +16000,7 @@ impl App {
         if before.is_none() || before == Some(access) {
             return;
         }
-        let layout = self.dock_layout.of(&self.skin.layout, self.settings.autohide_chat_bar).clone();
+        let layout = self.dock_layout.of(&self.skin.layout, self.settings.chat_bar.hides()).clone();
         let toolbar = self.settings.toolbar.get_or_insert_default();
         let mut buttons = toolbar.buttons(&layout).to_vec();
         let has = buttons.iter().any(|b| b.command == "favorites");
@@ -16727,6 +16814,7 @@ impl App {
         self.options_ui.cache_usage = self.disk_cache.usage();
         self.options_ui.cache_clearing = self.disk_cache.is_clearing();
         self.options_ui.chat_log_dir = self.world.chat_log.dir().map(std::path::Path::to_path_buf);
+        self.options_ui.conversation_log_entries = self.world.chat_log.conversations.list.len();
         self.options_ui.chat_log_custom = !self.settings.chat_log_location.is_empty();
         self.options_ui.chat_log_shared = self.world.chat_log.shared();
         self.poll_folder_pick();
@@ -16908,6 +16996,9 @@ impl App {
         if let Some(folders) = res.import_legacy_logs.take() {
             self.chat_import_start(folders);
         }
+        if res.clear_conversation_log {
+            self.world.chat_log.clear_conversations();
+        }
         if res.erase_chat_logs {
             self.options_ui.chat_log_status = if self.world.chat_log.busy() {
                 aurora_i18n::tr!("ui-options-chat-logs-busy").to_owned()
@@ -17011,7 +17102,7 @@ impl App {
             &self.ui_images,
         );
         ui::widgets::set_perceptual_volume(&ctx, self.settings.audio.perceptual_volume);
-        ui::bars::clock::set_chat_format(self.system_island().clock_format);
+        ui::bars::clock::set_chat_format(self.system_island().clock_format, self.settings.chat_time_seconds);
         let beacon_hovered = !ctx.is_pointer_over_egui() && !ctx.egui_wants_pointer_input() && self.beacon_hover();
         self.beacon_hit = None;
         let mut t = Instant::now();
@@ -17676,16 +17767,17 @@ impl App {
                     Default::default()
                 };
                 let mut demo_chat_width = demo_bars.chat_width;
-                // the chat bar shown only while it is used (#1009); also
-                // AURORA_DEMO_BARS=autohide, for this run, with either bars,
+                // when the chat bar shows (#1009, #2696); also, for this run,
+                // with either bars, AURORA_DEMO_BARS=autohide and `window…`,
                 // and `chatstart`: Enter pressed at frame 300 on a draft
-                let demo_autohide = if self.demo { ui::bars::demo::get() } else { Default::default() };
-                let autohide_chat_bar = self.settings.autohide_chat_bar || demo_autohide.autohide;
-                self.chat_ui.autohide = autohide_chat_bar;
-                if demo_autohide.chat_start && ctx.cumulative_frame_nr() == 300 {
+                let demo_chat_bar = if self.demo { ui::bars::demo::get() } else { Default::default() };
+                self.chat_ui.bar_mode = demo_chat_bar.chat_bar.unwrap_or(self.settings.chat_bar);
+                let autohide_chat_bar = self.chat_ui.bar_mode.hides();
+                if demo_chat_bar.chat_start && ctx.cumulative_frame_nr() == 300 {
                     self.chat_ui.input = "Hello!".into();
                     self.chat_ui.focus_request = true;
                 }
+                self.chat_ui.follow_bar_mode(&ctx, &mut self.panels.chat);
                 let mut mic = ui::bars::MicButton {
                     on: self.mic_on,
                     denied: self.speak_denied(),
@@ -17812,6 +17904,8 @@ impl App {
                 self.grid_status_listed = toolbar_settings.location("gridstatus", bar_layout).is_some();
                 self.toolbar_ui.islands = !classic_bars;
                 self.chat_ui.keep_focus = self.settings.chat_keep_focus;
+                self.chat_ui.enter_toggles = self.settings.chat_enter_toggles;
+                self.chat_ui.enter_last_field = self.settings.chat_enter_last_field;
                 // the chat fields' suggestions (#980); the residents around
                 // only while a nearby field lists or predicts them
                 let suggest = &mut self.chat_ui.suggest;
@@ -18184,7 +18278,12 @@ impl App {
                 // mode keeps them
                 if self.skin.layout.chat_toasts
                     && !self.interface.clears_view()
-                    && (crate::demo::chat_volume_comparison() || !(self.panels.chat && ui::chat::local_chat_shown(&ctx, &self.chat_ui)))
+                    && (crate::demo::chat_volume_comparison()
+                        || !ui::chat::nearby_chat_in_sight(
+                            self.panels.chat && !ui::widgets::floater_minimized(&ctx, "conversations"),
+                            !self.chat_ui.contacts && self.chat_ui.selected.is_none(),
+                            ui::chat::nearby_chat_popout_in_sight(&ctx, &self.chat_ui),
+                        ))
                 {
                     // FSBubblesHideConsoleAndToasts: the residents' lines are
                     // in their bubbles
@@ -18283,6 +18382,7 @@ impl App {
                     }
                 };
                 let mut mini = Vec::new();
+                open_conversations_for_focus(&ctx, &self.world, &self.chat_ui, &mut self.panels.chat);
                 let mut open = self.panels.chat;
                 let mut contact_actions = Vec::new();
                 self.chat_ui.set_style(self.settings.chat_style);
@@ -18300,6 +18400,8 @@ impl App {
                 self.chat_ui.compact_automated = self.settings.compact_automated_chat || (self.demo && crate::demo::object_chat::on());
                 self.chat_ui.compact_im_notices =
                     self.settings.compact_im_system_lines || (self.demo && crate::demo::object_chat::scene().is_some_and(|s| s.im_lines));
+                // AURORA_DEMO_EMOTES=…:on: for the run, nothing saved
+                self.chat_ui.group_emotes = self.settings.group_emotes || (self.demo && crate::demo::emotes_grouped());
                 self.chat_ui.show_channel = self.settings.show_chat_channel || self.chat_ui.demo_channel;
                 // the Legacy chat style keeps its own switch; both are off by
                 // default, the demo switch shows the row whatever they say
@@ -18364,15 +18466,16 @@ impl App {
                 // who hears the nearby chat, and who of them types (the
                 // radar's avatars in chat range, `World::is_typing_nearby`;
                 // never one whose chat is blocked, #1395)
-                self.chat_ui.nearby_count = 0;
+                let chat_ranges = crate::world::radar::chat_ranges();
+                self.chat_ui.nearby_count = ui::chat::earshot_count(
+                    self.radar.entries().filter(|e| !e.left_behind).map(|e| e.range),
+                    self.chat_ui.earshot_range(chat_ranges),
+                );
                 self.chat_ui.nearby_typing.clear();
-                let say = crate::world::radar::chat_ranges().say;
+                let say = chat_ranges.say;
                 for e in self.radar.entries() {
-                    if !e.left_behind && e.range.is_some_and(|d| d <= say) {
-                        self.chat_ui.nearby_count += 1;
-                        if e.typing && !self.world.nearby_typing_hidden(&e.id) {
-                            self.chat_ui.nearby_typing.push(e.id);
-                        }
+                    if !e.left_behind && e.range.is_some_and(|d| d <= say) && e.typing && !self.world.nearby_typing_hidden(&e.id) {
+                        self.chat_ui.nearby_typing.push(e.id);
                     }
                 }
                 // AURORA_DEMO_CONV=aurora / bubbles: someone types in the
@@ -18571,7 +18674,7 @@ impl App {
                         ui::chat::ConvAction::Contacts(c) => contact_actions.push(c),
                         ui::chat::ConvAction::People(pa) => contacts_people.push(pa),
                         ui::chat::ConvAction::OpenIm(id) => self.world.start_text_conference(vec![id]),
-                        ui::chat::ConvAction::StartGroupChat(group) => self.world.start_group_chat(group),
+                        ui::chat::ConvAction::StartGroupChat(group) => self.world.start_group_chat(group, true),
                         // LLIMModel::sendTypingState: to the resident, in
                         // the session of the two of us (agent XOR other)
                         ui::chat::ConvAction::Typing { to, typing } => a.typing.push(NetCommand::SendImDialog {
@@ -18756,7 +18859,7 @@ impl App {
                         }
                         ui::people::PeopleAction::GroupChat(id) => {
                             self.world.ui_sounds.push(UiSound::StartIm);
-                            self.world.start_group_chat(id);
+                            self.world.start_group_chat(id, true);
                             self.show_conversations();
                         }
                         ui::people::PeopleAction::GroupNotices(id, on) => self.world.groups.set_accept_notices(id, on),
@@ -18764,6 +18867,9 @@ impl App {
                             self.contacts_ui.ask_modify_rights(friend, rights, grant)
                         }
                         ui::people::PeopleAction::PickFriend => self.contacts_ui.pick_new_friend(),
+                        ui::people::PeopleAction::ConversationLog => {
+                            ui::widgets::toggle_floater(&ctx, ui::conversation_log::WINDOW, &mut self.panels.conversation_log)
+                        }
                         ui::people::PeopleAction::Unblock(id, name) => self.world.unblock(id, &name, 0),
                         ui::people::PeopleAction::BlockByName(name) => {
                             if let Err(e) = self.world.block(uuid::Uuid::nil(), &name, crate::world::mutes::MuteType::ByName) {
@@ -19228,9 +19334,7 @@ impl App {
                             .list
                             .iter()
                             .any(|n| n.id == id && matches!(n.data, crate::world::notifications::Data::Presence { .. }));
-                        if open_notification_to_type(&ctx, &mut self.world, &mut self.chat_ui, &mut self.panels.chat, id).is_some()
-                            && presence
-                        {
+                        if open_notification_to_type(&ctx, &mut self.world, &mut self.panels.chat, id).is_some() && presence {
                             self.world.ui_sounds.push(UiSound::StartIm);
                         }
                         continue;
@@ -19246,6 +19350,13 @@ impl App {
                     // only web links (llLoadURL / goto URL), opened after the user's click
                     if let Some(u) = url.filter(|u| u.starts_with("https://") || u.starts_with("http://")) {
                         self.open_web_link(u, None);
+                    }
+                }
+                // an Omnifilter rule's "Gotopage" (callback_load_url), web
+                // links only as above
+                for u in self.world.take_omnifilter_urls() {
+                    if u.starts_with("https://") || u.starts_with("http://") {
+                        ctx.open_url(egui::OpenUrl::new_tab(u));
                     }
                 }
                 self.world.record_notification_history();
@@ -19380,6 +19491,14 @@ impl App {
                 self.avatar_render_settings_window(&ctx, &p);
                 self.bumps_ui.show(&ctx, &p, &self.world, &mut self.panels.bumps);
                 self.grid_status_window(&ctx, &p);
+                self.conversation_log_window(&ctx, &p);
+                self.omnifilter_ui.show(
+                    &ctx,
+                    &p,
+                    &mut self.world.omnifilter,
+                    &mut self.settings,
+                    &mut self.panels.omnifilter,
+                );
                 self.avatar_align_window(&ctx, &p);
                 if let Some(ui::voice_controls::Action::LeaveCall) = self.voice_controls_ui.show(
                     &ctx,
@@ -19570,7 +19689,7 @@ impl App {
                             self.contacts_ui.ask_modify_rights(friend, rights, grant)
                         }
                         ui::profile::ProfileAction::GroupChat(id) => {
-                            self.world.start_group_chat(id);
+                            self.world.start_group_chat(id, true);
                             self.show_conversations();
                         }
                         // the conversations' give confirmation (#991)
@@ -21229,6 +21348,17 @@ impl ApplicationHandler for App {
                     self.chat_ui.demo_style = Some(style);
                     ui::widgets::place_floater(&self.egui_ctx, "conversations", egui::pos2(460.0, 230.0), egui::vec2(760.0, 560.0));
                 }
+            }
+            // AURORA_DEMO_EMOTES=<style>[:on]: the nearby chat in the
+            // Conversations window of that workspace style
+            if let Some(scene) = crate::demo::emotes_scene() {
+                self.panels.people = false;
+                self.panels.inventory = false;
+                self.panels.perf = false;
+                self.panels.chat = true;
+                self.chat_ui.selected = None;
+                self.chat_ui.demo_style = Some(scene.style);
+                ui::widgets::place_floater(&self.egui_ctx, "conversations", egui::pos2(460.0, 230.0), egui::vec2(760.0, 560.0));
             }
             // captures: AURORA_DEMO_MAP=1 opens the mini-map and the world map
             // (with a tracked spot east of the plaza)
@@ -24170,24 +24300,43 @@ mod tests {
         use super::open_notification_to_type;
         let ctx = egui::Context::default();
         let mut world = crate::world::World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
-        let mut chat = crate::ui::chat::ChatUi::default();
         let mut open = false;
         let jane = uuid::Uuid::from_u128(0x2285);
         let id = world.notifications.push_message(jane, jane, "Jane Doe", "hello", true);
-        assert_eq!(open_notification_to_type(&ctx, &mut world, &mut chat, &mut open, id), Some(jane));
+        assert_eq!(open_notification_to_type(&ctx, &mut world, &mut open, id), Some(jane));
         assert!(open, "the Conversations window opens");
-        assert!(chat.conv_focus_request, "the conversation's field takes the keyboard");
+        assert!(world.social.focus_im_to_type, "the conversation's field takes the keyboard");
         assert_eq!(world.social.focus_im, Some(jane), "the Conversations window shows that tab");
         assert!(
             !world.notifications.list.iter().any(|n| n.id == id),
             "the click acknowledges the card"
         );
         // an offline friend is a toast that opens nothing and takes no keyboard
-        chat.conv_focus_request = false;
+        world.social.focus_im_to_type = false;
         open = false;
         let off = world.notifications.push_presence(jane, "Jane Doe is offline.", false);
-        assert_eq!(open_notification_to_type(&ctx, &mut world, &mut chat, &mut open, off), None);
-        assert!(!open && !chat.conv_focus_request);
+        assert_eq!(open_notification_to_type(&ctx, &mut world, &mut open, off), None);
+        assert!(!open && !world.social.focus_im_to_type);
+    }
+
+    /// A conversation the user asked for opens the Conversations window even
+    /// when it was closed (Reply by text comes from a notification card);
+    /// a call's show-only request does not open it by itself.
+    #[test]
+    fn a_user_requested_conversation_opens_its_window_a_call_does_not() {
+        use super::open_conversations_for_focus;
+        let ctx = egui::Context::default();
+        let mut world = crate::world::World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
+        let chat = crate::ui::chat::ChatUi::default();
+        let jane = uuid::Uuid::from_u128(0x2285);
+        let mut open = false;
+        world.focus_conversation(jane, true);
+        open_conversations_for_focus(&ctx, &world, &chat, &mut open);
+        assert!(open, "the conversation the user asked for opens its window");
+        open = false;
+        world.focus_conversation(jane, false);
+        open_conversations_for_focus(&ctx, &world, &chat, &mut open);
+        assert!(!open, "a call does not open the window by itself");
     }
 
     #[test]

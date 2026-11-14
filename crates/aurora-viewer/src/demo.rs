@@ -87,6 +87,8 @@ pub mod contact_markers;
 /// The Conversations button flashing (AURORA_DEMO_CONV_BUTTON).
 #[path = "demo_conv_button.rs"]
 pub mod conv_button;
+#[path = "demo_conversation_log.rs"]
+pub mod conversation_log;
 /// A blended face lying exactly on an opaque face of the same mesh
 /// (AURORA_DEMO_COPLANAR_DECAL).
 #[path = "demo_coplanar_decal.rs"]
@@ -204,6 +206,10 @@ pub mod object_menu;
 /// Boxes for the build tools' snap to objects (AURORA_DEMO_OBJECT_SNAP).
 #[path = "demo_object_snap.rs"]
 pub mod object_snap;
+/// The Omnifilter's own rules and messages it filters
+/// (AURORA_DEMO_OMNIFILTER).
+#[path = "demo_omnifilter.rs"]
+pub mod omnifilter;
 /// AURORA_DEMO_OUTFIT_RESTORE: the login restore of the outfit against a
 /// region that puts part of it back by itself.
 #[path = "demo_outfit_restore.rs"]
@@ -1426,6 +1432,64 @@ fn chat_lines_said() -> Vec<NetEvent> {
             false,
             aurora_net::ChatType::Shout,
         ),
+    ]
+}
+
+/// `AURORA_DEMO_EMOTES=aurora|compact[:on]`: the nearby chat in the
+/// Conversations window of that style, where a resident says a line, an
+/// emote and another line, then another resident an emote and a line.
+/// `on` groups the emotes with their sender's messages for the run
+/// (Preferences > Chat), nothing saved; the option is the Aurora style's,
+/// so `compact:on` shows Compact unchanged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EmotesScene {
+    pub style: crate::settings::ChatStyle,
+    pub on: bool,
+}
+
+pub fn emotes_scene() -> Option<EmotesScene> {
+    parse_emotes(&std::env::var("AURORA_DEMO_EMOTES").ok()?)
+}
+
+fn parse_emotes(v: &str) -> Option<EmotesScene> {
+    use crate::settings::ChatStyle;
+    let mut flags = v.trim().split(':');
+    let style = match flags.next()? {
+        "aurora" | "1" => ChatStyle::Aurora,
+        "compact" => ChatStyle::Compact,
+        _ => return None,
+    };
+    Some(EmotesScene {
+        style,
+        on: flags.any(|f| f == "on"),
+    })
+}
+
+/// The emotes are grouped by the scenario.
+pub fn emotes_grouped() -> bool {
+    emotes_scene().is_some_and(|s| s.on)
+}
+
+fn emotes_events() -> Vec<NetEvent> {
+    use aurora_i18n::tr;
+    let say = |from: Uuid, name: &str, text: &str| {
+        NetEvent::Chat(aurora_net::ChatMessage {
+            from_name: name.into(),
+            source_id: from,
+            owner_id: Uuid::nil(),
+            source_type: aurora_net::ChatSourceType::Agent,
+            chat_type: aurora_net::ChatType::Normal,
+            position: Vec3::ZERO,
+            message: text.into(),
+        })
+    };
+    let (nova, orion) = (tr!("demo-nova-example"), tr!("demo-orion-example"));
+    vec![
+        say(DEMO_NOVA, nova, tr!("demo-bubbles-local-1")),
+        say(DEMO_NOVA, nova, tr!("demo-emotes-nova")),
+        say(DEMO_NOVA, nova, tr!("demo-bubbles-local-2")),
+        say(DEMO_FRIEND, orion, tr!("demo-chat-lines-emote")),
+        say(DEMO_FRIEND, orion, tr!("demo-emotes-orion")),
     ]
 }
 
@@ -6198,6 +6262,9 @@ pub fn events() -> Vec<NetEvent> {
     if object_chat::scene().is_some() {
         ev.extend(object_chat::events(agent));
     }
+    if emotes_scene().is_some() {
+        ev.extend(emotes_events());
+    }
     if let Some(scene) = aurora_scenario() {
         ev.extend(aurora_events(&scene));
     }
@@ -6375,6 +6442,8 @@ fn notification_samples(notifications: bool, inventory_offer: bool, menu: Option
         ev.push(NetEvent::LoadUrl {
             object_name: aurora_i18n::tr!("demo-shop").into(),
             object_id: Uuid::from_u128(0xF5),
+            owner_id: Uuid::nil(),
+            owner_is_group: false,
             message: aurora_i18n::tr!("demo-scripted-url").into(),
             url: "https://example.invalid/shop".into(),
         });
@@ -6451,6 +6520,22 @@ fn notification_samples(notifications: bool, inventory_offer: bool, menu: Option
         buttons,
     });
     ev
+}
+
+#[cfg(test)]
+mod emotes_tests {
+    use super::*;
+    use crate::settings::ChatStyle;
+
+    #[test]
+    fn the_emotes_scenario_names_a_workspace_style_and_groups_them_on() {
+        let scene = |style, on| Some(EmotesScene { style, on });
+        assert_eq!(parse_emotes("aurora"), scene(ChatStyle::Aurora, false));
+        assert_eq!(parse_emotes("1:on"), scene(ChatStyle::Aurora, true));
+        assert_eq!(parse_emotes("compact:on"), scene(ChatStyle::Compact, true));
+        assert_eq!(parse_emotes("legacy"), None);
+        assert_eq!(parse_emotes(""), None);
+    }
 }
 
 #[cfg(test)]
