@@ -102,7 +102,7 @@ pub const CANCELLED: u32 = u32::MAX;
 
 fn set(progress: &AtomicU32, f: f32) {
     let v = (f.clamp(0.0, 1.0) * 10_000.0) as u32;
-    let _ = progress.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |c| (c != CANCELLED).then_some(v));
+    let _ = progress.try_update(Ordering::Relaxed, Ordering::Relaxed, |c| (c != CANCELLED).then_some(v));
 }
 
 fn cancelled(progress: &AtomicU32) -> Result<(), String> {
