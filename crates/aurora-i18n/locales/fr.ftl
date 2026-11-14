@@ -14807,6 +14807,8 @@ ui-options-legacy-lists-failed = Illisible : { $files }.
 ui-options-legacy-lists-unsaved = Enregistrement impossible, inchangé : { $files }.
 ui-options-legacy-lists-other-grid = Sur cette grille, un dossier du même nom peut appartenir à une autre grille : vérifiez que c'est le bon.
 
+resource-preview-tabs-title = Aperçus de l’inventaire
+resource-preview-close-tab = Fermer cet onglet
 picker-pipette-hint = Cliquez sur une face pour sélectionner sa texture ou son matériau dans votre inventaire.
 
 picker-pipette-no-texture = Aucune texture copiable trouvée dans votre inventaire.

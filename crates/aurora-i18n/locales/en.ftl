@@ -14798,6 +14798,8 @@ ui-options-legacy-lists-failed = Could not read: { $files }.
 ui-options-legacy-lists-unsaved = Could not save, left as it was: { $files }.
 ui-options-legacy-lists-other-grid = On this grid a folder of the same name can belong to another grid: check that it is the right one.
 
+resource-preview-tabs-title = Inventory previews
+resource-preview-close-tab = Close this tab
 picker-pipette-hint = Click an object face to select its texture or material from your inventory.
 
 picker-pipette-no-texture = No copyable texture found in your inventory.

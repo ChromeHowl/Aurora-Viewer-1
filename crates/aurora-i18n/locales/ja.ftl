@@ -14708,6 +14708,8 @@ ui-options-legacy-lists-failed = 読み取れません：{ $files }。
 ui-options-legacy-lists-unsaved = 保存できず、変更しませんでした：{ $files }。
 ui-options-legacy-lists-other-grid = このグリッドでは、同じ名前のフォルダーが別のグリッドのものである場合があります。正しいフォルダーか確認してください。
 
+resource-preview-tabs-title = インベントリのプレビュー
+resource-preview-close-tab = このタブを閉じる
 picker-pipette-hint = オブジェクトの面をクリックして、インベントリからそのテクスチャまたはマテリアルを選択します。
 
 picker-pipette-no-texture = コピー可能なテクスチャがインベントリにありません。
