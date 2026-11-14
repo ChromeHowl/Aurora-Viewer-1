@@ -10084,6 +10084,11 @@ ui-options-aurora-ground-feet-height-help = Maximum vertical movement of each fo
 ui-options-aurora-ground-feet-help = Replace standard Legacy Viewer foot placement with Aurora's adaptation to slopes and individual steps. Foot lifts and high-priority poses keep control. When off, native standing, crouching and recovery animations use the standard behaviour. The two corrections never accumulate.
 ui-options-aurora-animation-clock = Animation timing
 ui-options-aurora-animation-clock-experimental = Experimental: synchronized playback is still being validated on the grid for avatars and animesh. Legacy remains the default.
+ui-options-aurora-clouds = Clouds
+ui-options-aurora-clouds-help = Aurora draws the clouds as a volume at real cloud heights, lit by the sky's sun and shaped by its cloud settings: heaps, sheets and shadowed bases instead of the Legacy Viewer's flat layer. They stay in the sky and cannot be reached. Needs a recent graphics card.
+ui-options-aurora-clouds-experimental = Experimental: new, and the Legacy Viewer's flat layer stays the default until it is tried on more graphics cards.
+ui-options-aurora-clouds-volumetric = Volumetric
+ui-options-aurora-clouds-flat = Flat layer
 ui-options-aurora-animation-clock-help = Avatars and animesh: the synchronized clock follows elapsed time from the first received signal, including after late loading or editing. Legacy starts at loading and resumes from the paused pose after editing.
 ui-options-aurora-animation-clock-synchronized = Synchronized clock
 ui-options-aurora-animation-clock-legacy = Legacy
@@ -14768,6 +14773,19 @@ wearable-favorites-delete-unloaded =
 wearable-favorites-invalid-name =
     Could not create Favorite Wearables folder "{ $name }".
     Folder names cannot contain / or \.
+# 360° snapshots: a format of the photo window (LLFloater360Capture, app/capture_360.rs)
+capture-360-quality-preview = Preview (fast)
+capture-360-quality-medium = Medium
+capture-360-quality-high = High
+capture-360-quality-maximum = Maximum
+capture-360-hide-avatars = Hide all avatars
+capture-360-capturing = Drawing face { $face } of 6…
+capture-360-projecting = Building the 360° image…
+capture-360-saving = Saving the 360° image…
+capture-360-saved = Saved { $name }
+capture-360-failed = The 360° image could not be made.
+capture-360-save-failed = The 360° image could not be saved: { $error }
+capture-360-save-dialog = Save the 360° image
 
 # Parcel radio state and stream failures
 music-state-error = Can't play: { $reason }
@@ -14850,7 +14868,24 @@ ui-options-attached-particles-hint = Draw the particles of what avatars wear: sp
 
 # Preferences › Graphics: progressive draw distance (FSRenderFarClipStepping)
 ui-options-draw-distance-stepping = Progressive draw distance
-ui-options-draw-distance-stepping-hint = After logging in and after a teleport to another region, the draw distance starts at 32 m and doubles back up to yours, so that what is near loads first.
+
+# Panorama viewer (ui/panorama.rs)
+panorama-reset = Reset the view
+panorama-enlarge = Enlarge
+panorama-leave-full = Leave the enlarged view
+panorama-help = Drag to look around, wheel to zoom, double-click to reset. Click it, then arrows to look and + / - to zoom.
+
+# Texture preview: look into a 2:1 texture as a panorama
+resource-preview-360 = 360°
+
+# Photo window: the 360° format
+photo-format-360 = 360°
+photo-not-in-360 = Not in 360° pictures.
+photo-360-inventory-size = Panorama: { $width } × { $height } (the largest texture)
+photo-360-output = Panorama: { $width } × { $height }
+photo-360-format = JPEG · 360°
+photo-360-placeholder = Press the shutter: the panorama appears here.
+photo-looks-not-in-360 = Not drawn in a 360° picture: only the colour looks are.
 
 # macOS Window menu (mac_window_menu.rs)
 app-mac-window-menu = Window
@@ -14889,3 +14924,4 @@ ui-minimap-avatar-name-format = Avatar name format
 ui-minimap-name-display = Display Name
 ui-minimap-name-legacy = Legacy Name
 ui-minimap-name-display-legacy = Display Name (Legacy Name)
+ui-options-draw-distance-stepping-hint = After logging in and after a teleport to another region, the draw distance starts at 32 m and grows back to yours as the load allows: it doubles every 2 seconds while objects have finished loading and frames are fast, waits while they are not, and steps back one level if frames stay too heavy.

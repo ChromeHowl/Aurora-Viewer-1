@@ -914,6 +914,12 @@ struct Targets {
     /// faces draw into, writing their depth as they go
     /// (`RiggedBlendDepth::Layered` and `Layers`, made on its first use).
     blend_layers: Option<(wgpu::Texture, wgpu::TextureView)>,
+    /// Without MSAA, where the scene depth is the attachment the particles
+    /// under the water write: its copy, made before that pass, for their
+    /// soft fade (`FrameGroups::under`). Made on first use, when such
+    /// particles are drawn; with MSAA `depth_ss` is not attached there and
+    /// serves.
+    depth_copy: Option<(wgpu::Texture, wgpu::TextureView)>,
     /// The lists of the blended fragments of each pixel
     /// (`RiggedBlendDepth::Exact`, made on its first use).
     blend_exact: Option<crate::blend_exact::Lists>,
@@ -978,6 +984,8 @@ struct Pipelines {
     hud_debug_red: wgpu::RenderPipeline,
     hud_debug_blue: wgpu::RenderPipeline,
     sky: wgpu::RenderPipeline,
+    /// The volumetric clouds' weather map (env.wgsl `fs_cloud_weather`).
+    clouds_weather: wgpu::RenderPipeline,
     terrain: wgpu::RenderPipeline,
     /// PBR terrain (vs_terrain_pbr / fs_terrain_pbr), masked or not.
     terrain_pbr: wgpu::RenderPipeline,
@@ -1032,6 +1040,12 @@ struct Pipelines {
     blend_under: SidedPipelines,
     blend_under_depth_ss: SidedPipelines,
     particles: wgpu::RenderPipeline,
+    /// The particles on the far side of the water surface, drawn before the
+    /// water with the blended faces under it, writing depth
+    /// (`DrawLists::particles_under`).
+    particles_under: Option<wgpu::RenderPipeline>,
+    /// Their depth alone, into the single-sampled scene depth (MSAA).
+    particles_under_depth_ss: Option<wgpu::RenderPipeline>,
     water_particles: wgpu::RenderPipeline,
     water_particles_under: wgpu::RenderPipeline,
     /// Rain prototype (`vs_rain` in env.wgsl, `AURORA_RAIN`).
@@ -1163,6 +1177,8 @@ struct GpuTimer {
     last_ssao: Option<f32>,
     /// Last time of the contact shadows (ms).
     last_contact: Option<f32>,
+    /// Last time of the volumetric clouds' compute (ms).
+    last_clouds: Option<f32>,
     /// Last time of the bloom levels (ms).
     last_bloom: Option<f32>,
     /// Last times of the rest of the effects (ms), in [`GPU_EFFECT_PARTS`]
@@ -1233,7 +1249,7 @@ impl PrepassCompare {
 
 /// Timestamps of a frame: 0 first pass, 1 end of post / HUDs, then the marks.
 const GPU_TIMESTAMPS: u32 = 2 + GPU_MARKS;
-const GPU_MARKS: u32 = 32;
+const GPU_MARKS: u32 = 33;
 /// Mark indices, in frame order. Those inside the scene passes split them
 /// by draw group; a timestamp there waits for the draws before it, so the
 /// split is close but not exact (the GPU overlaps neighbouring draws).
@@ -1309,6 +1325,9 @@ const MARK_SHELTER_BEGIN: u32 = 30;
 const MARK_SHELTER_END: u32 = 31;
 const MARK_WEATHER_MEMORY_BEGIN: u32 = 32;
 const MARK_WEATHER_MEMORY_END: u32 = 33;
+/// After the volumetric clouds' compute (clouds.rs), which follow
+/// `MARK_DEPTH_MSAA_END`; inside the terrain and sky element's range.
+const MARK_CLOUDS_END: u32 = 34;
 /// The effects beyond the occlusion and the contact shadows
 /// (`RenderStats::gpu_effects`): the planar reflections (water, mirror), with
 /// the refracted water light before them; the reflection probe face with its
@@ -1421,6 +1440,7 @@ impl GpuTimer {
             last_depth: None,
             last_ssao: None,
             last_contact: None,
+            last_clouds: None,
             last_bloom: None,
             last_effects: None,
             last_weather: None,
@@ -1451,6 +1471,7 @@ impl GpuTimer {
                             self.last_depth = Some(d);
                             self.last_ssao = Some(ms(MARK_DEPTH_END, MARK_SSAO_END));
                             self.last_contact = Some(ms(MARK_SSAO_END, MARK_CONTACT_END));
+                            self.last_clouds = Some(ms(MARK_DEPTH_MSAA_END, MARK_CLOUDS_END));
                             self.last_bloom = Some(ms(MARK_BLOOM_BEGIN, MARK_BLOOM_END));
                             self.last_effects = Some(GPU_EFFECT_PARTS.map(sum));
                             self.last_weather = Some(GPU_WEATHER_PARTS.map(|(a, b)| ms(a, b)));
@@ -1720,6 +1741,10 @@ struct FrameGroups {
     a: wgpu::BindGroup,
     /// Scene pass B: everything.
     b: wgpu::BindGroup,
+    /// The particles under the water, drawn writing the scene depth: pass A
+    /// with a readable depth, for their soft fade (a copy, or the
+    /// single-sampled one under MSAA).
+    under: Option<wgpu::BindGroup>,
     /// Own uniforms: [0] water reflection, [1] mirror, [2] probe,
     /// [3]/[4] impostor pictures, [5] HUD, [6] drawn pick, [7] water exterior,
     /// [8] probe irradiance capture.
@@ -1805,6 +1830,20 @@ pub(crate) struct Backend {
     part_depth: Option<wgpu::TextureView>,
     /// The coverage pass of cut-out photos (cutout.rs), made on first use.
     cutout: Option<crate::cutout::Cutout>,
+    /// The 360° snapshot's panorama pass (equirect.rs), made on first use.
+    equirect: Option<crate::equirect::Equirect>,
+    /// The faces of the 360° capture in progress, on the GPU (equirect.rs).
+    cube: Option<crate::equirect::CubeTarget>,
+    /// The panoramas being read back, asked in order (equirect.rs).
+    equirect_reads: crate::equirect::Readbacks,
+    /// The six faces of a 360° capture are drawn one after the other: the
+    /// snapshot size stays (the render targets are made once, not twice per
+    /// face) from the first face to the frame after the last.
+    cube_hold: bool,
+    /// The frame in hand draws a face that is not the last: the hold goes on.
+    cube_keep: bool,
+    /// The capture camera (its step) of the face the frame in hand draws.
+    cube_step: Option<usize>,
     frame_layout: wgpu::BindGroupLayout,
     records_layout: wgpu::BindGroupLayout,
     /// Layout of the scene's texture pages (textures.rs), for the pipelines.
@@ -1821,6 +1860,10 @@ pub(crate) struct Backend {
     /// The Milky Way map (stars.rs milky_way_texels), made once.
     milky_way: wgpu::TextureView,
     contact: crate::contact_shadows::ContactShadows,
+    /// The volumetric clouds (clouds.rs), made while the setting is on.
+    clouds: Option<crate::clouds::Clouds>,
+    /// This frame draws the volumetric clouds over the sky.
+    clouds_now: bool,
     /// This frame draws the contact shadows (`AURORA_CONTACT_SHADOWS=alt`
     /// switches them each second).
     contact_now: bool,
@@ -1924,6 +1967,8 @@ pub(crate) struct Backend {
     /// The scene moved as a whole (`FramePacket::motion_cut`) and no frame
     /// was submitted since: the next one takes its matrices as the previous.
     motion_cut: bool,
+    /// Where the sun's cascades anchor their texel grids (`CascadeAnchors`).
+    cascade_anchors: CascadeAnchors,
     /// The last submitted frame kept its matrices for the next one: only
     /// while something reads the motion (`motion_now`).
     motion_kept: bool,
@@ -2388,6 +2433,9 @@ fn begin_scene_b_on<'a>(
     })
 }
 
+/// The vertex buffer slot of the particles (after the meshes' two).
+const PARTICLE_SLOT: u32 = 2;
+
 /// Rain prototype: the wetness memory's bookkeeping. The memory covers
 /// [`RAIN_WET_EXTENT`] m around the camera, its corner snapped to
 /// [`RAIN_WET_SNAP`] m (it moves only after the camera has; the update reads
@@ -2586,7 +2634,9 @@ fn rain_constants() -> &'static [(&'static str, f64)] {
 
 fn make_pipeline(device: &wgpu::Device, module: &wgpu::ShaderModule, layout: &wgpu::PipelineLayout, d: PipeDesc) -> wgpu::RenderPipeline {
     let mesh_bufs = [Some(vertex_layout()), Some(skin_layout())];
-    let part_bufs = [Some(particle_layout())];
+    // (slot 2: the particle buffer is bound once for the whole pass, the
+    // meshes keep slots 0 and 1 where they are)
+    let part_bufs = [None, None, Some(particle_layout())];
     let sprite_bufs = [Some(sprite_layout())];
     let print_bufs = [Some(print_layout())];
     let mut targets = Vec::new();
@@ -2790,6 +2840,39 @@ fn extra<T>(
     let (made, refused) = crate::gpu_alloc::scoped(device, || make(device));
     // (a lost device's refusals are the device-loss path's, `lost`)
     (!first_use(oom, what, false, refused && !lost)).then_some(made)
+}
+
+/// Whether the volumetric clouds are asked for this frame: over the sky of
+/// the main view when it is drawn (not hidden by the debug filter), not
+/// under the water (the sky is seen through its fog), nor in a cut-out
+/// photo (no sky).
+fn clouds_wanted(cutout: bool, hide_sky: bool, camera_z: f32, water_level: f32) -> bool {
+    !cutout && !hide_sky && camera_z >= water_level
+}
+
+/// The clouds' size-bound targets for `size` (and a still's) are made,
+/// checked: false while refused or waiting (the frame draws the Legacy
+/// layer, like `dof_targets`).
+fn cloud_targets(
+    oom: &mut crate::gpu_alloc::Refusals,
+    clouds: &mut crate::clouds::Clouds,
+    device: &wgpu::Device,
+    size: (u32, u32),
+    still: bool,
+    lost: bool,
+) -> bool {
+    if clouds.has_targets(size, still) {
+        return true;
+    }
+    if !oom.extras_ready(Instant::now()) {
+        return false;
+    }
+    let (_, refused) = crate::gpu_alloc::scoped(device, || clouds.ensure_targets(device, size, still));
+    if first_use(oom, "volumetric clouds", false, refused && !lost) {
+        clouds.release_targets();
+        return false;
+    }
+    true
 }
 
 /// The depth of field's targets for `size` are made, checked: false while
@@ -3168,6 +3251,97 @@ impl Impostors {
 /// `cascade_matrices`).
 fn shadow_anchor(center: Vec3, radius: f32) -> Vec3 {
     (center / radius).floor() * radius
+}
+
+/// Farthest a held anchor may lie from its cascade's centre: beyond it the
+/// texel grid's phase is computed from coordinates far apart, where float
+/// rounding starts to show (an f32 near a kilometre resolves about 0.06 mm,
+/// a few thousandths of the finest texel), so a new one is taken, once per
+/// kilometre walked.
+const SHADOW_ANCHOR_REACH: f32 = 1024.0;
+
+/// Whether the cascades hold their anchor while the light is still
+/// (`AURORA_SHADOW_ANCHOR=old`: take it from the centre of each cascade
+/// every frame, as before, to compare).
+fn shadow_anchor_held() -> bool {
+    static HELD: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *HELD.get_or_init(|| std::env::var("AURORA_SHADOW_ANCHOR").map_or(true, |v| v.trim() != "old"))
+}
+
+/// The matrix of one sun cascade: an orthographic box around the sphere
+/// (`center`, `radius`), looking along `light_dir`, its `size` x `size`
+/// texels on a grid snapped to whole texels from `anchor`.
+fn cascade_matrix(center: Vec3, radius: f32, light_dir: Vec3, anchor: Vec3, size: u32) -> Mat4 {
+    let up = if light_dir.z.abs() > 0.99 { Vec3::Y } else { Vec3::Z };
+    let eye = center - light_dir * (radius + crate::shadow_cull::CASCADE_DEPTH_PAD);
+    let mut view = glam::camera::rh::view::look_at_mat4(eye, center, up);
+    let texel = 2.0 * radius / size as f32;
+    let origin = view.transform_point3(anchor);
+    let snapped = Vec3::new((origin.x / texel).round() * texel, (origin.y / texel).round() * texel, origin.z);
+    view = Mat4::from_translation(snapped - origin) * view;
+    let depth = radius * 2.0 + 2.0 * crate::shadow_cull::CASCADE_DEPTH_PAD;
+    let proj = glam::camera::rh::proj::directx::orthographic(-radius, radius, -radius, radius, 0.1, depth);
+    proj * view
+}
+
+/// How far, in texels, the light's movement may have swept the grid at the
+/// cascade's centre before a held anchor is given up: half a texel, the most
+/// a new anchor can move the grid's phase, so taking it again never shifts
+/// the edges by more than the drift it removes.
+const SHADOW_ANCHOR_SWEEP: f32 = 0.5;
+
+/// The anchors of the sun's cascades, kept between frames.
+///
+/// The texel grid of a cascade is snapped to whole texels from a world
+/// point, its anchor. For one light direction any point gives a valid grid,
+/// but a grid anchored on another point has another phase, up to half a
+/// texel away: taking the anchor from the cascade's centre (`shadow_anchor`)
+/// moved every shadow edge of the cascade each time the camera, turning or
+/// walking, took the centre across a cell of the lattice (3 to 4 times a
+/// turn). The anchor is kept instead. The grid turns around its anchor when
+/// the light moves, sweeping a point at distance `d` by `d` times the light's
+/// angle: a held anchor is given up when that sweep, at the cascade's
+/// centre, since it was taken passes `SHADOW_ANCHOR_SWEEP` texels (the
+/// light is compared with the light of that moment, not the last frame's: a
+/// slow day cycle holds the anchor for seconds, and a drift too small for
+/// one frame is not lost). It is also taken again when the cascade's size
+/// changes (the field of view, the shadow distance or the quality), when its
+/// centre is `SHADOW_ANCHOR_REACH` away, at a photo's tiles and at a region
+/// change.
+#[derive(Default)]
+struct CascadeAnchors {
+    /// Anchor, radius, texels a side and light direction of each cascade.
+    held: [Option<(Vec3, f32, u32, Vec3)>; CASCADES],
+}
+
+impl CascadeAnchors {
+    /// Start a frame: forget the anchors on a `cut` or when they are not
+    /// held.
+    fn begin(&mut self, cut: bool, hold: bool) {
+        if cut || !hold {
+            self.held = [None; CASCADES];
+        }
+    }
+
+    /// The anchor of cascade `i`, whose fit is the sphere (`center`,
+    /// `radius`), whose map has `size` texels a side, lit along `light`.
+    fn pick(&mut self, i: usize, center: Vec3, radius: f32, size: u32, light: Vec3) -> Vec3 {
+        if let Some((anchor, r, s, l)) = self.held[i] {
+            let reach = anchor.distance(center);
+            let texel = 2.0 * radius / size as f32;
+            // (the radius is rounded to 1/16 m: half a step tells equal ones)
+            if (r - radius).abs() < 0.03
+                && s == size
+                && reach <= SHADOW_ANCHOR_REACH
+                && l.distance(light) * reach <= SHADOW_ANCHOR_SWEEP * texel
+            {
+                return anchor;
+            }
+        }
+        let anchor = shadow_anchor(center, radius);
+        self.held[i] = Some((anchor, radius, size, light));
+        anchor
+    }
 }
 
 /// The projection of the whole image a frame draws with `proj`: the
@@ -4007,6 +4181,12 @@ impl Backend {
             previews: Default::default(),
             selection: None,
             cutout: None,
+            equirect: None,
+            cube: None,
+            equirect_reads: Default::default(),
+            cube_hold: false,
+            cube_keep: false,
+            cube_step: None,
             hud_selection: None,
             part: None,
             part_depth: None,
@@ -4023,6 +4203,8 @@ impl Backend {
             stars,
             milky_way,
             contact,
+            clouds: None,
+            clouds_now: false,
             contact_now: false,
             gtao_normals_now: false,
             motion_now: false,
@@ -4084,6 +4266,7 @@ impl Backend {
             impostors,
             motion_history,
             motion_cut: true,
+            cascade_anchors: CascadeAnchors::default(),
             motion_kept: false,
             cull_cpu: Vec::new(),
             particle_buffer,
@@ -4266,6 +4449,17 @@ impl Backend {
             depth_compare: wgpu::CompareFunction::Always,
             gbuf: ssr,
             ..base("sky", "vs_sky", g("fs_sky", "fs_sky_g"))
+        });
+        let clouds_weather = pipe(PipeDesc {
+            vb: Vb::None,
+            cull: None,
+            depth_write: false,
+            depth_compare: wgpu::CompareFunction::Always,
+            samples: 1,
+            format: Some(wgpu::TextureFormat::Rgba8Unorm),
+            depth_format: None,
+            write_mask: wgpu::ColorWrites::ALL,
+            ..base("cloud weather", "vs_sky", "fs_cloud_weather")
         });
         let terrain = pipe(PipeDesc {
             gbuf: ssr,
@@ -4566,7 +4760,44 @@ impl Backend {
             write_mask: wgpu::ColorWrites::ALL,
             depth_write: false,
             depth_compare: wgpu::CompareFunction::Greater,
+            // (the camera's side of the water with the interleave, as the
+            // blended faces after the water; none without, as before)
+            constants: if crate::particle_interleave() {
+                &[("WATER_CLIP", 1.0)]
+            } else {
+                &[]
+            },
             ..base("particles", "vs_particle", "fs_particle")
+        });
+        // POOL_ALPHA_PRE_WATER for the particles: the far side of the
+        // surface, writing depth from 1/255 of alpha (as `blend_under`), the
+        // soft fade kept on a copy of the scene depth (frame group `under`)
+        // (not made without the interleave, and the depth one only with MSAA)
+        let particles_under = crate::particle_interleave().then(|| {
+            pipe(PipeDesc {
+                vb: Vb::Particle,
+                cull: None,
+                blend: Some(suppress),
+                write_mask: wgpu::ColorWrites::ALL,
+                depth_write: true,
+                depth_compare: wgpu::CompareFunction::Greater,
+                constants: &[("WATER_CLIP", 2.0), ("PART_MIN_ALPHA", 0.004)],
+                ..base("particles under water", "vs_particle", "fs_particle")
+            })
+        });
+        let particles_under_depth_ss = (crate::particle_interleave() && samples > 1).then(|| {
+            pipe(PipeDesc {
+                vb: Vb::Particle,
+                cull: None,
+                fs: Some("fs_particle_depth"),
+                blend: None,
+                samples: 1,
+                format: None,
+                depth_write: true,
+                depth_compare: wgpu::CompareFunction::Greater,
+                constants: &[("WATER_CLIP", 2.0), ("PART_MIN_ALPHA", 0.004)],
+                ..base("particles under water depth", "vs_particle", "fs_particle_depth")
+            })
         });
         let water_particles = pipe(PipeDesc {
             vb: Vb::None,
@@ -5198,6 +5429,7 @@ impl Backend {
             hud_debug_red,
             hud_debug_blue,
             sky,
+            clouds_weather,
             terrain,
             terrain_pbr,
             pre_terrain,
@@ -5228,6 +5460,8 @@ impl Backend {
             blend_under,
             blend_under_depth_ss,
             particles,
+            particles_under,
+            particles_under_depth_ss,
             water_particles,
             water_particles_under,
             rain,
@@ -5497,6 +5731,7 @@ impl Backend {
             depth_msaa,
             depth_msaa_tex,
             blend_layers: None,
+            depth_copy: None,
             blend_exact: None,
             depth_ss,
             water_interface,
@@ -5726,6 +5961,23 @@ impl Backend {
                 false,
                 true,
             ),
+            // (only with the interleave, and once there is a depth to read:
+            // with MSAA `depth_ss`, without it its copy, made on first use)
+            under: (crate::particle_interleave() && (t.depth_msaa.is_some() || t.depth_copy.is_some())).then(|| {
+                mk(
+                    "frame under water",
+                    frame_buffer,
+                    ao,
+                    water,
+                    mirror,
+                    &dummies.black,
+                    t.depth_copy.as_ref().map_or(&t.depth_ss, |(_, view)| view),
+                    contact,
+                    il,
+                    false,
+                    true,
+                )
+            }),
             b: mk(
                 "frame b",
                 frame_buffer,
@@ -6034,6 +6286,7 @@ impl Backend {
     /// when next needed.
     fn drop_first_use_targets(&mut self) {
         self.targets.blend_layers = None;
+        self.targets.depth_copy = None;
         self.targets.blend_exact = None;
         self.rlva_spheres = None;
         self.rlva_scaled = None;
@@ -6552,7 +6805,7 @@ impl Backend {
 
     // ---------------------------------------------------------------- frame
 
-    fn cascade_matrices(&self, f: &FrameParams) -> ([Mat4; CASCADES], [f32; CASCADES]) {
+    fn cascade_matrices(&mut self, f: &FrameParams) -> ([Mat4; CASCADES], [f32; CASCADES]) {
         let far = f.far.min(f.shadow_distance).max(16.0);
         let splits = [far * 0.08, far * 0.3, far];
         // the whole photo's proportions when a frame draws one of its tiles
@@ -6562,6 +6815,10 @@ impl Backend {
         let aspect = (self.config.width as f32 * f.photo_tile.x_axis.x) / (self.config.height.max(1) as f32 * f.photo_tile.y_axis.y);
         let inv_view = f.view.inverse();
         let light_dir = -f.sun_dir.normalize_or(Vec3::Z);
+        // a photo's tiles and a region change (every position shifts) start
+        // the anchors again
+        self.cascade_anchors
+            .begin(f.photo_tile != Mat4::IDENTITY || self.motion_cut, shadow_anchor_held());
         let mut out = [Mat4::IDENTITY; CASCADES];
         let mut near = f.near;
         for (i, &split) in splits.iter().enumerate() {
@@ -6578,9 +6835,6 @@ impl Backend {
             let center = corners.iter().fold(Vec3::ZERO, |a, c| a + *c) / 8.0;
             let radius = corners.iter().map(|c| c.distance(center)).fold(0.0f32, f32::max).max(1.0);
             let radius = (radius * 16.0).ceil() / 16.0;
-            let up = if light_dir.z.abs() > 0.99 { Vec3::Y } else { Vec3::Z };
-            let eye = center - light_dir * (radius + crate::shadow_cull::CASCADE_DEPTH_PAD);
-            let mut view = glam::camera::rh::view::look_at_mat4(eye, center, up);
             // snap to texel grid to avoid shimmering when the camera moves.
             // The grid is anchored on a world point near the cascade (its
             // center rounded to a lattice of the cascade's radius), not on
@@ -6588,16 +6842,12 @@ impl Backend {
             // anchor, and from ~200 m away it swept the shadows by up to
             // ~12 texels a second near the camera (visible jumps as the EEP
             // sun moves); from the cell it is 20-80 times slower, a slow
-            // glide like Firestorm (which does not snap). The anchor only
-            // changes when the camera crosses a cell.
-            let texel = 2.0 * radius / self.shadow_size as f32;
-            let anchor = shadow_anchor(center, radius);
-            let origin = view.transform_point3(anchor);
-            let snapped = Vec3::new((origin.x / texel).round() * texel, (origin.y / texel).round() * texel, origin.z);
-            view = Mat4::from_translation(snapped - origin) * view;
-            let depth = radius * 2.0 + 2.0 * crate::shadow_cull::CASCADE_DEPTH_PAD;
-            let proj = glam::camera::rh::proj::directx::orthographic(-radius, radius, -radius, radius, 0.1, depth);
-            out[i] = proj * view;
+            // glide like the Legacy Viewer (which does not snap). While the light
+            // does not move the anchor is held (`CascadeAnchors`): the grid
+            // keeps one phase for as long as the light is still, and the shadow edges do not hop
+            // when the camera crosses a cell.
+            let anchor = self.cascade_anchors.pick(i, center, radius, self.shadow_size, light_dir);
+            out[i] = cascade_matrix(center, radius, light_dir, anchor, self.shadow_size);
             near = split;
         }
         (out, splits)
@@ -6855,7 +7105,10 @@ impl Backend {
     /// What a frame gives back: its statistics, the readbacks that have
     /// arrived, the packet's buffers.
     fn result(&mut self, index: u64, stats: RenderStats, captured: Option<(u32, u32, Vec<u8>)>, spent: Spent) -> FrameResult {
-        let snapshot = self.end_snapshot();
+        let cube_face = std::mem::take(&mut self.cube_step).is_some();
+        // (a face of a 360° capture is answered by nothing: it stays on the
+        // GPU, and the main thread did not wait for it)
+        let snapshot = self.end_snapshot() && !cube_face;
         FrameResult {
             index,
             stats,
@@ -6866,6 +7119,7 @@ impl Backend {
             cull: self.cull.last,
             captured,
             snapshot,
+            equirect: None,
             histogram: self.histogram.take(),
             spent,
         }
@@ -6873,20 +7127,66 @@ impl Backend {
 
     /// A photo frame draws every pass at the photo's size: the render size
     /// (`config`, which every pass reads) takes it for this frame, the
-    /// swapchain keeps the window's (it is not reconfigured).
+    /// swapchain keeps the window's (it is not reconfigured). The faces of a
+    /// 360° capture (`SnapshotSpec::cube`) share one set of targets: they are
+    /// made for the first face and kept until the frame after the last.
     fn begin_snapshot(&mut self, s: SnapshotSpec) {
-        self.snapshot_window = Some((self.config.width, self.config.height));
+        let held = self.cube_hold && self.snapshot_window.is_some();
+        if !held {
+            self.snapshot_window = Some((self.config.width, self.config.height));
+        }
+        let same = held && (self.config.width, self.config.height) == (s.width, s.height);
         self.config.width = s.width;
         self.config.height = s.height;
         self.gtao.photo = Some(s.photo);
-        self.rebuild_targets();
+        self.cube_step = s.cube.map(usize::from);
+        if self.cube_step == Some(0)
+            && let Some(cube) = &mut self.cube
+        {
+            // (a face lost before it was drawn must not pass for the last
+            // capture's)
+            cube.reset();
+        }
+        self.cube_keep = s
+            .cube
+            .is_some_and(|step| usize::from(step) + 1 < crate::equirect::CAPTURE_CAMERAS.len());
+        if same {
+            // the face before left its images in the history of the passes
+            // that remember the last frame: each face starts afresh (the
+            // targets made again do that by themselves)
+            self.occlusion.invalidate();
+            self.depth_pick.scene_changed();
+            self.prev_view_proj = None;
+            self.prev_motion_view = None;
+            if let Some(taa) = &mut self.taa {
+                taa.reset = true;
+            }
+        } else {
+            self.rebuild_targets();
+        }
     }
 
-    /// Back to the window's size after a photo frame, however it ended.
-    /// True when the frame was one.
+    /// Back to the window's size after a photo frame, however it ended; a
+    /// face of a 360° capture that is not the last keeps the targets for the
+    /// next one. True when the frame was a photo's.
     fn end_snapshot(&mut self) -> bool {
-        let Some((w, h)) = self.snapshot_window.take() else {
+        if self.snapshot_window.is_none() {
             return false;
+        }
+        if std::mem::take(&mut self.cube_keep) {
+            self.cube_hold = true;
+            return true;
+        }
+        self.release_snapshot();
+        true
+    }
+
+    /// The window's size again, the targets made for it.
+    fn release_snapshot(&mut self) {
+        self.cube_hold = false;
+        self.cube_keep = false;
+        let Some((w, h)) = self.snapshot_window.take() else {
+            return;
         };
         // the video memory at the photo's peak (its targets still alive)
         let live = self.device.get_internal_counters().hal;
@@ -6902,7 +7202,6 @@ impl Backend {
         self.config.height = h;
         self.gtao.photo = None;
         self.rebuild_targets();
-        true
     }
 
     /// End of a frame that cannot be drawn (no swapchain image, or its
@@ -7072,6 +7371,7 @@ impl Backend {
             picks: Vec::new(),
             drawn: Vec::new(),
             capture: None,
+            equirect: None,
             histogram: None,
             motion_cut: packet.motion_cut,
             input_at: None,
@@ -7140,7 +7440,29 @@ impl Backend {
         Ok(first)
     }
 
-    pub fn render(&mut self, packet: FramePacket) -> FrameResult {
+    pub fn render(&mut self, mut packet: FramePacket) -> FrameResult {
+        // the 360° snapshot's panorama, before the frame: projected from the
+        // cube the faces filled, its readback begun and answered by a later
+        // frame (equirect.rs). The cube is let go once the GPU has the job.
+        if let Some(job) = packet.equirect.take() {
+            let pass = self.equirect.get_or_insert_with(|| crate::equirect::Equirect::new(&self.device));
+            pass.start(
+                &self.device,
+                &self.queue,
+                &self.lost,
+                packet.index,
+                self.cube.as_ref(),
+                *job,
+                &mut self.equirect_reads,
+            );
+            self.cube = None;
+        }
+        let mut result = self.render_frame(packet);
+        result.equirect = self.equirect_reads.poll();
+        result
+    }
+
+    fn render_frame(&mut self, packet: FramePacket) -> FrameResult {
         #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
         if self.xr_world.is_none() && !self.vr.wanted() && self.vr.state() == crate::VrState::Stopping {
             self.vr.finish(false);
@@ -7258,6 +7580,8 @@ impl Backend {
             picks,
             drawn,
             capture: wanted,
+            // (taken by `render` before the frame)
+            equirect: _,
             histogram,
             motion_cut,
             input_at,
@@ -7293,8 +7617,21 @@ impl Backend {
             self.last_inv_vp,
             picks,
         );
+        // a 360° capture's faces share the snapshot targets; any other frame
+        // ends the hold (the capture was given up, or it is over)
+        let cube_face = matches!(&wanted, Some(Capture::Snapshot(s)) if s.width > 0 && s.height > 0 && s.cube.is_some());
+        if self.cube_hold && !cube_face {
+            // the capture was given up between its faces: no projection will
+            // come for these
+            self.release_snapshot();
+            self.cube = None;
+        }
         // the window and the settings as the main thread had them for this frame
-        self.apply_surface(surface);
+        // (the window's size and the swapchain are as they were: the faces
+        // draw at their own size until the hold ends)
+        if !self.cube_hold {
+            self.apply_surface(surface);
+        }
         if self.rlva_resolution_divisor != params.rlva_resolution_divisor {
             self.rlva_resolution_divisor = params.rlva_resolution_divisor;
             self.rebuild_targets();
@@ -7926,6 +8263,56 @@ impl Backend {
         if specular_aa_now(self.settings.specular_aa) {
             main.light_sets.mode[2] |= 0x8000;
         }
+        // ---- volumetric clouds (clouds.rs): over the sky of the main view
+        // when the setting is on and the Legacy layer would draw something;
+        // not under the water (the sky is seen through its fog), nor in a
+        // cut-out photo (no sky), nor with the sky hidden. A photo, a tile of one or any other still
+        // is traced once in full (clouds.rs `StillSpec`), with no history.
+        // Until the noise is made the sky shader keeps the Legacy layer.
+        let still = (snapshot.is_some() || f.photo_tile != Mat4::IDENTITY).then(|| {
+            let photo = self.gtao.photo.unwrap_or((self.config.width, self.config.height));
+            crate::clouds::StillSpec {
+                origin: crate::clouds::still_origin(photo_part(f.photo_tile), photo),
+            }
+        });
+        let cloud_params = f
+            .clouds
+            .as_ref()
+            .filter(|_| clouds_wanted(f.cutout, f.hide_sky, f.camera_pos.z, camera_water_level))
+            .and_then(|c| {
+                let rotation = Mat4::from_mat3(glam::Mat3::from_mat4(f.view));
+                crate::clouds::Params::new(f, c, f.proj * rotation, inv_view_proj_rot(f.proj, f.view))
+            });
+        match (&f.clouds, &mut self.clouds) {
+            (None, clouds) => *clouds = None,
+            (Some(_), clouds @ None) => {
+                // (checked: refused, the Legacy layer stays and it is tried
+                // again later; the noise file is read once it is made)
+                *clouds = extra(
+                    &mut self.oom,
+                    &self.device,
+                    self.lost.get(),
+                    "volumetric clouds",
+                    crate::clouds::Clouds::new,
+                );
+                if let Some(c) = clouds {
+                    c.start_noise_read();
+                }
+            }
+            _ => {}
+        }
+        // (the targets are made before the decision: refused, this frame
+        // draws the Legacy layer)
+        let cloud_size = (self.targets.color_tex.width().max(2), self.targets.color_tex.height().max(2));
+        let cloud_targets_ok = match (&mut self.clouds, &cloud_params) {
+            (Some(c), Some(_)) if c.ready() => cloud_targets(&mut self.oom, c, &self.device, cloud_size, still.is_some(), self.lost.get()),
+            _ => false,
+        };
+        self.clouds_now = cloud_params.is_some() && cloud_targets_ok;
+        if self.clouds_now {
+            // (env.wgsl, features.w: the sky pass leaves the clouds to clouds.rs)
+            main.features[3] = 1;
+        }
         self.queue.write_buffer(&self.frame_buffer, 0, bytemuck::bytes_of(&main));
         // a pixel whose drawn faces are asked: the same camera, narrowed to it
         let main_vp = Mat4::from_cols_array_2d(&main.view_proj);
@@ -8210,11 +8597,11 @@ impl Backend {
             // the light through the projection the depth prepass was drawn
             // with (jittered under TAA)
             let light = crate::contact_shadows::light_projection(fu.proj * fu.view, f.sun_dir);
-            // an infinite reversed projection keeps its near plane there
-            // (centred or not: tiled photos); a photo larger than the
-            // viewfinder marches as much further
-            self.contact
-                .write(&self.device, &self.queue, t, light, fu.proj.w_axis.z, f.photo_scale);
+            // an infinite reversed projection keeps its near plane there, and
+            // its vertical focal gives the pixel's angle (centred or not:
+            // tiled photos); a photo larger than the viewfinder marches as
+            // much further
+            self.contact.write(&self.device, &self.queue, t, light, &fu.proj, f.photo_scale);
         }
         if let (true, Some(t)) = (self.targets.gtao_shown, &mut self.targets.gtao) {
             let prev = self.prev_view_proj.unwrap_or(unjittered_vp);
@@ -8245,26 +8632,57 @@ impl Backend {
         }
 
         // ---- particles
-        let n_particles = if !lists.particles.is_empty() {
-            let bytes = std::mem::size_of_val(lists.particles.as_slice()) as u64;
+        // (the ones under the water after the others, in the same buffer)
+        let part_size = std::mem::size_of::<ParticleInstance>();
+        let (n_particles, n_part_under) = if !lists.particles.is_empty() || !lists.particles_under.is_empty() {
+            let total = lists.particles.len() + lists.particles_under.len();
             crate::gpu_alloc::grow_upload_buffer(
                 &self.device,
                 &mut self.particle_buffer,
                 &mut self.particle_backoff,
                 "particles",
-                bytes,
+                (total * part_size) as u64,
             );
-            let count = lists
-                .particles
-                .len()
-                .min((self.particle_buffer.size() / std::mem::size_of::<ParticleInstance>() as u64) as usize)
-                .min(u32::MAX as usize);
-            self.queue
-                .write_buffer(&self.particle_buffer, 0, bytemuck::cast_slice(&lists.particles[..count]));
-            count as u32
+            let room = ((self.particle_buffer.size() / part_size as u64) as usize).min(u32::MAX as usize);
+            let count = lists.particles.len().min(room);
+            let under = lists.particles_under.len().min(room - count);
+            if count > 0 {
+                self.queue
+                    .write_buffer(&self.particle_buffer, 0, bytemuck::cast_slice(&lists.particles[..count]));
+            }
+            if under > 0 {
+                self.queue.write_buffer(
+                    &self.particle_buffer,
+                    (count * part_size) as u64,
+                    bytemuck::cast_slice(&lists.particles_under[..under]),
+                );
+            }
+            (count as u32, under as u32)
         } else {
-            0
+            (0, 0)
         };
+        // The copy of the scene depth that the particles under the water
+        // read for their soft fade, where the pass writes the depth itself
+        // (without MSAA): made when first needed, as `blend_layers`.
+        if n_part_under > 0 && self.targets.depth_msaa.is_none() && self.targets.depth_copy.is_none() {
+            let size = self.targets.depth_ss_tex.size();
+            let (copy, refused) = crate::gpu_alloc::scoped(&self.device, || {
+                make_view(
+                    &self.device,
+                    "particle depth copy",
+                    size.width,
+                    size.height,
+                    DEPTH_FORMAT,
+                    1,
+                    wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                )
+            });
+            // refused: drawn without the soft fade for now
+            if !first_use(&mut self.oom, "particle depth copy", false, refused && !self.lost.get()) {
+                self.targets.depth_copy = Some(copy);
+                self.rebuild_bind_groups_checked("frame groups with the particle depth copy");
+            }
+        }
 
         // ---- shadow caster culling per cascade (CPU lists: the terrain,
         // and every caster without the GPU lists). Each cascade keeps the
@@ -8606,7 +9024,22 @@ impl Backend {
             BlendDiscard::Late => false,
             BlendDiscard::Alternate => !f.blend_late_discard,
         };
-        stats.particles = n_particles;
+        // (a particle crossing the water is in both lists: counted once)
+        let part_distinct = (n_particles + n_part_under).saturating_sub(lists.particle_crossing.min(n_part_under));
+        stats.particles = part_distinct;
+        stats.particle_runs = if crate::particle_interleave() {
+            // what is drawn after the clamps: the runs of the main pass
+            // (the last faces uploaded), and those of the pass under the water
+            let (_, n_blend) = rg.blend;
+            let under = if self.pipelines.particles_under.is_some() {
+                drawn_runs(&lists.particle_under_runs, 0, rg.blend_under.1, n_part_under)
+            } else {
+                0
+            };
+            drawn_runs(&lists.particle_runs, (lists.blend_depth as u32).min(n_blend), n_blend, n_particles) + under
+        } else {
+            0
+        };
         stats.occluded = occl.then_some(self.occlusion.last_hidden);
         if gpu.is_some() {
             // the GPU bins, read back a frame or two late
@@ -8626,7 +9059,7 @@ impl Backend {
         }
 
         let mut water_settings = self.settings.water_effects;
-        water_settings.particle_budget = water_settings.particle_budget.saturating_sub(n_particles);
+        water_settings.particle_budget = water_settings.particle_budget.saturating_sub(part_distinct);
         if self.water_effects.prepare(
             &self.device,
             &self.queue,
@@ -8735,6 +9168,16 @@ impl Backend {
         let draw_under = |pass: &mut wgpu::RenderPass, pipes: &SidedPipelines, r| {
             draw_sided_list(pass, pipes, r, 0, &lists.blend_under_double_sided);
         };
+        // particles `range` of the buffer (their slot is bound for the pass),
+        // with `frame_bg`, then the pass's frame group back (meshes follow)
+        let draw_particles_under =
+            |pass: &mut wgpu::RenderPass, pipe: &wgpu::RenderPipeline, range: std::ops::Range<u32>, frame_bg: &wgpu::BindGroup| {
+                calls.set(calls.get() + 1);
+                pass.set_bind_group(0, frame_bg, &[]);
+                pass.set_pipeline(pipe);
+                pass.draw(0..6, range);
+                pass.set_bind_group(0, &self.groups.a, &[]);
+            };
         let draw_from = |pass: &mut wgpu::RenderPass, pipe: &wgpu::RenderPipeline, buf: &wgpu::Buffer, r: (u64, u32)| {
             if r.1 > 0 {
                 calls.set(calls.get() + 1);
@@ -9579,6 +10022,53 @@ impl Backend {
         if let (Some(t), Some(slot)) = (&self.timer, timer_slot) {
             t.slot_prepass[slot].set(prepass_wanted);
         }
+        // ---- volumetric clouds: the weather map when its parameters changed,
+        // the noise slice, the trace and the reconstruction (clouds.rs)
+        let scene_samples = self.targets.depth_msaa_tex.as_ref().map_or(1, |t| t.sample_count());
+        let scene_gbuf = self.targets.gbuf.is_some();
+        // (until the noise is made `encode` generates it and allocates
+        // nothing; after, it needs the targets made above)
+        let clouds_encode = self.clouds_now || self.clouds.as_ref().is_some_and(|c| !c.ready());
+        if let (Some(clouds), Some(p), true) = (&mut self.clouds, &cloud_params, clouds_encode) {
+            if clouds.weather_stale(p.weather_key) {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("cloud weather"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: clouds.weather_target(),
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                pass.set_pipeline(&self.pipelines.clouds_weather);
+                pass.set_bind_group(0, &self.groups.a, &[]);
+                pass.set_bind_group(1, &self.records_bind_group, &[]);
+                pass.set_bind_group(2, &scene.textures, &[]);
+                pass.draw(0..3, 0..1);
+                drop(pass);
+                clouds.weather_drawn(p.weather_key);
+            }
+            clouds.encode(
+                &self.device,
+                &self.queue,
+                &mut encoder,
+                p,
+                &self.targets.depth_ss,
+                cloud_size,
+                still,
+            );
+            clouds.prepare(&self.device, scene_samples, scene_gbuf, HDR_FORMAT, GBUF_FORMAT, DEPTH_FORMAT);
+        } else if let Some(clouds) = &mut self.clouds {
+            clouds.skipped(still.is_some());
+        }
+        mark(&mut encoder, MARK_CLOUDS_END);
         // ---- scene pass A: sky, terrain, opaque, masked
         {
             let (view, resolve) = match &self.targets.color_msaa {
@@ -9653,6 +10143,14 @@ impl Backend {
             if !f.cutout && !f.hide_sky {
                 pass.set_pipeline(&self.pipelines.sky);
                 pass.draw(0..3, 0..1);
+                // the clouds over the sky: dst * T + L
+                if self.clouds_now
+                    && let Some(clouds) = &self.clouds
+                {
+                    clouds.draw(&mut pass, scene_samples, scene_gbuf);
+                    // (the composite has its own group 0)
+                    pass.set_bind_group(0, &self.groups.a, &[]);
+                }
             }
             pass_mark(&mut pass, MARK_SKY_END);
             draw(&mut pass, &self.pipelines.terrain, rg.terrain);
@@ -9800,12 +10298,49 @@ impl Backend {
         // and fog then cover them, instead of their being drawn over it.
         // (The frame group without the scene copy and the depth: the depth
         // is written here.)
-        let (_, n_under) = rg.blend_under;
-        if n_under > 0 {
+        let (under0, n_under) = rg.blend_under;
+        let under_stride = std::mem::size_of::<DrawIndexedIndirect>() as u64;
+        if n_under > 0 || n_part_under > 0 {
+            // (the particles under the water, between the faces: their soft
+            // fade reads the scene depth, which this pass writes. Without
+            // MSAA it is copied first, with it the single-sampled one
+            // serves. The meshes keep the frame group without a depth.)
+            if n_part_under > 0
+                && let Some((copy, _)) = &self.targets.depth_copy
+            {
+                encoder.copy_texture_to_texture(
+                    self.targets.depth_ss_tex.as_image_copy(),
+                    copy.as_image_copy(),
+                    self.targets.depth_ss_tex.size(),
+                );
+            }
             {
                 let mut pass = begin_scene_b(&mut encoder, &self.targets, "blend under water", false, true);
                 bind_mesh(&mut pass, &self.groups.a);
-                draw_under(&mut pass, &self.pipelines.blend_under, rg.blend_under);
+                let sided = |pass: &mut wgpu::RenderPass, from: u32, to: u32| {
+                    draw_sided_list(
+                        pass,
+                        &self.pipelines.blend_under,
+                        (under0 + u64::from(from) * under_stride, to - from),
+                        from,
+                        &lists.blend_under_double_sided,
+                    );
+                };
+                // the particles are in one buffer: their slot is bound once
+                // (the colour pipeline is made with the interleave: no
+                // particles under the water without it)
+                if let Some(pipe) = self.pipelines.particles_under.as_ref().filter(|_| n_part_under > 0) {
+                    pass.set_vertex_buffer(PARTICLE_SLOT, self.particle_buffer.slice(..));
+                    let group = self.groups.under.as_ref().unwrap_or(&self.groups.a);
+                    walk_runs(&lists.particle_under_runs, 0, n_under, n_part_under, |step| match step {
+                        RunStep::Faces { from, to } => sided(&mut pass, from, to),
+                        RunStep::Particles { from, to } => {
+                            draw_particles_under(&mut pass, pipe, n_particles + from..n_particles + to, group)
+                        }
+                    });
+                } else {
+                    sided(&mut pass, 0, n_under);
+                }
             }
             if self.targets.color_msaa.is_some() {
                 // the copy reads the resolved colour, and the water samples
@@ -9844,6 +10379,11 @@ impl Backend {
                 });
                 bind_mesh(&mut pass, &self.groups.a);
                 draw_under(&mut pass, &self.pipelines.blend_under_depth_ss, rg.blend_under);
+                if let Some(pipe) = self.pipelines.particles_under_depth_ss.as_ref().filter(|_| n_part_under > 0) {
+                    // (their order does not matter: the nearest depth stays)
+                    pass.set_vertex_buffer(PARTICLE_SLOT, self.particle_buffer.slice(..));
+                    draw_particles_under(&mut pass, pipe, n_particles..n_particles + n_part_under, &self.groups.a);
+                }
             }
         }
         // ---- scene copy (refraction / SSR source)
@@ -9972,15 +10512,9 @@ impl Backend {
             }
             draw_sided(pass, pipe, (b0 + start as u64 * stride, to - start), start);
         };
-        // the other blended faces, the overlays and the particles
-        let rest = |pass: &mut wgpu::RenderPass| {
-            // The local hologram leaves world depth and the SSR G-buffer
-            // untouched; transparent world faces still cover it normally.
-            if exact.is_none() {
-                draw(pass, &self.pipelines.creation_preview, rg.creation_preview);
-            }
-            blended(pass, blend_pipe, rest_from, bn);
-            // debug overlays (before the particles, which rebind vertex buffer 0)
+        // the debug overlays: the land, the highlights of the debug views,
+        // the physics shapes, the selection and the wireframe
+        let overlays = |pass: &mut wgpu::RenderPass| {
             draw(pass, &self.pipelines.land_overlay, rg.land_overlay);
             draw(pass, &self.pipelines.debug_red, rg.debug_red);
             draw(pass, &self.pipelines.debug_blue, rg.debug_blue);
@@ -10014,11 +10548,15 @@ impl Backend {
                     draw_bin(pass, Some(wire), b, b);
                 }
             }
-            pass_mark(pass, MARK_BLEND_END);
-            if water_particles > 0 {
-                pass.set_pipeline(&self.pipelines.water_particles);
-                pass.draw(0..crate::water_effects::WATER_PARTICLE_VERTICES, 0..water_particles);
-            }
+        };
+        // particles `range` (their slot is bound by `rest`)
+        let draw_particles = |pass: &mut wgpu::RenderPass, range: std::ops::Range<u32>| {
+            pass.set_pipeline(&self.pipelines.particles);
+            pass.draw(0..6, range);
+        };
+        let interleave = crate::particle_interleave();
+        // the rain prototype's drops, splashes and distant layers (marks around them)
+        let rain = |pass: &mut wgpu::RenderPass| {
             pass_mark(pass, MARK_RAIN_BEGIN);
             if rain_drops > 0 {
                 pass.set_pipeline(&self.pipelines.rain);
@@ -10038,12 +10576,53 @@ impl Backend {
                 pass.draw(0..3, 0..1);
             }
             pass_mark(pass, MARK_RAIN_END);
-            // particles last: they rebind vertex buffer 0
-            if n_particles > 0 {
-                pass.set_pipeline(&self.pipelines.particles);
-                pass.set_vertex_buffer(0, self.particle_buffer.slice(..));
-                pass.draw(0..6, 0..n_particles);
+        };
+        // the other blended faces, the particles between them, the overlays
+        let rest = |pass: &mut wgpu::RenderPass| {
+            // The local hologram leaves world depth and the SSR G-buffer
+            // untouched; transparent world faces still cover it normally.
+            // (`Exact` drew it before the blended faces, which dim it.)
+            if exact.is_none() {
+                draw(pass, &self.pipelines.creation_preview, rg.creation_preview);
             }
+            if n_particles > 0 {
+                pass.set_vertex_buffer(PARTICLE_SLOT, self.particle_buffer.slice(..));
+            }
+            if !interleave {
+                blended(pass, blend_pipe, rest_from, bn);
+                overlays(pass);
+                pass_mark(pass, MARK_BLEND_END);
+                if water_particles > 0 {
+                    pass.set_pipeline(&self.pipelines.water_particles);
+                    pass.draw(0..crate::water_effects::WATER_PARTICLE_VERTICES, 0..water_particles);
+                }
+                rain(pass);
+                if n_particles > 0 {
+                    draw_particles(pass, 0..n_particles);
+                }
+                return;
+            }
+            // Back to front, the particles between the faces they lie
+            // between (`DrawLists::particle_runs`); every index is clamped to
+            // what was uploaded and what is drawn here.
+            // (`Exact` has drawn the faces already: from `bn` on, only the particles
+            // are left, after them, as before the interleave)
+            walk_runs(&lists.particle_runs, rest_from, bn, n_particles, |step| match step {
+                RunStep::Faces { from, to } => blended(pass, blend_pipe, from, to),
+                RunStep::Particles { from, to } => draw_particles(pass, from..to),
+            });
+            if water_particles > 0 {
+                pass.set_pipeline(&self.pipelines.water_particles);
+                pass.draw(0..crate::water_effects::WATER_PARTICLE_VERTICES, 0..water_particles);
+            }
+            // The overlays come after every blended face and particle, as in
+            // the Legacy Viewer (renderDebugAlpha ends the alpha pass;
+            // renderHighlights and renderDebug follow the pools). The end of
+            // the blended part of the GPU timing is after them too: with the
+            // interleave `g_transparent` holds the particles, `g_post` less.
+            overlays(pass);
+            pass_mark(pass, MARK_BLEND_END);
+            rain(pass);
         };
         let exact_glow = glow_on && glow_skip & 8 == 0;
         {
@@ -11095,6 +11674,16 @@ impl Backend {
         }
         if wanted == Some(Capture::Full) {
             capture = self.encode_capture(&mut encoder, surface_tex.texture(), false);
+        } else if let (Some(step), Some(_)) = (self.cube_step, snapshot) {
+            // a face of a 360° capture stays on the GPU: copied into its
+            // layer of the cube, never read back
+            let (size, format) = (self.config.width, surface_tex.texture().format());
+            if self.cube.as_ref().is_none_or(|cube| !cube.fits(size, format)) {
+                self.cube = crate::equirect::CubeTarget::new(&self.device, size, format);
+            }
+            if let Some(cube) = &mut self.cube {
+                cube.add_face(&mut encoder, surface_tex.texture(), step);
+            }
         } else if snapshot.is_some() {
             capture = self.encode_capture(&mut encoder, surface_tex.texture(), true);
         }
@@ -11149,6 +11738,7 @@ impl Backend {
         self.motion_kept = self.motion_now;
         // staging chunks whose copies are now submitted are mapped again
         frame_uploads.after_submit();
+        // (a face of a 360° capture is on the GPU, with nothing to read)
         let captured = capture.and_then(|capture| self.read_capture(capture, f.cutout));
 
         if let (Some(t), Some(slot)) = (&mut self.timer, timer_slot) {
@@ -11216,6 +11806,7 @@ impl Backend {
         stats.gpu_depth = self.timer.as_ref().and_then(|t| t.last_depth);
         stats.gpu_ssao = self.timer.as_ref().and_then(|t| t.last_ssao);
         stats.gpu_contact = self.timer.as_ref().and_then(|t| t.last_contact);
+        stats.gpu_clouds = self.timer.as_ref().and_then(|t| t.last_clouds).filter(|_| self.clouds_now);
         stats.gpu_bloom = self.timer.as_ref().and_then(|t| t.last_bloom);
         stats.gpu_effects = self.timer.as_ref().and_then(|t| t.last_effects);
         stats.gpu_weather = self.timer.as_ref().and_then(|t| t.last_weather);
@@ -11434,6 +12025,7 @@ mod tests {
         MARK_SCENE_BEGIN,
         MARK_WATER_INTERFACE_END,
         MARK_DEPTH_MSAA_END,
+        MARK_CLOUDS_END,
         MARK_SKY_END,
         MARK_TERRAIN_END,
         MARK_OBJECTS_END,
@@ -11496,6 +12088,15 @@ mod tests {
             inside(part, GpuElement::Effects);
         }
         inside(&[(MARK_BLOOM_BEGIN, MARK_BLOOM_END)], GpuElement::Post);
+    }
+
+    #[test]
+    fn the_clouds_are_asked_for_only_over_a_drawn_sky() {
+        assert!(clouds_wanted(false, false, 30.0, 20.0));
+        assert!(clouds_wanted(false, false, 20.0, 20.0));
+        assert!(!clouds_wanted(true, false, 30.0, 20.0), "cut-out photo");
+        assert!(!clouds_wanted(false, true, 30.0, 20.0), "sky hidden: no trace for nothing");
+        assert!(!clouds_wanted(false, false, 19.0, 20.0), "under the water");
     }
 
     /// The occlusion's table is read by index against the main view's
@@ -11787,6 +12388,133 @@ mod tests {
         // small camera moves inside the cell keep the same anchor
         assert_eq!(shadow_anchor(c + Vec3::new(0.5, -0.4, 0.2), 6.0), a);
         assert_eq!(shadow_anchor(Vec3::new(-0.1, 0.0, 0.0), 6.0), Vec3::new(-6.0, 0.0, 0.0));
+    }
+
+    /// Where the world point `p` falls in a cascade's texel grid, in
+    /// fractions of a texel.
+    fn texel_phase(m: Mat4, p: Vec3, size: u32) -> (f32, f32) {
+        let ndc = m.project_point3(p);
+        let t = |v: f32| ((v * 0.5 + 0.5) * size as f32).rem_euclid(1.0);
+        (t(ndc.x), t(ndc.y))
+    }
+
+    fn phase_gap(a: (f32, f32), b: (f32, f32)) -> f32 {
+        let d = |x: f32, y: f32| {
+            let g = (x - y).abs();
+            g.min(1.0 - g)
+        };
+        d(a.0, b.0).max(d(a.1, b.1))
+    }
+
+    /// A full turn of the camera under a fixed sun, the cascade's centre
+    /// going round it: the texel grid keeps one phase (no hop of the shadow
+    /// edges); anchored on the centre as before it hopped at each cell.
+    #[test]
+    fn the_cascade_grid_keeps_its_phase_over_a_full_turn_with_a_fixed_sun() {
+        let light = Vec3::new(0.3, -0.5, -0.8).normalize();
+        let (radius, size) = (71.0f32, 2048u32);
+        let camera = Vec3::new(137.3, 119.8, 31.0);
+        let probe = Vec3::new(160.0, 140.0, 22.0);
+        let mut anchors = CascadeAnchors::default();
+        let mut held = Vec::new();
+        let mut old = Vec::new();
+        let mut hops = 0;
+        let mut last_old = Vec3::NAN;
+        for step in 0..720 {
+            let yaw = step as f32 * std::f32::consts::TAU / 720.0;
+            // the centre of a slice (n + f) / 2 ahead of the camera
+            let center = camera + Vec3::new(yaw.cos(), yaw.sin(), 0.0) * 125.0;
+            anchors.begin(false, true);
+            let kept = anchors.pick(1, center, radius, size, light);
+            held.push(texel_phase(cascade_matrix(center, radius, light, kept, size), probe, size));
+            let fresh = shadow_anchor(center, radius);
+            hops += usize::from(fresh != last_old);
+            last_old = fresh;
+            old.push(texel_phase(cascade_matrix(center, radius, light, fresh, size), probe, size));
+        }
+        let spread = |v: &[(f32, f32)]| v.iter().map(|&p| phase_gap(p, v[0])).fold(0.0f32, f32::max);
+        assert!(spread(&held) < 2e-3, "held: {}", spread(&held));
+        // the old anchor crossed cells (about 4 a turn) and its grid moved
+        assert!(hops >= 3, "{hops}");
+        assert!(spread(&old) > 0.05, "old: {}", spread(&old));
+    }
+
+    /// The default day cycle (4 hours, 60 frames a second) turns the light by
+    /// 7e-6 rad a frame: a turn of the camera keeps its anchors for seconds
+    /// (a light compared with the previous frame's gave a new one every
+    /// frame), and the grid never sweeps more than the bound at the centre.
+    #[test]
+    fn a_slow_day_cycle_holds_the_anchor_within_the_bound() {
+        let (radius, size) = (71.0f32, 2048u32);
+        let texel = 2.0 * radius / size as f32;
+        let camera = Vec3::new(137.3, 119.8, 31.0);
+        let per_frame = std::f32::consts::TAU / (4.0 * 3600.0 * 60.0);
+        let mut anchors = CascadeAnchors::default();
+        let mut taken = 0;
+        let mut last = Vec3::NAN;
+        let mut worst = 0.0f32;
+        for step in 0..720 {
+            let yaw = step as f32 * std::f32::consts::TAU / 720.0;
+            let center = camera + Vec3::new(yaw.cos(), yaw.sin(), 0.0) * 125.0;
+            let a = step as f32 * per_frame;
+            let light = Vec3::new(a.cos() * 0.5, a.sin() * 0.5 + 0.3, -0.8).normalize();
+            anchors.begin(false, true);
+            let anchor = anchors.pick(1, center, radius, size, light);
+            taken += usize::from(anchor != last);
+            last = anchor;
+            let (_, _, _, at) = anchors.held[1].unwrap();
+            worst = worst.max(at.distance(light) * anchor.distance(center) / texel);
+        }
+        assert!(worst <= SHADOW_ANCHOR_SWEEP + 1e-3, "{worst}");
+        assert!(taken < 40, "{taken} anchors in 720 frames");
+        // a light that drifts by less than any one frame's threshold is not lost
+        let mut drift = CascadeAnchors::default();
+        let center = Vec3::new(130.0, 120.0, 25.0);
+        let first = drift.pick(0, center, 20.0, 2048, Vec3::NEG_Z);
+        let far = center + Vec3::new(60.0, 0.0, 0.0);
+        let mut moved = false;
+        for k in 1..4000 {
+            let l = Vec3::new(k as f32 * 5e-7, 0.0, -1.0).normalize();
+            moved |= drift.pick(0, far, 20.0, 2048, l) != first;
+        }
+        assert!(moved, "a drift of 5e-7 a frame never moved the anchor");
+    }
+
+    #[test]
+    fn the_cascade_anchor_is_taken_again_when_it_must() {
+        let light = Vec3::new(0.2, 0.1, -0.9).normalize();
+        let center = Vec3::new(130.0, 120.0, 25.0);
+        let mut a = CascadeAnchors::default();
+        a.begin(false, true);
+        let first = a.pick(0, center, 20.0, 2048, light);
+        assert_eq!(first, shadow_anchor(center, 20.0));
+        // the centre moves on, the light does not: the anchor stays
+        let moved = center + Vec3::new(55.0, -30.0, 4.0);
+        assert_eq!(a.pick(0, moved, 20.0, 2048, light), first);
+        // the same radius to a rounding error
+        assert_eq!(a.pick(0, moved, 20.001, 2048, light), first);
+        // another size (field of view, shadow distance) or quality
+        assert_ne!(a.pick(0, moved, 25.0, 2048, light), first);
+        let held = a.pick(1, center, 20.0, 2048, light);
+        assert_eq!(a.pick(1, center, 20.0, 2048, light), held);
+        assert_ne!(a.pick(1, center + Vec3::new(500.0, 0.0, 0.0), 20.0, 4096, light), held);
+        // a centre a kilometre away
+        assert_eq!(a.pick(2, center, 20.0, 2048, light), shadow_anchor(center, 20.0));
+        let far = center + Vec3::new(1500.0, 0.0, 0.0);
+        assert_eq!(a.pick(2, far, 20.0, 2048, light), shadow_anchor(far, 20.0));
+        // the sun moves enough: the anchor follows it, from the new centre
+        let turned = Vec3::new(0.2, 0.12, -0.9).normalize();
+        let next = center + Vec3::new(55.0, 0.0, 0.0);
+        a.pick(0, center, 20.0, 2048, light);
+        assert_eq!(a.pick(0, next, 20.0, 2048, turned), shadow_anchor(next, 20.0));
+        // a photo tile or a region change, or `AURORA_SHADOW_ANCHOR=old`
+        for (cut, hold) in [(true, true), (false, false)] {
+            a.begin(false, true);
+            a.pick(0, center, 20.0, 2048, light);
+            a.begin(cut, hold);
+            let moved = center + Vec3::new(30.0, 0.0, 0.0);
+            assert_eq!(a.pick(0, moved, 20.0, 2048, light), shadow_anchor(moved, 20.0));
+        }
     }
 
     #[test]

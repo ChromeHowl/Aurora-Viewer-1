@@ -10086,6 +10086,11 @@ ui-options-aurora-ground-feet-height-help = Déplacement vertical maximal de cha
 ui-options-aurora-ground-feet-help = Remplace le placement standard du Legacy Viewer par l’adaptation Aurora aux pentes et aux marches distinctes. Les pieds peuvent se lever et les poses de priorité élevée gardent le contrôle. Sinon, les animations natives debout, accroupies et de récupération utilisent le comportement standard. Les deux corrections ne se cumulent jamais.
 ui-options-aurora-animation-clock = Synchronisation temporelle
 ui-options-aurora-animation-clock-experimental = Expérimental : la lecture synchronisée est encore en cours de validation sur la grille pour les avatars et les animesh. Legacy reste le mode par défaut.
+ui-options-aurora-clouds = Nuages
+ui-options-aurora-clouds-help = Aurora dessine les nuages en volume, à de vraies altitudes de nuages, éclairés par le soleil du ciel et façonnés par ses réglages de nuages : des cumulus, des nappes et des bases ombrées au lieu de la couche plate du Legacy Viewer. Ils restent dans le ciel et on ne peut pas les atteindre. Demande une carte graphique récente.
+ui-options-aurora-clouds-experimental = Expérimental : nouveau, et la couche plate du Legacy Viewer reste le choix par défaut tant qu’il n’est pas essayé sur davantage de cartes graphiques.
+ui-options-aurora-clouds-volumetric = Volumétriques
+ui-options-aurora-clouds-flat = Couche plate
 ui-options-aurora-animation-clock-help = Avatars et animesh : l’horloge synchronisée suit le temps écoulé depuis le premier signal reçu, même après un chargement tardif ou une édition. Legacy démarre au chargement et reprend à la pose suspendue après une édition.
 ui-options-aurora-animation-clock-synchronized = Horloge synchronisée
 ui-options-aurora-animation-clock-legacy = Legacy
@@ -14777,6 +14782,19 @@ wearable-favorites-delete-unloaded =
 wearable-favorites-invalid-name =
     Impossible de créer le dossier des vêtements préférés « { $name } ».
     Les noms de dossier ne peuvent pas contenir / ou \.
+# La fenêtre Photo 360° (LLFloater360Capture, floater_360capture.xml)
+capture-360-quality-preview = Aperçu (rapide)
+capture-360-quality-medium = Moyenne
+capture-360-quality-high = Élevée
+capture-360-quality-maximum = Maximale
+capture-360-hide-avatars = Masquer tous les avatars
+capture-360-capturing = Rendu de la face { $face } sur 6…
+capture-360-projecting = Assemblage de l'image 360°…
+capture-360-saving = Enregistrement de l'image 360°…
+capture-360-saved = Enregistré : { $name }
+capture-360-failed = L'image 360° n'a pas pu être créée.
+capture-360-save-failed = L'image 360° n'a pas pu être enregistrée : { $error }
+capture-360-save-dialog = Enregistrer l'image 360°
 
 # Parcel radio state and stream failures
 music-state-error = Lecture impossible : { $reason }
@@ -14859,12 +14877,28 @@ ui-options-attached-particles-hint = Affiche les particules de ce que portent le
 
 # Preferences › Graphics: progressive draw distance (FSRenderFarClipStepping)
 ui-options-draw-distance-stepping = Distance d'affichage progressive
-ui-options-draw-distance-stepping-hint = Après la connexion et après une téléportation vers une autre région, la distance d'affichage part de 32 m et double jusqu'à la vôtre, pour que ce qui est proche se charge d'abord.
 
 # macOS Window menu (mac_window_menu.rs)
 app-mac-window-menu = Fenêtre
 app-mac-minimize = Réduire
 app-mac-enter-full-screen = Passer en plein écran
+# Panorama viewer (ui/panorama.rs)
+panorama-reset = Réinitialiser la vue
+panorama-enlarge = Agrandir
+panorama-leave-full = Quitter la vue agrandie
+panorama-help = Glisser pour regarder autour, molette pour zoomer, double-clic pour réinitialiser. Cliquez dessus, puis les flèches pour regarder et + / - pour zoomer.
+
+# Texture preview: look into a 2:1 texture as a panorama
+resource-preview-360 = 360°
+
+# Photo window: the 360° format
+photo-format-360 = 360°
+photo-not-in-360 = Pas dans les images 360°.
+photo-360-inventory-size = Panorama : { $width } × { $height } (la plus grande texture)
+photo-360-output = Panorama : { $width } × { $height }
+photo-360-format = JPEG · 360°
+photo-360-placeholder = Appuyez sur le déclencheur : le panorama apparaît ici.
+photo-looks-not-in-360 = Pas appliqué à une image 360° : seuls les filtres de couleur le sont.
 
 vr-preferences-title = VR
 vr-preferences-about = Déplacement, confort et rendu du casque.
@@ -14895,3 +14929,4 @@ ui-minimap-avatar-name-format = Format du nom d’avatar
 ui-minimap-name-display = Nom d'affichage
 ui-minimap-name-legacy = Nom classique
 ui-minimap-name-display-legacy = Nom d'affichage (nom classique)
+ui-options-draw-distance-stepping-hint = Après la connexion et après une téléportation vers une autre région, la distance d'affichage part de 32 m et remonte jusqu'à la vôtre selon la charge : elle double toutes les 2 secondes quand les objets ont fini de se charger et que les images sont rapides, attend sinon, et recule d'un palier si les images restent trop lourdes.

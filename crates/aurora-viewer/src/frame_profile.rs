@@ -196,6 +196,9 @@ pub enum Part {
     ParamsPartSim,
     /// Particles: the frame's instances, sorted back to front.
     ParamsPartList,
+    /// Particles: split at the water and merged into the blended faces
+    /// (`scene::particle_order`).
+    ParamsPartOrder,
     /// Local lights nearest to the camera.
     ParamsLights,
     /// Reflection probes (candidate scan, slots, face to capture), then
@@ -234,7 +237,7 @@ pub enum Part {
 }
 
 impl Part {
-    pub const ALL: [Part; 37] = [
+    pub const ALL: [Part; 38] = [
         Part::Fetched,
         Part::Geometry,
         Part::Decoded,
@@ -257,6 +260,7 @@ impl Part {
         Part::ParamsPartSources,
         Part::ParamsPartSim,
         Part::ParamsPartList,
+        Part::ParamsPartOrder,
         Part::ParamsLights,
         Part::ParamsProbes,
         Part::UiBars,
@@ -307,6 +311,7 @@ impl Part {
             Part::ParamsPartSources => "part_sources",
             Part::ParamsPartSim => "part_sim",
             Part::ParamsPartList => "part_list",
+            Part::ParamsPartOrder => "part_order",
             Part::ParamsLights => "lights",
             Part::ParamsProbes => "probes",
             Part::UiBars => "bars",
@@ -433,6 +438,8 @@ struct Period {
     gpu_ssao: f32,
     /// The contact shadows alone (inside g_effects).
     gpu_contact: f32,
+    /// The volumetric clouds' compute alone (inside g_terrain_sky).
+    gpu_clouds: f32,
     /// The bloom levels alone (inside g_post).
     gpu_bloom: f32,
     /// The rest of g_effects: planar reflections, probe, scene copy, SSR.
@@ -462,6 +469,7 @@ struct Period {
     triangles: u64,
     shadow_draws: u64,
     particles: u64,
+    particle_runs: u64,
     occluded: u64,
     records_bytes: u64,
     palette_bytes: u64,
@@ -711,6 +719,7 @@ impl FrameProfile {
         }
         p.gpu_ssao += render.gpu_ssao.unwrap_or(0.0);
         p.gpu_contact += render.gpu_contact.unwrap_or(0.0);
+        p.gpu_clouds += render.gpu_clouds.unwrap_or(0.0);
         p.gpu_bloom += render.gpu_bloom.unwrap_or(0.0);
         if let Some(e) = render.gpu_effects {
             add(&mut p.gpu_effects, &e);
@@ -742,6 +751,7 @@ impl FrameProfile {
             }
         }
         p.particles += render.particles as u64;
+        p.particle_runs += render.particle_runs as u64;
         p.occluded += render.occluded.unwrap_or(0) as u64;
         p.records_bytes += render.records_uploaded;
         p.palette_bytes += render.palettes_uploaded;
@@ -1043,6 +1053,8 @@ fn summary(p: &Period, elapsed: Duration) -> String {
     let _ = write!(out, " g_ssao={:.3}", p.gpu_ssao / gpu_n);
     // the contact shadows alone (inside g_effects)
     let _ = write!(out, " g_contact={:.3}", p.gpu_contact / gpu_n);
+    // the volumetric clouds' compute alone (inside g_terrain_sky; 0 while off)
+    let _ = write!(out, " g_clouds={:.3}", p.gpu_clouds / gpu_n);
     // the bloom levels alone (inside g_post)
     let _ = write!(out, " g_bloom={:.3}", p.gpu_bloom / gpu_n);
     let _ = write!(out, " | shadow_path={}", aurora_render::shadow_cull::path_name(p.shadow_path));
@@ -1060,7 +1072,7 @@ fn summary(p: &Period, elapsed: Duration) -> String {
     let s = &p.scene;
     let _ = write!(
         out,
-        " | draws={:.0} calls={:.0} tris_k={:.0} shadow_draws={:.0} particles={:.0} occluded={:.0} cull={} \
+        " | draws={:.0} calls={:.0} tris_k={:.0} shadow_draws={:.0} particles={:.0} part_runs={:.0} occluded={:.0} cull={} \
          blend={:.0} blend_tris_k={:.0} blend_early={:.2} blend_glow={:.0} glow_alpha={:.0} lights={:.0} light_tiles={:.2} probes={:.0} | objects={:.0} visible={:.0} synced={:.0} anchored={:.0} movers={:.0} flexies={:.0} flexies_held={:.0} rebuilt={:.1} posed={:.1} \
          records_kb={:.1} palettes_kb={:.1} cull_kb={:.1} vertices_kb={:.1} journal_kb={:.1} | textures={} texture_mb={} texture_pages={} pages_mb={} geometry_mb={} \
          jobs={:.0} geom_pending={:.0} sync_backlog={:.0}",
@@ -1069,6 +1081,7 @@ fn summary(p: &Period, elapsed: Duration) -> String {
         count(p.triangles) / 1000.0,
         count(p.shadow_draws),
         count(p.particles),
+        count(p.particle_runs),
         count(p.occluded),
         if p.gpu_cull { "gpu" } else { "cpu" },
         count(s[5]),
@@ -1172,7 +1185,7 @@ mod tests {
         assert!(l.contains(" calls=40 "), "{l}");
         assert!(l.contains(" r_finish=0.00 ") && l.contains(" g_objects=0.000 "), "{l}");
         assert!(
-            l.contains(" g_depth=0.000 g_depth_msaa=0.000 g_ssao=0.000 g_contact=0.000 g_bloom=0.000 | shadow_path="),
+            l.contains(" g_depth=0.000 g_depth_msaa=0.000 g_ssao=0.000 g_contact=0.000 g_clouds=0.000 g_bloom=0.000 | shadow_path="),
             "{l}"
         );
         assert!(

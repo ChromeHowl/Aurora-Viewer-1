@@ -28,17 +28,19 @@
 // the light, divide them by their distance to the light point (in that
 // space every ray of light is parallel), share them in workgroup memory,
 // and a pixel is in shadow when one of the depths before it along the ray
-// comes within a surface thickness of its own. Changes from the original:
+// comes within a surface thickness of its own. Neighbouring wavefronts can
+// floor onto the same texel; each keeps the darker shadow in `shadow_max`
+// (`keep_darker`), and `write_mask` stores that once. Changes from the original:
 // integer texel loads instead of a clamp-to-border sampler (outside the
 // screen reads the far depth), the early-out of a whole wavefront through
 // workgroup memory (no wave intrinsics in WGSL), the shadow stored rather
 // than the light, no debug outputs, occluders taken as deep as the ray went
-// under them (up to `tuning.w`) rather than a shell (`depth_delta`), more
-// samples in a photo larger than the viewfinder (the four constants below
-// replaced in a pipeline of its own, `shader_source` in contact_shadows.rs:
-// the shadow keeps its length in the image), Bend's defaults otherwise
-// (BilinearSamplingOffsetMode and IgnoreEdgePixels off, no precision
-// offset).
+// under them (up to `tuning.w`, and as deep as they are wide along the ray)
+// rather than a shell (`depth_delta`), more samples in a photo larger than
+// the viewfinder (the four constants below replaced in a pipeline of its
+// own, `shader_source` in contact_shadows.rs: the shadow keeps its length
+// in the image), Bend's defaults otherwise (BilinearSamplingOffsetMode and
+// IgnoreEdgePixels off, no precision offset).
 
 struct Params {
     // x, y: the light on screen (pixels, y down), z: its depth, w: 1 when
@@ -50,11 +52,33 @@ struct Params {
     // occluders' depth in units of surface thickness per unit of reversed
     // depth (0: Bend's shell of one unit)
     tuning: vec4<f32>,
+    // x: units of depth per pixel of an occluder's run along the ray (0:
+    // every occluder as deep as tuning.w); yzw: padding to a vec4
+    caster_run: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> params: Params;
 @group(0) @binding(1) var depth_tex: texture_depth_2d;
 @group(0) @binding(2) var out_tex: texture_storage_2d<rgba8unorm, write>;
+// One quantized shadow per pixel, 0 lit, 255 in contact shadow. Wavefronts
+// meet on a texel where their rays floor together; `atomicMax` keeps the
+// darker one. `clear` zeros it, `write_mask` stores it into `out_tex`.
+@group(0) @binding(3) var<storage, read_write> shadow_max: array<atomic<u32>>;
+
+// The mask value of `result` (1 lit, 0 in shadow), as the unorm8 the store
+// used to write: 0 lit, 255 in contact shadow.
+fn shadow_level(result: f32) -> u32 {
+    return u32(round(saturate(1.0 - result) * 255.0));
+}
+
+fn keep_darker(write_xy: vec2<i32>, result: f32) {
+    let size = vec2<i32>(textureDimensions(out_tex));
+    if (any(write_xy < vec2<i32>(0)) || any(write_xy >= size)) {
+        return;
+    }
+    let pixel = u32(write_xy.y) * u32(size.x) + u32(write_xy.x);
+    atomicMax(&shadow_max[pixel], shadow_level(result));
+}
 
 // Must match WAVE_SIZE in contact_shadows.rs.
 const WAVE_SIZE: i32 = 64;
@@ -97,7 +121,22 @@ struct ShadowWindow {
     direction: f32,
     // the deepest an occluder is taken to be, in units (1: Bend's shell)
     depth: f32,
+    // units of depth per pixel of an occluder's run along the ray
+    run_units: f32,
 };
+
+// How far the sample's surface lies in front of the ray, in units.
+fn in_front(w: ShadowWindow, sample_depth: f32) -> f32 {
+    return (sample_depth * w.scale - w.start) * -w.z_sign;
+}
+
+// The consecutive samples in front of the ray within the window: the
+// caster's width along the ray so far, in samples (a pixel along the major
+// axis: on a diagonal ray a sample is up to 1.4 pixels of the caster, so the
+// width is then under-counted and the depth a little shallower).
+fn next_run(w: ShadowWindow, v: f32, run: f32) -> f32 {
+    return select(0.0, run + 1.0, v > 0.0 && v < w.depth + 1.0);
+}
 
 // How far the sample `k` pixels along the ray is from shadowing the pixel:
 // 0.75 or less is full shadow (with the contrast of 4), 1 or more lit.
@@ -107,17 +146,22 @@ struct ShadowWindow {
 // visible faces, was then stopped only where it grazed their edges: the
 // ground took the outline of the caster instead of its shadow (issue 988).
 // The window now reaches back to the pixel's own depth when the ray recedes
-// from the camera (a sun ahead), up to `depth`: a surface between the pixel
-// and the ray is a body the ray went under. One nearer than the pixel keeps
-// the shell, or each caster would darken the ground just behind it with a
-// copy of its silhouette.
-fn depth_delta(w: ShadowWindow, sample_depth: f32, k: i32) -> f32 {
-    let v = (sample_depth * w.scale - w.start) * -w.z_sign;
+// from the camera (a sun ahead), up to `depth`, and no deeper than the
+// caster is wide along the ray (`run`): a post thinner than the window no
+// longer shadows the ground the ray passes behind it. A surface between the
+// pixel and the ray is a body the ray went under. One nearer than the pixel
+// keeps the shell, or each caster would darken the ground just behind it
+// with a copy of its silhouette.
+fn depth_delta(w: ShadowWindow, v: f32, k: i32, run: f32) -> f32 {
     // the pixel's depth seen from the sample, in front of the ray by
     // start × (distance / distance_k - 1)
     let distance_k = max(w.distance + f32(k) * w.direction, 1.0);
     let receding = w.start * f32(k) * w.direction * w.z_sign / distance_k;
-    return max(1.0 - v, v - clamp(receding, 1.0, w.depth));
+    var deep = w.depth;
+    if (w.run_units > 0.0) {
+        deep = max(1.0, min(w.depth, run * w.run_units));
+    }
+    return max(1.0 - v, v - clamp(receding, 1.0, deep));
 }
 
 fn isign(v: vec2<i32>) -> vec2<i32> {
@@ -216,28 +260,45 @@ fn main(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_index
         sample_distance[0],
         direction,
         max(1.0, params.tuning.w * sampling_depth[0]),
+        params.caster_run.x,
     );
+    var run = 0.0;
     // sample i lies i + 1 pixels along the ray
     for (var i = 0; i < HARD_SHADOW_SAMPLES; i++) {
-        hard_shadow = min(hard_shadow, depth_delta(window, depth_data[sample_index + i], i + 1));
+        let v = in_front(window, depth_data[sample_index + i]);
+        run = next_run(window, v, run);
+        hard_shadow = min(hard_shadow, depth_delta(window, v, i + 1, run));
     }
     // the bulk, in four groups averaged at the end
     for (var i = HARD_SHADOW_SAMPLES; i < SAMPLE_COUNT - FADE_OUT_SAMPLES; i++) {
-        shadow_value[i & 3] = min(shadow_value[i & 3], depth_delta(window, depth_data[sample_index + i], i + 1));
+        let v = in_front(window, depth_data[sample_index + i]);
+        run = next_run(window, v, run);
+        shadow_value[i & 3] = min(shadow_value[i & 3], depth_delta(window, v, i + 1, run));
     }
     for (var i = SAMPLE_COUNT - FADE_OUT_SAMPLES; i < SAMPLE_COUNT; i++) {
         let fade_out = f32(i + 1 - (SAMPLE_COUNT - FADE_OUT_SAMPLES)) / f32(FADE_OUT_SAMPLES + 1) * 0.75;
-        shadow_value[i & 3] = min(shadow_value[i & 3], depth_delta(window, depth_data[sample_index + i], i + 1) + fade_out);
+        let v = in_front(window, depth_data[sample_index + i]);
+        run = next_run(window, v, run);
+        shadow_value[i & 3] = min(shadow_value[i & 3], depth_delta(window, v, i + 1, run) + fade_out);
     }
     // a sample on the reference depth is full shadow; the contrast widens it
     let contrast = params.tuning.z;
     shadow_value = saturate(shadow_value * contrast + (1.0 - contrast));
     hard_shadow = saturate(hard_shadow * contrast + (1.0 - contrast));
     let result = min(hard_shadow, dot(shadow_value, vec4<f32>(0.25)));
-    let size = vec2<i32>(textureDimensions(out_tex));
-    if (all(write_xy >= vec2<i32>(0)) && all(write_xy < size)) {
-        textureStore(out_tex, write_xy, vec4<f32>(1.0 - result, 0.0, 0.0, 0.0));
+    keep_darker(write_xy, result);
+}
+
+// The mask, after every wavefront: one store per pixel, the darker shadow.
+@compute @workgroup_size(8, 8, 1)
+fn write_mask(@builtin(global_invocation_id) id: vec3<u32>) {
+    let size = textureDimensions(out_tex);
+    if (id.x >= size.x || id.y >= size.y) {
+        return;
     }
+    let pixel = id.y * size.x + id.x;
+    let v = f32(atomicLoad(&shadow_max[pixel])) / 255.0;
+    textureStore(out_tex, vec2<i32>(id.xy), vec4<f32>(v, 0.0, 0.0, 0.0));
 }
 
 // Every pixel lit, before the wavefronts (wgpu's clear_texture needs a
@@ -247,5 +308,11 @@ fn clear(@builtin(global_invocation_id) id: vec3<u32>) {
     let size = textureDimensions(out_tex);
     if (id.x < size.x && id.y < size.y) {
         textureStore(out_tex, vec2<i32>(id.xy), vec4<f32>(0.0));
+        // (a placeholder buffer when the image is past the device's
+        // storage limit: nothing runs after the clear then)
+        let pixel = id.y * size.x + id.x;
+        if (pixel < arrayLength(&shadow_max)) {
+            atomicStore(&shadow_max[pixel], 0u);
+        }
     }
 }

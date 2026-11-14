@@ -482,6 +482,7 @@ the background still applies outside screenshots.
 | `AURORA_DEMO_SNAPSHOT=<scenario>` | Photo viewfinder, photo window, full-frame view, a photo saved at its size, sent to the inventory, posted to the profile or sent by e-mail, the photo quality on a card short of video memory |
 | `AURORA_DEMO_SNAPSHOT_FRAME=<n>` | Frame the scenario's photo is taken (700 by default) |
 | `AURORA_DEMO_SNAPSHOT_TILE=<px>` | Largest side drawn in one pass: forces the tiles |
+| `AURORA_DEMO_SNAPSHOT_360=<folder>[:preview\|medium\|high\|maximum][:hide][:inventory][:panel\|:classic]` | The photo window opened in 360° at frame 600 and its shutter pressed, the panorama written to the folder |
 | `AURORA_DEMO_FREEZE_WORLD=1` | With `AURORA_DEMO_SNAPSHOT=viewfinder-frozen`: a prop derezzed and particles started while the world is frozen |
 | `AURORA_DEMO_PHOTO_ROLL=<n>[:quick][:delete][:send][:upload][:item][:mail][:apply][:applied][:moved][:toolbar][:apart]` | The photo reel filled with `n` photos, then its quick view, a deletion asked, a photo sent again (inventory, e-mail), applied to the profile, the tray moved or the toolbar's Photo roll |
 | `AURORA_DEMO_ISOLATE=own\|pick[-panel][-opaque][-keep][-back]` | The photo's isolation: our avatar alone on an empty background, or chosen with a click |
@@ -904,6 +905,29 @@ the right toolbar (dimmed, "No photos this session yet", until the first
 photo), then closes photo mode and opens the quick view with it (the button
 lit). The log gives `photo reel demo: <n> photos in the reel`.
 
+`AURORA_DEMO_SNAPSHOT_360`: the photo window (the toolbar's `360capture`
+opens it too) is opened in its 360° format at frame 600 and its shutter is
+pressed at frame 630: the world frozen, six square 90° faces drawn from the
+camera's position and kept on the GPU (the log gives `360 capture: 6 faces
+of <n> px sent in <ms>`), the panorama built on the GPU and read back
+asynchronously (`360 capture: <w> x <h> panorama read back <ms> ms after
+the last face`) and shown in the window's viewer, then written to
+`<folder>` under `sl360_<region>_<w>x<h>_<face>_<stamp>.jpg` (`360 capture:
+saved <path>`). The panorama is four faces wide. A word after the folder
+picks the quality level (`preview` 128 px faces by default, `medium` 512,
+`high` 1024, `maximum` 2048); `hide` ticks "Hide all avatars"; `inventory`
+takes the inventory's panorama instead (2048 x 1024, the price accepted as
+`AURORA_DEMO_SNAPSHOT` does; there is no grid, so the log tells of the
+upload and `inventory_360.jpg` in the folder is the picture that was encoded,
+rolled to the heading); `panel` or `classic` picks the photo window's style
+(the viewfinder otherwise, whose drawer shows the panorama). Look at the
+JPEG: the six faces must join without a seam (the horizon is a straight line
+at mid height), the zenith and the nadir are stretched across the top and
+bottom rows without a hole, north (+Y) is at the centre column and east at
+three quarters. The log also gives the interest list mode asked of the
+regions (`interest list mode 360`, then `default` when the format is left),
+which the demo has no simulator to send to.
+
 `AURORA_DEMO_ISOLATE` (with `AURORA_DEMO_SNAPSHOT`, which opens the photo
 mode): at frame 640 `own` shows our avatar alone (My avatar), the sky,
 terrain and water left out: the window shows a checkerboard around it, and
@@ -1306,7 +1330,7 @@ when unfocused") is ignored during a screenshot.
   trigger plain G (snap / guide). Releasing a key first pressed without
   AltGr must always release it, even if AltGr was held in the meantime.
 
-- **`AURORA_DEMO_CAMERA=alt,x,y|altgr,x,y|pan,x,y|zoom,x,y|crouch-alt,x,y|crouch-pan,x,y|crouch-zoom,x,y|close,x,y[,n]|drift,x,y[,n]|zoom-resident|zoom-unloaded|tag|ml|ml-alt|ml-zoom|ml-zoom-alt|wheel|wheel-chat|fly|sit|sit-ml|sit-ml-reclined|scripted|scripted-sit|head-follow|pelvis-follow|hand-follow`**:
+- **`AURORA_DEMO_CAMERA=alt,x,y|altgr,x,y|pan,x,y|zoom,x,y|crouch-alt,x,y|crouch-pan,x,y|crouch-zoom,x,y|close,x,y[,n]|drift,x,y[,n]|spin,x,y[,px]|zoom-resident|zoom-unloaded|tag|ml|ml-alt|ml-zoom|ml-zoom-alt|wheel|wheel-chat|fly|sit|sit-ml|sit-ml-reclined|scripted|scripted-sit|head-follow|pelvis-follow|hand-follow`**:
   scenario logged under `demo camera` — Alt+click at (x, y) then drag and
   return while walking; `altgr`: the same orbit with AltGr alone held, as
   winit reports it (neither Ctrl nor Alt), so its `demo camera` lines match
@@ -1314,7 +1338,11 @@ when unfocused") is ignored during a screenshot.
   n frames (60 by default), then the camera no longer moves (close-up with a
   fixed camera, to compare consecutive screenshots); `drift`: the same
   close-up, then a very slow orbit (one fiftieth of a mouse pixel per frame)
-  until frame 1200; press on our own name plate then drag (steering);
+  until frame 1200; `spin,x,y[,px]`: Alt+click at (x, y) at frame 600, then a
+  steady Ctrl+Alt orbit of `px` mouse pixels a frame (0.5 by default) until
+  frame 1200: the view turns all the time, for the shadows that depended on
+  where the camera looked (`AURORA_SHADOW_ANCHOR`, `AURORA_DEMO_PROJECTOR`);
+  press on our own name plate then drag (steering);
   entering / leaving mouselook (frame 650 shows "Press Esc to return to
   world view" above the bottom bar); `ml-zoom`: the right button held in
   mouselook at 640 (the normal angle stays: no zoom was set with the wheel
@@ -4534,6 +4562,8 @@ both open states and the selection count. Capture at frame 620.
 | `AURORA_DEMO_WATER_EEP=<fresnel offset>,<fresnel scale>,<blur>,<normal scale>[,<fog r,g,b>]` | Water of the `AURORA_DEMO_SKY` day with these values, out-of-range ones included |
 | `AURORA_DEMO_SKY_FLAGS=<flags>\|none` | Settings flags of the `AURORA_DEMO_SKY` day (rights of the sky and water snapshots) |
 | `AURORA_DEMO_SKY_OPTICS=rainbow\|halo\|clear` | Rainbow or 22° halo in the sky |
+| `AURORA_DEMO_CLOUDS=fair\|broken\|stratocumulus\|overcast` | Volumetric clouds (Preferences › Aurora › Clouds on) under a fixed sky of that cloud type |
+| `AURORA_DEMO_CLOUDS_PITCH=<degrees>` | Camera pitch of `AURORA_DEMO_CLOUDS` (default 12; 2 shows the clouds at the horizon) |
 | `AURORA_DEMO_NIGHT_SKY=real\|legacy[:<azimuth>,<elevation>]` | The night sky's stars at midnight, the camera looking at the sky |
 | `AURORA_DEMO_NIGHT_SKY_PLACE=<latitude>[,<gain>[,<milky way>]]` | Where the real sky is seen from, its stars' brightness and the Milky Way's |
 | `AURORA_DEMO_NIGHT_SKY_CLOCK=<longitude>[,<YYYY-MM-DDTHH:MM>]` | The real sky's hour from the clock at this longitude, at a fixed UTC moment if given |
@@ -4757,10 +4787,15 @@ both open states and the selection count. Capture at frame 620.
   our avatar. The square of light of the projector with the white image has
   soft edges (visible with `AURORA_DEMO_TOD=3`): the fade comes from the
   distance to the focal point, not from the levels of the texture. The post
-  casts its shadow on the wall: the two projectors most present on screen
-  have a shadow map (`AURORA_PROJECTOR_SHADOWS=0`: none, the wall is
-  lit behind the post), and their shadows fade in
-  during the first second. `point`: the three projectors without their
+  casts its shadow on the wall: the projectors on screen that send the most
+  light to the camera (the Legacy Viewer ranks the ones in its frustum by
+  apparent size) have a shadow map, two at most (`AURORA_PROJECTOR_SHADOWS=0`:
+  none, the wall is lit behind the post), and their shadows fade in during
+  the first second. A projector that held a map keeps it for 5 seconds after
+  it leaves the screen, so that turning back shows its shadow at once: with
+  `AURORA_DEMO_CAMERA=spin,640,400,2` and `AURORA_PROJECTOR_TRACE=1` (the
+  log's `projector trace` lines) the same two projectors keep their maps and
+  their fade of 1 along the turn. `point`: the three projectors without their
   texture, hence point lights, as they were rendered before being supported —
   the pool light then lights in cyan our avatar from below and
   the sides of the slab's relief turned towards it. The orange light is
@@ -4863,6 +4898,52 @@ both open states and the selection count. Capture at frame 620.
   sends Second Life's own, `rainbow_id` and `halo_id`); the shape, the place
   and the colors' order are those of skyF.glsl. Capture in `AURORA_AA=3` and
   `AURORA_AA=6`.
+- **`AURORA_DEMO_CLOUDS=fair|broken|stratocumulus|overcast`**: turns on
+  Preferences › Aurora › Clouds › Volumetric for this launch (in memory,
+  `AURORA_CLOUDS=legacy` keeps the Legacy Viewer's flat layer under the
+  same sky, for the before / after) and the region answers with a fixed
+  afternoon (`demo_clouds.rs`): the sun about 50° up in the south-east, the
+  Legacy Viewer's default haze and cloud colours, the cover of the preset
+  through `cloud_shadow` (0.27 `fair`, 0.37 `broken`, 0.42 `stratocumulus`,
+  0.62 `overcast`), which gives the cloud type and so the layer: cumulus
+  1.2 to 2 km above the camera, a lumpy sheet at 0.6 to 1.5 km, a stratus
+  slab at 0.4 to 0.9 km. The camera looks east, 12° up, from behind the
+  avatar. The volumetric layer takes about 16 frames after the switch to
+  make its noise (the Legacy layer shows meanwhile), so capture from
+  `AURORA_CAPTURE_FRAMES=2500` (the loading fade of the interface ends first). What to look at: separate heaps with flat
+  bases and bright rims for `fair`, rows that merge towards the horizon, a
+  grey uniform sheet for `overcast`, no hard edge at the horizon (the far
+  clouds melt into the haze), the sun's disc and the stars behind the
+  clouds' transparency. A photo (one pass, the tiles of a large one, any
+  frame drawn once and read back) traces the layer in full instead: every
+  pixel, 128 steps, 4 sub-samples with their jitter keyed on the pixel of
+  the whole photo (no seam between tiles), no history, so that the live
+  view's history is untouched and does not flash after the shot; try
+  `AURORA_DEMO_SNAPSHOT=shoot` (and `AURORA_DEMO_SNAPSHOT_TILE=512` for
+  tiles) with this scenario. Under water, in a cut-out photo (no sky) and
+  in the reflections (water, mirror, probes) the Legacy layer is drawn,
+  for now.
+  `AURORA_PROFILE=1` prints `g_clouds=` (the noise, trace and
+  reconstruction compute, in ms; the composite is inside the sky's time).
+- **`AURORA_CLOUDS=aurora|legacy`**: volumetric clouds or the Legacy Viewer's
+  flat layer for this launch, whatever the setting says (and the demo
+  scenario). Anything else changes nothing.
+- **`AURORA_CLOUD_NOISE=<file>`**: the volumetric clouds' noise textures
+  come from `assets/clouds/cloud_noise.bin`, built into the viewer and read by a
+  thread when the clouds are turned on. With this variable the file is the one
+  named; a path that does not exist, or a file that fails its magic, version,
+  size or checksum, logs a warning (`cloud noise: ...`) and the shader makes the
+  noise instead, over 16 frames, as before. To rebuild the file after a change
+  to the generators (`clouds_noise.rs`, kept equal to `gen_base`, `gen_detail`
+  and `gen_curl` of `clouds.wgsl`): `cargo run -p aurora-render --example
+  generate_cloud_noise`; the test `the_generator_is_deterministic_and_matches_the_shipped_file`
+  fails until the file and its pinned hashes are updated.
+- **`AURORA_CLOUDS_DEBUG=weather|slice`**: a measurement view of the volumetric
+  clouds, for development only (off by default, not a setting). `weather`:
+  the weather map's coverage as light on the sky. `slice`: three vertical
+  slices of the density across the upper picture, 100 px to the km in both
+  directions (red above 0.02, green above 0.15), to measure the width to
+  height of the heaps on the capture.
 - **`AURORA_DEMO_NIGHT_SKY=real|legacy[:<azimuth>,<elevation>]`**: sets
   Preferences › Graphics › Environment › Night sky for this launch (in
   memory), the demo's midnight (unless `AURORA_DEMO_TOD` is also given) and
@@ -5013,7 +5094,7 @@ both open states and the selection count. Capture at frame 620.
 | `AURORA_DEMO_OVERDRAW=<n>` | Overdraw test: n rows of opaque walls |
 | `AURORA_DEMO_ALPHA_MASK_AB=<shape>:<layers>:<mode>[:touch]` | Static layered alpha faces for the offline Mask/Blend A/B (#1696) |
 | `AURORA_DEMO_ALPHA_SORT=<mode>` | Original three-face DAE/PNG fixture in the world or worn as a HUD |
-| `AURORA_ALPHA_FACE_SORT=0\|1` | World/HUD nonrigged alpha face-depth sorting, on by default; 0 retains object-centre sorting for A/B |
+| `AURORA_ALPHA_FACE_SORT=0\|1` | World/HUD nonrigged alpha face-depth sorting, on by default; 0 retains object-centre sorting for A/B (the particles then sort by radial distance too, to merge with the faces) |
 | `AURORA_DEMO_STREAM=<n>[,<wave>][,leave][,j2k=<folder>][,net=<ms>][,size=<m>]` | Streaming stutter test; with `net=`, textures downloaded from a local server |
 | `AURORA_DEMO_REZ_EFFECT=1\|loop\|styles\|cold` | The rez effect: objects and an avatar appearing, dressing and leaving in front of the camera; `styles`: its three looks side by side; `cold`: a cold arrival with slow textures |
 | `AURORA_REZ_EFFECT=0\|1` | The rez effect off or on, whatever the setting (Preferences › Aurora) |
@@ -5038,6 +5119,8 @@ both open states and the selection count. Capture at frame 620.
 | `AURORA_DEMO_COPLANAR_DECAL=1`, `mask` or `blend` | Two dirt strips blended over a grass face of the same static mesh, 9 m along the start view (#3059) |
 | `AURORA_DEMO_FOLIAGE=1` | The same cut-out foliage panel at 5, 10, 20, 35 and 60 m along the start view (alpha coverage of the mips) |
 | `AURORA_DEMO_PLANTS=1`, `far` or `dense` | Linden trees and grass: every species near or far along the start view, or a forest |
+| `AURORA_DEMO_PARTICLE_GLASS=1`, `sparse` or `dense` | Fountains behind, in front of and through three glass panes (one fullbright, one glowing; the emitters show red: the particle-source beacon highlight); 60 spread-out panes and 6 emitters; or 300 thin panes and 36 emitters (the cap of 256 particle runs) |
+| `AURORA_PARTICLE_INTERLEAVE=0` | Particles as before the interleave: all after the blended faces and the overlays, radial sort, not clipped at the water, none of its pipelines or targets made (A/B; read at launch, not live) |
 | `AURORA_DEMO_BLEND_SHADOWS=1` or `dense` | Alpha-blended panels in the sun (greenhouse pane, face and texture alpha), or 400 greenhouse panes |
 | `AURORA_DEMO_FEET=opaque` or `blend` | A shoe on each foot of our avatar and of the crowd, and two blocks on the ground (contact shadows) |
 | `AURORA_DEMO_LIGHTS=<n>` | Local light load: n small lights in the crowd |
@@ -5335,6 +5418,33 @@ both open states and the selection count. Capture at frame 620.
   left half, leaves in the top right quarter, grass blades from the bottom
   edge), only with this scenario. Close-ups: `AURORA_DEMO_CAMERA=close,790,185,80`
   on the tree behind the palm, capture at frame 760.
+- **`AURORA_DEMO_PARTICLE_GLASS=1|sparse|dense`** (`demo_particle_glass.rs`), with
+  `AURORA_PARTICLE_INTERLEAVE=0|1` for the A/B: particles drawn between the
+  blended faces by view depth (`scene/particle_order.rs`). `1`: two 3 m
+  glass panes 9 m along the start view (face alpha 0.45, the middle one
+  fullbright, the right one glowing), a fountain 2 m behind each, one 2 m in front of each and one in
+  the left pane's plane. Expected: the particles behind a pane tinted by the
+  glass and those in front clear, the arc through the left pane cut exactly
+  at it, the glowing pane keeping its glow over the particles behind it;
+  with `AURORA_PARTICLE_INTERLEAVE=0` all the particles are over the glass.
+  `sparse`: 60 panes spread over 8 to 68 m ahead and 22 m across, and 6
+  fountains among them: the usual few runs of a busy place.
+  `dense`: 300 thin panes 8 to 80 m ahead and 36 fountains over the same
+  depths, more than 256 runs by depth alone, for the cost of the cap: read
+  `p_part_order`, `part_runs`, `r_*`, `g_transparent` and `g_post` with
+  `AURORA_PROFILE=1`, alternating `AURORA_PARTICLE_INTERLEAVE=0` and `1`
+  (the variable is read at launch). With the interleave the particles are
+  drawn inside the blended part of the GPU timing and the overlays after
+  them: `g_transparent` then holds the particles and `g_post` less, so
+  compare their sum. The particle-source beacons and the other debug
+  highlights (the red emitters of this scenario) are drawn after the
+  particles too, over them, as the Legacy Viewer draws its highlights after
+  the alpha pass; with `AURORA_PARTICLE_INTERLEAVE=0` they are under them. Under the water,
+  `AURORA_DEMO_WATER=shore:alpha:particles` (also `medium:shore:alpha:particles`)
+  adds a fountain behind and one in front of each of the three blended boxes
+  of `:alpha`: the particles under the surface are refracted and fogged like
+  the box, those above it are not, a fountain crossing the surface is cut at
+  it. `AURORA_PARTICLE_INTERLEAVE=0` brings back the former order and no clip.
 - **`AURORA_DEMO_BLEND_SHADOWS=1|dense`**: alpha-blended prims that cast
   sun shadows (`demo_blend_shadows.rs`), best from
   `AURORA_DEMO_POS="80,100"`. `1`: six 2 m panels lying 1.3 m above the
@@ -5365,7 +5475,15 @@ both open states and the selection count. Capture at frame 620.
   `AURORA_DEBUG_SHADOWS=1` and `AURORA_DEMO_CAMERA=close,615,672,50`
   (frame 780 at 60 fps), the ground under the hovering shoe takes its
   contact shadow; with `AURORA_CONTACT_SHADOWS=shell` it stays lit, a
-  thin dark line along the sole's edge.
+  thin dark line along the sole's edge. From `AURORA_DEMO_POS="100,100"`
+  (camera looking east, about 3 m behind the avatar) three round posts
+  1.6 m tall (3, 6 and 12 cm across) stand 2, 3 and 4 m east and 1 m south
+  of the start position (the first about 5 m from the camera), a hoof on
+  the ground and a shoe hovering 2 cm above it about 2 m east and 1.7 and
+  2.3 m north of it:
+  thin and thick casters for the contact shadows' width
+  (`AURORA_CONTACT_SHADOWS=deep` against `1`, with `AURORA_DEMO_SUN=30,15`).
+  `AURORA_DEMO_POS="101.8,100.3"` brings the hoof and the shoe to about 3 m.
 - **`AURORA_DEMO_LASHES=1`** (with `AURORA_DEMO_HAIR`, for example
   `1,48,20`): our avatar also wears a small red ball, a blended rigged
   mesh, inside the head shell on the side the default camera sees: the
@@ -5422,7 +5540,8 @@ both open states and the selection count. Capture at frame 620.
   refused by a full video memory. An effect the frame can go without is
   left out and tried again after 2 s, then twice as long each time up to
   30 s: the selection outline (`AURORA_DEMO_BUILD`), the depth of field
-  (`AURORA_DEMO_DOF`), a photo look; the log says once `<what>: out of
+  (`AURORA_DEMO_DOF`), a photo look, the volumetric clouds (the Legacy
+  layer stays; `AURORA_DEMO_CLOUDS`); the log says once `<what>: out of
   video memory, drawn without it for now`. One the frame cannot go without
   shows the interface alone, as `AURORA_GPU_OOM_TARGETS` does: RLVa's
   vision spheres and reduced scene (`AURORA_DEMO_RLVA`), the TAA history
@@ -5758,6 +5877,18 @@ releases at frame 730; `face-cancel` cancels with Escape and `face-ui` moves ove
 the library. Capture at frame 750 to check the overlay is cleared. Suffixes can
 be combined, for example `face-hover-material-transparent-all`. `face-hover-contents`
 holds Ctrl: no face overlay, since the cargo goes into contents.
+
+`AURORA_DEMO_TEXTURE_LIBRARY`: `panorama` opens the preview of an item named
+for the 360° marker (`360 Snapshot : Aurora Demo`, a synthetic 2048 x 1024
+equirect with a hue per direction, lines every 30°, the north in red at the
+centre and a white meridian split across the two edges) as a panorama;
+`panorama-switch` opens a plain 2:1 texture and turns its 360° switch on;
+`panorama-full` enlarges the viewer; `panorama-nocopy` opens a marked item
+the agent may not copy: Copy UUID and Save As stay off. Look for: the white
+meridian crossing the wrap at the back without a dark or blurred seam, the
+poles clean, the buttons in the theme; drag, wheel, double-click and, after
+a click, the arrows and `+` / `-` (they reach the viewer only while it has
+the focus).
 
 `AURORA_DEMO_TEXTURE_LIBRARY`: `preview-controls` opens a 620 × 720 texture inspector and material
 editor side by side (use `AURORA_WINDOW_SIZE=1600,1000`, capture after frame 740).
@@ -11563,6 +11694,7 @@ What the inventory must show with these scenarios:
 | `AURORA_MIP_FILTER=weighted` | Colour of the mips averaged by the alpha, as before (distant foliage brighter than in the Legacy Viewer) |
 | `AURORA_SHADOW_FILTER=gaps\|mapped\|before` | Shadow lookup of before (lines along the shadow edges), to compare |
 | `AURORA_SHADOW_BIAS=legacy\|new\|alt` | Shadow receiver bias of before (stairs on avatars' backs), or one second in two |
+| `AURORA_SHADOW_ANCHOR=old` | The sun's texel grids anchored on the cascades' centres every frame, as before (far shadow edges hop as the camera turns), to compare |
 | `AURORA_BLEND_SHADOWS=0` | Alpha-blended faces that are not rigged cast no shadow, as before |
 | `AURORA_DEBUG_SHADOWS=1` | Shadow view: the cascade each pixel reads, and its shadow |
 | `AURORA_PROFILE=1` | Profiling in the log (see [Profiling](#profiling)) |
@@ -11615,13 +11747,16 @@ What the inventory must show with these scenarios:
 | `AURORA_FSR_MIP_BIAS=0` | FSR's smaller modes without the textures' mip bias |
 | `AURORA_SSIL=1`, `0` or `alt` | GTAO's screen-space indirect light forced on or off for this launch |
 | `AURORA_SSIL_INTENSITY=<0-8>` | Strength of GTAO's indirect light for this launch |
-| `AURORA_CONTACT_SHADOWS=0`, `1`, `alt`, `prepass` or `shell` | Sun contact shadows off, on, by turns, cast by the depth prepass alone, or by thin shells |
+| `AURORA_CONTACT_SHADOWS=0`, `1`, `alt`, `prepass`, `shell` or `deep` | Sun contact shadows off, on, by turns, cast by the depth prepass alone, by thin shells, or with every occluder 5 cm deep |
 | `AURORA_PROJECTOR_TRACE=1` | Log projector shadow selection and fades each frame |
 | `AURORA_CONTACT_SOFT=0` | Contact shadows with hard pixel edges (no softening) |
 | `AURORA_CONTACT_VARIANT=bend`, `no-early-out`, `no-shared`, `short` or `skip` | Diagnostic: the contact shadows' shader without one of its constructs (GPU hangs of the AMD RX 9000 cards) |
 | `AURORA_BLOOM=0`, `1` or `alt` | Bloom off, on or one second in two for this launch |
 | `AURORA_AUTO_EXPOSURE=0`, `1` or `alt` | Automatic exposure of non-classic skies off, on or one second in two |
 | `AURORA_SPECULAR_AA=0`, `1` or `alt` | Specular anti-aliasing off, on or one second in two for this launch |
+| `AURORA_CLOUDS=aurora` or `legacy` | Volumetric clouds or the Legacy Viewer's flat layer for this launch, over the setting (and over `AURORA_DEMO_CLOUDS`) |
+| `AURORA_CLOUD_NOISE=<file>` | Cloud noise file to read instead of the built-in one (a missing or damaged file tests the GPU fallback) |
+| `AURORA_CLOUDS_DEBUG=weather` or `slice` | Measurement view of the volumetric clouds (the weather map, or vertical slices of the density) |
 | `AURORA_COLORED_AMBIENT=0`, `1` or `alt` | Sky ambient softened, grey under linear and HDR skies (Legacy Viewer), coloured at full strength like the first PBR release, or one second in two |
 | `AURORA_RIGGED_BLEND=exact`, `layers` or `exact-alt` | The order of the blended faces whatever the setting says: composed in the order of their fragments at each pixel; sorted, as the Standard choice of the setting; or the sorted order one second in three |
 | `AURORA_RIGGED_BLEND=split`, `runs`, `copy`, `depth05`, `write`, `sorted` or `alt` | Depth of the blended faces of rigged meshes: object by object, what is half covered writing its depth as drawn, then the fainter texels, then their depth from 1/255 on a copy (`layers`, the Standard order of the setting); the same without the fainter texels' depth (#1024); where nearly opaque before their colour, then point by point where half covered (#966); from 1/255 on a copy (#948); where half covered before their colour; from 1/255; none (sorted with the others); or `split` by turns |
@@ -12069,18 +12204,30 @@ What the inventory must show with these scenarios:
   log filter (`RUST_LOG=warn,aurora_viewer::scene::lights=info` is enough).
   Use a separately named test log and unset the variable after diagnosis;
   these per-frame lines are intended for local investigation.
-- **`AURORA_CONTACT_SHADOWS=0|1|alt|prepass|shell`**: the sun's contact shadows
+- **`AURORA_CONTACT_SHADOWS=0|1|alt|prepass|shell|deep`**: the sun's contact shadows
   (Preferences › Graphics › Contact shadows, `contact_shadows.rs`, after
   Bend Studio's screen space shadows) for this launch, without changing the
   saved setting: `0` off, `1` on, `alt` off and on by turns, one second
   each (on in odd seconds), the mask kept ready; `prepass` on, but cast by
   the depth prepass alone (opaque and masked faces, terrain), as before the
   blended faces opaque enough and the impostor cards were drawn into a copy
-  of it for them (see `AURORA_DEMO_FEET`); `shell` on, each depth taken
-  as a shell of 0.5 % of its distance (Bend's window, before issue 988)
-  instead of a body as deep as the ray went under it (up to 5 cm, with
-  the sun ahead of the camera): a ray that goes under a thick caster is
-  stopped only where it grazes its edges. **`AURORA_CONTACT_SOFT=0`**:
+  of it for them (see `AURORA_DEMO_FEET`); with `1` (the default when on),
+  with the sun ahead of the camera each occluder is a body as deep as the
+  ray went under it, up to 5 cm and no deeper than it is wide along the
+  ray (a post thinner than 5 cm no longer shadows the ground the ray passes
+  behind it); `shell` on, each depth taken as a shell of 0.5 % of its
+  distance (Bend's window, before issue 988): a ray that goes under a thick
+  caster is stopped only where it grazes its edges; `deep` on, every
+  occluder taken up to 5 cm deep whatever its width (the window before the
+  thick-caster rule). To
+  compare, at `AURORA_DEMO_POS=100,100` with `AURORA_DEMO_FEET=opaque`,
+  `AURORA_DEBUG_SHADOWS=1`, `AURORA_DEMO_SUN=30,15` and a capture at frame
+  1100 or later: the 3 and 6 cm posts' shadows near their bases are 5.8-7.6
+  and 9.0-9.4 pixels wide with `deep`, 4.6-5.2 and 7.4-7.8 with `1` (the
+  shadow map alone: 3.3-3.5 and 6.6-6.8); with `AURORA_DEMO_SUN=150,20`
+  (sun behind) the two look the same; on the hoof and the shoe
+  (`AURORA_DEMO_SUN=0,12`, close-up) the shadows under them are as full, the
+  thin fringe along the hovering shoe's gap is partly lighter with `1`. **`AURORA_CONTACT_SOFT=0`**:
   the mask reaches the shading as the pass wrote it, without the 5 × 5
   softening over each surface (`contact_shadows_filter.wgsl`): hard steps
   of whole pixels on curved bodies (the sides of our avatar with
@@ -12097,7 +12244,8 @@ What the inventory must show with these scenarios:
   thread reads from the depth what the others would have shared,
   `contact_shadows_no_shared.wgsl`). Both draw the same mask as Bend's
   (the GPU test `the_variants_that_keep_the_image_draw_bends_mask`, run
-  with `-- --ignored`). `short`: 16 samples per pixel instead of 60, the
+  with `-- --ignored`). Where two wavefronts cover one pixel, the mask
+  keeps the darker shadow. `short`: 16 samples per pixel instead of 60, the
   shadows about four times shorter; `skip`: the shader is not dispatched,
   no contact shadow (the mask is still cleared and filtered). `bend` or
   any other value keeps Bend's shader; the log says `contact shadows:
@@ -12827,6 +12975,26 @@ What the inventory must show with these scenarios:
   default): two texels of the cascade, in metres along the light. `alt`:
   one second in two each. In the demo at noon (`AURORA_DEMO_TOD` unset),
   camera behind our avatar: the stairs on the skirt under the waist.
+- **`AURORA_SHADOW_ANCHOR=old`**: the texel grid of each sun cascade is
+  anchored on a world point near its centre. The anchor used to be taken
+  from the centre every frame, so each time the camera, turning or walking,
+  took a centre across a cell of the lattice (3 to 4 times a full turn) the
+  grid changed phase by up to half a texel and every far shadow edge of that
+  cascade hopped (up to 11 cm in the third cascade at the default quality).
+  Now the anchor is held until the sun or moon has swept the grid by half a
+  texel at the cascade's centre (seconds on the default day cycle, never on a
+  fixed sun), and taken again then, when the cascade's size changes, at a
+  photo and at a region change. `old` brings back the anchor of every frame.
+  To compare with a fixed sun (`AURORA_DEMO_TOD=2`) and
+  `AURORA_DEBUG_SHADOWS=1` (the shadows are the dark areas, in the colour of
+  the cascade they come from, which makes the edges easy to see):
+  `AURORA_DEMO_CAMERA=spin,640,400,1` turns the camera steadily from frame
+  600; capture two frames of one run (`AURORA_CAPTURE_FRAMES=700,900`) and
+  look at the far edges (the box on the left, the rim of the torus): with
+  `old`, some move by about a pixel between two captures taken either side of
+  a crossing; without, they only follow the camera. The unit test
+  `the_cascade_grid_keeps_its_phase_over_a_full_turn_with_a_fixed_sun` checks
+  the grid's phase over a full turn.
 - **`AURORA_DEBUG_SHADOWS=1`**: instead of the image, objects and terrain
   show the cascade each pixel reads — red, green then blue from the finest,
   mixed where two cascades are blended, black beyond the shadow distance —
@@ -13039,7 +13207,9 @@ parts, against the scene without weather. `--scenes` picks some,
     mirror, then the particles — `part_sources` systems set up or stopped
     by the object updates, `part_sim` simulation of each source,
     `part_list` instances of the frame sorted from the farthest to the
-    nearest (`particles` gives their number) —, `lights` nearest local
+    nearest (`particles` gives their number), `part_order` their split at
+    the water and their merge into the blended faces (`part_runs` gives the
+    number of switches drawn) —, `lights` nearest local
     lights and `probes` reflection probes (search for the candidates by
     slices, slots, face to capture);
   - the parts of the interface (`u_*`, in `ui`): `bars` top and bottom
@@ -13534,6 +13704,7 @@ rendered Gerstner spectrum at all qualities and several depths.
 | Variable | Purpose |
 |---|---|
 | `AURORA_DEMO_WATER=medium` | Offline coast, moving hull, pillars, wading and submerged avatars |
+| `AURORA_DEMO_WATER=<place>:alpha:particles` | The `:alpha` boxes with a fountain behind and one in front of each (particles above, across and under the surface) |
 | `AURORA_DEMO_WATER=off:exclusion` | Invisible water exclusion above/below the surface; use `medium` for enhanced water |
 | `AURORA_DEMO_WATER_ACTIONS=dive` | Local native water animation and jump/entry preview |
 | `AURORA_DEMO_WATER_ANIMS=<folder>` | Read-only folder containing the twelve native water clips |
@@ -13553,6 +13724,8 @@ The enhanced-water master is disabled by default (2026-10-19), including missing
 Experimental water defaults validation (2026-10-19): final `scripts/check.ps1` green, 3,576 passed, zero failures, 26 ignored; scripts/formatting/Clippy clean. Regressions cover fresh/missing/partial defaults, disabled render flags, saved choices, all graphics presets, Aurora section reset and explicit bulk opt-in. Built the default dev viewer and inspected `.scratch/ao-water-spacing-final-fr.png`, `ao-water-spacing-final-en.png` (1024x768), `water-experimental-off-fr.png` and `water-experimental-on-en.png`, compared with `ao-optional-water-controls-fr.png` and `water-experimental-before-fr.png`. The two gesture gaps are wider and scrolling remains available. Water preferences show exactly one warning on global activation, with ordinary individual controls and readable disabled choices. Both water modes are explicit offline fixtures; they do not verify a real user's saved preference. Last-five disabled-water preferences before/after medians: 60 FPS, UI 0.83/0.80 ms and GPU 1.95/1.59 ms; baseline compilation and desktop load vary, so no isolated performance gain is claimed. Preferences captures have zero warnings/errors/panics; AO captures have no errors/panics and only the baseline synthetic missing-outfit warning. Human acceptance remains required before PR.
 
 Modes `off`, `low`, `medium`, `high`, `ultra` explicitly select the demo's initial master/quality, overriding the normal disabled default; `medium:underwater` (or another quality with `:underwater`) starts the camera below the surface. The `cycle` mode (also `cycle:window` for the underwater camera) switches the master and each individual effect, cycling all four qualities every 60 frames; its log records each transition. Camera suffixes `:shore` and `:close` inspect grazing reflections/shore breakers and detailed hull/foot contacts; `:foam` inspects close shoreline coverage and reflected highlights, and `:avatar` inspects wading droplets (`:avatar:run` raises horizontal speed to exercise running) (also test with `AURORA_DEMO_TOD=3` for sunset lighting); `:underwater` inspects refracted caustics and bubble lighting. `:surface` follows a horizontal swimmer; `:window` looks up through the water at a colored above-water crossbar, and `:window-grazing` inspects internal reflection at shallow angles. `:alpha` (#1678) adds three semi-transparent boxes, green under the water, yellow across its surface and magenta above it: from above (`off:shore:alpha`, `medium:shore:alpha`), the green one and the lower half of the yellow one must be refracted and fogged by the water like the ground around them, never drawn crisp over the surface, while the upper half and the magenta one look as before; from below (`:underwater:alpha`) nothing changes. Only demo mode reads it. The inspection view stays fixed across frames unless free camera is active; action scenarios retain their own framing. Preferences remain editable. Combine with `AURORA_DEMO_OPTIONS=graphics/3:cogs` for Preferences › Graphics › Reflections and water (Aurora water); `AURORA_AO=gtao:2` for the GTAO integration; `AURORA_PROFILE=1` for CPU/GPU timings. Capture several settled frames: shoreline and pillar foam should persist, the moving hull should leave an expanding wake, immersed avatar motion should emit bubbles, and droplets should fall back into the water. From above, submerged particles enter the refracted scene; below, they are seen directly through water fog. Switch each effect independently, change quality, and disable/enable the master switch: saved choices remain intact, physics and motion do not change. Also test MSAA 4×, SMAA, TAA, a night sky, a region crossing, and a teleport (no stale trails). Grid validation requires the human: boats, scripted objects, attachments, animated/custom avatars and region water at different heights. These effects target native region water, not arbitrary mesh pools.
+
+The `:alpha:particles` words (`AURORA_DEMO_WATER=<place>:alpha:particles`) add a fountain behind and one in front of each `:alpha` box, its particles above, across and under the surface: the particles under the water are drawn before it and fogged by it, those crossing it are cut at the surface; the emitters are sent once. With `AURORA_PARTICLE_INTERLEAVE=0` they are drawn after everything, as before. See also `AURORA_DEMO_PARTICLE_GLASS`.
 
 With `AURORA_DEMO_WATER_SHADERS=1`, an offline viewer loads common/spectrum, scene object/environment, water simulation, swept-wake and caustics WGSL from its own source checkout when pipelines are created. Restart the demo after editing shaders; no build is needed for each visual comparison. This switch is ignored without `AURORA_DEMO`; normal viewers and final acceptance runs use baked shaders. Missing source files fall back to the baked version.
 

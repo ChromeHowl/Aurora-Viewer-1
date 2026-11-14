@@ -647,11 +647,14 @@ pub struct Settings {
     pub start_region: String,
     pub draw_distance: f32,
     /// FSRenderFarClipStepping: after the login and a teleport to another
-    /// region, the draw distance starts at 32 m and doubles every
-    /// `draw_distance_stepping_interval` seconds (settings/draw_stepping.rs;
-    /// off).
+    /// region, the draw distance starts at 32 m and grows back to the
+    /// user's as the load allows (settings/draw_stepping.rs; off): doubling
+    /// every 2 s while the arrival is quiet and the frames fast, and
+    /// stepping back one level when frames stay heavy.
     pub draw_distance_stepping: bool,
-    /// FSRenderFarClipSteppingInterval: 20 s, 5 to 30 (Debug Settings only).
+    /// FSRenderFarClipSteppingInterval: 20 s, 5 to 30 (Debug Settings only):
+    /// the pace of the steps while objects are still arriving or the frames
+    /// are slow (the Legacy Viewer's fixed pace).
     pub draw_distance_stepping_interval: u32,
     /// The steps under way; the file keeps the user's draw distance.
     #[serde(skip)]
@@ -1597,6 +1600,11 @@ pub struct Settings {
     /// colour either way and only take the 0.7 curve, a little brighter. An
     /// experimental setting, off by default.
     pub colored_sky_ambient: bool,
+    /// Volumetric clouds (aurora-render `clouds.rs`) in the place of the
+    /// Legacy Viewer's flat cloud layer: Aurora (true) or Legacy. Off by
+    /// default until tried on modest GPUs, and left alone by the two buttons
+    /// of Preferences › Aurora, as the water effects once were.
+    pub volumetric_clouds: bool,
     /// 0 Khronos PBR Neutral, 1 ACES (RenderTonemapType: ACES by default,
     /// like the Legacy Viewer)
     pub tonemapper: u8,
@@ -2570,6 +2578,7 @@ impl Default for Settings {
             render_scale_auto: cfg!(target_os = "macos"),
             specular_aa: true,
             colored_sky_ambient: false,
+            volumetric_clouds: false,
             tonemapper: 1,
             tonemap_mix: TONEMAP_MIX,
             world_lut: String::new(),

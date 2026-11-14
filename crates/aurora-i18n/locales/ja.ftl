@@ -10028,6 +10028,11 @@ ui-options-aurora-ground-feet-height-help = アニメーションに対する各
 ui-options-aurora-ground-feet-help = レガシービューアの標準の足の配置を、傾斜や段差に合わせるAuroraの方式に置き換えます。足を上げる動作や優先度の高いポーズは制御を維持します。オフにすると、標準の立ち、しゃがみ、復帰のアニメーションは標準の動作になります。2つの補正が重なることはありません。
 ui-options-aurora-animation-clock = アニメーションのタイミング
 ui-options-aurora-animation-clock-experimental = 試験的：同期再生はアバターとアニメッシュについてグリッドでまだ検証中です。デフォルトはレガシーのままです。
+ui-options-aurora-clouds = 雲
+ui-options-aurora-clouds-help = Aurora は雲を実際の雲の高さにあるボリュームとして描き、空の太陽で照らし、空の雲の設定で形を決めます。Legacy Viewerの平らな層の代わりに、積雲、層雲、影のついた雲底を表示します。雲は空にあり、近づくことはできません。比較的新しいグラフィックスカードが必要です。
+ui-options-aurora-clouds-experimental = 試験的：新機能です。より多くのグラフィックスカードで試すまで、Legacy Viewerの平らな層がデフォルトのままです。
+ui-options-aurora-clouds-volumetric = ボリューム
+ui-options-aurora-clouds-flat = 平らな層
 ui-options-aurora-animation-clock-help = アバターとアニメッシュ：同期クロックは、遅れて読み込まれた場合や編集後も含め、最初に受信した信号からの経過時間に従います。レガシーは読み込み時に開始し、編集後は一時停止したポーズから再開します。
 ui-options-aurora-animation-clock-synchronized = 同期クロック
 ui-options-aurora-animation-clock-legacy = レガシー
@@ -14678,6 +14683,19 @@ wearable-favorites-delete-unloaded =
 wearable-favorites-invalid-name =
     お気に入りの着用物のフォルダ「{ $name }」を作成できませんでした。
     フォルダ名に「/」または「\」を含めることはできません。
+# ３６０度スナップショットのウィンドウ（LLFloater360Capture, floater_360capture.xml）
+capture-360-quality-preview = プレビュー（高速）
+capture-360-quality-medium = 通常
+capture-360-quality-high = 高
+capture-360-quality-maximum = 最高品位
+capture-360-hide-avatars = アバターをすべて隠す
+capture-360-capturing = ６面中{ $face }面目を描画中…
+capture-360-projecting = ３６０度画像を作成中…
+capture-360-saving = ３６０度画像を保存中…
+capture-360-saved = { $name }を保存しました
+capture-360-failed = ３６０度画像を作成できませんでした。
+capture-360-save-failed = ３６０度画像を保存できませんでした：{ $error }
+capture-360-save-dialog = ３６０度画像を保存
 
 # Parcel radio state and stream failures
 music-state-error = 再生できません：{ $reason }
@@ -14760,12 +14778,28 @@ ui-options-attached-particles-hint = アバターが装着しているものの�
 
 # Preferences › Graphics: progressive draw distance (FSRenderFarClipStepping)
 ui-options-draw-distance-stepping = 描画距離を段階的に広げる
-ui-options-draw-distance-stepping-hint = ログイン後と別のリージョンへのテレポート後、描画距離を32mから始めて設定値まで倍々に広げ、近くのものから読み込みます。
 
 # macOS Window menu (mac_window_menu.rs)
 app-mac-window-menu = ウインドウ
 app-mac-minimize = 最小化
 app-mac-enter-full-screen = フルスクリーンにする
+# Panorama viewer (ui/panorama.rs)
+panorama-reset = 表示をリセット
+panorama-enlarge = 拡大
+panorama-leave-full = 拡大表示を終了
+panorama-help = ドラッグで見回し、ホイールでズーム、ダブルクリックでリセット。クリックしてから、矢印キーで見回し、+ / - でズームします。
+
+# Texture preview: look into a 2:1 texture as a panorama
+resource-preview-360 = ３６０°
+
+# Photo window: the 360° format
+photo-format-360 = ３６０°
+photo-not-in-360 = ３６０°画像では使えません。
+photo-360-inventory-size = パノラマ：{ $width } × { $height }（最大のテクスチャ）
+photo-360-output = パノラマ：{ $width } × { $height }
+photo-360-format = JPEG · ３６０°
+photo-360-placeholder = シャッターを押すと、ここにパノラマが表示されます。
+photo-looks-not-in-360 = ３６０°画像には適用されません。色調フィルターのみ適用されます。
 
 vr-preferences-title = VR
 vr-preferences-about = ヘッドセットの移動、快適性、描画。
@@ -14796,3 +14830,4 @@ ui-minimap-avatar-name-format = アバター名の表示形式
 ui-minimap-name-display = 表示名
 ui-minimap-name-legacy = 従来の名前
 ui-minimap-name-display-legacy = 表示名（従来の名前）
+ui-options-draw-distance-stepping-hint = ログイン後と別のリージョンへのテレポート後、描画距離を32mから始め、負荷に合わせて設定値まで広げます。オブジェクトの読み込みが終わりフレームが軽い間は2秒ごとに倍にし、そうでない間は待ち、重いフレームが続くと一段戻します。
