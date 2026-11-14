@@ -421,7 +421,7 @@ impl Taker {
                     copy: self.copy,
                 });
                 let left = self.queue.len();
-                if left % 10 == 0 {
+                if left.is_multiple_of(10) {
                     if left == 0 {
                         if self.package {
                             out.push(say(aurora_i18n::tr!("cmdline-take-ktake-done")));
@@ -494,7 +494,7 @@ impl Mtake {
                 copy: false,
             });
             let left = self.queue.len();
-            if left % 10 == 0 {
+            if left.is_multiple_of(10) {
                 out.push(say(if left == 0 {
                     aurora_i18n::tr!("cmdline-take-mtake-done").to_string()
                 } else {
