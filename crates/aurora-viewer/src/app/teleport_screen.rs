@@ -95,9 +95,62 @@ pub fn logout_fraction(elapsed: f32) -> f32 {
     0.95 * (1.0 - (-elapsed / 1.5).exp())
 }
 
+/// The logout screen's state. It belongs to the session that is ending:
+/// the login screen that follows never draws it, so nothing would ever
+/// clear it there, and the next session's world showed it again, stuck at
+/// 95 %, over a viewer that was logged in.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct LogoutScreen {
+    since: Option<std::time::Instant>,
+}
+
+impl LogoutScreen {
+    /// The user asked to log out.
+    pub fn begin(&mut self, now: std::time::Instant) {
+        self.since = Some(now);
+    }
+
+    /// The session is over (back at the login screen): the screen goes.
+    pub fn end(&mut self) {
+        self.since = None;
+    }
+
+    /// When the screen began, while it is to be drawn over a world that
+    /// is shown. Outside the world it ends.
+    pub fn shown(&mut self, in_world: bool) -> Option<std::time::Instant> {
+        if !in_world {
+            self.since = None;
+        }
+        self.since
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_logout_screen_does_not_outlive_its_session() {
+        let now = std::time::Instant::now();
+        let mut screen = LogoutScreen::default();
+        // session 1: logged in, the user logs out
+        assert!(screen.shown(true).is_none());
+        screen.begin(now);
+        assert!(screen.shown(true).is_some());
+        // the login screen comes back (nothing draws the bar there)
+        screen.end();
+        // session 2: loading, then the world
+        assert!(screen.shown(false).is_none());
+        assert!(screen.shown(true).is_none(), "the next session's world shows no logout bar");
+    }
+
+    #[test]
+    fn a_logout_screen_ends_outside_the_world() {
+        let mut screen = LogoutScreen::default();
+        screen.begin(std::time::Instant::now());
+        assert!(screen.shown(false).is_none());
+        assert!(screen.shown(true).is_none());
+    }
 
     #[test]
     fn the_logout_bar_rises_and_never_completes_on_its_own() {
