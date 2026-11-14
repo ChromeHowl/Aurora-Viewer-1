@@ -4979,6 +4979,9 @@ mod tests {
         assert_eq!(super::ooc(""), "");
         // like the Legacy Viewer, a channel typed after Alt+Enter stays text on channel 0
         assert_eq!(super::parse_channel(&super::ooc("/5 hi")), (0, "(( /5 hi ))".into()));
+    }
+
+    #[test]
     fn nearby_world_typing_targets_the_field_that_will_be_drawn() {
         assert_eq!(nearby_typing_target(true, false), NearbyTypingTarget::Detached);
         assert_eq!(nearby_typing_target(true, true), NearbyTypingTarget::Detached);
