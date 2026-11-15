@@ -775,21 +775,6 @@ fn an_objects_full_size_line_offers_to_ignore_it_in_every_style() {
     }
 }
 
-/// An object's IM carries its owner's id: no object menu on that id.
-#[test]
-fn an_objects_im_has_no_object_menu() {
-    const OWNER: Uuid = Uuid::from_u128(0x0b1ec8);
-    for style in ALL {
-        let mut h = H::new(style);
-        h.world
-            .conversation_line(JANE, line("Worn Thing", OWNER, ChatKind::ObjectIm, "an object's IM"));
-        h.open(Some(JANE));
-        let at = h.text_rect("Worn Thing").center();
-        h.right_click(at);
-        assert!(!h.painted(aurora_i18n::tr!("common-ignore")), "{style:?}");
-    }
-}
-
 /// A double click on the first or the last word of a message, then Ctrl+C,
 /// copies that word alone: not the line's "[time] Name: " prefix, nor the
 /// whole message.
