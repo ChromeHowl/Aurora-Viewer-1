@@ -180,7 +180,8 @@ begin
       Item := Procs.ItemIndex(I);
       if not VarIsNull(Item.ExecutablePath) then
       begin
-        Path := Lowercase(Item.ExecutablePath);
+        Path := Item.ExecutablePath;
+        Path := Lowercase(Path);
         if Pos(Prefix, Path) = 1 then
           Result := True;
       end;
