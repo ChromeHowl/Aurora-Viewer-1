@@ -59,7 +59,7 @@ macro_rules! dark_states {
     };
 }
 
-/// Aurora's dark surfaces and text, shared by the single accent presets.
+/// Aurora's dark surfaces and text, shared by the presets that keep them.
 macro_rules! aurora_base {
     () => {
         ("#070B1F", "#252830", "#1B1E26", "#181B23", "#363B47")
@@ -179,7 +179,7 @@ const PRESETS: &[Preset] = &[
         id: "ocean",
         colors: colors(
             ["#3B9EFF", "#1D5FB5", "#67E8F9"],
-            aurora_base!(),
+            ("#060E1F", "#232A35", "#1A2029", "#161C26", "#34404F"),
             ["#66B3FF", "#A8D2FF"],
             ["#E8EDFB", "#9AA6C6", "#6F7BA0"],
             dark_states!(),
@@ -191,7 +191,7 @@ const PRESETS: &[Preset] = &[
         id: "forest",
         colors: colors(
             ["#3FBF73", "#1F7A47", "#5EEAD4"],
-            aurora_base!(),
+            ("#06100B", "#242B27", "#1B211E", "#171D1A", "#364039"),
             ["#6AD596", "#A6EBC3"],
             ["#E8EDFB", "#9AA6C6", "#6F7BA0"],
             dark_states!(),
@@ -203,7 +203,7 @@ const PRESETS: &[Preset] = &[
         id: "ember",
         colors: colors(
             ["#F59E0B", "#8A4F08", "#FDE68A"],
-            aurora_base!(),
+            ("#100908", "#2B2624", "#211D1B", "#1D1917", "#403733"),
             ["#FBB63A", "#FCD479"],
             ["#E8EDFB", "#9AA6C6", "#6F7BA0"],
             dark_states!(),
@@ -215,7 +215,7 @@ const PRESETS: &[Preset] = &[
         id: "rose",
         colors: colors(
             ["#EC5B9A", "#A8285F", "#F9A8D4"],
-            aurora_base!(),
+            ("#100810", "#2A2528", "#211C1F", "#1D181B", "#3F3539"),
             ["#F37FB4", "#F9B4D3"],
             ["#E8EDFB", "#9AA6C6", "#6F7BA0"],
             dark_states!(),
