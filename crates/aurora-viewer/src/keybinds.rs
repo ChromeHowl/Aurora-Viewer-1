@@ -2670,7 +2670,10 @@ mod tests {
         };
         assert!(kb.held(Action::Forward, &down, shift));
         // the camera button triggers (it is not a held action): the middle button reaches it
-        assert_eq!(kb.triggered(&Input::mouse(MouseButton::Middle).expect("bindable"), Mods::default()), Some(Action::MouseCam));
+        assert_eq!(
+            kb.triggered(&Input::mouse(MouseButton::Middle).expect("bindable"), Mods::default()),
+            Some(Action::MouseCam)
+        );
         assert!(!kb.held(Action::Back, &down, shift));
     }
 
