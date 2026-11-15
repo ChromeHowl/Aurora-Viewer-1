@@ -279,6 +279,10 @@ pub mod set_notices;
 /// Many Orion-like friends for multi-share (#3074; AURORA_DEMO_SHARE=multi).
 #[path = "demo_share.rs"]
 pub mod share;
+/// The Wolf and the crowd changing shape every few seconds, for the
+/// progressive shape changes (AURORA_DEMO_SHAPE_MORPH).
+#[path = "demo_shape_morph.rs"]
+pub mod shape_morph;
 /// Freeze, region console and voice moderation (AURORA_DEMO_FREEZE,
 /// AURORA_DEMO_SIM_CONSOLE, AURORA_DEMO_VOICE_MODERATION).
 #[path = "demo_sim_extras.rs"]
