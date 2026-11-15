@@ -1616,6 +1616,7 @@ ui-context-new-contact-set = 新建联系人分组…
 ui-appearance-gallery-add-to-your-outfit = 添加到你的装扮
 common-add-2 = 添加…
 ui-environment-adjusts-the-sky-for-your-view-only-other-people = 仅调整你视野中的天空；其他人看不到这些变化。
+ui-environment-apply-lighting-hint = 将此处显示的天空应用到地块或区域，对所有人生效，与天空编辑器的“应用到地块/区域”相同。
 build-ui-texture-fit-media-texture-to-face = 将媒体纹理适配到面
 ui-environment-adjust-the-current-sky-for-your-view-only = 仅调整你视野中的当前天空
 ui-sound-alert = 警报

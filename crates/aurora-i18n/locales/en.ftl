@@ -1743,6 +1743,7 @@ ui-context-new-contact-set = New contact set…
 ui-appearance-gallery-add-to-your-outfit = Add to your outfit
 common-add-2 = Add...
 ui-environment-adjusts-the-sky-for-your-view-only-other-people = Adjusts the sky for your view only; other people do not see these changes.
+ui-environment-apply-lighting-hint = Applies the sky shown here to the parcel or the region for everyone, as the sky editor's Apply To Parcel / Region does.
 build-ui-texture-fit-media-texture-to-face = Fit media texture to face
 ui-environment-adjust-the-current-sky-for-your-view-only = Adjust the current sky for your view only
 ui-sound-alert = Alert

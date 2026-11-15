@@ -1731,6 +1731,7 @@ ui-context-new-contact-set = 新しいコンタクトセット…
 ui-appearance-gallery-add-to-your-outfit = アウトフィットに追加
 common-add-2 = 追加…
 ui-environment-adjusts-the-sky-for-your-view-only-other-people = 自分の視界の空だけを調整します。他の人にはこれらの変更は見えません。
+ui-environment-apply-lighting-hint = ここに表示されている空を、空のエディタの「区画に適用／リージョンに適用」と同じく、区画またはリージョンの全員に適用します。
 build-ui-texture-fit-media-texture-to-face = メディアテクスチャを面に合わせる
 ui-environment-adjust-the-current-sky-for-your-view-only = 現在の空を自分の視界だけで調整
 ui-sound-alert = アラート

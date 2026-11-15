@@ -31,6 +31,8 @@ use std::sync::Arc;
 pub(super) enum Sender {
     Fixed,
     Day,
+    /// "Apply To Parcel / Region" of Personal lighting.
+    Lighting,
     /// The day cycle editor's commit: the editor has closed.
     Commit,
 }
@@ -190,7 +192,14 @@ impl App {
                 real_time: self.settings.night_sky_hour == crate::world::night_sky::StarHour::RealTime,
                 changed: false,
             });
+        self.env_ui.lighting_access = self.env_editor_access();
         let reset = self.env_ui.show_lighting(ctx, p, &mut self.world.eep, &mut open);
+        if let Some(region) = self.env_ui.lighting_apply.take() {
+            self.personal_lighting_apply(region);
+        }
+        if !open {
+            self.env_ui.lighting_message = None;
+        }
         if open {
             self.set_env_beacons(self.env_ui.beacons);
         }
@@ -404,6 +413,7 @@ impl App {
         match sender {
             Sender::Fixed => self.env_editor.message = Some((text.into(), false)),
             Sender::Day => self.day_editor.message = Some((text.into(), false)),
+            Sender::Lighting => self.env_ui.lighting_message = Some((text.into(), false)),
             Sender::Commit => {}
         }
         // About Land shows its environment loading when it is that parcel's
@@ -467,6 +477,51 @@ impl App {
             }
         };
         self.send_env_apply(target, cmd, Sender::Fixed);
+    }
+
+    /// "Apply To Parcel / Region" of Personal lighting: the sky it shows goes
+    /// to the parcel (About Land's selection, else the agent's) or the
+    /// region as the sky editor's apply of changed settings does
+    /// (`env_editor_apply`, world::env_apply::personal_sky_apply), after the
+    /// same checks: the agent's rights (the buttons are greyed without them,
+    /// and the server's answer is not the only check), the rights of the
+    /// light shown, a local texture.
+    pub(super) fn personal_lighting_apply(&mut self, region: bool) {
+        let title = aurora_i18n::tr!("ui-environment-personal-lighting");
+        self.env_ui.lighting_message = None;
+        let access = self.env_editor_access();
+        if !(if region { access.region } else { access.parcel }) {
+            return;
+        }
+        let Some(sky) = self.world.eep.personal_sky() else { return };
+        let fail = |app: &mut Self, text: &str| app.env_ui.lighting_message = Some((text.to_owned(), true));
+        let local = env_apply::local_texture(&sky.settings_llsd(), false, &self.is_local_texture());
+        if let Some(field) = local {
+            let text = aurora_i18n::tr!("ui-env-apply-local-fixed", field = field.label());
+            self.env_alert(title, text.clone());
+            fail(self, &text);
+            return;
+        }
+        let Some(target) = self.apply_target(region, title) else { return };
+        let source = self.source_flags(self.world.eep.current_rights(SettingsKind::Sky));
+        let rights = crate::world::env_edit::Rights::of_source(source);
+        let Some(current) = self.current_day_settings(target).map(|day| (*day).clone()) else {
+            log::warn!("environment: no day to build the settings into");
+            self.env_alert(title, aurora_i18n::tr!("ui-env-apply-build-failed"));
+            return;
+        };
+        let name = aurora_i18n::tr!("ui-env-editor-snapshot-sky");
+        match env_apply::personal_sky_apply(target, &current, &sky, name, rights) {
+            Ok(cmd) => self.send_env_apply(target, cmd, Sender::Lighting),
+            Err(env_apply::LightingRefusal::NoSave) => {
+                let notice = super::env_editor::source_notice(rights).unwrap_or_default();
+                fail(self, notice);
+            }
+            Err(env_apply::LightingRefusal::NoDay) => {
+                log::warn!("environment: no day to build the settings into");
+                self.env_alert(title, aurora_i18n::tr!("ui-env-apply-build-failed"));
+            }
+        }
     }
 
     /// doApplyEnvironment of the day cycle editor (inventory context): the
@@ -553,6 +608,7 @@ impl App {
             self.env_applying = None;
             let title = match applying.sender {
                 Sender::Fixed => self.fixed_title(),
+                Sender::Lighting => aurora_i18n::tr!("ui-environment-personal-lighting"),
                 _ => aurora_i18n::tr!("ui-day-editor-title"),
             };
             let message = match &result {
@@ -578,6 +634,7 @@ impl App {
             match applying.sender {
                 Sender::Fixed if self.env_editor.open => self.env_editor.message = Some(message),
                 Sender::Day if self.day_editor.open => self.day_editor.message = Some(message),
+                Sender::Lighting => self.env_ui.lighting_message = Some(message),
                 _ => {}
             }
         }
@@ -763,9 +820,26 @@ impl App {
     /// - `region`: the day cycle editor on the region's day in the region
     ///   context (400), its first ground frame brightened (900), committed
     ///   (1000);
+    /// - `parcel-lighting`: "Personal lighting" opens (400), its sky is
+    ///   brightened with a lower sun (900), then applied to the parcel with
+    ///   its "Apply To Parcel" (1000): the footer line and the parcel's sky;
     /// - `custom`: About Land on the parcel's environment, "Custom" chosen
     ///   (400): the parcel's day in the parcel context, left to the tester.
     pub(super) fn demo_env_apply(&mut self, scenario: &str, frame: u64) {
+        if scenario == "parcel-lighting" {
+            match frame {
+                400 => self.panels.personal_lighting = true,
+                900 => {
+                    self.world.eep.edit_personal(crate::demo::env::edit_lighting);
+                }
+                1000 => {
+                    log::info!("demo environment: Personal lighting applied to the parcel");
+                    self.personal_lighting_apply(false);
+                }
+                _ => {}
+            }
+            return;
+        }
         let base = scenario.split('-').next().unwrap_or(scenario);
         match (base, frame) {
             ("parcel", 400) => {

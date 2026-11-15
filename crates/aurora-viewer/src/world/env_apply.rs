@@ -100,6 +100,50 @@ pub fn day_around(current: &Llsd, frame: &SettingsDoc) -> Option<DayDoc> {
     Some(day)
 }
 
+/// Why "Apply to parcel / region" of Personal lighting sends nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LightingRefusal {
+    /// The light shown has rights that do not let it be saved (its own
+    /// FLAG_NOSAVE, or rights not known): the server would keep a copy of it
+    /// on the parcel, as the sky editor's apply refuses (the notice of
+    /// `source_notice`).
+    NoSave,
+    /// No day to build the sky into.
+    NoDay,
+}
+
+/// "Apply to parcel / region" of Personal lighting: the sky it edits sent
+/// inline, as the sky editor's apply of changed settings does
+/// (LLFloaterEditEnvironmentBase::doApplyEnvironment ->
+/// LLEnvironment::updateParcel / updateRegion with the day built by
+/// createDayCycleFromEnvironment, indra/newview/llfloatereditenvironmentbase.cpp,
+/// llenvironment.cpp, originally LGPL 2.1). Personal lighting has no apply
+/// of its own in the Legacy Viewer: this is the sky editor's apply for the
+/// sky Personal lighting shows. `rights` are those of the light shown, which
+/// go with it (no-modify / no-transfer flags).
+pub fn personal_sky_apply(
+    target: Target,
+    current: &Llsd,
+    sky: &crate::world::eep::SkyFrame,
+    name: &str,
+    rights: super::env_edit::Rights,
+) -> Result<aurora_net::land::LandCommand, LightingRefusal> {
+    if !rights.save {
+        return Err(LightingRefusal::NoSave);
+    }
+    let mut doc = SettingsDoc::snapshot_sky(sky, name);
+    doc.set_flags(rights.flags(0));
+    let day = day_around(current, &doc).ok_or(LightingRefusal::NoDay)?;
+    Ok(aurora_net::land::LandCommand::EnvironmentApplyDay {
+        local_id: target.local_id(),
+        track: None,
+        flags: day.flags(),
+        day: day.to_llsd(),
+        day_length: -1,
+        day_offset: -1,
+    })
+}
+
 /// A texture field of the settings (LLTrans "Environment*" strings).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LocalField {
@@ -216,6 +260,69 @@ mod tests {
         let rendered = day.day();
         assert!((rendered.sky_at(0.7, 0).gamma - 3.0).abs() < 1e-6);
         assert!((rendered.water_at(0.2).fog_density - 4.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn personal_lighting_applies_its_sky_inline_to_the_parcel_or_the_region() {
+        use crate::world::env_edit::Rights;
+        let sky = SkyFrame {
+            gamma: 3.0,
+            ..SkyFrame::default()
+        };
+        for (target, id) in [(Target::Parcel(7), 7), (Target::Region, aurora_net::land::REGION_PARCEL_ID)] {
+            let Ok(aurora_net::land::LandCommand::EnvironmentApplyDay {
+                local_id,
+                track,
+                day,
+                flags,
+                day_length,
+                day_offset,
+            }) = personal_sky_apply(target, &current(), &sky, "Mine", Rights::FREE)
+            else {
+                panic!("a day was expected");
+            };
+            assert_eq!((local_id, track, day_length, day_offset), (id, None, -1, -1));
+            // the day keeps the current one's flags, the sky's rights add theirs
+            assert_eq!(flags, FLAG_NOTRANS);
+            let sent = DayDoc::from_llsd(day).expect("a day");
+            assert!((sent.day().sky_at(0.7, 0).gamma - 3.0).abs() < 1e-6);
+            assert!(sent.tracks[2].is_empty());
+            assert_eq!(sent.tracks[TRACK_WATER].len(), 1, "the water stays");
+        }
+    }
+
+    #[test]
+    fn personal_lighting_without_save_rights_applies_nothing_and_no_transfer_goes_with_it() {
+        use crate::world::env_edit::{FLAG_NOCOPY, Rights};
+        let sky = SkyFrame::default();
+        assert_eq!(
+            personal_sky_apply(Target::Parcel(1), &current(), &sky, "x", Rights::PREVIEW_ONLY).err(),
+            Some(LightingRefusal::NoSave)
+        );
+        let no_save = Rights {
+            save: false,
+            ..Rights::FREE
+        };
+        assert_eq!(
+            personal_sky_apply(Target::Region, &current(), &sky, "x", no_save).err(),
+            Some(LightingRefusal::NoSave)
+        );
+        let limited = Rights {
+            copy: false,
+            transfer: false,
+            ..Rights::FREE
+        };
+        let Ok(aurora_net::land::LandCommand::EnvironmentApplyDay { flags, .. }) =
+            personal_sky_apply(Target::Parcel(1), &current(), &sky, "x", limited)
+        else {
+            panic!("a day was expected");
+        };
+        assert_eq!(flags & (FLAG_NOCOPY | FLAG_NOTRANS), FLAG_NOCOPY | FLAG_NOTRANS);
+        // no day settings map, nothing to build into
+        assert_eq!(
+            personal_sky_apply(Target::Parcel(1), &Llsd::Boolean(false), &sky, "x", Rights::FREE).err(),
+            Some(LightingRefusal::NoDay)
+        );
     }
 
     #[test]

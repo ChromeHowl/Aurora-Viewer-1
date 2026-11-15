@@ -5215,7 +5215,7 @@ both open states and the selection count. Capture at frame 620.
   found and the time of day after it; capture after the sky's transition
   (`AURORA_CAPTURE_FRAMES=620`). `j` with `AURORA_DEMO_TOD=2` must bring
   back the region's sky (time of day 0).
-- **`AURORA_DEMO_ENV_EDITOR=sky|clouds|clouds-picker|sun|beacons|water|item|item-save|day|day-play|day-edit|day-notrans|parcel|region|custom|custom-follow`**: sky,
+- **`AURORA_DEMO_ENV_EDITOR=sky|clouds|clouds-picker|sun|beacons|water|item|item-save|day|day-play|day-edit|day-notrans|parcel|parcel-lighting|region|custom|custom-follow`**: sky,
   water and day cycle editors (`app/env_editor.rs`, `app/env_day_editor.rs`).
   `day`: the day cycle editor opens on the user's "my day cycle" (frame
   400: midnight, the purple sky at 25 %, noon, sunset), the ground track and
@@ -5238,7 +5238,7 @@ both open states and the selection count. Capture at frame 620.
   owner of its parcel, give the region a dusk EEP day (as
   `AURORA_DEMO_EEP_PARCEL=1`) and the demo simulator answers ExtEnvironment
   updates: an inline day becomes the parcel's (or the region's) and the
-  sky follows. `parcel`: the sky editor on "my purple sky" (400), applied
+  sky follows. `parcel-lighting`: "Personal lighting" opens (frame 400), its sky is brightened with a lower sun (900), then applied to the parcel with its "Apply To Parcel" (1000; the window's footer says "Applied to the parcel."). `parcel`: the sky editor on "my purple sky" (400), applied
   to the parcel unchanged, as its asset (900, logged `environment: applying
   to Parcel(1)` without a new day), then brightened and applied inline in
   the region's day (1000, `parcel 1 takes the day`); the footer says

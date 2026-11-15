@@ -1618,6 +1618,7 @@ ui-context-new-contact-set = Neuer Kontaktsatz…
 ui-appearance-gallery-add-to-your-outfit = Ergänzen Sie Ihr Outfit
 common-add-2 = Hinzufügen...
 ui-environment-adjusts-the-sky-for-your-view-only-other-people = Passt den Himmel nur für Ihre Ansicht an; andere Menschen sehen diese Veränderungen nicht.
+ui-environment-apply-lighting-hint = Wendet den hier angezeigten Himmel für alle auf das Paket oder die Region an, wie „Auf Paket/Region anwenden“ im Himmelseditor.
 build-ui-texture-fit-media-texture-to-face = Passen Sie die Medientextur an die Vorderseite an
 ui-environment-adjust-the-current-sky-for-your-view-only = Passen Sie den aktuellen Himmel nur für Ihre Ansicht an
 ui-sound-alert = Alarm

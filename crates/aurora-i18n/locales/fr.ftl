@@ -1746,6 +1746,7 @@ ui-context-new-contact-set = Nouveau cercle…
 ui-appearance-gallery-add-to-your-outfit = Ajouter à votre tenue
 common-add-2 = Ajouter...
 ui-environment-adjusts-the-sky-for-your-view-only-other-people = Ajuste le ciel pour votre vue uniquement ; les autres ne voient pas ces changements.
+ui-environment-apply-lighting-hint = Applique le ciel affiché ici à la parcelle ou à la région pour tout le monde, comme « Appliquer à la parcelle / région » de l'éditeur de ciel.
 build-ui-texture-fit-media-texture-to-face = Ajuster la texture du média à la face
 ui-environment-adjust-the-current-sky-for-your-view-only = Ajuster le ciel actuel pour votre vue uniquement
 ui-sound-alert = Alerte
