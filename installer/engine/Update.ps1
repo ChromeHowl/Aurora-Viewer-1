@@ -462,7 +462,10 @@ function Install-Rust {
     if ($code -ne 0 -or -not (Find-Rustup)) { throw "The Rust installation failed (exit code $code)." }
 }
 
-# The newest stable Rust, at least the version the code needs.
+# Rust is left as it is when it is new enough for the code: a newer compiler
+# would throw away the whole build cache (every crate is built again) and
+# download about 1 GB. It is updated only when the installed one is too old,
+# or when there is no stable toolchain yet.
 function Update-Rust([string]$Rustup) {
     $need = $Cfg.minimumRust
     foreach ($toml in @((Join-Path $P.Src 'Cargo.toml'), (Join-Path $P.Src 'crates\aurora-viewer\Cargo.toml'))) {
@@ -470,7 +473,14 @@ function Update-Rust([string]$Rustup) {
             if (-not (Test-Newer $need $Matches[1])) { $need = $Matches[1] }
         }
     }
-    Set-Stage 'Updating Rust...' "The code needs Rust $need or newer: getting the newest stable version." '' 'Check the internet connection, then run UPDATE_SHORTCUT again.'
+    $r = Invoke-Capture $Rustup @('run', 'stable', 'rustc', '--version')
+    $have = if ($r.Out -match 'rustc (\d+\.\d+\.\d+)') { $Matches[1] } else { '0.0.0' }
+    Write-Log "rustc $have (needs $need)"
+    if (Test-Newer $have $need) {
+        Set-Stage 'Rust is ready' "Rust $have is installed and new enough (the code needs $need): nothing to download." '' ''
+        return
+    }
+    Set-Stage 'Updating Rust...' "The code needs Rust $need or newer; $(if ($have -eq '0.0.0') { 'none is installed' } else { "$have is installed" }): getting the newest stable version." '' 'Check the internet connection, then run UPDATE_SHORTCUT again.'
     $code = Invoke-Tool $Rustup @('toolchain', 'install', 'stable', '--profile', 'minimal')
     if ($code -eq 0) { $code = Invoke-Tool $Rustup @('update', 'stable', '--no-self-update') }
     $r = Invoke-Capture $Rustup @('run', 'stable', 'rustc', '--version')
@@ -577,9 +587,12 @@ function Add-LocalPatches {
 }
 
 # What the installed viewer was built from: the commit, the patches (name
-# and content), the label and this script.
+# and content), the label and the build revision.
 function Get-Fingerprint([string]$Sha) {
-    $parts = @($Sha, $Cfg.buildLabel, (Get-FileHash -LiteralPath $EnginePath -Algorithm SHA256).Hash)
+    # Not the engine script's hash: a new installer with a reworded script
+    # must not rebuild the same code. buildRev (settings.json) is raised by
+    # hand when the build itself changes (flags, packaging).
+    $parts = @($Sha, $Cfg.buildLabel, [string]$Cfg.buildRev)
     foreach ($f in Get-PatchFiles) { $parts += "$($f.Name)=$((Get-FileHash -LiteralPath $f.FullName -Algorithm SHA256).Hash)" }
     $parts -join '|'
 }
@@ -824,6 +837,16 @@ function Invoke-Main {
     $free = Get-FreeGB $AppDir
     $firstBuild = -not (Test-Path -LiteralPath $P.Target)
     Write-Log "free space: $free GB; first build: $firstBuild"
+    $reused = @()
+    if ($msvc) { $reused += 'Visual Studio C++ tools' }
+    if ($rustup) { $reused += 'Rust' }
+    if ($script:Git) { $reused += 'Git' }
+    if (Test-Path -LiteralPath (Join-Path $P.Src '.git')) { $reused += 'the downloaded code' }
+    if (-not $firstBuild) { $reused += 'the build cache' }
+    if ($reused) {
+        Set-Detail ('Already on this PC, not downloaded again: {0}.' -f ($reused -join ', '))
+        Write-Log ('reused: ' + ($reused -join ', '))
+    }
     if ($missing) {
         $text = "To build $Product on this PC, these free tools from their official websites are needed:`n`n" + ($missing -join "`n") +
         "`n`nBefore each build, Rust's stable version is brought up to date (rustup update stable): the code needs a recent one." +

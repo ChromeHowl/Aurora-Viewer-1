@@ -3,6 +3,7 @@
   "productName": "Aurora Viewer +",
   "folderName": "AuroraViewerPlus",
   "buildLabel": "Aurora Viewer +",
+  "buildRev": 1,
   "repository": "https://github.com/ChromeHowl/Aurora-Viewer-1.git",
   "branch": "main",
   "versionTags": "https://github.com/Aurora-Viewer/Aurora-Viewer.git",

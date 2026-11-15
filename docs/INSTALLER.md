@@ -125,7 +125,17 @@ An update, step by step:
    failed or cancelled update leaves the installed viewer as it was.
 
 `state.json` records what the installed viewer was built from (commit,
-patches, label, engine): when nothing changed, the update says so.
+patches, label, `buildRev`): when nothing changed, the update says so. A new
+installer over an existing install therefore does not rebuild the same code
+(`buildRev` in `settings.json` is raised by hand when the build itself
+changes).
+
+**What is reused, never downloaded twice**: the C++ tools, Rust and Git when
+found on the PC; the code clone and `build\target` of an existing install
+(Setup installs over the same folder by itself); Rust is only updated when
+the installed one is older than the code needs (a newer compiler would
+rebuild every crate). Uninstalling deletes `build\` and `tools\`: update
+instead of uninstalling to keep them.
 
 ### The in-viewer updater
 
