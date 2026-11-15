@@ -32,7 +32,7 @@ impl App {
         (wanted || self.world.rlva_has_locked_hud()) && (!self.viewfinder_on() || self.settings.snapshot.huds)
     }
 
-    fn vf_now(&self) -> f64 {
+    pub(super) fn vf_now(&self) -> f64 {
         self.egui_ctx.input(|i| i.time)
     }
 
@@ -433,15 +433,21 @@ impl App {
 
     /// The photo, with the shutter's blackout.
     fn vf_fire(&mut self, renderer: &Renderer) {
+        // the shot mode: the shutter button, Enter, a shot waiting for the
+        // focus and the self-timer all come here
+        let ui = &self.snapshots.ui;
+        let fire = vf::shutter_action(ui.shot, ui.depth);
+        // (the Path mode places a waypoint: no photo, no blackout)
+        if fire == vf::Fire::Waypoint {
+            self.vf_waypoint();
+            return;
+        }
         let now = self.vf_now();
         let v = &mut self.snapshots.vf;
         v.flash_at = Some(now);
         v.hinted = true;
-        // the shot mode: the shutter button, Enter, a shot waiting for the
-        // focus and the self-timer all come here
-        let ui = &self.snapshots.ui;
-        let action = match vf::shutter_action(ui.shot, ui.depth) {
-            vf::Fire::Take => Action::Take,
+        let action = match fire {
+            vf::Fire::Take | vf::Fire::Waypoint => Action::Take,
             vf::Fire::FullSave => Action::FullSave,
             vf::Fire::Pano => Action::Pano,
         };
@@ -547,6 +553,10 @@ impl App {
             return;
         }
         self.snapshots.vf.pressed = true;
+        // (a waypoint needs no focus: it is placed as the shutter is released)
+        if self.vf_path_mode() {
+            return;
+        }
         if self.settings.snapshot.dof.focus != PhotoFocus::Click {
             return;
         }
@@ -566,6 +576,10 @@ impl App {
     /// locked (focus priority); none after a failed focus.
     fn vf_release(&mut self, renderer: &Renderer) {
         if !std::mem::take(&mut self.snapshots.vf.pressed) {
+            return;
+        }
+        if self.vf_path_mode() {
+            self.vf_waypoint();
             return;
         }
         let v = &mut self.snapshots.vf;

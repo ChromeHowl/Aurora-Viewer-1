@@ -51,6 +51,16 @@ impl CameraTools {
     pub fn playing(&self) -> bool {
         self.player.is_some()
     }
+
+    /// Recording: a waypoint each time the user's camera move ends.
+    pub(super) fn recording(&self) -> bool {
+        self.recording
+    }
+
+    /// The last thing told to the user (what the viewfinder's strip shows).
+    pub(super) fn status(&self) -> &str {
+        &self.status
+    }
 }
 
 fn invalid_text(error: Invalid) -> &'static str {

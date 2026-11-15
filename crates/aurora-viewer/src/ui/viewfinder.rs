@@ -20,6 +20,7 @@ mod isolate;
 mod light;
 mod looks;
 mod modes;
+pub mod path;
 mod presets;
 mod sheets;
 mod style;
