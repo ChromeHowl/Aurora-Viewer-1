@@ -169,6 +169,9 @@ pub(super) struct State {
     /// its changes (`together`).
     together: Vec<usize>,
     requests: Vec<Request>,
+    /// Animations the Upload button prepared, for the app to stage in the
+    /// import inspector.
+    uploads: Vec<clip::Prepared>,
     /// The consent requests travel through the worn bridge's query service
     /// (query.lsl): Ask waits for `Ready`, and the menu says why it waits.
     bridge: crate::world::bridge::QueryState,
@@ -502,6 +505,10 @@ impl Editor {
     }
     /// The consent and Preferences actions chosen in the window since the
     /// last call.
+    /// The animations Upload prepared since the last call. The poser stays open.
+    pub fn take_poser_imports(&mut self) -> Vec<clip::Prepared> {
+        std::mem::take(&mut self.poser.uploads)
+    }
     pub fn take_poser_requests(&mut self) -> Vec<Request> {
         std::mem::take(&mut self.poser.requests)
     }
@@ -607,6 +614,22 @@ impl Editor {
             self.toggle();
         }
     }
+    /// The session ends (back to the login screen, whatever the cause: the
+    /// Logout bar, the server, a lost link): nothing of the editors stays
+    /// for the next login, neither a pose that "stop when closed" off kept
+    /// nor goals, animations or selections. The animation editor's document
+    /// (it autosaves its own drafts) and the project library are the
+    /// account's files and stay.
+    pub fn end_session(&mut self) {
+        self.stop_editing();
+        let clip = std::mem::take(&mut self.clip);
+        let project = std::mem::take(&mut self.project);
+        *self = Self {
+            clip,
+            project,
+            ..Self::default()
+        };
+    }
     pub fn stop_editing(&mut self) {
         self.poser.active = false;
         self.leave_clip();
@@ -646,12 +669,11 @@ impl Editor {
                         rotations: session.pose.rotations.clone(),
                         positions: session.pose.positions.clone(),
                     };
-                    let (pose, anim_base) = total::load(&world.avatar_lib.rig, animation, start);
+                    let pose = total::load(&world.avatar_lib.rig, animation, start);
                     let selective = matches!(mode, document::LoadMode::Selective | document::LoadMode::SelectiveRotations);
                     let rotations = matches!(mode, document::LoadMode::Rotations | document::LoadMode::SelectiveRotations);
                     let edited: Vec<_> = (0..world.avatar_lib.rig.len()).map(|b| session.edited(b)).collect();
                     session.checkpoint();
-                    session.anim_base = Some(Arc::new(anim_base));
                     let current = Arc::make_mut(&mut session.pose);
                     for (bone, edited) in edited.iter().enumerate() {
                         if selective && *edited {

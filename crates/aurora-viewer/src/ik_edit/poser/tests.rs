@@ -973,6 +973,26 @@ fn poser_closing_and_ik_switch_release_every_subject_unless_keep_pose_is_explici
     assert!(!editor.poser.active);
     assert!(editor.pose_layers(&world).is_empty());
 }
+#[test]
+fn a_pose_kept_with_the_window_closed_does_not_outlive_the_session() {
+    // the pose kept by "stop when closed" off, as the user left it at night
+    let (world, mut editor) = fixture();
+    editor.poser.stop_on_close = false;
+    editor.close_poser();
+    assert!(!editor.open && editor.poser.active);
+    assert!(!editor.pose_layers(&world).is_empty(), "the pose is still on the avatar");
+    assert!(editor.request().active || editor.poser.active);
+    // the session ends, whatever the cause (server logout, lost link, Logout)
+    editor.end_session();
+    assert!(!editor.poser.active && !editor.open);
+    assert!(editor.poser.sessions.is_empty(), "no joint of the old pose is kept");
+    assert!(
+        editor.pose_layers(&world).is_empty(),
+        "nothing is laid over the next login's avatar"
+    );
+    assert!(!editor.request().active, "no edit request reaches the scene");
+    assert!(editor.poser.stop_on_close, "the next session starts from the defaults");
+}
 /// The demo animesh without DemoSim's "you own this" update flag, so only
 /// its OwnerID decides whose it is.
 fn animesh_not_flagged_ours() -> Vec<aurora_net::objects::ObjectUpdate> {
@@ -1390,7 +1410,7 @@ fn poser_window_stays_steady_at_scaled_fonts_and_keeps_the_upload_footer_visible
             crate::ui::widgets::steady_tests::assert_window_steady(
                 "poser",
                 &[egui::vec2(880.0, 760.0), egui::vec2(720.0, 480.0)],
-                aurora_i18n::text("poser-save-total"),
+                aurora_i18n::text("poser-upload"),
                 || {
                     let (world, mut editor) = selected_fixture();
                     editor.poser.library_open = library;
@@ -1605,6 +1625,7 @@ fn poser_library_saves_confirms_overwrite_and_correlates_loads_to_the_original_s
     service.job = Some(storage::Job::Save(storage::Save {
         document: document.clone(),
         pose: posed.clone(),
+        animation: None,
         black_dragon: true,
         confirm: false,
         pick: false,
@@ -1626,6 +1647,7 @@ fn poser_library_saves_confirms_overwrite_and_correlates_loads_to_the_original_s
     service.job = Some(storage::Job::Save(storage::Save {
         document: document.clone(),
         pose: posed,
+        animation: None,
         black_dragon: true,
         confirm: false,
         pick: false,
@@ -1633,14 +1655,12 @@ fn poser_library_saves_confirms_overwrite_and_correlates_loads_to_the_original_s
     for _ in 0..3 {
         tick(&mut service);
     }
-    if let Some((document, pose, black_dragon)) = service.overwrite.take() {
+    if let Some(save) = service.overwrite.take() {
         // saving the same name again asks to overwrite: confirm it
         service.job = Some(storage::Job::Save(storage::Save {
-            document,
-            pose,
-            black_dragon,
             confirm: true,
             pick: false,
+            ..save
         }));
         for _ in 0..3 {
             tick(&mut service);
@@ -1678,6 +1698,7 @@ fn poser_library_saves_confirms_overwrite_and_correlates_loads_to_the_original_s
     service.job = Some(storage::Job::Save(storage::Save {
         document,
         pose: session.pose.clone(),
+        animation: None,
         black_dragon: false,
         confirm: true,
         pick: false,
@@ -3606,7 +3627,7 @@ fn elbow_animation(first: Quat, last: Quat) -> aurora_assets::Animation {
     }
 }
 #[test]
-fn save_diff_holds_only_the_joints_changed_and_applies_on_the_captured_pose() {
+fn save_holds_the_whole_pose_and_saves_even_when_nothing_changed() {
     let (world, editor) = fixture();
     let rig = &world.avatar_lib.rig;
     let elbow = rig.names["mElbowLeft"];
@@ -3615,72 +3636,92 @@ fn save_diff_holds_only_the_joints_changed_and_applies_on_the_captured_pose() {
     captured.rotations[elbow] = (rig.local_rot[elbow] * Quat::from_rotation_x(1.1)).normalize();
     captured.origin[elbow] = captured.rotations[elbow];
     let mut session = data::Session::new(captured);
-    assert!(
-        document::Document::diff(rig, &session, "Diff".into(), 4).is_none(),
-        "nothing changed, nothing to save"
-    );
-    let mut pose = (*session.pose).clone();
-    pose.rotations[elbow] = (pose.rotations[elbow] * Quat::from_rotation_z(0.5)).normalize();
-    session.pose = Arc::new(pose.clone());
-    let diff = document::Document::diff(rig, &session, "Diff".into(), 4).expect("a change");
-    assert_eq!(diff.joints.len(), 1);
-    assert_eq!(diff.joints[0].name, rig.canonical_names[elbow]);
+    // nothing edited: still a complete pose, every joint, complete rotations
+    let whole = session.whole(rig, Mat4::IDENTITY).expect("a whole pose");
+    let document = document::Document::whole(rig, &session, &whole, "Whole".into(), 4);
+    assert_eq!(document.joints.len(), rig.len(), "every joint, edited or not");
+    assert!(document.valid(rig));
+    assert!(near(
+        Quat::from_array(document.joint_rotation(&rig.canonical_names[elbow])),
+        session.pose.rotations[elbow]
+    ));
+    // it loads back on another subject as the same pose
     let mut destination = data::Session::new((*session.base).clone());
-    assert!(diff.apply(rig, &mut destination, document::LoadMode::All, Mat4::IDENTITY));
-    assert!(
-        near(destination.pose.rotations[elbow], pose.rotations[elbow]),
-        "the saved diff loads back as it was"
-    );
-    // the cause of the wrong-way joints: the old export wrote the same change
-    // on the rest skeleton, which is not the pose it was made on
-    let on_rest = session.authored(rig, Mat4::IDENTITY).unwrap();
-    assert!(!near(on_rest.rotations[elbow], pose.rotations[elbow]));
+    let mut cleared = (*destination.pose).clone();
+    cleared.rotations[elbow] = rig.local_rot[elbow];
+    destination.pose = Arc::new(cleared);
+    assert!(document.apply(rig, &mut destination, document::LoadMode::All, Mat4::IDENTITY));
+    assert!(near(destination.pose.rotations[elbow], session.pose.rotations[elbow]));
+    // an edit changes the joint it touched and nothing else is lost
+    let head = rig.names["mHead"];
+    let mut pose = (*session.pose).clone();
+    pose.rotations[head] = (pose.rotations[head] * Quat::from_rotation_x(0.3)).normalize();
+    session.pose = Arc::new(pose.clone());
+    let whole = session.whole(rig, Mat4::IDENTITY).unwrap();
+    let document = document::Document::whole(rig, &session, &whole, "Whole".into(), 4);
+    assert_eq!(document.joints.len(), rig.len());
+    assert!(near(Quat::from_array(document.joint_rotation("mHead")), pose.rotations[head]));
+    assert!(near(
+        Quat::from_array(document.joint_rotation(&rig.canonical_names[elbow])),
+        pose.rotations[elbow]
+    ));
 }
 #[test]
-fn total_animation_keeps_the_motion_and_reloads_as_the_pose_on_screen() {
+fn save_animation_holds_every_joint_and_round_trips_the_upload_reader() {
+    let (world, editor) = fixture();
+    let rig = &world.avatar_lib.rig;
+    let session = &editor.poser.sessions[&world.agent_id];
+    let whole = session.whole(rig, Mat4::IDENTITY).unwrap();
+    let animation = total::whole(rig, &whole, 4).expect("an unchanged pose still builds");
+    let bytes = total::encode(&animation).unwrap();
+    let decoded = aurora_assets::anim::parse_animation_upload(&bytes).unwrap();
+    let driven: Vec<&str> = decoded.joints.iter().map(|j| j.joint_name.as_str()).collect();
+    for bone in 0..rig.len() {
+        let name = &rig.canonical_names[bone];
+        if name.starts_with('m') && whole.enabled[bone] {
+            assert!(driven.contains(&name.as_str()), "{name} has a key, edited or not");
+        }
+    }
+    assert!(decoded.joints.iter().all(|j| !j.rot_keys.is_empty()));
+    // a joint switched off in the poser is the live animation's: no key
+    let head = rig.names["mHead"];
+    let mut off = whole.clone();
+    off.enabled[head] = false;
+    let decoded = total::whole(rig, &off, 4).unwrap();
+    assert!(!decoded.joints.iter().any(|j| j.joint_name == "mHead"));
+}
+#[test]
+fn a_loaded_animation_does_not_change_what_save_holds() {
     let (world, editor) = fixture();
     let rig = &world.avatar_lib.rig;
     let elbow = rig.names["mElbowLeft"];
-    let head = rig.names["mHead"];
+    let session = &editor.poser.sessions[&world.agent_id];
     let first = (rig.local_rot[elbow] * Quat::from_rotation_x(0.8)).normalize();
     let last = (rig.local_rot[elbow] * Quat::from_rotation_y(-0.5)).normalize();
-    let animation = elbow_animation(first, last);
-    let session = &editor.poser.sessions[&world.agent_id];
-    let start = || ik::LocalPose {
-        rotations: session.pose.rotations.clone(),
-        positions: session.pose.positions.clone(),
-    };
-    let (loaded, base) = total::load(rig, animation.clone(), start());
+    let loaded = total::load(
+        rig,
+        elbow_animation(first, last),
+        ik::LocalPose {
+            rotations: session.pose.rotations.clone(),
+            positions: session.pose.positions.clone(),
+        },
+    );
     assert!(near(loaded.rotations[elbow], first));
-
-    // nothing changed: no new animation
-    let mut pose = (*session.pose).clone();
+    let mut with_base = data::Session::new((*session.base).clone());
+    let mut pose = (*with_base.pose).clone();
     pose.rotations.clone_from(&loaded.rotations);
-    pose.positions.clone_from(&loaded.positions);
-    assert_eq!(total::total(rig, &base, &pose, &session.base).err(), Some("poser-total-unchanged"));
-
-    // the elbow turned on its own frame, the head (not in the file) too
-    pose.rotations[elbow] = (first * Quat::from_rotation_z(0.4)).normalize();
-    pose.rotations[head] = (rig.local_rot[head] * Quat::from_rotation_x(0.3)).normalize();
-    let total = total::total(rig, &base, &pose, &session.base).unwrap();
-    assert_eq!(base.animation, animation, "the loaded animation is never modified");
-    let bytes = total::encode(&total).unwrap();
-    let decoded = aurora_assets::anim::parse_animation_upload(&bytes).unwrap();
-    let (reloaded, _) = total::load(rig, decoded.clone(), start());
-    let close = |a: Quat, b: Quat| a.dot(b).abs() > 0.9995;
-    assert!(
-        close(reloaded.rotations[elbow], pose.rotations[elbow]),
-        "the elbow loads back as it was posed"
+    with_base.pose = Arc::new(pose);
+    let plain = session.whole(rig, Mat4::IDENTITY).unwrap();
+    let loaded_whole = with_base.whole(rig, Mat4::IDENTITY).unwrap();
+    let count = |pose: &data::Pose| total::whole(rig, pose, 4).unwrap().joints.len();
+    assert_eq!(
+        count(&plain),
+        count(&loaded_whole),
+        "as complete with a loaded animation as without"
     );
     assert!(
-        close(reloaded.rotations[head], pose.rotations[head]),
-        "a joint the file did not drive is kept"
-    );
-    let change = first.inverse() * pose.rotations[elbow];
-    let track = decoded.joints.iter().find(|j| j.joint_name == "mElbowLeft").unwrap();
-    assert!(
-        close(track.rot_keys.last().unwrap().rotation, last * change),
-        "the later keys keep their motion with the same change"
+        near(loaded_whole.rotations[elbow], first),
+        "the loaded animation's pose is what is saved"
     );
 }
 #[test]
@@ -3747,59 +3788,6 @@ fn the_name_field_follows_the_selected_subject_in_the_editor() {
     assert_eq!(editor.poser.name, "pose_1", "after a reopen the own avatar has its name");
     editor.pick_subject(&world, id);
     assert_eq!(editor.poser.name, "pose_2");
-}
-#[test]
-fn two_subjects_diff_and_total_with_their_own_pose_and_base_animation() {
-    let (world, editor) = fixture();
-    let rig = &world.avatar_lib.rig;
-    let elbow = rig.names["mElbowLeft"];
-    let pose = &editor.poser.sessions[&world.agent_id].pose;
-    // two subjects, each with its own captured elbow and its own loaded animation
-    let make = |captured: Quat, first: Quat| {
-        let mut p = (**pose).clone();
-        p.rotations[elbow] = captured;
-        p.origin[elbow] = captured;
-        let mut session = data::Session::new(p);
-        let start = ik::LocalPose {
-            rotations: session.pose.rotations.clone(),
-            positions: session.pose.positions.clone(),
-        };
-        let (loaded, base) = total::load(rig, elbow_animation(first, first), start);
-        let mut edited = (*session.pose).clone();
-        edited.rotations.clone_from(&loaded.rotations);
-        session.anim_base = Some(Arc::new(base));
-        session.base = Arc::new(edited.clone());
-        session.pose = Arc::new(edited);
-        session
-    };
-    let one = make(
-        rig.local_rot[elbow] * Quat::from_rotation_x(0.9),
-        rig.local_rot[elbow] * Quat::from_rotation_x(0.2),
-    );
-    let two = make(
-        rig.local_rot[elbow] * Quat::from_rotation_y(-0.7),
-        rig.local_rot[elbow] * Quat::from_rotation_y(0.6),
-    );
-    let turn = |session: &data::Session, angle: f32| {
-        let mut p = (*session.pose).clone();
-        p.rotations[elbow] = (p.rotations[elbow] * Quat::from_rotation_z(angle)).normalize();
-        p
-    };
-    let (p1, p2) = (turn(&one, 0.4), turn(&two, -0.5));
-    let t1 = total::total(rig, one.anim_base.as_ref().unwrap(), &p1, &one.base).unwrap();
-    let t2 = total::total(rig, two.anim_base.as_ref().unwrap(), &p2, &two.base).unwrap();
-    let key = |a: &aurora_assets::Animation| a.joints[0].rot_keys[0].rotation;
-    assert!(near(key(&t1), p1.rotations[elbow]));
-    assert!(near(key(&t2), p2.rotations[elbow]));
-    assert!(!near(key(&t1), key(&t2)), "each subject's animation holds its own change");
-    // Save diff of each: its own joints against its own capture
-    let mut s1 = one.clone();
-    s1.pose = Arc::new(p1.clone());
-    assert!(document::Document::diff(rig, &s1, "one".into(), 4).is_some());
-    assert!(
-        document::Document::diff(rig, &two, "two".into(), 4).is_none(),
-        "the other subject changed nothing"
-    );
 }
 #[test]
 fn hand_presets_turn_each_finger_as_the_legacy_viewer_does() {
