@@ -207,6 +207,8 @@ pub struct FloaterState {
     tab_drag: tab_drag::Wait,
     /// Item being renamed in the Contents tab.
     pub rename: Option<contents_selection::Rename>,
+    /// (object, item) of the contents to open in its window: a notecard,
+    /// or the preview of a texture, a sound or an animation.
     pub open_notecard: Option<(Uuid, Uuid)>,
     pub weights_open: bool,
     pub grid_options_open: bool,
