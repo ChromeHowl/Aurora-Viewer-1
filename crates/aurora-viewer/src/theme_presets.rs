@@ -354,13 +354,16 @@ pub fn current() -> &'static Preset {
 /// `AURORA_DEMO_THEME=<id>` (demo mode only): this run's theme, never
 /// saved. An unknown id is logged and the saved theme stays.
 pub fn demo_override() -> Option<&'static str> {
-    let raw = std::env::var("AURORA_DEMO_THEME").ok()?;
-    let id = raw.trim();
-    let found = find(id).map(|p| p.id);
-    if found.is_none() {
-        log::warn!("AURORA_DEMO_THEME: unknown theme '{id}', keeping the saved one");
-    }
-    found
+    static FOUND: std::sync::OnceLock<Option<&'static str>> = std::sync::OnceLock::new();
+    *FOUND.get_or_init(|| {
+        let raw = std::env::var("AURORA_DEMO_THEME").ok()?;
+        let id = raw.trim();
+        let found = find(id).map(|p| p.id);
+        if found.is_none() {
+            log::warn!("AURORA_DEMO_THEME: unknown theme '{id}', keeping the saved one");
+        }
+        found
+    })
 }
 
 /// The colours of the skin as it is read: the chosen preset's when the
