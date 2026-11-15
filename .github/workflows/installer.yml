@@ -25,7 +25,7 @@ concurrency:
 env:
   # Inno Setup when the runner image has none (or an older one): this exact
   # version, whose Chocolatey package checks the installer's checksum.
-  INNO_SETUP: 6.4.3
+  INNO_SETUP: 6.7.1
 
 jobs:
   build:
