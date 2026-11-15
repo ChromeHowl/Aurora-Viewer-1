@@ -2669,7 +2669,8 @@ mod tests {
             ..Default::default()
         };
         assert!(kb.held(Action::Forward, &down, shift));
-        assert!(kb.held(Action::MouseCam, &down, Mods::default()));
+        // the camera button triggers (it is not a held action): the middle button reaches it
+        assert_eq!(kb.triggered(&Input::mouse(MouseButton::Middle).expect("bindable"), Mods::default()), Some(Action::MouseCam));
         assert!(!kb.held(Action::Back, &down, shift));
     }
 
@@ -2705,7 +2706,9 @@ mod tests {
         kb.set_middle_mouse_camera(false);
         assert!(!kb.middle_mouse_camera());
         assert_eq!(kb.get(Action::MouseCam), [None, None]);
-        assert_eq!(kb.triggered(&middle, Mods::default()), Some(Action::PushToTalk));
+        // push-to-talk is a held action, so it is read with `held`, not `triggered`
+        assert_eq!(kb.triggered(&middle, Mods::default()), None);
+        assert!(kb.held(Action::PushToTalk, &HashSet::from([middle.clone()]), Mods::default()));
         // switched on again: the camera takes it back, with and without Ctrl
         kb.set_middle_mouse_camera(true);
         assert!(kb.middle_mouse_camera());
