@@ -897,7 +897,7 @@ fn toolbar_sanitize_skips_the_retired_howto_command() {
 #[test]
 fn toolbar_catalogue_holds_legacy_commands_and_runs_the_ready_ones() {
     // the Legacy Viewer's commands, and Aurora's Camera Path and Camera Lock
-    const COUNT: usize = 96;
+    const COUNT: usize = 97;
     let skin = Layout::default();
     let all = catalogue(&skin);
     assert_eq!(all.len(), COUNT);

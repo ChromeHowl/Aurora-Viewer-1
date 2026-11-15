@@ -1569,11 +1569,13 @@ mod key_tests {
     use crate::keybinds::{Action, Binding, Input, KeyBindings};
 
     #[test]
-    fn p_b_and_t_are_free_on_default_bindings_and_yield_when_bound() {
+    fn p_and_b_are_free_on_default_bindings_and_yield_when_bound() {
         let mut kb = KeyBindings::default();
-        for code in [KeyCode::KeyP, KeyCode::KeyB, KeyCode::KeyT] {
+        for code in [KeyCode::KeyP, KeyCode::KeyB] {
             assert!(vf_key_free(&kb, code, Mods::default()), "{code:?}");
         }
+        // the camera's roll keys hold T by default: the viewer's action wins
+        assert!(!vf_key_free(&kb, KeyCode::KeyT, Mods::default()), "T rolls the camera right");
         kb.set(
             Action::Fly,
             1,

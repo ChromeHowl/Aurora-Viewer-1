@@ -1068,8 +1068,10 @@ mod tests {
             .map(|w| w.rect)
             .collect();
         quick.sort_by(|a, b| a.left().total_cmp(&b.left()));
-        assert_eq!(quick.len(), 6, "an online friend's quick actions");
-        for events in click(quick[4].center()) {
+        // six, and the poke between the message and the teleports when pokes are on
+        assert!(matches!(quick.len(), 6 | 7), "an online friend's quick actions");
+        // the contact sheet is the one before the whole menu
+        for events in click(quick[quick.len() - 2].center()) {
             frame(640.0, events, &mut settings, &mut st);
         }
         for _ in 0..2 {

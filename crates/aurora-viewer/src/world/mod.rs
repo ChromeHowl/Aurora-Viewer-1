@@ -5039,9 +5039,6 @@ impl World {
             }
             return;
         }
-        if self.omnifilter_im(&mut im) {
-            return;
-        }
         if self.on_session_im(&im) || self.on_status_im(&im) || self.on_im_offer(&im) {
             return;
         }
