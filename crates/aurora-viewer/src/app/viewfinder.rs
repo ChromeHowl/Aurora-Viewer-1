@@ -52,6 +52,7 @@ impl App {
     pub(super) fn viewfinder_frame(&mut self, renderer: &mut Renderer) {
         self.camera_presets_demo(renderer.size());
         self.photo_camera_demo();
+        self.viewfinder_path_demo();
         // the focal length is the photo's: the view's own comes back when
         // the viewfinder closes
         // the depth of field on, once, for the profiles that saved it off
@@ -1198,6 +1199,8 @@ impl App {
         }
         let preset_object = self.snapshots.vf.preset_form.object.map(|id| self.photo_isolate_name(&id).0);
         let first_allowed = self.settings.camera.enable_mouselook;
+        // (the Path mode: the path in the world view, put on the screen)
+        let path_world = self.vf_path_world(projector);
         // (the stack only opens the quick view: no destination, no clock)
         let no_time = |_: i64| String::new();
         let reel = self.snapshots.reel.view(&[], &no_time);
@@ -1249,6 +1252,7 @@ impl App {
             deband: self.settings.render_extras.deband,
             follow: self.settings.camera.extra.follow_joint,
             camera_locked: self.camera.locked(),
+            path: self.camera_tools.viewfinder_frame(path_world),
         };
         // the demo aims at the own avatar's face, then shoots
         let (aim, shoot) = self.photo_demo_viewfinder();
@@ -1338,6 +1342,8 @@ impl App {
                 Out::Cameratools => {
                     crate::ui::widgets::toggle_floater(ctx, crate::ui::options::cameratools::WINDOW, &mut self.panels.cameratools)
                 }
+                Out::Path(action) => self.vf_path_action(action),
+                Out::PathSelect(index) => self.camera_tools.select(index),
                 Out::Exit => self.panels.snapshot = false,
             }
         }

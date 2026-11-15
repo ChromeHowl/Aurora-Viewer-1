@@ -7,6 +7,7 @@
 //! the isolation panel (`isolate`) and the camera presets (`presets`). The logic is `snapshot::viewfinder`, the frames and the keys
 //! `app::viewfinder`; TASKS.md (photo window, part 6) tells what it does.
 
+use super::camera_path::PathAction;
 use super::snapshot::{self as panel, Action, Destination, SnapshotUi, View};
 use super::widgets;
 use crate::dof::PhotoFocus;
@@ -27,6 +28,7 @@ mod style;
 pub use controls::{CamMode, Pad, roll_text};
 pub use isolate::{Isolate, IsolateRow};
 pub use modes::refused_text;
+pub use path::{PathFrame, SavedPath, WorldPath};
 pub use presets::{Preset, PresetForm, anchor_icon};
 pub use sheets::{BankEdit, LensEdit};
 pub use style::{StyleContext, style_rows};
@@ -57,6 +59,9 @@ pub enum Sheet {
     Lens,
     /// C1 to C3 (0 to 2).
     Bank(u8),
+    /// The Path mode's sheet: the path's name, the saved paths, import and
+    /// export (`path`).
+    Path,
 }
 
 /// The viewfinder's state for the session (its settings are
@@ -79,6 +84,11 @@ pub struct Viewfinder {
     pub sheet_keys: Option<(i32, i32)>,
     /// The new name typed in a custom mode's sheet.
     bank_name: String,
+    /// The Path mode's own state (`path`).
+    pub path: path::PathUi,
+    /// The shutter is greyed this frame (the Path mode while the path plays
+    /// or records).
+    shutter_off: bool,
     /// The shutter on screen, as drawn last frame (the mode list opens
     /// beside it).
     shutter_at: Option<Rect>,
@@ -249,6 +259,8 @@ pub struct Frame<'a> {
     pub deband: f32,
     pub follow: crate::camera::extra::FollowJoint,
     pub camera_locked: bool,
+    /// The Camera Path being edited, for the Path mode (`path`).
+    pub path: PathFrame<'a>,
 }
 
 /// A custom mode's slot as the viewfinder shows it.
@@ -311,6 +323,11 @@ pub enum Out {
     CameraLock,
     CameraPath,
     Cameratools,
+    /// The Path mode: one of the Camera Path window's actions (waypoint
+    /// edits, play, stop, record, saving…), and the waypoint selected on
+    /// the timeline.
+    Path(PathAction),
+    PathSelect(Option<usize>),
     /// A quick-menu tile opens a sheet (the viewfinder's own: never
     /// reaches the app).
     Sheet(Sheet),
@@ -724,6 +741,8 @@ impl Viewfinder {
         }
         let before = s.clone();
         let light_before = panel.light;
+        let path_mode = vf::shown(panel.shot, panel.depth, panel.bank) == vf::ShotChoice::Path;
+        self.shutter_off = path_mode && !path::shutter_enabled(f.path.recording, f.path.playing);
         let screen = ctx.content_rect();
         let display = s.viewfinder.display;
         let full = display == Display::Full;
@@ -766,6 +785,10 @@ impl Viewfinder {
         if !panel.pano {
             self.af_point(ctx, p, &front, s, f);
         }
+        // the Path mode: the path in the world view, unless hidden
+        if path_mode && shows && !self.path.world_hidden {
+            self.path_world(&front, ctx, p, f);
+        }
         // (the last photo's card takes its place while it shows)
         let card = f.now < self.review_until && f.review.is_some();
         if shows && !self.hinted && !self.menu && !self.help && !card {
@@ -780,7 +803,10 @@ impl Viewfinder {
         }
         let manual = s.dof.focus == PhotoFocus::Manual;
         let active = matches!(self.af.phase, Phase::Hunt | Phase::Fail) || (self.af.recent(f.now) && shows);
-        if ctl {
+        if path_mode {
+            // (no lens row: the timeline strip is in its place)
+            self.wb_row_top = None;
+        } else if ctl {
             self.ring_deck(ctx, p, screen, s, panel, fov, f, &mut out);
         } else if !self.menu && (manual || active || full) {
             self.scale(ctx, p, &front, screen, s, f);
@@ -848,6 +874,7 @@ impl Viewfinder {
             Some(Sheet::Style) => self.style_sheet(ctx, p, screen, panel, f, &mut out),
             Some(Sheet::Guide) => self.guide_sheet(ctx, p, screen, s),
             Some(Sheet::Lens) => self.lens_sheet(ctx, p, screen, f, &mut out),
+            Some(Sheet::Path) => self.path_sheet(ctx, p, screen, f, &mut out),
             Some(Sheet::Bank(i)) => {
                 let bank = f.banks[usize::from(i.min(2))].clone();
                 self.bank_sheet(ctx, p, screen, i, s, &bank, &mut out);
@@ -1549,6 +1576,9 @@ impl Viewfinder {
             p.navy.gamma_multiply(0.72),
         );
         let y = screen.bottom() - 16.0 - 22.0;
+        // the Path mode shows its timeline strip instead of the lens row and
+        // the focus's readings
+        let path_mode = vf::shown(panel.shot, panel.depth, panel.bank) == vf::ShotChoice::Path;
         // the confirmation dot
         let dot = Pos2::new(screen.left() + GAP + 6.0, y);
         let t = self.af.phase_time(f.now);
@@ -1572,7 +1602,7 @@ impl Viewfinder {
                 back.circle_stroke(dot, 5.25, Stroke::new(1.5, p.muted.gamma_multiply(0.8)));
             }
         }
-        if ctl && af_on {
+        if ctl && af_on && !path_mode {
             self.af_choices(ctx, p, screen, s, Pos2::new(dot.x + 6.0 + 10.0, y), out);
         }
         let c = af_color(p, self.af.phase, false);
@@ -1612,7 +1642,7 @@ impl Viewfinder {
 
         // the zone kept sharp
         let right = screen.right() - GAP;
-        if af_on {
+        if af_on && !path_mode {
             shadow_text(
                 back,
                 p,
@@ -1633,7 +1663,9 @@ impl Viewfinder {
         } else {
             aurora_i18n::tr!("photo-vf-all-sharp").to_owned()
         };
-        if !af_on {
+        if path_mode {
+            // (nothing to focus: the strip has the room)
+        } else if !af_on {
             shadow_text(
                 back,
                 p,
@@ -1668,6 +1700,10 @@ impl Viewfinder {
                 });
         }
 
+        if path_mode {
+            self.path_strip(ctx, p, screen, f, out);
+            return;
+        }
         // the dials
         egui::Area::new(Id::unique("vf_dials"))
             .order(Order::Foreground)
@@ -1920,13 +1956,18 @@ impl Viewfinder {
                     ) {
                         s.viewfinder.pad = !s.viewfinder.pad;
                     }
-                    if dock_button(
-                        ui,
-                        p,
-                        Face::Icon("snowflake"),
-                        aurora_i18n::tr!("photo-freeze-world-tip"),
-                        panel.freeze_world,
-                    ) {
+                    // (the Path mode has no photo to freeze or isolate: the room
+                    // goes to its own buttons)
+                    let path_mode = vf::shown(panel.shot, panel.depth, panel.bank) == vf::ShotChoice::Path;
+                    if !path_mode
+                        && dock_button(
+                            ui,
+                            p,
+                            Face::Icon("snowflake"),
+                            aurora_i18n::tr!("photo-freeze-world-tip"),
+                            panel.freeze_world,
+                        )
+                    {
                         panel.freeze_world = !panel.freeze_world;
                     }
                     // the photo's light, next to the shutter
@@ -1941,6 +1982,9 @@ impl Viewfinder {
                             out.push(Out::Isolate(Isolate::Picking(false)));
                         }
                     }
+                    if path_mode {
+                        self.path_dock(ui, p, f, out);
+                    }
                     // six above the shutter, six under it (the panels of
                     // the shot together; the session's photos are bottom
                     // left, `reel_tray`)
@@ -1948,7 +1992,7 @@ impl Viewfinder {
                     self.shutter_button(ui, p, vf::shown(panel.shot, panel.depth, panel.bank), out);
                     ui.add_space(6.0);
                     let isolating = self.isolate || f.isolation.mode != crate::snapshot::isolate::Mode::Off;
-                    if dock_button(ui, p, Face::Icon("user-scan"), aurora_i18n::tr!("photo-isolate-tip"), isolating) {
+                    if !path_mode && dock_button(ui, p, Face::Icon("user-scan"), aurora_i18n::tr!("photo-isolate-tip"), isolating) {
                         self.isolate = !self.isolate;
                         self.sheet = self.sheet.filter(|_| !self.isolate);
                         self.drawer &= !self.isolate;
@@ -2120,7 +2164,8 @@ impl Viewfinder {
         let (rect, resp) = ui.allocate_exact_size(Vec2::splat(66.0), Sense::click_and_drag());
         self.shutter_at = Some(rect);
         let primary = ui.input(|i| i.pointer.button_down(egui::PointerButton::Primary));
-        let down = resp.is_pointer_button_down_on() && primary;
+        // (greyed: nothing to press while the path plays or records)
+        let down = resp.is_pointer_button_down_on() && primary && !self.shutter_off;
         if resp.secondary_clicked() {
             self.toggle_sheet(Sheet::Modes, out);
         }
@@ -2133,15 +2178,17 @@ impl Viewfinder {
         }
         let locked = matches!(self.af.phase, Phase::Lock | Phase::Track);
         let c = rect.center();
+        let dim = if self.shutter_off { 0.45 } else { 1.0 };
         ui.painter().circle_filled(c, 33.0, p.navy.gamma_multiply(0.35));
         let ring = if self.pressed && locked { p.success } else { p.ink };
-        ui.painter().circle_stroke(c, 31.5, Stroke::new(3.0, ring));
+        ui.painter().circle_stroke(c, 31.5, Stroke::new(3.0, ring.gamma_multiply(dim)));
         let fill = if self.pressed {
             if locked { p.success } else { p.ink }
         } else {
             p.ink.gamma_multiply(0.92)
         };
-        ui.painter().circle_filled(c, if self.pressed { 25.0 * 0.86 } else { 25.0 }, fill);
+        ui.painter()
+            .circle_filled(c, if self.pressed { 25.0 * 0.86 } else { 25.0 }, fill.gamma_multiply(dim));
         match modes::glyph(mode) {
             Some(modes::Glyph::Icon(name)) => icon(ui.painter(), name, Rect::from_center_size(c, Vec2::splat(22.0)), p.navy),
             Some(modes::Glyph::Text(t)) => {
@@ -2149,12 +2196,21 @@ impl Viewfinder {
             }
             None => {}
         }
+        // the Path mode's plus: the shutter adds a waypoint
+        if mode == vf::ShotChoice::Path {
+            let badge = c + Vec2::new(23.0, -23.0);
+            ui.painter().circle_filled(badge, 10.0, p.violet.gamma_multiply(dim));
+            icon(ui.painter(), "plus", Rect::from_center_size(badge, Vec2::splat(13.0)), p.on_accent);
+        }
         keep_keys(&resp);
-        let tip = format!(
-            "{}\n{}",
-            aurora_i18n::tr!("photo-vf-shutter-tip"),
-            aurora_i18n::tr!("pcu-shutter-modes-tip")
-        );
+        let shutter_tip = if self.shutter_off {
+            aurora_i18n::tr!("vfp-shutter-busy-tip")
+        } else if mode == vf::ShotChoice::Path {
+            aurora_i18n::tr!("vfp-shutter-tip")
+        } else {
+            aurora_i18n::tr!("photo-vf-shutter-tip")
+        };
+        let tip = format!("{}\n{}", shutter_tip, aurora_i18n::tr!("pcu-shutter-modes-tip"));
         resp.on_hover_text(tip);
     }
 

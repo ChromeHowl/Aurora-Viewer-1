@@ -496,6 +496,7 @@ the background still applies outside screenshots.
 | `AURORA_DEMO_CONTROLS=camera\|roll\|movement\|compact\|compact-move\|classic\|views\|classic-views\|free\|free-compact` | The Controls window open on a tab, the Legacy Viewer's two windows, a view saved and given back, or driving the photo window's free camera |
 | `AURORA_DEMO_CAMERA_PRESETS=save\|apply\|object\|pick[-…]` | The viewfinder's camera presets: saved on the avatar, a place and an object, applied, or the object chosen in the scene |
 | `AURORA_DEMO_PHOTO_CAMERA=<what>[:down=<n>][:turn=<n>]` | The photo camera's quick menu, mode list or a sheet walked with the arrow keys (the row the keys are on lit), or the camera pad's Follow rows |
+| `AURORA_DEMO_VF_PATH=<what>[:<what>…]` | The viewfinder's Path mode (camera movie): a four-waypoint demo path, its timeline strip, dock buttons, sheet, playback or recording |
 
 `AURORA_DEMO_RENDER_TEXTURE`: with demo mode and `AURORA_CAPTURE`, the capture
 frame draws the full world into a caller-owned GPU texture instead of acquiring
@@ -1019,6 +1020,15 @@ row …`. With `follow` and `AURORA_UI_FONT=OpenDyslexic`, the pad's Follow
 labels shrink to their cells (an ellipsis past 9 points, the whole name in
 the tip); with the default font they keep their size. `follow` changes the
 demo profile's settings only.
+
+`AURORA_DEMO_VF_PATH` (with `AURORA_DEMO_SNAPSHOT=viewfinder`): at frame 600 the Path shot mode is chosen
+and a demo path of four waypoints (Smooth, Ease, Smooth, Linear) is placed in front of the camera, the second selected
+(never saved). Parts, joined with `:`: `empty` (no waypoints), `sel=<n>` (select waypoint 1 to 4), `sheet` (the Path
+sheet open), `hidden` (the path hidden in the world), `rec` (recording on: the shutter greys), `play` (the path plays
+from frame 640: the shutter greys and the playhead moves). Capture from frame 660: the timeline strip replaces the lens
+row with its markers, transitions and clock, the dock has the Path, eye, record and play buttons above the shutter, which
+wears a film glyph and a plus, and the violet curve with numbered pins shows in the world. The log gives the state at
+frame 700. Right-click a marker for its menu (by hand).
 
 `AURORA_DEMO_CONTROLS` opens the Controls window at frame 600: `camera` on
 its Camera tab (joysticks, zoom, the four views, object view, mouselook,
