@@ -110,6 +110,7 @@ mod system_notify;
 mod system_theme;
 mod text_validation;
 mod theme;
+mod theme_presets;
 mod tolerant;
 mod ui;
 mod ui_sound;
