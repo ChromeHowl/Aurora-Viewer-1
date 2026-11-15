@@ -458,7 +458,9 @@ mod tests {
         /// be at `to`, and hold it there.
         fn hold_at(&mut self, id: &str, to: Pos2) -> Pos2 {
             let from = self.title(id);
-            let target = from + (to - self.rect(id).min);
+            // The pointer stays in the viewport: a title bar dragged out of
+            // it tears the window off into its own native window.
+            let target = (from + (to - self.rect(id).min)).clamp(Pos2::new(1.0, 1.0), Pos2::new(self.screen.x - 1.0, self.screen.y - 1.0));
             self.press_and_hold(from, target);
             target
         }
@@ -646,15 +648,7 @@ mod tests {
         // B dragged far to the left and up: A reaches the corner first
         let start = s.rect(B).min;
         let at = s.hold_at(B, start + Vec2::new(-3000.0, -3000.0));
-        assert_eq!(
-            s.rect(A).min,
-            work.min,
-            "B {:?} MAP {:?} at {at:?} top {:?} dragged {:?}",
-            s.rect(B),
-            s.rect(MAP),
-            s.ctx.layer_id_at(s.title(B)),
-            s.ctx.dragged_id()
-        );
+        assert_eq!(s.rect(A).min, work.min);
         assert_eq!(s.rect(B).min - s.rect(A).min, offset);
         // dropped in the corner of the work area, under the top bar
         s.release(at);

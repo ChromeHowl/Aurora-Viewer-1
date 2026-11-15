@@ -72,6 +72,8 @@ pub struct WorldMapUi {
     zoom_pivot: Option<Vec2>,
     was_open: bool,
     focus_search: bool,
+    /// Frames the focus was asked for since the map opened.
+    focus_tries: u8,
     /// The next opening comes from a script (llMapDestination): it must not
     /// take the keyboard.
     opened_by_script: bool,
@@ -106,6 +108,7 @@ impl Default for WorldMapUi {
             zoom_pivot: None,
             was_open: false,
             focus_search: false,
+            focus_tries: 0,
             opened_by_script: false,
             tiles_complete: false,
             search: String::new(),
@@ -962,8 +965,15 @@ impl WorldMapUi {
                 aurora_i18n::tr!("ui-worldmap-regions-by-name"),
                 ui.available_width() - 84.0,
             );
-            if std::mem::take(&mut self.focus_search) {
+            // asked again for a few frames: the one of the window's first
+            // frames, still being sized, may be lost
+            if self.focus_search {
                 r.request_focus();
+                self.focus_tries += 1;
+                if self.focus_tries >= 3 {
+                    self.focus_search = false;
+                    self.focus_tries = 0;
+                }
             }
             if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                 go = true;
@@ -2037,7 +2047,9 @@ mod focus_tests {
         for style in [WorldMapStyle::Legacy, WorldMapStyle::Aurora] {
             let mut bench = Bench::new(style);
             // opened by the user (toolbar, menu, Ctrl+M)
-            bench.frame(true, vec![]);
+            for _ in 0..4 {
+                bench.frame(true, vec![]);
+            }
             let focused = match style {
                 WorldMapStyle::Legacy => bench.ctx.memory(|memory| memory.focused().is_some()),
                 WorldMapStyle::Aurora => bench.ctx.memory(|memory| memory.has_focus(overlay::search_id())),

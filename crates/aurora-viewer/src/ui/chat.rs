@@ -4815,10 +4815,10 @@ fn bubble_sender_link(ctx: &egui::Context, p: &Palette, world: &World, k: usize,
         });
 }
 
-/// The object a line can be inspected or blocked by: what it said, not its
-/// IMs, which carry their owner's id.
+/// The object a line can be inspected or blocked by: what it said, or its
+/// IM, which belongs to the object (the IM's session id).
 pub(super) fn line_object(line: &crate::world::ChatLine) -> Option<uuid::Uuid> {
-    (matches!(line.kind, ChatKind::Object(_)) && !line.source.is_nil()).then_some(line.source)
+    (matches!(line.kind, ChatKind::Object(_) | ChatKind::ObjectIm) && !line.source.is_nil()).then_some(line.source)
 }
 
 /// The rows of an object's menu: inspect, ignore (the Block of
@@ -7385,8 +7385,7 @@ mod tests {
                 let actions = crate::ui::context::take_requests(&frames.ctx);
                 assert!(
                     matches!(&actions[..], [CtxAction::AppLink(crate::slapp::AppLink::ObjectIm(o))] if o == expected),
-                    "{name}, renderer {renderer}: {actions:?} at {at:?} line {line:?} texts {:?}",
-                    texts.iter().map(|t| (t.source.clone(), t.rect)).collect::<Vec<_>>()
+                    "{name}, renderer {renderer}: {actions:?}"
                 );
             }
         }
