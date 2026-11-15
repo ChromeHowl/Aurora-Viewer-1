@@ -128,7 +128,7 @@ pub fn snap(t: f32) -> f32 {
 pub fn drag_time(wanted: f32, before: Option<f32>, span: f32) -> f32 {
     let lo = before.map_or(0.0, |b| b + MIN_GAP);
     let hi = span.min(MAX_TIME);
-    snap(wanted).max(lo).min(hi.max(lo))
+    snap(wanted).clamp(lo, hi.max(lo))
 }
 
 /// The ruler's ticks: how often a small one and a labelled one are drawn
@@ -664,7 +664,7 @@ impl Viewfinder {
                                     bold(ui.ctx(), 13.0),
                                     p.ink,
                                 );
-                                let seconds = format!("{}", aurora_i18n::number(f64::from(saved.duration), 1));
+                                let seconds = aurora_i18n::number(f64::from(saved.duration), 1);
                                 let detail = aurora_i18n::tr!("vfp-sheet-detail", count = saved.waypoints as i64, time = seconds.as_str());
                                 clip.text(
                                     Pos2::new(rect.left() + 8.0, rect.top() + 26.0),

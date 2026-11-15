@@ -2210,7 +2210,7 @@ impl Viewfinder {
         } else {
             aurora_i18n::tr!("photo-vf-shutter-tip")
         };
-        let tip = format!("{}\n{}", shutter_tip, aurora_i18n::tr!("pcu-shutter-modes-tip"));
+        let tip = format!("{shutter_tip}\n{}", aurora_i18n::tr!("pcu-shutter-modes-tip"));
         resp.on_hover_text(tip);
     }
 
