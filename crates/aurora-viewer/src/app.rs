@@ -13815,6 +13815,7 @@ impl App {
             );
         }
         self.native_viewports.root_textures(&full.textures_delta);
+        self.native_viewports.prune(&ctx, &full.viewport_output);
         full.textures_delta = self.native_viewports.root_texture_deltas(std::mem::take(&mut full.textures_delta));
         gfx.egui_state
             .handle_platform_output_with_event_loop(&gfx.window, event_loop, full.platform_output);
@@ -14115,7 +14116,8 @@ impl App {
         let timed = self.capture.is_some() || self.frame_profile.enabled();
         let cap = frame_cap(
             &self.settings,
-            self.focused,
+            // a detached floater with the keyboard is still the viewer in front
+            self.focused || self.native_viewports.has_focused_window(),
             gfx.renderer.vr_engaged(),
             self.in_world(),
             monitor_hz,
