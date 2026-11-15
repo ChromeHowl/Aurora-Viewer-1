@@ -1928,6 +1928,11 @@ pub struct Settings {
     /// Read the former single-key setting once; new files use HudDrag's two slots.
     #[serde(rename = "hud_drag_key", skip_serializing)]
     pub(crate) legacy_hud_drag_key: Option<crate::keybinds::HoldKey>,
+    /// This build gives the middle button to the Mouse Camera: set once
+    /// the files written before that have been moved over (`sanitized`).
+    /// Not the settings version, which upstream owns.
+    #[serde(default)]
+    pub middle_camera_default_applied: bool,
     /// Bumped when defaults change in a way that must reach existing settings
     /// (missing in older files: 0).
     #[serde(default)]
@@ -2890,6 +2895,7 @@ impl Default for Settings {
             colors: ColorSettings::default(),
             keybinds: Default::default(),
             legacy_hud_drag_key: None,
+            middle_camera_default_applied: true,
             settings_version: SETTINGS_VERSION,
             newer_file: None,
             new_profile: false,
@@ -3262,6 +3268,15 @@ impl Settings {
     }
 
     pub(crate) fn sanitized(mut self) -> Settings {
+        if !self.middle_camera_default_applied {
+            // a file written before this build: the middle button goes to the
+            // Mouse Camera once, unless the camera already has a button of
+            // its own; push-to-talk keeps whatever other key it has
+            self.middle_camera_default_applied = true;
+            if self.keybinds.get(crate::keybinds::Action::MouseCam).iter().all(Option::is_none) {
+                self.keybinds.set_middle_mouse_camera(true);
+            }
+        }
         if self.settings_version <= SETTINGS_VERSION {
             self.gamepad.migrate_gamepad_layout();
         }
@@ -5054,6 +5069,50 @@ mod tests {
 
     /// The chat bar keeps the keyboard by default, earlier files get it once
     /// (they all wrote the old "off"), a later choice stays.
+    #[test]
+    fn an_earlier_file_gives_the_middle_button_to_the_mouse_camera_once() {
+        use crate::keybinds::{Action, Binding, Input, KeyBindings, Mods};
+        use winit::keyboard::KeyCode;
+        // a file written before this build: push-to-talk on the middle button
+        let mut old = Settings {
+            middle_camera_default_applied: false,
+            ..Settings::default()
+        };
+        old.keybinds = KeyBindings::default();
+        old.keybinds.set_middle_mouse_camera(false);
+        assert!(!old.keybinds.middle_mouse_camera());
+        let moved = old.sanitized();
+        assert!(moved.middle_camera_default_applied);
+        assert!(moved.keybinds.middle_mouse_camera());
+        assert_eq!(moved.keybinds.get(Action::PushToTalk), [None, None]);
+        // switched off afterwards, it stays off at the next load
+        let mut again = moved;
+        again.keybinds.set_middle_mouse_camera(false);
+        assert!(!again.sanitized().keybinds.middle_mouse_camera());
+        // a push-to-talk key of its own is kept
+        let mut own = Settings {
+            middle_camera_default_applied: false,
+            ..Settings::default()
+        };
+        own.keybinds.set_middle_mouse_camera(false);
+        let f8 = Some(Binding::captured(Input::key(KeyCode::F8), Mods::default()));
+        own.keybinds.set(Action::PushToTalk, 0, f8.clone());
+        let own = own.sanitized();
+        assert_eq!(own.keybinds.get(Action::PushToTalk)[0], f8);
+        assert!(own.keybinds.middle_mouse_camera());
+        // a camera already on a button of its own is left alone
+        let mut other = Settings {
+            middle_camera_default_applied: false,
+            ..Settings::default()
+        };
+        other.keybinds.set_middle_mouse_camera(false);
+        let f9 = Some(Binding::captured(Input::key(KeyCode::F9), Mods::default()));
+        other.keybinds.set(Action::MouseCam, 0, f9.clone());
+        let other = other.sanitized();
+        assert_eq!(other.keybinds.get(Action::MouseCam)[0], f9);
+        assert!(!other.keybinds.middle_mouse_camera());
+    }
+
     #[test]
     fn a_file_on_the_former_deluxe_moves_to_gtao_once() {
         use crate::graphics_presets::{Preset, deluxe_v18};

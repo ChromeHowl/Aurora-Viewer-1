@@ -402,8 +402,8 @@ pub enum Action {
     CamRollRight,
     /// Catznip's Settings-MouseCam: the button held over the world takes
     /// the camera, focused on the clicked point, until it is released
-    /// (app/mouse_cam.rs). Unbound by default: Preferences › Mouse and
-    /// keyboard gives it the middle button (`set_middle_mouse_camera`).
+    /// (app/mouse_cam.rs). On the middle button by default in this build;
+    /// Preferences › Mouse and keyboard switches it (`set_middle_mouse_camera`).
     MouseCam,
     Chat,
     PushToTalk,
@@ -887,15 +887,12 @@ impl KeyBindings {
             (Action::CamPanDown, [kalt(K::ArrowDown, true, true), None]),
             (Action::CamRollLeft, [k(K::KeyR), None]),
             (Action::CamRollRight, [k(K::KeyT), None]),
-            (Action::MouseCam, [None, None]),
+            // this build: the middle button is the Mouse Camera's (Catznip's MouseCam); push-to-talk has no key until one is bound
+            (Action::MouseCam, middle_mouse_camera_bindings()),
             (Action::Chat, [k(K::Enter), k(K::NumpadEnter)]),
             // menu_viewer.xml: Nearby Chat, shortcut="control|H" use_mac_ctrl="true"
             (Action::NearbyChat, [kmod(K::KeyH, true, false), None]),
-            // SL default push-to-talk: middle mouse button
-            (
-                Action::PushToTalk,
-                [Some(Binding::plain(Input::Mouse(aurora_i18n::tr!("keybinds-middle").into()))), None],
-            ),
+            (Action::PushToTalk, [None, None]),
             (Action::ToggleMic, [None, None]),
             (Action::Conversations, [kmod(K::KeyT, true, false), None]),
             (Action::People, [kmod(K::KeyA, true, true), None]),
@@ -2662,7 +2659,7 @@ mod tests {
     }
 
     #[test]
-    fn movement_ignores_shift_and_mouse_ptt() {
+    fn movement_ignores_shift_and_mouse_camera() {
         let kb = KeyBindings::default();
         let mut down = HashSet::new();
         down.insert(Input::key(KeyCode::ArrowUp));
@@ -2672,7 +2669,7 @@ mod tests {
             ..Default::default()
         };
         assert!(kb.held(Action::Forward, &down, shift));
-        assert!(kb.held(Action::PushToTalk, &down, Mods::default()));
+        assert!(kb.held(Action::MouseCam, &down, Mods::default()));
         assert!(!kb.held(Action::Back, &down, shift));
     }
 
@@ -2697,23 +2694,22 @@ mod tests {
             alt: true,
             ..Default::default()
         };
-        // by default the button is push-to-talk's, as in the Legacy Viewer
+        // by default the button is the camera's in this build; push-to-talk has no key
         let mut kb = KeyBindings::default();
-        assert!(!kb.middle_mouse_camera());
-        assert_eq!(kb.get(Action::MouseCam), [None, None]);
-        assert_eq!(kb.triggered(&middle, Mods::default()), None);
-        // switched on: the camera takes it, with and without Ctrl
-        kb.set_middle_mouse_camera(true);
         assert!(kb.middle_mouse_camera());
         assert_eq!(kb.get(Action::PushToTalk), [None, None]);
         assert_eq!(kb.triggered(&middle, Mods::default()), Some(Action::MouseCam));
         assert_eq!(kb.triggered(&middle, ctrl), Some(Action::MouseCam));
         assert_eq!(kb.triggered(&middle, alt), None);
-        // switched off: push-to-talk has it again
+        // switched off: push-to-talk has it (the Legacy Viewer's default)
         kb.set_middle_mouse_camera(false);
         assert!(!kb.middle_mouse_camera());
         assert_eq!(kb.get(Action::MouseCam), [None, None]);
-        assert_eq!(kb.get(Action::PushToTalk), KeyBindings::default().get(Action::PushToTalk));
+        assert_eq!(kb.triggered(&middle, Mods::default()), Some(Action::PushToTalk));
+        // switched on again: the camera takes it back, with and without Ctrl
+        kb.set_middle_mouse_camera(true);
+        assert!(kb.middle_mouse_camera());
+        assert_eq!(kb.get(Action::PushToTalk), [None, None]);
         // push-to-talk moved to another key keeps it when switched off
         let f8 = Some(Binding::plain(Input::key(KeyCode::F8)));
         kb.set(Action::PushToTalk, 0, f8.clone());
