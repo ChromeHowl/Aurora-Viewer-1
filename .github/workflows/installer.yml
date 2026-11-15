@@ -43,8 +43,8 @@ jobs:
         shell: pwsh
         run: |
           function Find-Iscc {
-              Get-ChildItem "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe" -ErrorAction SilentlyContinue |
-                  Where-Object { [version]$_.VersionInfo.ProductVersion -ge [version]'6.3' } | Select-Object -First 1
+              Get-ChildItem "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe", "$env:ProgramFiles\Inno Setup*\ISCC.exe", "$env:LOCALAPPDATA\Programs\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue |
+                  Where-Object { [version]($_.VersionInfo.ProductVersion -replace '[^\d.].*$', '') -ge [version]'6.3' } | Select-Object -First 1
           }
           $iscc = Find-Iscc
           if (-not $iscc) {
@@ -52,7 +52,10 @@ jobs:
               if ($LASTEXITCODE) { exit $LASTEXITCODE }
               $iscc = Find-Iscc
           }
-          if (-not $iscc) { throw 'Inno Setup 6.3 or newer was not found.' }
+          if (-not $iscc) {
+              Get-ChildItem 'C:\Program Files*' -Recurse -Filter ISCC.exe -ErrorAction SilentlyContinue | ForEach-Object { "found $($_.FullName) $($_.VersionInfo.ProductVersion)" }
+              throw 'Inno Setup 6.3 or newer was not found.'
+          }
           $sig = Get-AuthenticodeSignature -LiteralPath $iscc.FullName
           if ($sig.Status -ne 'Valid') { throw "ISCC.exe is not validly signed ($($sig.Status))." }
           Write-Host "Inno Setup $($iscc.VersionInfo.ProductVersion), signed by $($sig.SignerCertificate.Subject)"
