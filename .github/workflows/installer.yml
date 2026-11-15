@@ -42,9 +42,15 @@ jobs:
       - name: Inno Setup
         shell: pwsh
         run: |
+          # ISCC.exe 6.7 reports 0.0.0.0 as its file version: read the banner it prints
+          function Get-IsccVersion([string]$Path) {
+              $banner = (& $Path '/?' 2>&1 | Out-String)
+              if ($banner -match 'Inno Setup (\d+\.\d+(\.\d+)?)') { return [version]$Matches[1] }
+              return [version]'0.0'
+          }
           function Find-Iscc {
               Get-ChildItem "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe", "$env:ProgramFiles\Inno Setup*\ISCC.exe", "$env:LOCALAPPDATA\Programs\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue |
-                  Where-Object { [version]($_.VersionInfo.ProductVersion -replace '[^\d.].*$', '') -ge [version]'6.3' } | Select-Object -First 1
+                  Where-Object { (Get-IsccVersion $_.FullName) -ge [version]'6.3' } | Select-Object -First 1
           }
           $iscc = Find-Iscc
           if (-not $iscc) {
@@ -58,7 +64,7 @@ jobs:
           }
           $sig = Get-AuthenticodeSignature -LiteralPath $iscc.FullName
           if ($sig.Status -ne 'Valid') { throw "ISCC.exe is not validly signed ($($sig.Status))." }
-          Write-Host "Inno Setup $($iscc.VersionInfo.ProductVersion), signed by $($sig.SignerCertificate.Subject)"
+          Write-Host "Inno Setup $(Get-IsccVersion $iscc.FullName), signed by $($sig.SignerCertificate.Subject)"
           "ISCC=$($iscc.FullName)" >> $env:GITHUB_ENV
       - name: Compile
         id: compile
