@@ -111,10 +111,10 @@ impl Editor {
             session.history(redo);
             self.refresh = true;
         }
-        if let Some((document, pose, black_dragon)) = self.poser.storage.overwrite.clone() {
+        if let Some(save) = self.poser.storage.overwrite.clone() {
             widgets::Modal::new(egui::Id::unique("poser-overwrite-confirm")).show(ctx, |ui| {
                 ui.heading(aurora_i18n::tr!("poser-overwrite"));
-                ui.label(&document.name);
+                ui.label(&save.document.name);
                 ui.horizontal(|ui| {
                     if ui.button(aurora_i18n::tr!("common-cancel")).clicked() {
                         self.poser.storage.overwrite = None;
@@ -131,11 +131,9 @@ impl Editor {
                     {
                         self.poser.storage.overwrite = None;
                         self.poser.storage.job = Some(storage::Job::Save(storage::Save {
-                            document,
-                            pose,
-                            black_dragon,
                             confirm: false,
                             pick: false,
+                            ..save
                         }));
                     }
                 });
@@ -442,12 +440,12 @@ impl Editor {
                     ui,
                     p,
                     "device-floppy-filled",
-                    aurora_i18n::text("poser-save-diff"),
+                    aurora_i18n::text("poser-save-whole"),
                     widgets::ActionKind::Primary,
                     egui::vec2(0.0, 28.0),
                     !self.poser.storage.busy && !self.poser.name.trim().is_empty(),
                 )
-                .on_hover_text(aurora_i18n::text("poser-save-diff-hint"))
+                .on_hover_text(aurora_i18n::text("poser-save-whole-hint"))
                 .clicked()
                 {
                     self.save_pose(rig, frame, false);
@@ -509,15 +507,15 @@ impl Editor {
                     ui,
                     p,
                     "file-upload-filled",
-                    aurora_i18n::text("poser-save-total"),
+                    aurora_i18n::text("poser-upload"),
                     widgets::ActionKind::Flat,
                     egui::vec2(0.0, 28.0),
-                    !self.poser.storage.busy,
+                    !self.poser.storage.busy && !self.poser.name.trim().is_empty(),
                 )
-                .on_hover_text(aurora_i18n::text("poser-save-total-hint"))
+                .on_hover_text(aurora_i18n::text("poser-upload-hint"))
                 .clicked()
                 {
-                    self.save_total(rig, frame);
+                    self.upload_pose(rig, frame);
                 }
             });
         });
@@ -543,52 +541,58 @@ impl Editor {
     pub(super) fn follow_name(&mut self) {
         self.poser.names.follow(self.poser.subject, &mut self.poser.name);
     }
-    pub(super) fn save_pose(&mut self, rig: &Rig, frame: &Frame, pick: bool) {
+    /// The Save request for the whole current pose of the selected subject:
+    /// every joint, edited or not, as a pose file and as a new animation.
+    /// Nothing is refused for being unchanged, and a loaded animation only
+    /// changes the pose it put on screen.
+    pub(super) fn whole_save(&mut self, rig: &Rig, frame: &Frame, pick: bool) -> Option<storage::Save> {
         self.follow_name();
-        let Some(session) = self.poser.sessions.get(&self.poser.subject) else {
-            return;
-        };
-        let Some(snapshot) = session.pose.snapshot(rig, frame.model) else {
+        let session = self.poser.sessions.get(&self.poser.subject)?;
+        let built = session.whole(rig, frame.model).and_then(|whole| {
+            let animation = total::whole(rig, &whole, self.poser.priority).ok()?;
+            let document = document::Document::whole(rig, session, &whole, self.poser.name.clone(), self.poser.priority);
+            Some(storage::Save {
+                document,
+                pose: Arc::new(whole),
+                animation: Some(Arc::new(animation)),
+                black_dragon: self.poser.also_black_dragon,
+                confirm: self.poser.confirm_overwrite,
+                pick,
+            })
+        });
+        if built.is_none() {
             self.poser.storage.message = Some(aurora_i18n::text("anim-edit-invalid").to_owned());
-            return;
-        };
-        let mut capture = session.clone();
-        capture.pose = Arc::new(snapshot);
-        let Some(document) = document::Document::diff(rig, &capture, self.poser.name.clone(), self.poser.priority) else {
-            self.poser.storage.message = Some(aurora_i18n::text("poser-diff-unchanged").to_owned());
-            return;
-        };
-        let Some(authored) = session.authored(rig, frame.model) else {
-            self.poser.storage.message = Some(aurora_i18n::text("anim-edit-invalid").to_owned());
-            return;
-        };
-        self.poser.storage.job = Some(storage::Job::Save(storage::Save {
-            document,
-            pose: Arc::new(authored),
-            black_dragon: self.poser.also_black_dragon,
-            confirm: self.poser.confirm_overwrite,
-            pick,
-        }));
+        }
+        built
     }
-    /// Save total animation: the animation loaded as the base with the
-    /// changes applied, written as a new `.anim` file (the base is never
-    /// modified). Needs a loaded animation.
-    pub(super) fn save_total(&mut self, rig: &Rig, frame: &Frame) {
-        self.follow_name();
-        let Some(session) = self.poser.sessions.get(&self.poser.subject) else {
+    /// Save: the pose file and the animation, in the library or, with `pick`
+    /// (Save as…), where the system dialog says.
+    pub(super) fn save_pose(&mut self, rig: &Rig, frame: &Frame, pick: bool) {
+        if let Some(save) = self.whole_save(rig, frame, pick) {
+            self.poser.storage.job = Some(storage::Job::Save(save));
+        }
+    }
+    /// Upload: saves the same whole pose first, then stages its animation in
+    /// the import inspector, where the upload and its price confirmation stay
+    /// the human's action.
+    pub(super) fn upload_pose(&mut self, rig: &Rig, frame: &Frame) {
+        let Some(save) = self.whole_save(rig, frame, false) else {
             return;
         };
-        let Some(base) = session.anim_base.clone() else {
-            self.poser.storage.message = Some(aurora_i18n::text("poser-total-need-base").to_owned());
+        let Some(animation) = save.animation.clone() else {
             return;
         };
-        let Some(snapshot) = session.pose.snapshot(rig, frame.model) else {
-            self.poser.storage.message = Some(aurora_i18n::text("anim-edit-invalid").to_owned());
-            return;
-        };
-        match total::total(rig, &base, &snapshot, &session.base) {
-            Ok(animation) => self.poser.storage.job = Some(storage::Job::Total(animation, self.poser.name.clone())),
-            Err(key) => self.poser.storage.message = Some(aurora_i18n::text(key).to_owned()),
+        match total::encode(&animation) {
+            Ok(bytes) => {
+                self.poser.uploads.push(clip::Prepared {
+                    name: clip::files::basename(&save.document.name),
+                    bytes: Arc::new(bytes),
+                    animation,
+                    pose: true,
+                });
+                self.poser.storage.job = Some(storage::Job::Save(save));
+            }
+            Err(error) => self.poser.storage.message = Some(error),
         }
     }
     /// The library in the joints column's place: the window keeps its size.

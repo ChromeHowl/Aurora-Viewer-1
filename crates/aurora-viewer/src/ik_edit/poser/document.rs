@@ -96,20 +96,24 @@ impl Document {
                 .collect(),
         }
     }
-    /// Save diff: only the joints changed since posing started (or pinned),
-    /// each as a change on the destination's own pose
-    /// (FSFloaterPoser::savePoseToXml writes no joint that is all zero when
-    /// saving a diff). `None` when nothing changed.
-    pub fn diff(rig: &Rig, session: &data::Session, name: String, priority: i32) -> Option<Self> {
+    /// Save: the whole pose, every joint of the subject with its complete
+    /// rotation, including joints that were never edited. `whole` is
+    /// `Session::whole`: the pose on the rest skeleton with the locks baked.
+    pub fn whole(rig: &Rig, session: &data::Session, whole: &data::Pose, name: String, priority: i32) -> Self {
         let mut document = Self::capture(rig, session, name, priority);
-        let joints = std::mem::take(&mut document.joints);
-        document.joints = joints
-            .into_iter()
-            .enumerate()
-            .filter(|(bone, _)| session.edited(*bone) || session.pose.locks.contains_key(bone))
-            .map(|(_, joint)| joint)
-            .collect();
-        (!document.joints.is_empty()).then_some(document)
+        for (bone, joint) in document.joints.iter_mut().enumerate() {
+            joint.rotation = whole.rotations[bone].to_array();
+            joint.translation = (whole.positions[bone] - rig.local_pos[bone]).to_array();
+            joint.change = false;
+        }
+        document
+    }
+    #[cfg(test)]
+    pub fn joint_rotation(&self, name: &str) -> [f32; 4] {
+        self.joints
+            .iter()
+            .find(|j| j.name == name)
+            .map_or([0.0, 0.0, 0.0, 1.0], |j| j.rotation)
     }
     pub fn valid(&self, rig: &Rig) -> bool {
         let mut seen = HashSet::new();

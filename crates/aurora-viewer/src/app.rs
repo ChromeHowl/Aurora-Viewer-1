@@ -3580,6 +3580,11 @@ impl App {
         // before the settings are saved and the account state replaced
         self.close_pose_stand();
         self.panels.pose_stand = false;
+        // no pose or edit of the poser and the animation editors outlives the
+        // session: the next login starts with none
+        self.ik_editor.end_session();
+        self.scene.ik_edit = Default::default();
+        self.scene.poser.clear();
         self.parcel_music.enter(false);
         self.stream_url.clear();
         self.music_fade.reset();
@@ -19355,7 +19360,12 @@ impl App {
                         self.settings.save();
                     }
                 }
-                for prepared in self.ik_editor.take_clip_imports() {
+                for prepared in self
+                    .ik_editor
+                    .take_clip_imports()
+                    .into_iter()
+                    .chain(self.ik_editor.take_poser_imports())
+                {
                     self.imports.authored_animation(
                         &self.world,
                         &self.settings.inventory,

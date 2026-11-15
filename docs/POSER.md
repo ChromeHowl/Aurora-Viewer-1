@@ -54,10 +54,10 @@ this one; Reset acts on all of them, as in the full window.
   the full window's.
 - **Last row**, three groups of one kind each: picking (markers Always or
   On hover, Ctrl + click body parts, Ctrl + click avatars), going back
-  (undo, redo, reset) and files (Save diff, Load, Save total animation). The reset greys out
+  (undo, redo, reset) and files (Save, Load, Upload). The reset greys out
   when it would change nothing; its tip names the joint; with Shift it
-  resets the whole pose. Save diff is a small form: the name,
-  priority, Save diff to the library, and Save as… (the file chosen in the
+  resets the whole pose. Save is a small form: the name,
+  priority, Save to the library, and Save as… (the file chosen in the
   system dialog). Load lists the library, with the load mode in a submenu
   and Open file.
 - **Start / Stop**, alone across the window under the last row.
@@ -274,7 +274,7 @@ human checks below.
 
 Each posed subject (your avatar, a consenting nearby avatar, an owned
 animesh) has its own captured pose, loaded base animation and changes, so Save
-diff and Save total animation always act on the selected subject. The name
+and Upload always act on the selected subject. The name
 field is per subject too, in the full and the compact window: it shows the
 name last saved or loaded for the selected subject (a loaded animation gives
 its file name), an empty one when it has none, and switches back as the
@@ -283,35 +283,33 @@ session and are dropped when a subject is gone. A name typed but not saved is
 kept with its subject as well. Try it with `AURORA_DEMO_POSER=animesh` (own
 avatar and an owned animesh).
 
-There are exactly two ways out, both saving a file and neither uploading:
+Two actions leave the poser:
 
-1. **Save diff** writes a `*.aurora-pose.json` with only the joints you
-   changed (the Legacy Viewer's "Save Diff", `FSFloaterPoser::savePoseToXml`
-   skips joints with no change). Each joint holds the turn made on its own
-   frame, `rotation = captured * change` (the Legacy Viewer's
-   `mRotation * mBaseRotation`, which is `base * change` in the usual
-   quaternion product), so it loads onto any pose as the same turn. A joint
-   built from T-pose, a preset or a loaded file is stored complete. Nothing
-   changed: nothing is saved and the window says so. Files saved before this
-   are read as before.
-2. **Save total animation** writes a new `.anim`: the animation loaded as the
-   base (Load, then an `.anim` or `.bvh` file) with your changes applied.
-   Each rotation key of a driven joint becomes `key * change`, where
-   `change = first frame * (pose on screen)`, so the motion stays and the
-   joint turns as it did on screen; a joint the file does not drive, and
-   that you changed, gets one key with your pose. Position keys move by your
-   position change. Priority, loop, ease and hand pose are the file's. The
-   file is checked with the same reader as **Upload animation**, so it opens
-   in that preview; the loaded animation is never modified. Without a loaded
-   animation the button explains that one is needed; with no change it
-   says so. Upload and the simulator price confirmation still require the
-   human's action; saving never uploads.
+1. **Save** writes the whole current pose of the selected subject as a new
+   animation and as a pose file, in the library (or where **Save as…** says).
+   Every joint is written with its complete rotation, edited or not (fingers
+   and Bento joints included), plus the positions you moved; a loaded
+   animation or pose only decides what is on screen, and what is on screen is
+   what is saved. A joint switched off in the poser (the live animation's) is
+   left out of the animation, though its flag stays in the pose file. Nothing
+   needs to be changed or loaded first: an untouched pose saves too. The
+   animation is `<name>.anim`, a one-frame animation that holds the pose
+   (priority from the Save form), written beside `<name>.aurora-pose.json`;
+   it is checked with the same reader as **Upload animation**. The pose file
+   keeps the library's format (complete rotations, so it loads on any avatar
+   with the load modes). The Black Dragon copy, when its option is on, is the
+   same whole pose. The Legacy Viewer's "Save Diff" and loading a Black Dragon
+   diff are not part of this: Aurora no longer writes difference files, and
+   pose files saved as differences before still load.
+2. **Upload** saves the same pose first (same files, same overwrite
+   confirmation) and opens the animation in the upload window, in the
+   "! Created Poses" folder. The upload itself and the simulator's price
+   confirmation are still the human's action there; **Save never uploads**.
 
-Why both are measured on the pose they were made on: the old exports wrote
-the change on the rest skeleton, so a joint whose captured rotation was not
-the rest one (any avatar playing an animation) turned the wrong way when the
-file was loaded or uploaded. There is no BVH export any more; Load still
-reads `.bvh`.
+A session's end (the Logout bar, the server, a lost link) ends the poser and
+the animation editors too: a pose kept with "Stop posing when the window
+closes" off, goals, the animation stack and the selection are dropped, so the
+next login starts with none (`Editor::end_session`).
 
 ## Animations
 
@@ -410,7 +408,7 @@ request/answer events exercise the real consent state machine; they are
 not a substitute for two-client LSL transport validation.
 
 Human checks: edit each tab and channel, use presets and undo, save/reload
-each load mode, confirm overwrite, load an animation and save the total animation, switch subjects, and test both close behaviours. Load a
+each load mode, confirm overwrite, save a pose and open its `.anim` in the upload window, press Upload, switch subjects, and test both close behaviours. Load a
 real Black Dragon pose file of each layout, save a Black Dragon copy and load
 it in Black Dragon; play, pause, seek, apply and stop an inventory animation
 in the Animations panel with the override on and off. On a

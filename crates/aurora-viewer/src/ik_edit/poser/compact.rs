@@ -834,9 +834,10 @@ impl Editor {
                 let tag = (aurora_i18n::text("poser-tip-load"), aurora_i18n::text("poser-tip-load-detail"));
                 let load = square(ui, p, "folder-open-filled", tag, false, free);
                 self.load_list(&load, p);
-                let tag = (aurora_i18n::text("poser-save-total"), aurora_i18n::text("poser-save-total-hint"));
-                if square(ui, p, "file-upload-filled", tag, false, free).clicked() {
-                    self.save_total(rig, frame);
+                let tag = (aurora_i18n::text("poser-upload"), aurora_i18n::text("poser-upload-hint"));
+                let named = !self.poser.name.trim().is_empty();
+                if square(ui, p, "file-upload-filled", tag, false, free && named).clicked() {
+                    self.upload_pose(rig, frame);
                 }
             });
         });
@@ -929,7 +930,7 @@ impl Editor {
                     ui,
                     p,
                     "device-floppy-filled",
-                    aurora_i18n::text("poser-save-diff"),
+                    aurora_i18n::text("poser-save-whole"),
                     widgets::ActionKind::Primary,
                     egui::vec2(244.0, 28.0),
                     ready,

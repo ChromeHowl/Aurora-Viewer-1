@@ -169,9 +169,6 @@ pub(super) struct Session {
     pub enabled: bool,
     pub undo: Vec<Arc<Pose>>,
     pub redo: Vec<Arc<Pose>>,
-    /// The animation loaded as the base (Load > an animation file): what
-    /// Save total animation applies the changes to.
-    pub anim_base: Option<Arc<total::AnimBase>>,
 }
 impl Session {
     pub fn new(pose: Pose) -> Self {
@@ -188,7 +185,6 @@ impl Session {
             enabled: true,
             undo: Vec::new(),
             redo: Vec::new(),
-            anim_base: None,
         }
     }
     pub fn rebase(&mut self, rest: Arc<SkeletonBase>) {
@@ -261,6 +257,23 @@ impl Session {
             rotations: (0..rig.len())
                 .map(|b| (rig.local_rot[b] * resolved.origin[b].inverse() * resolved.rotations[b]).normalize())
                 .collect(),
+            positions: (0..rig.len())
+                .map(|b| rig.local_pos[b] + resolved.positions[b] - self.base.positions[b])
+                .collect(),
+            scales: rig.scale.clone(),
+            locks: HashMap::new(),
+            origin: rig.local_rot.clone(),
+            enabled: self.pose.enabled.clone(),
+        };
+        pose.valid(rig).then_some(pose)
+    }
+    /// The whole pose on the rest skeleton, as Save writes it: the complete
+    /// rotation of every joint (what the captured pose or a loaded file
+    /// brought stays), the positions the user moved, the locks baked.
+    pub fn whole(&self, rig: &Rig, model: Mat4) -> Option<Pose> {
+        let resolved = self.pose.snapshot(rig, model)?;
+        let pose = Pose {
+            rotations: resolved.rotations.clone(),
             positions: (0..rig.len())
                 .map(|b| rig.local_pos[b] + resolved.positions[b] - self.base.positions[b])
                 .collect(),
