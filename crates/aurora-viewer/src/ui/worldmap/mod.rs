@@ -2048,7 +2048,13 @@ mod focus_tests {
                 WorldMapStyle::Legacy => &bench.map.search,
                 WorldMapStyle::Aurora => &bench.map.ov.query,
             };
-            assert_eq!(query, "ab", "typed text should reach {style:?} map search");
+            assert_eq!(
+                query,
+                "ab",
+                "typed text should reach {style:?} map search (focus {:?}, search id {:?})",
+                bench.ctx.memory(|memory| memory.focused()),
+                overlay::search_id()
+            );
         }
     }
 

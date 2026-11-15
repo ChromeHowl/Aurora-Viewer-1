@@ -646,7 +646,15 @@ mod tests {
         // B dragged far to the left and up: A reaches the corner first
         let start = s.rect(B).min;
         let at = s.hold_at(B, start + Vec2::new(-3000.0, -3000.0));
-        assert_eq!(s.rect(A).min, work.min);
+        assert_eq!(
+            s.rect(A).min,
+            work.min,
+            "B {:?} MAP {:?} at {at:?} top {:?} dragged {:?}",
+            s.rect(B),
+            s.rect(MAP),
+            s.ctx.layer_id_at(s.title(B)),
+            s.ctx.dragged_id()
+        );
         assert_eq!(s.rect(B).min - s.rect(A).min, offset);
         // dropped in the corner of the work area, under the top bar
         s.release(at);

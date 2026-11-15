@@ -7385,7 +7385,8 @@ mod tests {
                 let actions = crate::ui::context::take_requests(&frames.ctx);
                 assert!(
                     matches!(&actions[..], [CtxAction::AppLink(crate::slapp::AppLink::ObjectIm(o))] if o == expected),
-                    "{name}, renderer {renderer}: {actions:?}"
+                    "{name}, renderer {renderer}: {actions:?} at {at:?} line {line:?} texts {:?}",
+                    texts.iter().map(|t| (t.source.clone(), t.rect)).collect::<Vec<_>>()
                 );
             }
         }
