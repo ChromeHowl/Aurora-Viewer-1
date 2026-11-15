@@ -120,11 +120,20 @@ Push-Location $src
 # A shell inherited from a release job must not stamp another commit with
 # its tag. The local build resolves the version from this checkout's Git.
 $previousVersionTag = [Environment]::GetEnvironmentVariable('AURORA_VERSION_TAG', 'Process')
+# The OpenXR loader built in, like the published exe (release.yml): without
+# it, VR depends on an openxr_loader.dll found on the PC, which a headset
+# software update can remove. Building it needs CMake (docs/VR_WINDOWS.md).
+$features = @()
+if (Get-Command cmake -ErrorAction SilentlyContinue) {
+    $features = '--features', 'xr-static-loader'
+} else {
+    Write-Host 'CMake not found: the OpenXR loader is not built in, VR will need an openxr_loader.dll on this PC. Install CMake (winget install Kitware.CMake) to build it in.' -ForegroundColor Yellow
+}
 try {
     # Not SetEnvironmentVariable(…, $null): PowerShell passes '', which .NET 9 and
     # later keep as an empty variable, and the build refuses an empty tag.
     Remove-Item Env:AURORA_VERSION_TAG -ErrorAction SilentlyContinue
-    Invoke-Checked 'cargo build' { cargo build --release --locked -p aurora-viewer }
+    Invoke-Checked 'cargo build' { cargo build --release --locked -p aurora-viewer @features }
 } finally {
     if ($null -ne $previousVersionTag) { [Environment]::SetEnvironmentVariable('AURORA_VERSION_TAG', $previousVersionTag, 'Process') }
     Pop-Location
