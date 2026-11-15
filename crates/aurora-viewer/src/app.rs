@@ -54,8 +54,8 @@ mod buy_currency;
 mod buy_land;
 mod camera_presets;
 mod camera_tools;
-mod character_tests;
 mod capture_360;
+mod character_tests;
 mod chat_commands;
 mod chat_import;
 mod chat_take;
@@ -72,8 +72,8 @@ mod describe;
 mod dev_toolbox;
 mod folders;
 mod hover_pick;
-mod photo_camera_demo;
 mod legacy_lists;
+mod photo_camera_demo;
 mod texture_picker;
 mod typing_pointer;
 use folders::chat_log_root;
@@ -183,8 +183,8 @@ mod viewer_stats;
 mod viewfinder;
 mod water_volumes;
 mod wearable_editor;
-mod window_size;
 mod wearable_favorites;
+mod window_size;
 mod world_click_demo;
 mod worn_demo;
 
@@ -572,7 +572,6 @@ pub struct App {
     favorite_images: std::collections::HashSet<uuid::Uuid>,
     /// The History window (a conversation's whole transcript).
     history_ui: ui::chat::history::HistoryUi,
-    conversation_log_ui: ui::chat::conversation_log::ConversationLogUi,
     perf: PerfData,
     /// The Performance window's full view (ui/monitor) and what its
     /// snapshots need (app/monitor.rs).
@@ -647,8 +646,6 @@ pub struct App {
     /// Open right-click menu.
     context_menu: Option<ui::context::ContextMenu>,
     context_customization: ui::context::Customization,
-    /// The Omnifilter's rule set to or from an inventory notecard.
-    omnifilter_notecards: ui::omnifilter_notecards::State,
     avatar_textures: ui::context::AvatarTexturesUi,
     object_profile: ui::context::ObjectProfileUi,
     pathfinding_ui: ui::context::PathfindingUi,
@@ -1977,7 +1974,6 @@ impl App {
             favorites_access_applied: None,
             favorite_images: Default::default(),
             history_ui: Default::default(),
-            conversation_log_ui: Default::default(),
             chat_import: Default::default(),
             legacy_lists: Default::default(),
             perf: PerfData::default(),
@@ -2019,7 +2015,6 @@ impl App {
             right_gesture: RightGesture::default(),
             context_menu: None,
             context_customization: Default::default(),
-            omnifilter_notecards: Default::default(),
             avatar_textures: Default::default(),
             object_profile: Default::default(),
             pathfinding_ui: Default::default(),
@@ -3979,12 +3974,6 @@ impl App {
                 }
                 return;
             }
-            if self.omnifilter_notecards.saved(request, &result) {
-                if let Ok(item) = result {
-                    self.world.inventory.add_items(vec![item]);
-                }
-                return;
-            }
             if self.context_customization.notecards.saved(request, &result) {
                 if let Ok(item) = result {
                     self.world.inventory.add_items(vec![item]);
@@ -4145,21 +4134,6 @@ impl App {
             }
             if ui::inventory::context_notecards::loaded(&mut self.inventory_ui, &mut self.settings.inventory, item, &result) {
                 self.settings.save();
-            }
-            // a Legacy Omnifilter notecard: a new rule set, put in use
-            // (importRuleSetFromNotecard)
-            if let Some((name, rules)) = self.omnifilter_notecards.loaded(item, &result) {
-                let mut set = self.world.omnifilter.rules().clone();
-                let name = set.free_name(&name);
-                let count = rules.len().min(crate::world::omnifilter::MAX_RULES);
-                self.options_ui.omnifilter_note = Some(match set.add(&name, rules) {
-                    Ok(()) => {
-                        self.world.omnifilter.replace(set);
-                        aurora_i18n::tr!("nb-omnifilter-imported-set", count = count as i64, name = name)
-                    }
-                    Err(_) => aurora_i18n::tr!("nb-omnifilter-sets-full").to_owned(),
-                });
-                return;
             }
             if let Some(menus) = self.context_customization.notecards.loaded(item, &result) {
                 self.context_customization
@@ -6590,9 +6564,7 @@ impl App {
             if self.settings.flash_conversations_button && (!self.panels.chat || minimized) && w.message_flashes_conversations(&m) {
                 self.chat_ui.button_flash.message(now, !self.panels.chat);
             }
-            // highlighted by a rule, translated (`world/omnifilter.rs`,
-            // `world/translate.rs`)
-            w.omnifilter_message(&m);
+            // translated (`world/translate.rs`)
             w.translate_message(&m);
             // copied into the nearby chat or its lines over the world
             // (`world/chat_copies.rs`), before the toast it may replace
@@ -7800,8 +7772,11 @@ impl App {
                 portal,
             } => {
                 if portal && !self.world.rlva_allows_portal_crossing() {
+                    let reason: String = aurora_i18n::tr!("rlva-blocked").into();
                     self.world.apply(NetEvent::TeleportFailed {
-                        reason: aurora_i18n::tr!("rlva-blocked").into(),
+                        code: reason.clone(),
+                        reason,
+                        region: String::new(),
                     });
                     return;
                 }
@@ -18262,7 +18237,10 @@ impl App {
         );
         ui::widgets::set_perceptual_volume(&ctx, self.settings.audio.perceptual_volume);
         let island = self.system_island();
-        ui::bars::clock::set_chat_format(island.clock_format, self.settings.chat_time_seconds);
+        ui::bars::clock::set_chat_format(
+            island.clock_format,
+            self.settings.chat_time_seconds || self.settings.chat_display.seconds_in_timestamps,
+        );
         ui::bars::clock::set_zone(island.clock_zone);
         ui::chat::display::set(&self.settings.chat_display);
         self.emoji.set_monochrome(self.settings.chat_display.more.bw_emojis);
@@ -20018,14 +19996,6 @@ impl App {
                 if self.settings.friends_list != friends_before {
                     self.settings.save();
                 }
-                // the Conversation Log: a past conversation opens in History
-                if let Some(pick) = self
-                    .conversation_log_ui
-                    .show(&ctx, &p, self.world.chat_log.dir(), &mut self.panels.conversation_log)
-                {
-                    self.history_ui.show_file(pick.title, Some(pick.file));
-                    ui::widgets::bring_floater_front(&ctx, "chat_history");
-                }
                 if let Some(ui::chat::history::HistoryAction::OpenFolder(dir)) = self.history_ui.show(
                     &ctx,
                     &p,
@@ -20329,10 +20299,6 @@ impl App {
                         .notecards
                         .show(&ctx, &p, &mut self.world.inventory, &self.settings.world_context_menus)
                 {
-                    self.send(command);
-                }
-                let filter = self.in_world().then(|| self.world.omnifilter.rules());
-                if let Some(command) = self.omnifilter_notecards.show(&ctx, &p, &mut self.world.inventory, filter) {
                     self.send(command);
                 }
                 self.object_menu_ui(&ctx, &p);
@@ -24798,14 +24764,12 @@ impl ApplicationHandler for App {
                     g.renderer
                         .apply_settings(snapshot::render_settings_with(&self.settings, &self.snapshots.ui.light));
                 }
-            }
-            WindowEvent::Moved(_) => {
+                // DPI transitions can change both the surface size and saved
+                // physical placement without a distinct user resize.
                 ui::menu::window_geometry_changed(&self.egui_ctx);
                 self.geom_changed = Some(Instant::now());
             }
-            WindowEvent::ScaleFactorChanged { .. } => {
-                // DPI transitions can change both the surface size and saved
-                // physical placement without a distinct user resize.
+            WindowEvent::Moved(_) => {
                 ui::menu::window_geometry_changed(&self.egui_ctx);
                 self.geom_changed = Some(Instant::now());
             }

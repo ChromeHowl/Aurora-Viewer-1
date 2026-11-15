@@ -199,6 +199,7 @@ fn menu_toolbar_right_click_import_adds_and_removes_without_running_it() {
     let mut settings = ToolbarSettings::default();
     let mut toolbar = ToolbarUi::default();
     toolbar.commit_with_menus(&ctx, &layout, &mut settings);
+    let mut panels = Panels::from_settings(&crate::settings::Settings::default());
     let mut time = 0.0;
     let mut frame = |events| {
         time += 0.2;
@@ -213,7 +214,7 @@ fn menu_toolbar_right_click_import_adds_and_removes_without_running_it() {
             |ui| {
                 egui::MenuBar::new().ui(ui, |ui| {
                     ui.menu_button(aurora_i18n::tr!("common-build"), |ui| {
-                        menu::searchable(ui, &p, |ui| build_menu(ui, &p, &mut action, "", false));
+                        menu::searchable(ui, &p, |ui| build_menu(ui, &p, &mut panels, &mut action, "", false, false));
                     });
                 });
                 crate::ui::toolbar::show_command_context(&ctx, &p);

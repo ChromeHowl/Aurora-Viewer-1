@@ -425,6 +425,7 @@ mod tests {
             scales: rig.scale.clone(),
             locks: Default::default(),
             origin: rig.local_rot.clone(),
+            enabled: vec![true; rig.len()],
         };
         let (head, pelvis, hand) = (rig.names["mHead"], rig.pelvis, rig.names["mWristLeft"]);
         pose.rotations[head] = (rig.local_rot[head] * Quat::from_euler(EulerRot::XYZ, 0.4, -0.7, 1.1)).normalize();

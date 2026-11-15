@@ -2316,6 +2316,11 @@ mod tests {
             email: None,
             exposure: 0.0,
             hdr: true,
+            shadows: ShadowView {
+                softness: 1.0,
+                intensity: 1.0,
+                soft: false,
+            },
             env: EnvView {
                 catalog,
                 own: crate::world::eep_env::LocalView::SHARED,
@@ -2325,6 +2330,10 @@ mod tests {
             },
             back_key: None,
             quality_reduced: false,
+            pano_allowed: true,
+            prefs_grade: Default::default(),
+            tone_why: None,
+            effects: &[],
             pano: None,
         }
     }

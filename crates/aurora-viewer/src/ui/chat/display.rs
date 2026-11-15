@@ -53,33 +53,3 @@ pub(crate) fn labelled_link_hint(ctx: &egui::Context) -> bool {
     let d = get();
     if nearby { d.link_hint_nearby } else { d.link_hint_im }
 }
-
-/// ":ss" after the minutes when the chat's times show their seconds
-/// (FSSecondsinChatTimestamps), else nothing.
-pub(crate) fn seconds_suffix(t: std::time::SystemTime) -> String {
-    if !get().seconds_in_timestamps {
-        return String::new();
-    }
-    seconds_of(t).map_or_else(String::new, |s| format!(":{s:02}"))
-}
-
-/// The seconds of a moment (the same in every time zone, whose offsets are
-/// whole minutes). None for an unknown time (the epoch).
-pub(crate) fn seconds_of(t: std::time::SystemTime) -> Option<u64> {
-    t.duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .filter(|d| !d.is_zero())
-        .map(|d| d.as_secs() % 60)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::time::{Duration, UNIX_EPOCH};
-
-    #[test]
-    fn seconds_are_those_of_the_moment() {
-        assert_eq!(seconds_of(UNIX_EPOCH + Duration::from_secs(3_600 * 5 + 61)), Some(1));
-        assert_eq!(seconds_of(UNIX_EPOCH), None, "a line without its time");
-    }
-}

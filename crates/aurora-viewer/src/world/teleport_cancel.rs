@@ -215,7 +215,7 @@ mod tests {
     fn a_request_held_for_the_rating_is_dropped_without_a_message() {
         let mut world = world();
         world.maturity.request(2, 0);
-        world.maturity.hold(aurora_net::NetCommand::TeleportHome, uuid::Uuid::nil());
+        world.maturity.hold(aurora_net::NetCommand::TeleportHome, uuid::Uuid::nil(), false);
         started(&mut world, 0);
         assert_eq!(world.cancel_teleport(false), Some(Cancelled::Dropped));
         assert!(!world.maturity.holds_teleport());

@@ -777,6 +777,7 @@ mod tests {
             object_name: "Box".into(),
             object_id: object,
             owner_id: owner,
+            owner_is_group: false,
             message: "Visit".into(),
             url: "https://example.invalid/".into(),
         };

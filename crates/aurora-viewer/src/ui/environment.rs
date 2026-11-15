@@ -950,7 +950,7 @@ pub fn settings_list(
                             .truncate(),
                         );
                     }
-                    for c in matches {
+                    for c in &matches {
                         let on = shown == Shown::Item(c.asset);
                         if widgets::search_list_item(ui, on, RichText::new(&c.name).size(12.0)).clicked() {
                             if !on {

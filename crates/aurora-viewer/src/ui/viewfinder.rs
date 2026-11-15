@@ -1717,11 +1717,7 @@ impl Viewfinder {
                         Dial::Aperture,
                         &format!("f/{}", aurora_i18n::number(f64::from(n), if n < 10.0 { 1 } else { 0 })),
                         !s.dof.enabled || pano || dial_greyed(panel.pano, Dial::Aperture),
-                        if pano {
-                            hint
-                        } else {
-                            aurora_i18n::tr!("photo-vf-aperture-tip")
-                        },
+                        if pano { hint } else { aurora_i18n::tr!("photo-vf-aperture-tip") },
                         self.dial,
                     );
                     self.dial_input(ui, &resp, Dial::Aperture, s, panel, fov, f, out);

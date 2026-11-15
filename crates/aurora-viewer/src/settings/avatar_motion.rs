@@ -9,7 +9,6 @@
 //!   llheadrotmotion.cpp, as settings. The other avatars keep the constants.
 //! - FSResetSkeletonOnStandUp (off): our skeleton is reset when we get off a
 //!   seat (LLVOAvatar::getOffObject).
-//! - FSPoseStandLastSelectedPose: the pose stand's last pose.
 //!
 //! The defaults are the constants used so far, so nothing changes until the
 //! user moves a slider.
@@ -42,8 +41,6 @@ pub struct AvatarMotion {
     pub eye_limit: f32,
     /// FSResetSkeletonOnStandUp.
     pub reset_skeleton_on_stand: bool,
-    /// FSPoseStandLastSelectedPose.
-    pub pose_stand: crate::ik_edit::poser::stand::StandPose,
 }
 
 impl Default for AvatarMotion {
@@ -55,7 +52,6 @@ impl Default for AvatarMotion {
             head_limit: HEAD_LIMIT,
             eye_limit: EYE_LIMIT,
             reset_skeleton_on_stand: false,
-            pose_stand: Default::default(),
         }
     }
 }
@@ -78,7 +74,6 @@ impl AvatarMotion {
             head_limit: bounded(self.head_limit, &HEAD_RANGE, HEAD_LIMIT),
             eye_limit: bounded(self.eye_limit, &EYE_RANGE, EYE_LIMIT),
             reset_skeleton_on_stand: self.reset_skeleton_on_stand,
-            pose_stand: self.pose_stand,
         }
     }
 
@@ -124,7 +119,6 @@ mod tests {
             head_limit: 200.0,
             eye_limit: f32::INFINITY,
             reset_skeleton_on_stand: true,
-            pose_stand: Default::default(),
         }
         .sanitized();
         assert_eq!((s.turn_slow, s.turn_fast, s.turn_mouselook), (60.0, 0.0, 180.0));

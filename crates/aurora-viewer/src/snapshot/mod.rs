@@ -11,10 +11,10 @@
 //! and the cut-out's matte are kept in `extras`; the window is
 //! `ui::snapshot`, the frames `app::snapshot`.
 
+pub mod capture_360;
 pub mod effects;
 pub mod extras;
 pub mod full_save;
-pub mod capture_360;
 pub mod gallery;
 pub mod inventory;
 pub mod isolate;

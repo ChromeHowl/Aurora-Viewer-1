@@ -4981,6 +4981,7 @@ mod tests {
             chat_type: aurora_net::ChatType::OwnerSay,
             position,
             message: message.to_owned(),
+            region: None,
         }));
     }
 
@@ -5975,7 +5976,7 @@ mod tests {
             let dt = 1.0 / 60.0;
             for _ in 0..180 {
                 camera.reset_view(&mut world.agent, &settings, true, false, true, false);
-                camera.apply_keys(keys, &mut world.agent, &settings, dt);
+                camera.apply_keys(keys, false, &mut world.agent, &settings, dt);
                 world.agent.position += Vec3::X * (2.0 * dt);
                 camera.update(&mut world, &settings, &frame(dt));
             }

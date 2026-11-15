@@ -10,7 +10,6 @@ mod completion;
 mod compose;
 mod console;
 mod conv_menu;
-pub mod conversation_log;
 pub(crate) mod display;
 pub(crate) mod docking;
 mod find;
@@ -1033,22 +1032,6 @@ pub(crate) fn auto_close_ooc(text: &str) -> String {
         break;
     }
     out
-}
-
-/// A conversation's field after a message: it keeps the keyboard, except
-/// the nearby chat's when the chat bar lets go of it too (Aurora's
-/// `chat_keep_focus` off, the Legacy CloseChatOnReturn) and
-/// FSUnfocusChatHistoryOnReturn is on (FSFloaterNearbyChat::sendChat).
-fn focus_after_send(resp: &egui::Response, nearby: bool, keep_focus: bool) {
-    if keeps_focus_after_send(nearby, keep_focus, display::get().more.unfocus_nearby_on_send) {
-        resp.request_focus();
-    } else {
-        resp.surrender_focus();
-    }
-}
-
-fn keeps_focus_after_send(nearby: bool, keep_focus: bool, unfocus_nearby: bool) -> bool {
-    !(nearby && !keep_focus && unfocus_nearby)
 }
 
 /// The line typed as it is sent: wrapped by Alt+Enter (`ooc_key`), then
@@ -5181,12 +5164,6 @@ mod tests {
         assert_eq!(super::ooc_with("brb", "((", "))"), "(( brb ))");
         assert_eq!(super::ooc_with("", "((", "))"), "");
         assert_eq!(super::auto_close_ooc("(( brb"), "(( brb ))");
-        // FSUnfocusChatHistoryOnReturn: only the nearby chat, only with
-        // the bar letting go too
-        assert!(!super::keeps_focus_after_send(true, false, true));
-        assert!(super::keeps_focus_after_send(true, true, true));
-        assert!(super::keeps_focus_after_send(false, false, true));
-        assert!(super::keeps_focus_after_send(true, false, false));
         assert_eq!(super::auto_close_ooc("((brb"), "((brb))");
         assert_eq!(super::auto_close_ooc("((brb "), "((brb ))");
         assert_eq!(super::auto_close_ooc("((brb :)"), "((brb :) ))");

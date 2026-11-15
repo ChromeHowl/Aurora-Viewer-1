@@ -494,27 +494,6 @@ pub struct OptionsUi {
     pub media_filter: Option<Vec<crate::media::filter::Rule>>,
     pub media_filter_edits: Vec<crate::media::filter::Edit>,
     media_filter_typed: String,
-    /// The account's Omnifilter rules while logged in (set by the app), the
-    /// rules as edited here (applied by the app), the rule open, and the
-    /// filter's list of the session (set by the app).
-    pub omnifilter: Option<crate::world::omnifilter::RuleSet>,
-    pub omnifilter_edit: Option<crate::world::omnifilter::RuleSet>,
-    pub omnifilter_broken: Vec<usize>,
-    pub omnifilter_log: Vec<crate::world::omnifilter::LogEntry>,
-    pub omnifilter_log_key: (u64, u64),
-    pub omnifilter_clear_log: bool,
-    omnifilter_open: Option<usize>,
-    /// A Legacy notecard being read (`omnifilter::legacy`): None when the
-    /// file was not chosen, Err when it is not one; and what the last
-    /// import or export came to.
-    #[allow(clippy::type_complexity)]
-    pub(crate) omnifilter_import: Option<std::sync::mpsc::Receiver<Option<Result<(String, Vec<crate::world::omnifilter::Rule>), ()>>>>,
-    pub(crate) omnifilter_note: Option<String>,
-    /// The name typed for a new rule set.
-    pub(crate) omnifilter_set_name: String,
-    /// Save the rule set in use to an inventory notecard, or load one
-    /// (taken by the app, which shows the picker or the name to save under).
-    pub(crate) omnifilter_notecard: Option<crate::ui::inventory::context_notecards::Mode>,
     /// The translation keys: their state (set by the app), a look at them
     /// asked, the key being typed and the keys typed or forgotten here
     /// (taken by the app, never kept in the settings).
@@ -642,12 +621,6 @@ impl OptionsUi {
         self.query.clear();
         self.modified_view = false;
         self.cancel_capture();
-    }
-
-    /// Opens Preferences › Chat › Translation and filter (the toolbar's
-    /// Omnifilter).
-    pub fn open_message_rules(&mut self) {
-        self.open(Page::Chat, pages::message_rules::TAB);
     }
 
     /// Opens the Chat page on the YouTube player's settings (a player's

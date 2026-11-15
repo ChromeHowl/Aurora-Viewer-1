@@ -243,6 +243,7 @@ impl Capture360 {
             scale: crate::snapshot::viewfinder_scale((size, size), window, render_scale_percent),
             look: self.look.clone(),
             context: aurora_render::PhotoContext::None,
+            cube: None,
             cube_face: true,
         })
     }

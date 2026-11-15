@@ -591,6 +591,7 @@ mod tests {
             chat_type: aurora_net::ChatType::Normal,
             position: glam::Vec3::ZERO,
             message: String::new(),
+            region: None,
         }
     }
 

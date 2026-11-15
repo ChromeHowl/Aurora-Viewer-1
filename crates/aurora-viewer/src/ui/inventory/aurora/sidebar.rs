@@ -263,7 +263,7 @@ fn favorite_folders(
             for id in favorites {
                 let selected = st.tab == 0 && st.browse == *id;
                 let color = folder_colors::tint(prefs, *id);
-                let response = entry_tinted(ui, p, "folder-filled", &folder_name(inv, *id), None, 0, selected, 8.0, color);
+                let response = entry_tinted(ui, p, "folder-filled", &folder_name(inv, *id), None, 0, selected, 8.0, color, None);
                 if response.clicked() {
                     jump(st, prefs, *id);
                 }

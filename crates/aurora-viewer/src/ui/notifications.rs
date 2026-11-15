@@ -1360,7 +1360,7 @@ pub(super) fn dialogs_apart(
                 let Some(n) = list.list.iter_mut().find(|n| n.id == *id) else {
                     continue;
                 };
-                if close_script_prompt(ctx, n) {
+                if close_script_prompt(ctx, n, true) {
                     answers.push((*id, Response::Dismiss));
                     continue;
                 }

@@ -1,56 +1,12 @@
 //! Preferences › Chat › Translation and filter, for the account logged in:
-//! the Omnifilter's rules and list (`world/omnifilter.rs`) and the
-//! translation keys (`world/translate.rs`), between the window and the
+//! the translation keys (`world/translate.rs`), between the window and the
 //! world.
 use super::*;
 use crate::settings::chat_translation::Service;
 
 impl App {
     pub(super) fn sync_filter_and_translation_options(&mut self) {
-        let in_world = self.in_world();
         let o = &mut self.options_ui;
-        if let Some(set) = o.omnifilter_edit.take()
-            && in_world
-        {
-            self.world.omnifilter.replace(set);
-        }
-        self.world.omnifilter.flush(Instant::now());
-        if std::mem::take(&mut o.omnifilter_clear_log) {
-            self.world.omnifilter.clear_log();
-        }
-        // a notecard of the inventory to save the rule set in use to, or to
-        // read a new one from (the app shows the picker or the name)
-        if let Some(mode) = o.omnifilter_notecard.take()
-            && in_world
-        {
-            let name = self.world.omnifilter.rules().current_name().to_owned();
-            self.omnifilter_notecards.open(mode, &name);
-        }
-        if let Some(message) = self.omnifilter_notecards.message.take() {
-            o.omnifilter_note = Some(message);
-        }
-        let filter = &self.world.omnifilter;
-        let rules = in_world.then(|| filter.rules());
-        if o.omnifilter.as_ref() != rules {
-            o.omnifilter = rules.cloned();
-            o.omnifilter_broken = filter.broken().to_vec();
-        }
-        // the messages set aside, as the chat would show them under RLVa
-        // (names and places hidden)
-        let key = (filter.revision, self.world.rlva.revision);
-        if o.omnifilter_log_key != key {
-            o.omnifilter_log_key = key;
-            let world = &self.world;
-            o.omnifilter_log = filter
-                .log
-                .iter()
-                .map(|e| crate::world::omnifilter::LogEntry {
-                    from: world.rlva_filter_text(&e.from).into_owned(),
-                    text: world.rlva_filter_text(&e.text).into_owned(),
-                    ..e.clone()
-                })
-                .collect();
-        }
         // the keys typed go straight to the translation thread, which keeps
         // them in the credential store
         let translation = &mut self.world.translation;

@@ -2776,10 +2776,6 @@ pub fn run_command(ctx: &egui::Context, cmd: &str, panels: &mut Panels) -> BarAc
         // without the window (the keyboard's Save to disk)
         "snapshot_to_disk" => return BarAction::PhotoToDisk,
         "photo_roll" => return BarAction::PhotoRoll,
-        // Floater.Toggle 360capture: the photo window's 360° photo
-        "360capture" => return BarAction::Photo360,
-        // Floater.Toggle omnifilter: Aurora keeps the rules in Preferences
-        "omnifilter" => return BarAction::OmnifilterPrefs,
         "beacons" => toggle(super::beacons::WINDOW, &mut panels.beacons),
         // Floater.Toggle quickprefs
         "quickprefs" => toggle(super::quick_prefs::WINDOW, &mut panels.quick_prefs),
@@ -2858,8 +2854,6 @@ pub fn run_command(ctx: &egui::Context, cmd: &str, panels: &mut Panels) -> BarAc
         "marketplacelistings" => return BarAction::ToggleMarketplaceListings,
         "stop_animations" => return BarAction::StopAnimations,
         "resync_animations" => return BarAction::ResyncAnimations,
-        // Avatar.AlignToggle, Avatar.FaceNearest (commands.xml)
-        "pose_stand" => toggle(super::pose_stand::WINDOW, &mut panels.pose_stand),
         "immersive" => return BarAction::ToggleImmersive,
         // Avatar.AlignToggle: the Compass in its saved layout
         "avatar_align" => toggle(super::avatar_align::window(panels.avatar_align_mini), &mut panels.avatar_align),
@@ -2913,7 +2907,6 @@ fn command_active(cmd: &str, panels: &Panels, flying: bool, seated: bool, mousel
         "performance" | "statistics" => panels.perf,
         "snapshot" => panels.snapshot,
         "beacons" => panels.beacons,
-        "pose_stand" => panels.pose_stand,
         "quickprefs" => panels.quick_prefs,
         "settings_debug" => panels.debug_settings,
         "preferences" => panels.settings,
@@ -4663,17 +4656,15 @@ mod tests {
     }
 
     /// The commands of features Aurora has under another name: the photo
-    /// window's 360° photo, the Omnifilter's Preferences tab and the
-    /// favourite wearables window.
+    /// window's 360° photo and the favourite wearables window.
     #[test]
     fn toolbar_commands_reach_their_features() {
         let ctx = egui::Context::default();
         let mut panels = Panels::from_settings(&crate::settings::Settings::default());
-        for cmd in ["360capture", "omnifilter", "wearable_favorites"] {
+        for cmd in ["360capture", "wearable_favorites"] {
             assert!(super::super::toolbar::ready(cmd), "{cmd}");
         }
         assert!(matches!(run_command(&ctx, "360capture", &mut panels), BarAction::Photo360));
-        assert!(matches!(run_command(&ctx, "omnifilter", &mut panels), BarAction::OmnifilterPrefs));
         panels.wearable_favorites = false;
         run_command(&ctx, "wearable_favorites", &mut panels);
         assert!(panels.wearable_favorites);

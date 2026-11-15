@@ -290,6 +290,7 @@ mod tests {
             scales: rig.scale.clone(),
             locks: Default::default(),
             origin: rig.local_rot.clone(),
+            enabled: vec![true; rig.len()],
         };
         let (head, neck) = (rig.names["mHead"], rig.names["mNeck"]);
         let mut pose = base.clone();

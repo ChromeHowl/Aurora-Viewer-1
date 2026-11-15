@@ -2079,7 +2079,7 @@ print(\"bye\")"
     fn a_lone_script_opened_with_other_items_still_comes_to_the_front() {
         let mut editors = Editors::default();
         let target = target(1);
-        let request = editors.open(target, "Test".into(), true, true).expect("load");
+        let request = editors.open(target, "Test".into(), true, true, 0).expect("load");
         editors.loaded(request, target, Ok("default {}".into()));
         editors.documents[0].raise = true;
         // the script with a notecard: only one script editor, no group
@@ -2108,7 +2108,7 @@ print(\"bye\")"
             },
         ];
         for target in targets {
-            let request = editors.open(target, "Test".into(), true, true).expect("load");
+            let request = editors.open(target, "Test".into(), true, true, 0).expect("load");
             editors.loaded(request, target, Ok("original".into()));
         }
         let save = |editors: &mut Editors, i: usize| {

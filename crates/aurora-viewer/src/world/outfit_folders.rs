@@ -681,11 +681,11 @@ mod tests {
         // "Earrings" is in "Neurolab" and "Leather Jacket" only, whatever
         // their names: the Legacy Viewer keeps a tab whose items match
         // (LLOutfitsList::applyFilterToTab with list->hasMatchedItems).
-        let rows = rows(&tree(&inv, "earrings", false, Order::List));
+        let rows = rows(&tree(&inv, "earrings", Sort::default(), Order::List));
         let mut found: Vec<_> = rows.iter().map(|r| (r.0, r.2)).collect();
         found.sort();
         assert_eq!(found, vec![(704, false), (705, false)]);
-        assert!(tree(&inv, "earrings", false, Order::Gallery).iter().all(|e| !e.group));
+        assert!(tree(&inv, "earrings", Sort::default(), Order::Gallery).iter().all(|e| !e.group));
     }
 
     #[test]
@@ -706,7 +706,7 @@ mod tests {
         inv.items.insert(item.id, item.clone());
         inv.folders.get_mut(&inner).expect("inner").items.push(item.id);
         inv.folders.get_mut(&outfit).expect("outfit").children.push(inner);
-        assert_eq!(rows(&tree(&inv, "zebra", false, Order::List)), vec![(702, 0, false, 0)]);
+        assert_eq!(rows(&tree(&inv, "zebra", Sort::default(), Order::List)), vec![(702, 0, false, 0)]);
     }
 
     #[test]

@@ -148,6 +148,7 @@ mod tests {
             kind,
             session,
             new_session: false,
+            poke: false,
         }
     }
 

@@ -91,6 +91,7 @@ impl Document {
                     scale: scale.to_array(),
                     locked: false,
                     change: false,
+                    enabled: true,
                 })
                 .collect(),
         }

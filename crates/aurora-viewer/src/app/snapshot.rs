@@ -2253,21 +2253,6 @@ impl App {
         self.gfx = Some(gfx);
     }
 
-    /// The toolbar's 360capture (LLFloater360Capture, "Capture a 360°
-    /// equirectangular image"): the photo window opens on its disk
-    /// destination, where the 360° options are, and its 360° action runs
-    /// (`photo_pano_start`, which refuses it under RLVa camera limits).
-    pub(super) fn photo_360(&mut self) {
-        crate::ui::widgets::open_floater(&self.egui_ctx, crate::ui::snapshot::WINDOW, &mut self.panels.snapshot);
-        self.snapshots.ui.destination = Destination::Disk;
-        let Some(gfx) = self.gfx.take() else {
-            self.snapshots.to_pano = true;
-            return;
-        };
-        self.photo_action(Action::Pano, &gfx.renderer);
-        self.gfx = Some(gfx);
-    }
-
     /// Every frame: the saves, thumbnails, dialogs and preview to follow.
     pub(super) fn photo_update(&mut self, renderer: &Renderer) {
         if std::mem::take(&mut self.snapshots.to_disk) {
@@ -3079,6 +3064,7 @@ LUT_3D_SIZE {n}
                 window,
                 photo,
                 tiles,
+                pano_allowed: !snapshot::pano::rlva_blocks(|b| self.world.rlva.has(b)),
                 preview: None,
                 busy,
                 message: message.as_ref(),
@@ -3170,6 +3156,7 @@ LUT_3D_SIZE {n}
                 window,
                 photo,
                 tiles,
+                pano_allowed: !snapshot::pano::rlva_blocks(|b| self.world.rlva.has(b)),
                 preview: s.held.as_ref().and_then(|h| h.texture.as_ref()).or(s.preview.as_ref()),
                 busy,
                 message: s.message.as_ref(),

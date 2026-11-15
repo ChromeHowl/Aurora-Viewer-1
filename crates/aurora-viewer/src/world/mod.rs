@@ -2971,7 +2971,6 @@ impl World {
                 self.derender = derender::Derender::load(account.join(derender::FILE));
                 self.friends_only.reload = true;
                 self.media_filter = crate::media::filter::MediaFilter::load(account.join(crate::media::filter::FILE));
-                self.omnifilter = omnifilter::Omnifilter::load(account.join(omnifilter::FILE));
                 self.aliases_synced = u64::MAX;
                 self.sync_contact_aliases();
                 self.inventory = inventory::Inventory::from_login(&l.raw);
@@ -3751,14 +3750,10 @@ impl World {
                 object_name,
                 owner_name,
                 owner_id: _,
-                mut message,
+                message,
                 channel,
                 buttons,
             } => {
-                // the Omnifilter's rules (`omnifilter.rs`): hidden or set aside
-                if self.omnifilter_dialog(&object_name, &mut message, &buttons) {
-                    return None;
-                }
                 let textbox = buttons.first().is_some_and(|b| b == "!!llTextBox!!");
                 let data = if textbox {
                     notifications::Data::TextBox {
@@ -4851,9 +4846,6 @@ impl World {
             self.keep_muted_chat(c);
             return;
         }
-        let Some(highlight) = self.omnifilter_chat(&mut c) else {
-            return;
-        };
         if self.receive_hand_contacts(&c, Instant::now()) {
             return;
         }
@@ -8738,6 +8730,7 @@ mod motion_tests {
                 chat_type: ChatType::Normal,
                 position: Vec3::new(10.0, 10.0, 20.0),
                 message: "hello".into(),
+                region: None,
             })
         };
         world.apply(said(rezzed.full_id, me));

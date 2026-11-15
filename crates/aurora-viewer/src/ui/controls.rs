@@ -1649,6 +1649,7 @@ mod tests {
                 keys: &keys,
                 views: &SavedViews::default(),
                 free: None,
+                camera_tools: (false, false, false),
             };
             let mut time = 0.0;
             let mut target = Pos2::ZERO;

@@ -20,7 +20,6 @@ mod overlay;
 mod playback;
 mod scale_gizmo;
 mod silhouette;
-pub(crate) mod stand;
 mod storage;
 mod subjects;
 mod together;

@@ -647,6 +647,7 @@ pub(super) mod tests {
             chat_type: ChatType::OwnerSay,
             position: glam::Vec3::ZERO,
             message: "@shownames=n".into(),
+            region: None,
         }));
         assert_eq!(wearer(&world, &said), None, "the picture would name them");
     }

@@ -721,6 +721,7 @@ mod tests {
                     copy_uuid,
                     Some((2048, 1024)),
                     &mut display,
+                    None,
                     panorama.then_some(&mut on),
                     &mut actions,
                 );
@@ -811,6 +812,7 @@ mod tests {
                         true,
                         Some((2048, 1024)),
                         display,
+                        None,
                         Some(&mut on),
                         &mut Vec::new(),
                     );

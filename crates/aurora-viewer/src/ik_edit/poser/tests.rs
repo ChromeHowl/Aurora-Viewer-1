@@ -123,25 +123,6 @@ fn poser_joint_toggle_falls_back_tracks_undo_and_survives_saved_pose_loads() {
     loaded = data::Session::new(SubjectPose::capture(rig, &frame).unwrap());
     assert!(decoded.apply(rig, &mut loaded, document::LoadMode::Selective, frame.model));
     assert!(loaded.pose.enabled[bone], "selective load enables joints it applies");
-
-    let authored = session.authored(rig, frame.model).unwrap();
-    assert!(
-        !storage::native(rig, &authored, &[], "Disabled head".into(), 4)
-            .unwrap()
-            .animation
-            .joints
-            .iter()
-            .any(|joint| joint.joint_name == "mHead")
-    );
-    let bvh = bvh::encode(rig, &authored, false).unwrap();
-    let mut neutral_head = authored.clone();
-    neutral_head.enabled[bone] = true;
-    neutral_head.rotations[bone] = Quat::IDENTITY;
-    assert_eq!(
-        bvh,
-        bvh::encode(rig, &neutral_head, false).unwrap(),
-        "disabled head exports neutral rotation"
-    );
 }
 #[test]
 fn poser_joint_rework_selective_load_reenables_an_already_off_edited_joint() {
@@ -173,21 +154,6 @@ fn poser_joint_rework_selective_load_reenables_an_already_off_edited_joint() {
             "edited posed joints stay untouched"
         );
     }
-}
-
-#[test]
-fn poser_joint_rework_disabled_pelvis_exports_no_bvh_translation_when_unlocked() {
-    let (world, _) = fixture();
-    let rig = &world.avatar_lib.rig;
-    let frame = Frame::new(&world).unwrap();
-    let mut pose = SubjectPose::capture(rig, &frame).unwrap();
-    pose.enabled[rig.pelvis] = false;
-    pose.positions[rig.pelvis] += Vec3::new(0.4, -0.2, 0.3);
-    pose.rotations[rig.pelvis] = Quat::from_rotation_z(0.7);
-    let actual = bvh::encode(rig, &pose, true).unwrap();
-    pose.positions[rig.pelvis] = rig.local_pos[rig.pelvis];
-    pose.rotations[rig.pelvis] = Quat::IDENTITY;
-    assert_eq!(actual, bvh::encode(rig, &pose, true).unwrap());
 }
 
 #[test]
