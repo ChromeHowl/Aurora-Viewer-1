@@ -24975,7 +24975,9 @@ impl ApplicationHandler for App {
                     let build_keyboard = self.in_world()
                         && !altgr_text
                         && !self.egui_ctx.egui_wants_keyboard_input()
-                        && !egui::Popup::is_any_open(&self.egui_ctx);
+                        // an open right-click menu keeps only a plain Delete
+                        && (!egui::Popup::is_any_open(&self.egui_ctx)
+                            || (ke.logical_key == winit::keyboard::Key::Named(winit::keyboard::NamedKey::Delete) && !mods.ctrl && !mods.shift && !mods.alt));
                     let build_shortcut = pressed
                         .then(|| {
                             crate::build::ui::Shortcut::take_native_key(

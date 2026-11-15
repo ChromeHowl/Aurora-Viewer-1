@@ -316,9 +316,13 @@ pub fn shortcuts(ctx: &egui::Context, tool: &mut BuildTool, world: &mut World, s
     if contents_selection::shortcuts(ctx, tool, world) {
         return;
     }
-    if ctx.egui_wants_keyboard_input() || egui::Popup::is_any_open(ctx) {
+    if ctx.egui_wants_keyboard_input() {
         return;
     }
+    // An open right-click menu keeps every shortcut but Delete, which still
+    // removes the selection the menu was opened on (menu_viewer.xml binds it
+    // to Edit > Delete with no regard for open menus).
+    let menu_open = egui::Popup::is_any_open(ctx);
     if tool.replacement_active() {
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             tool.cancel_replacement(world);
@@ -346,6 +350,9 @@ pub fn shortcuts(ctx: &egui::Context, tool: &mut BuildTool, world: &mut World, s
         // Position for 1–5; consume the logical key so AZERTY's `'` is taken.
         let shortcut_key = keyboard::position_key(key, physical_key);
         if let Some(command) = Shortcut::from_key(shortcut_key, mods, tool.open) {
+            if menu_open && command != Shortcut::Delete {
+                continue;
+            }
             // The picker owns Escape in stages (pipette, then dialog).
             // Leave its event intact instead of consuming a no-op Close.
             if command == Shortcut::Close && (tool.ui.color_picker.is_open() || crate::ui::texture_picker::pipette::armed(ctx)) {
@@ -353,6 +360,9 @@ pub fn shortcuts(ctx: &egui::Context, tool: &mut BuildTool, world: &mut World, s
             }
             if !repeat || matches!(command, Shortcut::History(_)) {
                 command.run(tool, world, s);
+                if menu_open {
+                    egui::Popup::close_all(ctx);
+                }
             }
             // Repeated non-repeatable commands still own their keys.
             ctx.input_mut(|i| {
