@@ -1,4 +1,4 @@
-﻿﻿; Windows installer of Aurora Viewer +, a personal build of Aurora Viewer.
+﻿; Windows installer of Aurora Viewer +, a personal build of Aurora Viewer.
 ;
 ; The installer holds no viewer program: it installs the update engine
 ; (engine\Update.ps1), which installs the build tools (with the user's
