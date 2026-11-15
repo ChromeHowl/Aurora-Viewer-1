@@ -275,8 +275,18 @@ impl Session {
         let resolved = self.pose.snapshot(rig, model)?;
         let pose = Pose {
             rotations: resolved.rotations.clone(),
+            // A joint the user did not move keeps the rest position exactly:
+            // the float noise of the snapshot would otherwise read as a move
+            // when the file is loaded, and shift the joints around it.
             positions: (0..rig.len())
-                .map(|b| rig.local_pos[b] + resolved.positions[b] - self.base.positions[b])
+                .map(|b| {
+                    let moved = resolved.positions[b] - self.base.positions[b];
+                    if moved.length_squared() < 1e-10 {
+                        rig.local_pos[b]
+                    } else {
+                        rig.local_pos[b] + moved
+                    }
+                })
                 .collect(),
             scales: rig.scale.clone(),
             locks: HashMap::new(),
