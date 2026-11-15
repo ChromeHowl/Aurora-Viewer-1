@@ -34,10 +34,38 @@ const PAUSE: Duration = Duration::from_secs(5);
 /// The simulator's refusal (AlertMessage).
 const REZ_FAILED: &str = "Attempt to rez an object failed";
 
+/// ATTACHMENT_ADD (indra/llcommon/indra_constants.h): keep
+/// what the point already holds. Point 0 asks for the item's own default point.
+const ATTACHMENT_ADD: u8 = 0x80;
+
+/// The AttachmentPt byte of RezMultipleAttachmentsFromInv, as
+/// LLAttachmentsMgr::requestAttachments builds it: the point (0 = the
+/// item's default one, chosen by the simulator), with ATTACHMENT_ADD set
+/// when the request adds instead of replacing.
+pub(super) fn wire_point(point: u8, add: bool) -> u8 {
+    point | if add { ATTACHMENT_ADD } else { 0 }
+}
+
+/// First eight characters of an id, for the log.
+fn short(id: Uuid) -> String {
+    id.simple().to_string().chars().take(8).collect()
+}
+
+/// A request sent and waiting for its object.
+struct InFlight {
+    at: Instant,
+    point: u8,
+    add: bool,
+}
+
 pub(super) struct AttachQueue {
     pending: VecDeque<AttachRequest>,
     /// Items requested whose object has not arrived yet, and when.
-    in_flight: HashMap<Uuid, Instant>,
+    in_flight: HashMap<Uuid, InFlight>,
+    /// Explicit requests (a point was chosen) that came while an earlier,
+    /// different request for the same item was on its way: sent once that
+    /// one is settled, never dropped.
+    deferred: HashMap<Uuid, AttachRequest>,
     limit: usize,
     /// Objects arrived since the limit last grew.
     arrived_since_raise: usize,
@@ -60,6 +88,7 @@ impl Default for AttachQueue {
         AttachQueue {
             pending: VecDeque::new(),
             in_flight: HashMap::new(),
+            deferred: HashMap::new(),
             limit: START_LIMIT,
             arrived_since_raise: 0,
             last_sent: None,
@@ -70,19 +99,61 @@ impl Default for AttachQueue {
 }
 
 impl AttachQueue {
-    /// Queues `list`; a request for an item still waiting takes its place
-    /// (the latest point and add mode win), one whose object is on its way
-    /// is not sent twice.
+    /// Queues `list`. A request for an item still waiting takes its place
+    /// (the latest point and add mode win), except that a request without a
+    /// point (the default one, as login restore, outfit sync and refresh
+    /// ask) never replaces a chosen point. One whose object is on its way
+    /// is not sent twice; if it names another point or mode than the one
+    /// sent, it waits for that one to settle and is then sent.
     pub(super) fn push(&mut self, list: Vec<AttachRequest>, now: Instant) {
         for request in list {
-            if self.in_flight.contains_key(&request.item_id) {
+            let id = short(request.item_id);
+            if let Some(sent) = self.in_flight.get(&request.item_id) {
+                if request.point != 0 && (request.point != sent.point || request.add != sent.add) {
+                    log::info!(
+                        "attach request {id} point {} add {}: deferred, the one on its way names point {} add {}",
+                        request.point,
+                        request.add,
+                        sent.point,
+                        sent.add
+                    );
+                    self.deferred.insert(request.item_id, request);
+                } else {
+                    log::info!(
+                        "attach request {id} point {} add {}: dropped, same item already on its way (point {} add {})",
+                        request.point,
+                        request.add,
+                        sent.point,
+                        sent.add
+                    );
+                }
                 continue;
             }
             match self.pending.iter_mut().find(|p| p.item_id == request.item_id) {
-                Some(slot) => *slot = request,
+                Some(slot) if request.point == 0 && slot.point != 0 => {
+                    log::info!(
+                        "attach request {id} point 0 add {}: dropped, the queued one names point {}",
+                        request.add,
+                        slot.point
+                    );
+                }
+                Some(slot) => {
+                    log::info!(
+                        "attach request {id} point {} add {}: merged into the queued one (was point {} add {})",
+                        request.point,
+                        request.add,
+                        slot.point,
+                        slot.add
+                    );
+                    *slot = request;
+                }
                 None => self.pending.push_back(request),
             }
         }
+        self.start_run(now);
+    }
+
+    fn start_run(&mut self, now: Instant) {
         if !self.pending.is_empty() && self.run.is_none() {
             self.run = Some(Run {
                 started: now,
@@ -93,11 +164,34 @@ impl AttachQueue {
         }
     }
 
+    /// A settled request (object arrived, or timed out) lets the explicit
+    /// one that waited behind it go first.
+    fn release(&mut self, item: Uuid, now: Instant) {
+        if let Some(request) = self.deferred.remove(&item) {
+            log::info!(
+                "attach request {} point {} add {}: sent now, the earlier one is settled",
+                short(item),
+                request.point,
+                request.add
+            );
+            self.pending.push_front(request);
+            self.start_run(now);
+        }
+    }
+
     /// The next request to send now, if its turn has come.
     pub(super) fn next(&mut self, now: Instant) -> Option<AttachRequest> {
         let before = self.in_flight.len();
-        self.in_flight
-            .retain(|_, at| now.saturating_duration_since(*at) < IN_FLIGHT_TIMEOUT);
+        let expired: Vec<Uuid> = self
+            .in_flight
+            .iter()
+            .filter(|(_, sent)| now.saturating_duration_since(sent.at) >= IN_FLIGHT_TIMEOUT)
+            .map(|(id, _)| *id)
+            .collect();
+        for id in expired {
+            self.in_flight.remove(&id);
+            self.release(id, now);
+        }
         if let Some(run) = &mut self.run {
             run.timed_out += before - self.in_flight.len();
         }
@@ -111,27 +205,55 @@ impl AttachQueue {
         }
         let request = self.pending.pop_front()?;
         self.last_sent = Some(now);
-        self.in_flight.insert(request.item_id, now);
+        self.in_flight.insert(
+            request.item_id,
+            InFlight {
+                at: now,
+                point: request.point,
+                add: request.add,
+            },
+        );
         Some(request)
     }
 
-    /// Objects arrived: one worn from a requested item frees its place.
-    pub(super) fn observe<'a>(&mut self, name_values: impl Iterator<Item = &'a str>, now: Instant) {
+    /// Objects arrived, each with its name-values and the attachment point
+    /// it sits on: one worn from a requested item frees its place, and its
+    /// point is logged next to the one asked for.
+    pub(super) fn observe<'a>(&mut self, objects: impl Iterator<Item = (&'a str, u8)>, now: Instant) {
         if self.in_flight.is_empty() {
             return;
         }
-        for nv in name_values {
-            let Some(sent) = attach_item_id(nv).and_then(|item| self.in_flight.remove(&item)) else {
+        for (nv, landed) in objects {
+            let Some(item) = attach_item_id(nv) else {
                 continue;
             };
+            let Some(sent) = self.in_flight.remove(&item) else {
+                continue;
+            };
+            if sent.point != 0 && sent.point != landed {
+                log::warn!(
+                    "attach arrived {}: on point {landed}, point {} was asked for (add {})",
+                    short(item),
+                    sent.point,
+                    sent.add
+                );
+            } else {
+                log::info!(
+                    "attach arrived {}: on point {landed}, asked for point {} add {}",
+                    short(item),
+                    sent.point,
+                    sent.add
+                );
+            }
             if let Some(run) = &mut self.run {
-                run.worn.push(now.saturating_duration_since(sent));
+                run.worn.push(now.saturating_duration_since(sent.at));
             }
             self.arrived_since_raise += 1;
             if self.arrived_since_raise >= GROW_EVERY {
                 self.arrived_since_raise = 0;
                 self.limit = (self.limit + 1).min(MAX_LIMIT);
             }
+            self.release(item, now);
         }
     }
 
@@ -156,7 +278,7 @@ impl AttachQueue {
 
     /// Logs the run once nothing waits any more.
     fn end_run(&mut self, now: Instant) {
-        if !self.pending.is_empty() || !self.in_flight.is_empty() {
+        if !self.pending.is_empty() || !self.in_flight.is_empty() || !self.deferred.is_empty() {
             return;
         }
         let Some(mut run) = self.run.take() else {
@@ -179,7 +301,7 @@ impl AttachQueue {
     }
 
     pub(super) fn len(&self) -> usize {
-        self.pending.len()
+        self.pending.len() + self.deferred.len()
     }
 }
 
@@ -198,6 +320,15 @@ impl Session<'_> {
         let Some(a) = self.attach_queue.next(now) else {
             return;
         };
+        let wire = wire_point(a.point, a.add);
+        log::info!(
+            "attach request sent: '{}' item {} point {} add {} byte 0x{wire:02x} item_flags 0x{:x}",
+            a.name,
+            short(a.item_id),
+            a.point,
+            a.add,
+            a.flags
+        );
         let mut m = RezMultipleAttachmentsFromInv::default();
         m.agent_data.agent_id = self.agent_id();
         m.agent_data.session_id = self.session_id();
@@ -207,7 +338,7 @@ impl Session<'_> {
         m.object_data = vec![rez_multiple_attachments_from_inv::ObjectData {
             item_id: a.item_id,
             owner_id: a.owner_id,
-            attachment_pt: a.point | if a.add { 0x80 } else { 0 },
+            attachment_pt: wire,
             item_flags: a.flags,
             group_mask: a.group_mask,
             everyone_mask: a.everyone_mask,
@@ -264,7 +395,7 @@ mod tests {
         let (sent, at) = drain(&mut q, t0 + SPACING, 30);
         assert_eq!(sent.len() + 1, START_LIMIT, "the others wait for their object");
         // an object worn from item 2 arrives: its place is free
-        q.observe([worn(2)].iter().map(String::as_str), at);
+        q.observe([worn(2)].iter().map(|w| (w.as_str(), 0)), at);
         assert_eq!(q.next(at).map(|a| a.item_id.as_u128()), Some(START_LIMIT as u128 + 1));
         // the others free theirs after the timeout
         let (sent, _) = drain(&mut q, t0 + IN_FLIGHT_TIMEOUT + SPACING, 30);
@@ -277,7 +408,10 @@ mod tests {
         let t0 = Instant::now();
         q.push((1..=40).map(|id| request(id, 0)).collect(), t0);
         let (sent, at) = drain(&mut q, t0, 20);
-        q.observe(sent.iter().map(|id| worn(*id)).collect::<Vec<_>>().iter().map(String::as_str), at);
+        q.observe(
+            sent.iter().map(|id| worn(*id)).collect::<Vec<_>>().iter().map(|w| (w.as_str(), 0)),
+            at,
+        );
         assert_eq!(q.limit, START_LIMIT + START_LIMIT / GROW_EVERY);
         let (_, at) = drain(&mut q, at, 20);
         q.on_alert("Attempt to rez an object failed.", at);
@@ -289,8 +423,10 @@ mod tests {
         }
         assert_eq!(q.limit, MIN_LIMIT);
         let many: Vec<String> = (1..=200).map(worn).collect();
-        q.in_flight = (1..=200).map(|id| (Uuid::from_u128(id), at)).collect();
-        q.observe(many.iter().map(String::as_str), at);
+        q.in_flight = (1..=200)
+            .map(|id| (Uuid::from_u128(id), InFlight { at, point: 0, add: true }))
+            .collect();
+        q.observe(many.iter().map(|w| (w.as_str(), 0)), at);
         assert_eq!(q.limit, MAX_LIMIT);
     }
 
@@ -317,6 +453,77 @@ mod tests {
         // asked again while its object is on its way: not sent twice
         q.push(vec![request(1, 0)], t0);
         assert_eq!(q.len(), 2);
+    }
+
+    #[test]
+    fn the_wire_byte_is_the_point_with_the_add_bit() {
+        assert_eq!(wire_point(0, true), 0x80, "Add without a point: the item's own point, stacked");
+        assert_eq!(wire_point(0, false), 0, "Wear without a point");
+        assert_eq!(wire_point(35, true), 0x80 | 35);
+        assert_eq!(wire_point(35, false), 35);
+        assert_eq!(wire_point(3, true) & !0x80, 3);
+    }
+
+    #[test]
+    fn a_default_request_never_replaces_a_chosen_point_in_the_queue() {
+        let mut q = AttachQueue::default();
+        let t0 = Instant::now();
+        q.push(vec![request(1, 35)], t0);
+        q.push(vec![request(1, 0)], t0);
+        assert_eq!(q.len(), 1);
+        assert_eq!(q.next(t0).map(|a| a.point), Some(35));
+        // a later explicit point still replaces an earlier one
+        let mut q = AttachQueue::default();
+        q.push(vec![request(1, 35)], t0);
+        q.push(vec![request(1, 7)], t0);
+        assert_eq!(q.next(t0).map(|a| a.point), Some(7));
+    }
+
+    #[test]
+    fn a_chosen_point_asked_while_a_default_request_is_on_its_way_is_sent_after_it() {
+        let mut q = AttachQueue::default();
+        let t0 = Instant::now();
+        q.push(vec![request(1, 0)], t0);
+        assert_eq!(q.next(t0).map(|a| a.point), Some(0));
+        q.push(vec![request(1, 35)], t0);
+        assert_eq!(q.len(), 1, "kept, not dropped");
+        assert!(q.next(t0 + SPACING).is_none(), "not while the first is on its way");
+        q.observe([worn(1)].iter().map(|w| (w.as_str(), 6)), t0 + SPACING);
+        let again = q.next(t0 + SPACING * 2).expect("sent once the first object arrived");
+        assert_eq!((again.item_id, again.point, again.add), (Uuid::from_u128(1), 35, true));
+        assert_eq!(q.len(), 0);
+    }
+
+    #[test]
+    fn a_deferred_request_is_sent_when_the_first_one_times_out() {
+        let mut q = AttachQueue::default();
+        let t0 = Instant::now();
+        q.push(vec![request(1, 0)], t0);
+        assert!(q.next(t0).is_some());
+        q.push(vec![request(1, 35)], t0);
+        assert!(q.next(t0 + IN_FLIGHT_TIMEOUT - Duration::from_millis(1)).is_none());
+        let again = q.next(t0 + IN_FLIGHT_TIMEOUT).expect("sent after the timeout");
+        assert_eq!(again.point, 35);
+    }
+
+    #[test]
+    fn a_default_or_identical_request_while_one_is_on_its_way_is_dropped() {
+        let mut q = AttachQueue::default();
+        let t0 = Instant::now();
+        q.push(vec![request(1, 35)], t0);
+        assert!(q.next(t0).is_some());
+        q.push(vec![request(1, 0), request(1, 35)], t0);
+        assert_eq!(q.len(), 0);
+        // a different add mode on the same chosen point is a different request
+        let mut replace = request(1, 35);
+        replace.add = false;
+        q.push(vec![replace], t0);
+        assert_eq!(q.len(), 1);
+        // the latest chosen request is the one kept
+        q.push(vec![request(1, 7)], t0);
+        assert_eq!(q.len(), 1);
+        q.observe([worn(1)].iter().map(|w| (w.as_str(), 35)), t0);
+        assert_eq!(q.next(t0 + SPACING).map(|a| a.point), Some(7));
     }
 
     #[test]
