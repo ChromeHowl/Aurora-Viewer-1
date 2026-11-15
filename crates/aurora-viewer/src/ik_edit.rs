@@ -165,6 +165,13 @@ pub fn offsets(joint: Mat4, contact: Vec3, target_p: Vec3, target_q: Quat) -> Op
     (p.is_finite() && q.is_finite()).then_some((p, q))
 }
 
+/// Whether a click with these modifiers adds its joint to the selection
+/// (or takes it out): Shift, or Ctrl (Cmd on macOS), the same on a handle,
+/// a bone, a picker dot and a row, in the pose and animation editors.
+pub(crate) fn adds_to_selection(modifiers: egui::Modifiers) -> bool {
+    modifiers.shift || modifiers.ctrl || modifiers.command
+}
+
 fn ray(proj: &Projector, at: Pos2) -> Option<(Vec3, Vec3)> {
     let inverse = proj.view_proj.inverse();
     let point = |z| {
@@ -227,16 +234,22 @@ impl Editor {
     }
 
     fn active_tool(&self, modifiers: egui::Modifiers) -> Tool {
-        if modifiers.ctrl {
+        // a handle being dragged keeps its tool: Shift pressed during the
+        // drag only makes it finer (`gizmo::FINE`)
+        if let Some(tool) = self.gizmo.dragging_tool() {
+            tool
+        } else if modifiers.ctrl {
             Tool::Rotate
-        } else if modifiers.shift {
+        } else if modifiers.shift && !self.clip.active {
             Tool::Move
         } else {
+            // the animation editor keeps the Move or Rotate chosen (R) with
+            // Shift held, so that Shift grabs a ring or an arrow finely
             self.tool
         }
     }
     fn gizmo_visible(&self, modifiers: egui::Modifiers) -> bool {
-        self.gizmo.dragging() || modifiers.ctrl || !modifiers.shift
+        self.gizmo.dragging() || modifiers.ctrl || !modifiers.shift || self.clip.active
     }
 
     /// The drag scale of the shared move and rotate handles. The Poser's
@@ -252,11 +265,12 @@ impl Editor {
     }
 
     /// Whether a free rotation drag is ten times finer. Shift does that in
-    /// the Poser, which says so on its trackball. Elsewhere Shift only
+    /// the Poser, which says so on its trackball, and in the animation
+    /// editor, whose Shift keeps the chosen tool. Elsewhere Shift only
     /// enables dragging a point (`point_drag_enabled`), so that Ctrl+Shift
     /// keeps the rotation rate it always had.
     fn fine_drag(&self, modifiers: egui::Modifiers) -> bool {
-        self.poser.active && modifiers.shift
+        (self.poser.active || self.clip.active) && modifiers.shift
     }
 
     fn bone_overlays_visible(&self) -> bool {
@@ -779,7 +793,10 @@ impl Editor {
             self.graph.target = binding.target.clone();
         }
         self.control = Control::Bone;
-        self.tool = Tool::Move;
+        // the animation editor keeps the Move or Rotate chosen from joint to joint
+        if !self.clip.active {
+            self.tool = Tool::Move;
+        }
         self.pole_orbit = None;
         self.pole = None;
         self.drag = None;
@@ -1097,6 +1114,7 @@ impl Editor {
                         continue;
                     }
                     let selected = self.selected == Some(joint);
+                    let follower = self.clip_follows(joint);
                     let limb = limb_list.iter().find(|l| l.end == joint);
                     let point = if self.links.bone_pick {
                         frame.joints[joint].w_axis.truncate()
@@ -1137,14 +1155,21 @@ impl Editor {
                                     palette.teal,
                                 );
                             }
+                            if follower {
+                                // a joint that follows the selected one: a thinner ring
+                                ui.painter().circle_stroke(rect.center(), 6.0, Stroke::new(1.5, palette.teal));
+                            }
                             ui.painter().circle_filled(
                                 rect.center(),
-                                if selected { 4.5 } else { 2.5 },
-                                if selected { palette.teal } else { palette.ink },
+                                if selected || follower { 4.5 } else { 2.5 },
+                                if selected || follower { palette.teal } else { palette.ink },
                             );
                             response
                         })
                         .inner;
+                    // a press on a joint's handle is the editor's: Avatar Studio
+                    // would otherwise also turn its camera with the drag
+                    self.manipulator_hovered |= response.contains_pointer() && !gizmo_owns;
                     if self.links.bone_pick && response.clicked() {
                         self.picked_bone(
                             world,
@@ -1158,7 +1183,13 @@ impl Editor {
                         continue;
                     }
                     if response.clicked() || response.drag_started() {
-                        self.select(joint, rig, &frame);
+                        if !self.clip.active {
+                            self.select(joint, rig, &frame);
+                        } else if response.clicked() {
+                            self.clip_click_bone(joint, rig, &frame, ctx.input(|i| adds_to_selection(i.modifiers)));
+                        } else {
+                            self.clip_grab_bone(joint, rig, &frame);
+                        }
                         if self.mode == Mode::Ik
                             && self.pole.is_none()
                             && let Some(limb) = limb
@@ -1192,6 +1223,8 @@ impl Editor {
                 self.show_poles(ctx, palette, proj, &frame, rig, gizmo_owns);
             }
             self.pick_segment(ctx, palette, world, &frame, &segments, gizmo_owns);
+            // a point dragged keeps the pointer to its release, wherever it goes
+            self.manipulator_hovered |= self.drag.is_some();
         }
         if self.clip.active {
             // the animation editor has its own, narrower window and pages

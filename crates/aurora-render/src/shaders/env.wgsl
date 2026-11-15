@@ -451,7 +451,12 @@ fn sky_full_at(dir: vec3<f32>, foot: SkyFootprint) -> vec3<f32> {
             hidden = 1.0;
         }
     }
-    let clouds = sky_clouds(d);
+    // (frame.features.w: the main view's clouds are composited over the sky
+    // by the volumetric layer, clouds.rs; the Legacy layer is skipped)
+    var clouds = vec4<f32>(0.0);
+    if (frame.features.w == 0u) {
+        clouds = sky_clouds(d);
+    }
     c = mix(c, clouds.rgb, clouds.a);
     var col = srgb_to_linear(c) * frame.sky_cloud_pd2.w;
     let cover = 1.0 - clouds.a;
@@ -464,6 +469,43 @@ fn sky_full_at(dir: vec3<f32>, foot: SkyFootprint) -> vec3<f32> {
         col += frame.sun_color.rgb * disk * 6.0 * cover;
     }
     return col;
+}
+
+// The volumetric clouds' weather map (clouds.rs), drawn when the sky's cloud
+// parameters or the cloud texture change, never per frame. One tile of the
+// map is one repeat of the cloud texture, as the Legacy layer's `alpha1`
+// (sky_clouds) cuts its coverage from it: the same two taps (the texture,
+// and the texture 16 times smaller as detail), the same cover shift from
+// `cloud_shadow`. The scroll and the placement are applied by the trace.
+// R: coverage, G: unused (the type is the sky's, a uniform), B: the detail
+// tap, which varies the cloud tops, A: unused.
+const CLOUD_WEATHER_SIZE: f32 = 512.0;
+const HEAP_KNEE: f32 = 0.4;
+const HEAP_SLOPE: f32 = 0.2;
+
+@fragment
+fn fs_cloud_weather(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+    if (frame.tex_slots.x == 0u) {
+        return vec4<f32>(0.0);
+    }
+    let uv = pos.xy / CLOUD_WEATHER_SIZE;
+    let pd2 = frame.sky_cloud_pd2.xyz;
+    let density = 2.0 * (frame.sky_sunlight.w - 0.25);
+    let n1 = cloud_noise(uv) - 0.5;
+    let detail = cloud_noise(uv * 8.0);
+    let fine = n1 + (detail - 0.5) * pd2.z * 0.35;
+    let wc0 = smoothstep(-0.05, 0.45, fine + density);
+    // Two coverage channels (Haggstrom 2018): separate heaps from `wc0`, and
+    // as the sky's cover passes one half a continuous sheet `wc1` whose own
+    // light and dark patches (thin and thick places) give it structure.
+    let gc = smoothstep(0.0, 1.0, saturate((frame.sky_sunlight.w - 0.1) / 0.56));
+    let wc1 = 0.55 + 0.45 * smoothstep(-0.25, 0.25, fine);
+    let sheet = saturate((gc - 0.5) * 2.0);
+    // Until the sheet takes over the heaps never close up: above HEAP_KNEE
+    // their cover rises at a fifth of the pace and tops out at 0.52 (a full
+    // cover makes a slab of them), the gaps stay and fair heaps are untouched.
+    let heaps = mix(min(wc0, HEAP_KNEE) + max(wc0 - HEAP_KNEE, 0.0) * HEAP_SLOPE, wc0, sheet);
+    return vec4<f32>(mix(heaps, wc1, sheet), 0.0, detail, 0.0);
 }
 
 fn lattice_gradient(i: vec3<f32>) -> vec3<f32> {
@@ -913,7 +955,7 @@ fn terrain_color(in: TerrainOut) -> vec3<f32> {
         let nv=max(dot(n,v),0.001);let nl=max(dot(n,l),0.0);
         let fresnel=0.02037+0.97963*pow(1.0-nv,5.0);
         let glint=d_ggx(max(dot(n,half_vec),0.0),0.08)*v_smith(nv,nl,0.08)*nl*0.02;
-        wet_light=(sky_color(reflect(-v,n))*fresnel*0.25+frame.sun_color.rgb*min(glint,2.0)*sh)*wet;
+        wet_light=(sky_color(reflect(-v,n))*fresnel*0.25+frame.sun_color.rgb*min(glint,2.0)*select(sh, shadow_lift(sh), is_classic_sky()))*wet;
     }
     if (is_classic_sky()) {
         let a = ll_atmos(in.world_pos - frame.camera_pos.xyz);
@@ -1511,7 +1553,7 @@ fn water_pixel(in: WaterOut) -> vec4<f32> {
     if(water_fx_on(1u)){rough=clamp(rough*0.65+footprint*0.06,0.035,0.25);}
     rough=mix(rough,0.055,smoothstep(0.004,0.045,-wake.z)*0.65);
     let gn = select(n, legacy_glint_n, legacy_water);
-    let shadow = shadow_factor(in.world_pos, vec3<f32>(0.0, 0.0, 1.0), dist);
+    let shadow = shadow_lift(shadow_factor(in.world_pos, vec3<f32>(0.0, 0.0, 1.0), dist));
     // waterF.glsl: punctual = clamp(nl x (diffPunc + specPunc), 0, 10) x
     // sunlit_linear x shadow x atten, metallic 1 (no diffuse), roughness the
     // blur multiplier, F0 the `specular` uniform (LLDrawPoolWater: the

@@ -27,6 +27,69 @@ pub fn page(cx: &mut Cx, tab: usize) {
     }
 }
 
+fn world_lut(cx: &mut Cx) {
+    use crate::snapshot::looks;
+    use aurora_i18n::tr;
+
+    let p = cx.p;
+    let files = &cx.st.world_lut_files;
+    let imported = looks::lut_list(files);
+    let selected = if cx.s.world_lut.is_empty() {
+        tr!("photo-look-none").into()
+    } else if cx.s.world_lut.starts_with(looks::PACK) {
+        looks::name(&cx.s.world_lut).unwrap_or_else(|| tr!("ui-options-world-lut-unavailable").into())
+    } else {
+        imported
+            .iter()
+            .find(|entry| entry.id == cx.s.world_lut)
+            .map(|entry| entry.name.clone())
+            .unwrap_or_else(|| tr!("ui-options-world-lut-unavailable").into())
+    };
+    cx.keywords("LUT cube").row(
+        tr!("ui-options-world-lut"),
+        tr!("ui-options-world-lut-help"),
+        &field!(world_lut),
+        |ui, s| {
+            let mut changed = false;
+            egui::ComboBox::from_id_salt(ui.scope_id().with("world-lut"))
+                .width(COMBO_W)
+                .selected_text(selected)
+                .show_ui(ui, |ui| {
+                    changed |= ui
+                        .selectable_value(&mut s.world_lut, String::new(), tr!("photo-look-none"))
+                        .changed();
+                    for (creator, entries) in looks::pack_list() {
+                        crate::ui::menu::separator(ui, &p);
+                        ui.label(creator);
+                        for entry in entries {
+                            changed |= ui.selectable_value(&mut s.world_lut, entry.id, entry.name.as_ref()).changed();
+                        }
+                    }
+                    if !imported.is_empty() {
+                        crate::ui::menu::separator(ui, &p);
+                        ui.label(tr!("photo-lut-mine"));
+                        for entry in &imported {
+                            changed |= ui
+                                .selectable_value(&mut s.world_lut, entry.id.clone(), entry.name.as_ref())
+                                .changed();
+                        }
+                    }
+                });
+            changed
+        },
+    );
+    let enabled = !cx.s.world_lut.is_empty();
+    cx.row(
+        tr!("ui-options-world-lut-strength"),
+        tr!("ui-options-world-lut-strength-help"),
+        &field!(world_lut_strength),
+        |ui, s| {
+            ui.add_enabled_ui(enabled, |ui| super::super::slider(ui, &mut s.world_lut_strength, 0..=100, "%"))
+                .inner
+        },
+    );
+}
+
 /// Graphics › Sky and environment: the environment's own settings.
 fn environment(cx: &mut Cx) {
     use aurora_i18n::tr;
@@ -391,6 +454,11 @@ fn frames_per_second(cx: &mut Cx) {
             tr!("ui-options-gpu-recovery-tip"),
             &field!(gpu_recovery),
         );
+        cx.unfolded().toggle(
+            tr!("ui-options-gaming-mode-leave-on-focus"),
+            tr!("ui-options-gaming-mode-leave-on-focus-tip"),
+            &field!(gaming_mode_leave_on_focus),
+        );
     });
 }
 
@@ -437,6 +505,7 @@ fn parcels(cx: &mut Cx) {
             true,
         );
     });
+    cx.group(tr!("parcel-environment-title"), parcel_environments);
 }
 
 fn quality(cx: &mut Cx) {
@@ -905,6 +974,49 @@ fn light(cx: &mut Cx) {
                 tr!("ui-options-contact-shadows-help"),
                 &field!(contact_shadows),
             );
+            cx.experimental().toggle(
+                tr!("ui-options-soft-shadows"),
+                tr!("ui-options-soft-shadows-help"),
+                &field!(soft_shadows),
+            );
+            // the size of the light acts with the soft shadows only
+            let soft = cx.s.soft_shadows;
+            cx.subs(!soft, |cx| {
+                cx.row(
+                    tr!("ui-options-shadow-softness"),
+                    tr!("ui-options-shadow-softness-help"),
+                    &field!(shadow_softness),
+                    |ui, s| {
+                        let slider = ui.add_enabled_ui(soft, |ui| {
+                            ui.add(
+                                egui::Slider::new(&mut s.shadow_softness, 0.0..=crate::settings::SHADOW_SOFTNESS_MAX)
+                                    .custom_parser(aurora_i18n::parse_number)
+                                    .fixed_decimals(2)
+                                    .step_by(0.05)
+                                    .trailing_fill(true),
+                            )
+                            .changed()
+                        });
+                        slider.response.on_disabled_hover_text(tr!("ui-options-shadow-softness-needs-soft"));
+                        slider.inner
+                    },
+                );
+            });
+            cx.row(
+                tr!("ui-options-shadow-intensity"),
+                tr!("ui-options-shadow-intensity-help"),
+                &field!(shadow_intensity),
+                |ui, s| {
+                    ui.add(
+                        egui::Slider::new(&mut s.shadow_intensity, 0.0..=1.0)
+                            .custom_parser(aurora_i18n::parse_number)
+                            .fixed_decimals(2)
+                            .step_by(0.05)
+                            .trailing_fill(true),
+                    )
+                    .changed()
+                },
+            );
         });
     });
     cx.group(tr!("ui-options-ambient-occlusion"), |cx| {
@@ -995,6 +1107,81 @@ fn light(cx: &mut Cx) {
                 |ui, s| {
                     ui.add(
                         egui::Slider::new(&mut s.bloom_strength, 0.05..=1.0)
+                            .custom_parser(aurora_i18n::parse_number)
+                            .step_by(0.05)
+                            .trailing_fill(true),
+                    )
+                    .changed()
+                },
+            );
+        });
+        cx.experimental()
+            .toggle(tr!("ui-options-god-rays"), tr!("ui-options-god-rays-help"), &field!(god_rays));
+        let off = !cx.s.god_rays;
+        cx.subs(off, |cx| {
+            cx.row(
+                tr!("ui-options-god-rays-strength"),
+                tr!("ui-options-god-rays-strength-help"),
+                &field!(god_rays_strength),
+                |ui, s| {
+                    ui.add(
+                        egui::Slider::new(&mut s.god_rays_strength, 0.1..=2.0)
+                            .custom_parser(aurora_i18n::parse_number)
+                            .step_by(0.05)
+                            .trailing_fill(true),
+                    )
+                    .changed()
+                },
+            );
+            cx.row(
+                tr!("ui-options-god-rays-haze"),
+                tr!("ui-options-god-rays-haze-help"),
+                &field!(god_rays_haze),
+                |ui, s| {
+                    ui.add(
+                        egui::Slider::new(&mut s.god_rays_haze, 0.1..=3.0)
+                            .custom_parser(aurora_i18n::parse_number)
+                            .step_by(0.05)
+                            .trailing_fill(true),
+                    )
+                    .changed()
+                },
+            );
+            cx.row(
+                tr!("ui-options-god-rays-glow"),
+                tr!("ui-options-god-rays-glow-help"),
+                &field!(god_rays_glow),
+                |ui, s| {
+                    ui.add(
+                        egui::Slider::new(&mut s.god_rays_glow, 0.0..=0.9)
+                            .custom_parser(aurora_i18n::parse_number)
+                            .step_by(0.05)
+                            .trailing_fill(true),
+                    )
+                    .changed()
+                },
+            );
+            cx.row(
+                tr!("ui-options-god-rays-side"),
+                tr!("ui-options-god-rays-side-help"),
+                &field!(god_rays_side),
+                |ui, s| {
+                    ui.add(
+                        egui::Slider::new(&mut s.god_rays_side, 0.0..=2.0)
+                            .custom_parser(aurora_i18n::parse_number)
+                            .step_by(0.05)
+                            .trailing_fill(true),
+                    )
+                    .changed()
+                },
+            );
+            cx.row(
+                tr!("ui-options-god-rays-resolution"),
+                tr!("ui-options-god-rays-resolution-help"),
+                &field!(god_rays_resolution),
+                |ui, s| {
+                    ui.add(
+                        egui::Slider::new(&mut s.god_rays_resolution, 0.25..=1.0)
                             .custom_parser(aurora_i18n::parse_number)
                             .step_by(0.05)
                             .trailing_fill(true),
@@ -1203,7 +1390,14 @@ fn image(cx: &mut Cx) {
             "%",
         );
     });
+    // Order-independent transparency (aurora-render oit_stochastic.rs), an
+    // Aurora addition
+    cx.group(tr!("ui-options-transparency"), |cx| {
+        cx.experimental()
+            .toggle(tr!("ui-options-oit"), tr!("ui-options-oit-help"), &field!(oit));
+    });
     cx.group(tr!("ui-options-color-and-sharpness"), |cx| {
+        world_lut(cx);
         // "HDR and Emissive" (RenderDisableVintageMode): off, the tone
         // mapping, its mix and the sharpening are greyed, as in
         // LLFloaterPreference::refreshEnabledState
@@ -1415,6 +1609,63 @@ fn depth_of_field(cx: &mut Cx) {
 }
 
 /// Scope and rendering exceptions use the same saved identities and list controls.
+/// The environments saved for parcels (`world/parcel_env.rs`), set from the
+/// Environment window and the inventory: this list only removes them.
+fn parcel_environments(cx: &mut Cx) {
+    use crate::ui::widgets;
+    use aurora_i18n::tr;
+    let p = cx.p;
+    let field = field!(parcel_environments);
+    cx.section_body().row_with(
+        tr!("parcel-environment-title"),
+        tr!("parcel-environment-help"),
+        &field,
+        |ui, s, _, _| {
+            let entries = &mut s.parcel_environments;
+            let mut changed = false;
+            ui.vertical(|ui| {
+                if entries.is_empty() {
+                    ui.label(RichText::new(tr!("parcel-environment-empty")).color(p.muted));
+                    return;
+                }
+                let mut remove = None;
+                egui::ScrollArea::vertical()
+                    .id_salt("parcel_environments")
+                    .max_height(180.0)
+                    .min_scrolled_height(180.0)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        for (i, entry) in entries.iter().enumerate() {
+                            ui.push_id((&entry.grid, entry.parcel), |ui| {
+                                ui.horizontal_top(|ui| {
+                                    let width = (ui.available_width() - 20.0 - ui.spacing().item_spacing.x).max(1.0);
+                                    ui.allocate_ui_with_layout(egui::vec2(width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+                                        ui.set_min_width(width);
+                                        ui.spacing_mut().item_spacing.y = 2.0;
+                                        ui.add(egui::Label::new(RichText::new(&entry.name).strong()).wrap());
+                                        ui.add(egui::Label::new(RichText::new(&entry.region_name).size(12.0).color(p.muted)).wrap());
+                                    });
+                                    if widgets::icon_button(ui, &p, "trash-filled", tr!("common-remove"), true) {
+                                        remove = Some(i);
+                                    }
+                                });
+                            });
+                        }
+                    });
+                if let Some(i) = remove {
+                    entries.remove(i);
+                    changed = true;
+                }
+                if ui.button(tr!("parcel-environment-remove-all")).clicked() {
+                    entries.clear();
+                    changed = true;
+                }
+            });
+            changed
+        },
+    );
+}
+
 fn parcel_list(
     cx: &mut Cx,
     label: &str,

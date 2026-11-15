@@ -84,6 +84,27 @@ pub enum ChatThumbnails {
     TopRight,
 }
 
+/// The nearby chat bar (Preferences › Chat, #2696): at the bottom always,
+/// only while it is used (the Legacy Viewer's `AutohideChatBar`, #1009), or
+/// never, the Nearby tab of the Conversations window taking its place
+/// (Aurora's: there Enter always shows the bar, `start_chat` in
+/// indra/newview/llviewerinput.cpp).
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ChatBar {
+    #[default]
+    Always,
+    WhenTyping,
+    ConversationsOnly,
+}
+
+impl ChatBar {
+    /// The bar is not always on screen: the default dock keeps the
+    /// Conversations button.
+    pub fn hides(self) -> bool {
+        self != ChatBar::Always
+    }
+}
+
 /// Where web pages open, like `PreferredBrowserBehavior` and
 /// `LLWeb::useExternalBrowser` in the Legacy Viewer.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -477,6 +498,28 @@ impl DebugView {
 /// The former look-at range slider's maximum, which meant no limit.
 const FORMER_LOOK_AT_UNLIMITED: f32 = 64.0;
 
+/// The conversation log window's view menu (menu_conversation_log_view.xml).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ConversationLogView {
+    /// CallLogSortOrder: by date (1, the default) or by name (0).
+    pub by_date: bool,
+    /// SortFriendsFirst (on).
+    pub friends_first: bool,
+    /// ShowBlockedConvHistory (off).
+    pub show_blocked: bool,
+}
+
+impl Default for ConversationLogView {
+    fn default() -> Self {
+        ConversationLogView {
+            by_date: true,
+            friends_first: true,
+            show_blocked: false,
+        }
+    }
+}
+
 /// The draw distance's range (m): the Legacy Viewer's Graphics slider
 /// (RenderFarClip, panel_preferences_graphics1.xml, 32 to 1024). A region
 /// sends what it allows of it (OpenSim's MaxDrawDistance, 512 by default).
@@ -547,6 +590,8 @@ pub struct Settings {
     pub camera: crate::camera::CameraSettings,
     /// The crosshair in mouselook (ShowCrosshairs; #1166).
     pub crosshair: crate::ui::crosshair::Settings,
+    /// Size and appearance of the ordinary mouse pointer.
+    pub pointer: crate::cursors::Preferences,
     /// LLViewerJoystick: device, axis mapping and separate avatar/flycam tuning.
     pub joystick: crate::joystick::Settings,
     pub gamepad: crate::joystick::Settings,
@@ -587,6 +632,8 @@ pub struct Settings {
     /// Requested position lock and options, independent for each avatar.
     pub bridge: std::collections::HashMap<uuid::Uuid, crate::world::bridge::Preferences>,
     pub movements: std::collections::HashMap<uuid::Uuid, crate::movement::Preferences>,
+    /// Swimming in prims named as water (#2008), for every account.
+    pub water_volumes: crate::movement::water_volume::Settings,
     /// Show Friends Only and keeping it after a teleport, for each account
     /// (FSRenderFriendsOnly, FSRenderFriendsOnlyPersistsTP: per-account settings).
     pub friends_only: std::collections::HashMap<uuid::Uuid, crate::world::friends_only::Preferences>,
@@ -607,6 +654,12 @@ pub struct Settings {
     /// Viewer always does; Preferences › Avatars › Animations). Off, our
     /// avatar keeps its pose. Camera framing is controlled independently.
     pub customize_animation: bool,
+    /// FSPlayDefaultBentoAnimation: a priority 0 Bento pose plays under
+    /// every other animation, so hands, mouth, wings and tail fall back to
+    /// a natural pose instead of staying stuck where the last animation
+    /// left them (off, as in the Legacy Viewer; Preferences › Avatars ›
+    /// Animations).
+    pub bento_idle: bool,
     pub script_editor: crate::ui::scripts::settings::ScriptSettings,
     pub username: String,
     pub remember_username: bool,
@@ -628,11 +681,14 @@ pub struct Settings {
     pub start_region: String,
     pub draw_distance: f32,
     /// FSRenderFarClipStepping: after the login and a teleport to another
-    /// region, the draw distance starts at 32 m and doubles every
-    /// `draw_distance_stepping_interval` seconds (settings/draw_stepping.rs;
-    /// off).
+    /// region, the draw distance starts at 32 m and grows back to the
+    /// user's as the load allows (settings/draw_stepping.rs; off): doubling
+    /// every 2 s while the arrival is quiet and the frames fast, and
+    /// stepping back one level when frames stay heavy.
     pub draw_distance_stepping: bool,
-    /// FSRenderFarClipSteppingInterval: 20 s, 5 to 30 (Debug Settings only).
+    /// FSRenderFarClipSteppingInterval: 20 s, 5 to 30 (Debug Settings only):
+    /// the pace of the steps while objects are still arriving or the frames
+    /// are slow (the Legacy Viewer's fixed pace).
     pub draw_distance_stepping_interval: u32,
     /// The steps under way; the file keeps the user's draw distance.
     #[serde(skip)]
@@ -662,6 +718,10 @@ pub struct Settings {
     pub env_persist: bool,
     /// The weather of this viewer (the Environment window's "Weather").
     pub weather: crate::weather::WeatherSettings,
+    /// Sky, water and day cycle lists A–Z instead of the inventory's order
+    /// (an Aurora switch on the lists, off: the order since #812; the
+    /// Legacy Viewer's lists are always by name).
+    pub env_lists_by_name: bool,
     /// Which stars the night sky shows: the real sky over Paris (Aurora's
     /// default) or the Legacy Viewer's random stars (world/night_sky.rs).
     pub night_sky: crate::world::night_sky::NightSky,
@@ -691,6 +751,22 @@ pub struct Settings {
     pub bloom: bool,
     /// The share of the light over the threshold it spreads (0.05 to 1).
     pub bloom_strength: f32,
+    /// Light shafts from the sun through the bright parts of the image
+    /// (Aurora's own, the Legacy Viewer has none): off by default.
+    pub god_rays: bool,
+    /// How bright the sun rays are (0.1 to 2, 0.5 by default).
+    pub god_rays_strength: f32,
+    /// How thick the air of the sun rays is (0.1 to 3, 0.5 by default).
+    pub god_rays_haze: f32,
+    /// How tightly their glow gathers around the sun (0 to 0.9, 0.6 by
+    /// default).
+    pub god_rays_glow: f32,
+    /// The resolution the sun rays draw at, a share of the image's size
+    /// (0.25 to 1, 1 by default): lower is cheaper and blockier.
+    pub god_rays_resolution: f32,
+    /// How bright the beams are away from the sun, from the side and behind
+    /// (0 to 2, 1 by default).
+    pub god_rays_side: f32,
     /// GPU occlusion culling: objects hidden behind others are not drawn
     /// (Firestorm UseOcclusion, on by default). Renamed from `gpu_occlusion`
     /// (off while it cost more than it saved) so that saved settings take
@@ -837,6 +913,11 @@ pub struct Settings {
     pub balance_shows_received: bool,
     /// The same for L$ spent, in red.
     pub balance_shows_spent: bool,
+    /// Preferences › Chat › Conversations: send and receive pokes
+    /// (`world/pokes.rs`). On by default: a poke needs both viewers to
+    /// read it. Off, no Poke button shows and a poke arrives as an
+    /// ordinary IM.
+    pub pokes: bool,
     /// Mini-map and world map options (Firestorm MiniMap* / Map* settings).
     pub maps: MapSettings,
     /// "Search": last tab, rating boxes and land limits.
@@ -848,9 +929,14 @@ pub struct Settings {
     pub show_appearance: bool,
     /// Crop outfit gallery previews to fill their frames (off: fit the whole image).
     pub appearance_fill_previews: bool,
+    /// The order of the Favorite Wearables list (FSWearableFavoritesSortOrder).
+    pub wearable_favorites_sort: crate::world::wearable_favorites::SortOrder,
     /// The Appearance tab shown at exit (gallery, outfit list, worn), shown
     /// again at the next start, as the Legacy Viewer's `LastAppearanceTab`.
     pub appearance_tab: u8,
+    /// The order of the Appearance outfits (FSOutfitListSortOrder and
+    /// OutfitGallerySortOrder, saved like them).
+    pub appearance_outfit_sort: crate::world::outfit_folders::Sort,
     pub show_ao: bool,
     /// Loading / teleport screens show the last view, blurred.
     pub loading_backdrop: bool,
@@ -863,6 +949,10 @@ pub struct Settings {
     pub window_x: Option<i32>,
     pub window_y: Option<i32>,
     pub window_maximized: bool,
+    /// Last display used for restoring native window placement.
+    pub window_display: Option<crate::window_display::SavedDisplay>,
+    /// Recover unreachable window geometry when connected displays change.
+    pub window_display_recovery: bool,
     /// Start in a borderless window covering the current monitor.
     pub window_fullscreen: bool,
     /// Legacy single-account authorization, read once for migration only.
@@ -882,6 +972,10 @@ pub struct Settings {
     /// The times of the conversations' lines, private and group
     /// (FSShowTimestampsIM, on; Preferences › Chat › Conversations).
     pub chat_timestamps_im: bool,
+    /// Seconds in the times of the nearby chat and of the conversations,
+    /// "14:05:09" (Firestorm's FSSecondsinChatTimestamps, off; Preferences ›
+    /// Chat › Nearby chat), whatever the bars' clock shows (#502).
+    pub chat_time_seconds: bool,
     /// The former single switch, read once: its choice goes to both.
     #[serde(rename = "chat_timestamps", skip_serializing)]
     pub(crate) former_chat_timestamps: Option<bool>,
@@ -913,14 +1007,27 @@ pub struct Settings {
     /// viewer's notices (#475, off by default; Preferences > Chat). Not in
     /// the Legacy Viewer.
     pub compact_automated_chat: bool,
+    /// An emote ("/me waves") joins its sender's group under one header in
+    /// the Aurora style, instead of standing alone (off by default;
+    /// Preferences > Chat). Not in the Legacy Viewer.
+    pub group_emotes: bool,
     /// With it, the system lines of the conversations (calls, automatic
     /// replies) too (off, the human's choice of 2026-10-24).
     pub compact_im_system_lines: bool,
-    /// The local chat bar keeps the keyboard after a message is sent; Enter
-    /// on the empty bar gives it back to the world (the Legacy Viewer's
-    /// CloseChatOnReturn off). On by default (human choice of 2026-10-16);
-    /// off, the bar lets go after sending.
+    /// The local chat bar keeps the keyboard after a message is sent, and
+    /// an empty Enter leaves it there (the Legacy Viewer's CloseChatOnReturn
+    /// off, FSNearbyChatControl::autohide). On by default (human choice of
+    /// 2026-10-16, empty Enter kept since #3349). Off, sending lets the
+    /// keyboard go and the next Enter takes the bar back.
     pub chat_keep_focus: bool,
+    /// Aurora extension, Enter toggles typing: Enter on an empty field gives
+    /// the keyboard back to the world in every conversation too (IMs and
+    /// group chats), not only in the nearby chat. Off by default.
+    pub chat_enter_toggles: bool,
+    /// Aurora extension, Enter returns to the last chat field used: from the
+    /// world, Enter focuses the conversation last talked in when its window
+    /// is open, instead of always the chat bar. Off by default.
+    pub chat_enter_last_field: bool,
     /// The nearby chat fields complete a gesture's trigger after `/`, with
     /// the list of the matching ones (FSChatbarGestureAutoCompleteEnable, on).
     pub chat_gesture_autocomplete: bool,
@@ -934,11 +1041,15 @@ pub struct Settings {
     /// `@` in a chat field lists the residents of the conversation to mention
     /// (FSUseChatMentionAutoComplete, on).
     pub chat_mention_autocomplete: bool,
-    /// The local chat bar (the chat island) shows only while it is used:
-    /// Enter or a letter key brings it (#1009). The Legacy Viewer's
-    /// `AutohideChatBar`, off by default; with the islands the default dock
-    /// then keeps the Conversations button.
-    pub autohide_chat_bar: bool,
+    /// When the local chat bar (the chat island) shows: always, only while
+    /// it is used (#1009), or never, the Conversations window's Nearby tab
+    /// taking Enter (#2696). With the islands, the default dock keeps the
+    /// Conversations button while the bar hides.
+    pub chat_bar: ChatBar,
+    /// The former switch "Hide the chat bar when not in use", read once:
+    /// on is `ChatBar::WhenTyping`.
+    #[serde(rename = "autohide_chat_bar", skip_serializing)]
+    pub(crate) former_autohide_chat_bar: Option<bool>,
     /// Show Contacts in Conversations (Preferences > Chat, on by default as
     /// the Legacy Viewer's always-present entry; it can be hidden there).
     pub show_contacts_tab: bool,
@@ -1101,6 +1212,13 @@ pub struct Settings {
     pub log_im: bool,
     /// Write the nearby chat too (Firestorm LogNearbyChat, off).
     pub log_nearby: bool,
+    /// Keep the conversation log: who we had an instant message, group chat
+    /// or conference with, and when (the Legacy Viewer's
+    /// KeepConversationLogTranscripts > 0, on). Independent of `log_im`
+    /// here; see `ui/conversation_log.rs`.
+    pub log_conversations: bool,
+    /// The conversation log window's order and filters.
+    pub conversation_log: ConversationLogView,
     /// Reopen the private conversations of the last session at login (the
     /// Legacy Viewer's FSRestoreOpenIMs, off).
     pub reopen_ims: bool,
@@ -1161,6 +1279,9 @@ pub struct Settings {
     pub sim_version_alert: bool,
     /// Object messages from elsewhere dropped (Preferences › Privacy, #623).
     pub object_im_filter: crate::world::object_im_filter::Settings,
+    /// The Omnifilter on or off and its rule set in use (OmnifilterEnabled,
+    /// OmnifilterRuleSetID); the rules are in `omnifilter.xml`.
+    pub omnifilter: crate::omnifilter::Settings,
     pub anti_spam: crate::world::anti_spam::Settings,
     /// Global RLVa opt-in. Session restrictions are never persisted.
     pub rlva_enabled: bool,
@@ -1170,6 +1291,9 @@ pub struct Settings {
     /// Our avatar's turn thresholds, head and eye limits and reset on
     /// stand-up (settings/avatar_motion.rs; Preferences › Avatars).
     pub avatar_motion: avatar_motion::AvatarMotion,
+    /// The pose stand's lock and last pose (FSPoseStandLock,
+    /// FSPoseStandLastSelectedPose).
+    pub pose_stand: crate::pose_stand::Settings,
     /// Automatic responses and the kept online status modes.
     pub autoresponse: crate::world::status::AutoResponse,
     /// The chat bar as a command line (FSCmdLine*, Preferences › Chat ›
@@ -1361,6 +1485,10 @@ pub struct Settings {
     /// colours of the interface (`crate::interface_colors`), each the
     /// skin's by default.
     pub interface_colors: crate::interface_colors::InterfaceColors,
+    /// Preferences › Appearance › Skin: the system's light or dark mode and
+    /// accent colour (`crate::system_theme`), live, off by default. A
+    /// colour of `interface_colors` wins over the system's.
+    pub follow_system_theme: bool,
     /// Firestorm's camera and movement windows (floater_camera.xml,
     /// floater_moveview.xml) instead of `ui/controls.rs`.
     pub classic_controls: bool,
@@ -1429,7 +1557,20 @@ pub struct Settings {
     /// Aurora extension: allow the left/right mouse chord on land and objects
     /// without a click action, in addition to our avatar. Off by default.
     pub world_mouse_walk: bool,
+    /// A left drag on our avatar turns the camera around it without turning
+    /// the avatar, as a right drag does (the Firestorm habit, feedback #445).
+    /// Off by default: the drag steers the avatar (LLToolPie::startCameraSteering).
+    pub left_drag_avatar_moves_camera: bool,
+    /// Aurora extension, MMO-style mouse buttons: the right button's drag
+    /// steers our avatar (the turn keys slide, the left button walks
+    /// forward) and the left button held on our avatar orbits the camera,
+    /// the other way round from the default. Off by default.
+    pub mmo_mouse_buttons: bool,
     pub arrows_strafe: bool,
+    /// Aurora extension: pressing a walk key twice quickly runs while held
+    /// (agent_handle_doubletap_run, always on in the Legacy Viewer). On by
+    /// default.
+    pub double_tap_run: bool,
     /// The arrow keys (and Page Up / Down, Home) move the avatar while the
     /// chat bar has the keyboard, even with text in it; an empty bar always
     /// lets them through. The Legacy Viewer's `ArrowKeysAlwaysMove`, off by
@@ -1538,6 +1679,18 @@ pub struct Settings {
     /// Legacy Viewer (contact_shadows.rs): what the shadow map is too coarse
     /// to show, where things touch. Off by default; only with the shadows.
     pub contact_shadows: bool,
+    /// Soft sun shadows, experimental (aurora-render `soft_shadows.rs`): the
+    /// penumbra widens with the distance of the caster, like the sun's in
+    /// real life. Beyond the Legacy Viewer, off by default and in every
+    /// graphics level; only with the shadows.
+    pub soft_shadows: bool,
+    /// With soft shadows, the size of the light: 1 = 2.3 degrees across (the
+    /// real sun, 0.53 degrees, is a softness of 0.23), 0 = no size, up to 2. Without soft
+    /// shadows it has no effect.
+    pub shadow_softness: f32,
+    /// How dark the sun's shadows are, 0 to 1: 1 = as the Legacy Viewer's,
+    /// less lets the light through. Works with or without soft shadows.
+    pub shadow_intensity: f32,
     /// 0 none, 1 FXAA, 2 MSAA 2x, 3 MSAA 4x, 4 MSAA 8x, 5 TAA, 6 SMAA (the
     /// default, RenderFSAAType 2 of Firestorm's High to Ultra levels in
     /// featuretable.txt), 7 AMD FSR 3.1 (beyond the Legacy Viewer)
@@ -1577,6 +1730,11 @@ pub struct Settings {
     /// colour either way and only take the 0.7 curve, a little brighter. An
     /// experimental setting, off by default.
     pub colored_sky_ambient: bool,
+    /// Volumetric clouds (aurora-render `clouds.rs`) in the place of the
+    /// Legacy Viewer's flat cloud layer: Aurora (true) or Legacy. Off by
+    /// default until tried on modest GPUs, and left alone by the two buttons
+    /// of Preferences › Aurora, as the water effects once were.
+    pub volumetric_clouds: bool,
     /// 0 Khronos PBR Neutral, 1 ACES (RenderTonemapType: ACES by default,
     /// like the Legacy Viewer), then Aurora's own: 2 Reinhard, 3 Uncharted 2,
     /// 4 AgX, 5 a fixed Filmic ([`tonemapper_of`])
@@ -1584,6 +1742,9 @@ pub struct Settings {
     /// Share of the tone mapped color over the exposed linear one, on skies
     /// that are not classic (RenderTonemapMix, 0.7 like the Legacy Viewer).
     pub tonemap_mix: f32,
+    /// LUT ID for the live world view. Empty disables colour grading.
+    pub world_lut: String,
+    pub world_lut_strength: u8,
     /// "HDR and Emissive" (RenderDisableVintageMode, on by default, off in
     /// the Legacy Viewer's Low and LowMid levels): off, no exposure, tone
     /// mapping nor sharpening, no emissive on opaque PBR faces and 8-bit
@@ -1609,6 +1770,9 @@ pub struct Settings {
     /// by another program), a new window and device instead of closing
     /// (app/gpu_recovery.rs). On by default; the Legacy Viewer closes.
     pub gpu_recovery: bool,
+    /// Gaming mode (app/gaming_mode.rs) ends by itself when the window
+    /// comes back in front. On by default; not in the Legacy Viewer.
+    pub gaming_mode_leave_on_focus: bool,
     /// Maximum live particles (0 = particles off).
     pub max_particles: u32,
     /// RenderAttachedParticles: the particles of what avatars wear (on;
@@ -1707,6 +1871,11 @@ pub struct Settings {
     pub display_name_notices: bool,
     /// Screen-space reflections.
     pub ssr: bool,
+    /// Order-independent transparency (aurora-render oit_stochastic.rs):
+    /// the blended faces drawn with depth-based stochastic transparency
+    /// rather than in the sorted order. An Aurora addition, off by
+    /// default (an opt-in); in every anti-aliasing mode.
+    pub oit: bool,
     /// Anisotropic filtering: 1 (off), 2, 4, 8, 16.
     pub anisotropy: u16,
     /// Disk cache size (MB) for textures, meshes, animations, objects and inventory.
@@ -1733,6 +1902,8 @@ pub struct Settings {
     pub parcel_visibility: crate::world::parcel_visibility::Settings,
     /// World › Shadow Realm: its switch and distance (`settings/shadow_realm.rs`).
     pub shadow_realm: shadow_realm::ShadowRealm,
+    /// Environments saved for parcels (Preferences › Graphics › Parcels).
+    pub parcel_environments: Vec<crate::world::parcel_env::Entry>,
     /// Width of the local chat input in the bottom bar (px, 0 = skin default).
     pub chat_bar_width: f32,
     /// Width of the chat island of the bottom islands (px, 0 = the default
@@ -1769,6 +1940,11 @@ pub struct Settings {
     /// graphics card once it is known (`graphics_presets::for_machine`).
     #[serde(skip)]
     pub new_profile: bool,
+    /// The keyboard's defaults were placed for a layout that may only stand
+    /// in for the active one (a new profile, or a file older than version
+    /// 40): the first report of `keybinds::LayoutWatch` moves them.
+    #[serde(skip)]
+    pub defaults_follow_reported_layout: bool,
     /// Version 33 turned the camera's limits back on in this file: the login
     /// screen says so once (`ui/login/camera_limits_notice.rs`).
     #[serde(skip)]
@@ -1779,6 +1955,13 @@ pub struct Settings {
 /// bounce) it hardly shows in the demo's coloured corner, at 2 a glow starts
 /// around the foot of objects, at 4 it is grainy (captures of 2026-10-17).
 pub(crate) const SCREEN_INDIRECT_INTENSITY: f32 = 1.5;
+
+/// The default shadow softness, 0.25 (a light about 0.6 degrees across, close
+/// to the real sun (0.53 degrees, a softness of 0.23); 1 is 2.3 degrees), and the range of the slider.
+pub(crate) const SHADOW_SOFTNESS: f32 = 0.25;
+pub(crate) const SHADOW_SOFTNESS_MAX: f32 = 2.0;
+/// The shadows as the Legacy Viewer draws them.
+pub(crate) const SHADOW_INTENSITY: f32 = 1.0;
 
 pub(crate) const DEFAULT_GROUND_FEET_HEIGHT: f32 = 0.4;
 pub(crate) const DEFAULT_GROUND_FEET_AVATARS: u32 = 5;
@@ -1844,7 +2027,7 @@ pub(crate) fn max_texture_resolution_choice(v: u32) -> u32 {
         .unwrap_or(MAX_TEXTURE_RESOLUTIONS[0])
 }
 
-const SETTINGS_VERSION: u32 = 39;
+const SETTINGS_VERSION: u32 = 41;
 
 /// The world render percentage that draws at the display's logical
 /// resolution, as the Legacy Viewer does on a Mac with RenderHiDPI 0: 50 on
@@ -1989,6 +2172,9 @@ impl Default for ColorSettings {
 
 /// Audio channels in Firestorm's order: Main, Interface, Ambient, Sounds,
 /// Music, Multimedia, Voice.
+/// Index of the voice channel in the audio settings (`audio_channels`).
+pub const VOICE_CHANNEL: usize = 6;
+
 pub fn audio_channels() -> [&'static str; 7] {
     [
         aurora_i18n::tr!("settings-main"),
@@ -2065,6 +2251,10 @@ pub struct AudioSettings {
     pub mute_when_minimized: bool,
     /// Output device name (empty = system default).
     pub output_device: String,
+    /// Voice-only output device (`VoiceOutputAudioDevice` in the Legacy Viewer
+    /// panel, `indra/newview/llpanelvoicedevicesettings.cpp`; empty follows
+    /// `output_device`).
+    pub voice_output_device: String,
     /// Microphone name (empty = system default).
     pub input_device: String,
     /// Connect to voice chat.
@@ -2134,6 +2324,7 @@ impl Default for AudioSettings {
             stream_title_history: 10,
             mute_when_minimized: false,
             output_device: String::new(),
+            voice_output_device: String::new(),
             input_device: String::new(),
             voice_enabled: true,
             mic_hold: false,
@@ -2162,6 +2353,22 @@ pub enum VoiceEar {
 }
 
 impl AudioSettings {
+    /// What the enable box of a channel switches. The voice one is the voice
+    /// connection itself, microphone included (EnableVoiceChat of
+    /// panel_preferences_sound.xml and panel_volume_pulldown.xml).
+    pub fn channel_box(&mut self, i: usize) -> &mut bool {
+        if i == VOICE_CHANNEL {
+            &mut self.voice_enabled
+        } else {
+            &mut self.enabled[i]
+        }
+    }
+
+    /// The state of [`AudioSettings::channel_box`].
+    pub fn channel_on(&self, i: usize) -> bool {
+        if i == VOICE_CHANNEL { self.voice_enabled } else { self.enabled[i] }
+    }
+
     pub fn world_voice_visualizer(&self, own: bool, in_call: bool, mouselook: bool) -> bool {
         self.voice_visualizer && (!in_call || self.voice_visualizers_in_calls) && (!own || (self.voice_visualizer_self && !mouselook))
     }
@@ -2201,6 +2408,7 @@ impl Default for Settings {
             build: Default::default(),
             camera: Default::default(),
             crosshair: Default::default(),
+            pointer: Default::default(),
             joystick: Default::default(),
             gamepad: crate::joystick::Settings::gamepad_defaults(),
             pending_legacy_gamepad: None,
@@ -2222,6 +2430,7 @@ impl Default for Settings {
             shape_height_feet: false,
             customize_animation: true,
             appearance_camera_movement: true,
+            bento_idle: false,
             imports: Default::default(),
             script_editor: Default::default(),
             username: String::new(),
@@ -2249,6 +2458,7 @@ impl Default for Settings {
             env_manual_transition: 0.0,
             env_persist: true,
             weather: Default::default(),
+            env_lists_by_name: false,
             night_sky: Default::default(),
             night_sky_place: Default::default(),
             night_sky_latitude: crate::world::night_sky::LATITUDE as f32,
@@ -2261,6 +2471,12 @@ impl Default for Settings {
             glow: true,
             bloom: false,
             bloom_strength: BLOOM_STRENGTH,
+            god_rays: false,
+            god_rays_strength: 0.5,
+            god_rays_haze: 0.5,
+            god_rays_glow: 0.6,
+            god_rays_resolution: 1.0,
+            god_rays_side: 1.0,
             occlusion_culling: true,
             lod_factor: 2.0,
             tree_lod_factor: 0.5,
@@ -2319,6 +2535,7 @@ impl Default for Settings {
             notify_money_threshold: 200,
             balance_shows_received: true,
             balance_shows_spent: true,
+            pokes: true,
             maps: MapSettings::default(),
             search: Default::default(),
             show_people: true,
@@ -2326,11 +2543,14 @@ impl Default for Settings {
             show_inventory: false,
             show_appearance: false,
             appearance_fill_previews: false,
+            wearable_favorites_sort: Default::default(),
             appearance_tab: 0,
+            appearance_outfit_sort: Default::default(),
             show_ao: false,
             ao: Default::default(),
             bridge: Default::default(),
             movements: Default::default(),
+            water_volumes: Default::default(),
             friends_only: Default::default(),
             parcel_music_accounts: Default::default(),
             snapshot: Default::default(),
@@ -2342,6 +2562,8 @@ impl Default for Settings {
             window_x: None,
             window_y: None,
             window_maximized: false,
+            window_display: None,
+            window_display_recovery: true,
             window_fullscreen: false,
             mfa_hash: String::new(),
             font: crate::ui::fonts::DEFAULT.into(),
@@ -2349,6 +2571,7 @@ impl Default for Settings {
             chat_font_scale: 1.0,
             chat_timestamps_nearby: true,
             chat_timestamps_im: true,
+            chat_time_seconds: false,
             former_chat_timestamps: None,
             show_chat_channel: false,
             show_recent_emojis: false,
@@ -2358,13 +2581,17 @@ impl Default for Settings {
             script_errors_to_channel: false,
             script_errors_channel: 1,
             compact_automated_chat: false,
+            group_emotes: false,
             compact_im_system_lines: false,
             chat_keep_focus: true,
+            chat_enter_toggles: false,
+            chat_enter_last_field: false,
             chat_gesture_autocomplete: true,
             chat_name_prediction: true,
             colon_emote: false,
             chat_mention_autocomplete: true,
-            autohide_chat_bar: false,
+            chat_bar: ChatBar::Always,
+            former_autohide_chat_bar: None,
             show_contacts_tab: true,
             conversations_own_windows: false,
             send_typing_state: true,
@@ -2419,6 +2646,8 @@ impl Default for Settings {
             notification_options: Default::default(),
             log_im: true,
             log_nearby: false,
+            log_conversations: true,
+            conversation_log: Default::default(),
             reopen_ims: false,
             log_show_history: true,
             log_dated_names: false,
@@ -2439,12 +2668,14 @@ impl Default for Settings {
             script_count_threshold: 100,
             sim_version_alert: false,
             object_im_filter: Default::default(),
+            omnifilter: Default::default(),
             anti_spam: Default::default(),
             rlva_enabled: false,
             rlva: Default::default(),
             pose_requests: Default::default(),
             poser: Default::default(),
             avatar_motion: Default::default(),
+            pose_stand: Default::default(),
             autoresponse: Default::default(),
             chat_commands: Default::default(),
             keywords: Default::default(),
@@ -2506,6 +2737,7 @@ impl Default for Settings {
             color_blindness_strength: 1.0,
             high_contrast: false,
             interface_colors: Default::default(),
+            follow_system_theme: false,
             classic_controls: false,
             camera_shots: Vec::new(),
             camera_views: Default::default(),
@@ -2537,7 +2769,10 @@ impl Default for Settings {
             destinations_wide: true,
             invert_mouse: false,
             arrows_strafe: false,
+            double_tap_run: true,
             world_mouse_walk: false,
+            left_drag_avatar_moves_camera: false,
+            mmo_mouse_buttons: false,
             arrow_keys_always_move: false,
             letter_keys_move: true,
             walk_backwards_without_turning: false,
@@ -2571,6 +2806,9 @@ impl Default for Settings {
             local_light_count: crate::scene::lights::MAX_LIGHTS as u32,
             projector_shadow_limit: 2,
             contact_shadows: false,
+            soft_shadows: false,
+            shadow_softness: SHADOW_SOFTNESS,
+            shadow_intensity: SHADOW_INTENSITY,
             antialiasing: 6,
             blend_order: crate::graphics_presets::BLEND_ORDER_FULL,
             fsr_quality: 1,
@@ -2579,8 +2817,11 @@ impl Default for Settings {
             render_scale_auto: cfg!(target_os = "macos"),
             specular_aa: true,
             colored_sky_ambient: false,
+            volumetric_clouds: false,
             tonemapper: 1,
             tonemap_mix: TONEMAP_MIX,
+            world_lut: String::new(),
+            world_lut_strength: 100,
             hdr_emissive: true,
             fps_cap: true,
             fps_limit: 60,
@@ -2590,6 +2831,7 @@ impl Default for Settings {
             background_fps_limit: 15,
             background_gpu_pause: true,
             gpu_recovery: true,
+            gaming_mode_leave_on_focus: true,
             max_particles: 4096,
             attached_particles: true,
             tracker_beacon: true,
@@ -2626,6 +2868,9 @@ impl Default for Settings {
             render_extras: Default::default(),
             render_photo: Default::default(),
             ssr: false,
+            // an opt-in: the Legacy Viewer sorts its blended faces, and the
+            // method's targets take video memory while it is on
+            oit: false,
             anisotropy: 8,
             cache_size_mb: 20480,
             cache_location: String::new(),
@@ -2635,6 +2880,7 @@ impl Default for Settings {
             no_neighbour_regions: false,
             parcel_visibility: Default::default(),
             shadow_realm: Default::default(),
+            parcel_environments: Vec::new(),
             chat_bar_width: 0.0,
             chat_island_width: 0.0,
             toolbar: Default::default(),
@@ -2647,6 +2893,7 @@ impl Default for Settings {
             settings_version: SETTINGS_VERSION,
             newer_file: None,
             new_profile: false,
+            defaults_follow_reported_layout: false,
             camera_limits_restored: false,
         }
     }
@@ -2901,6 +3148,7 @@ impl Settings {
         let forced = std::env::var_os("AURORA_CAPTURE").is_some();
         s.window_maximized = window_starts_maximized(saved_window.0, saved_window.1, forced);
         s.new_profile = new_profile;
+        s.defaults_follow_reported_layout = new_profile;
         s.finished(newer)
     }
 
@@ -3329,6 +3577,34 @@ impl Settings {
             // sorted order of these levels
             crate::graphics_presets::upgrade_blend_order(&mut self);
         }
+        if self.settings_version < 40 {
+            // the letter shortcuts of version 12 (or older defaults moved
+            // then) were placed for the first layout of a Wayland keymap,
+            // which only stood in for the active one: they follow the layout
+            // the compositor reports first (`keybinds::LayoutWatch`)
+            self.defaults_follow_reported_layout = true;
+        }
+        // "Hide the chat bar when not in use" became the "Chat bar" choice:
+        // on is "Shown when typing", off (or absent) "Always shown". Only
+        // earlier files: an older build that saved over a newer file wrote
+        // the switch back beside the choice, which stays
+        let autohide = self.former_autohide_chat_bar.take();
+        if self.settings_version < 41 {
+            self.chat_bar = if autohide == Some(true) {
+                ChatBar::WhenTyping
+            } else {
+                ChatBar::Always
+            };
+        }
+        if !self.audio.enabled[VOICE_CHANNEL] {
+            // this box used to switch a mixer channel of its own, leaving
+            // voice connected and the microphone open: whoever unticked it
+            // wanted voice off. Repaired at every load, not once by version:
+            // no control ticks this channel back on, and an earlier build
+            // sharing the file can still write it
+            self.audio.enabled[VOICE_CHANNEL] = true;
+            self.audio.voice_enabled = false;
+        }
         if !self.audio.mic_gain.is_finite() {
             self.audio.mic_gain = 1.0;
         }
@@ -3396,6 +3672,16 @@ impl Settings {
         } else {
             SCREEN_INDIRECT_INTENSITY
         };
+        self.shadow_softness = if self.shadow_softness.is_finite() {
+            self.shadow_softness.clamp(0.0, SHADOW_SOFTNESS_MAX)
+        } else {
+            SHADOW_SOFTNESS
+        };
+        self.shadow_intensity = if self.shadow_intensity.is_finite() {
+            self.shadow_intensity.clamp(0.0, 1.0)
+        } else {
+            SHADOW_INTENSITY
+        };
         self.sharpen = if self.sharpen.is_finite() {
             self.sharpen.clamp(0.0, 1.0)
         } else {
@@ -3405,6 +3691,31 @@ impl Settings {
             self.bloom_strength.clamp(0.05, 1.0)
         } else {
             BLOOM_STRENGTH
+        };
+        self.god_rays_strength = if self.god_rays_strength.is_finite() {
+            self.god_rays_strength.clamp(0.1, 2.0)
+        } else {
+            0.5
+        };
+        self.god_rays_haze = if self.god_rays_haze.is_finite() {
+            self.god_rays_haze.clamp(0.1, 3.0)
+        } else {
+            0.5
+        };
+        self.god_rays_glow = if self.god_rays_glow.is_finite() {
+            self.god_rays_glow.clamp(0.0, 0.9)
+        } else {
+            0.6
+        };
+        self.god_rays_resolution = if self.god_rays_resolution.is_finite() {
+            self.god_rays_resolution.clamp(0.25, 1.0)
+        } else {
+            1.0
+        };
+        self.god_rays_side = if self.god_rays_side.is_finite() {
+            self.god_rays_side.clamp(0.0, 2.0)
+        } else {
+            1.0
         };
         self.lod_factor = self.lod_factor.clamp(0.5, 4.0);
         let area = |v: f32, default: f32| if v.is_finite() { v.clamp(0.0, 1.0e6) } else { default };
@@ -3438,6 +3749,8 @@ impl Settings {
             0.5
         };
         self.ui_scale = self.ui_scale.clamp(0.75, 2.0);
+        self.pointer.size = self.pointer.size.clamp(16, 64);
+        self.pointer.touch_size = self.pointer.touch_size.clamp(16, 64);
         self.mouse_sensitivity = self.mouse_sensitivity.clamp(0.1, 5.0);
         self.texture_budget_mb = self.texture_budget_mb.clamp(256, 32768);
         self.font_scale = self.font_scale.clamp(FONT_SCALE_MIN, FONT_SCALE_MAX);
@@ -3471,6 +3784,7 @@ impl Settings {
         self.build.tools.sanitize();
         self.render_photo.sanitize();
         self.tonemapper = self.tonemapper.min(TONEMAPPER_MAX);
+        self.world_lut_strength = self.world_lut_strength.min(100);
         self.tonemap_mix = if self.tonemap_mix.is_finite() {
             self.tonemap_mix.clamp(0.0, 1.0)
         } else {
@@ -3553,6 +3867,8 @@ impl Settings {
             window_x: old.window_x,
             window_y: old.window_y,
             window_maximized: old.window_maximized,
+            window_display: old.window_display,
+            window_display_recovery: old.window_display_recovery,
             window_fullscreen: old.window_fullscreen,
             // a newer build's own values are not this build's to reset
             newer_file: old.newer_file,
@@ -3745,6 +4061,7 @@ impl Settings {
             screen_indirect: self.ao_method == 1 && self.screen_indirect_light,
             screen_indirect_intensity: self.screen_indirect_intensity,
             contact_shadows: self.contact_shadows,
+            soft_shadows: self.soft_shadows,
             specular_aa: self.specular_aa,
             water_reflection_scale: Self::reflection_scale(self.water_reflections),
             mirror_scale: Self::reflection_scale(self.mirrors),
@@ -3756,6 +4073,7 @@ impl Settings {
             rain_surfaces: false,
             anisotropy: self.anisotropy,
             occlusion: self.occlusion_culling,
+            oit: self.oit,
         }
     }
 
@@ -3771,6 +4089,15 @@ impl Settings {
     }
 }
 
+/// How the minimap displays avatar names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum MiniAvatarNameFormat {
+    Display,
+    Legacy,
+    #[default]
+    DisplayAndLegacy,
+}
+
 /// Mini-map (LLNetMap) and world map (LLFloaterWorldMap) options, with the
 /// Firestorm defaults.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -3778,6 +4105,8 @@ impl Settings {
 pub struct MapSettings {
     /// MiniMapScale: pixels per region, 32..4096.
     pub mini_scale: f32,
+    /// Avatar name format in minimap tooltips and avatar menus.
+    pub mini_avatar_name_format: MiniAvatarNameFormat,
     /// MiniMapRotate: camera direction at the top (else north).
     pub mini_rotate: bool,
     /// MiniMapObjects.
@@ -3825,6 +4154,7 @@ impl Default for MapSettings {
     fn default() -> Self {
         MapSettings {
             mini_scale: 128.0,
+            mini_avatar_name_format: MiniAvatarNameFormat::DisplayAndLegacy,
             // forced to north-up at the first login (llnetmap.cpp)
             mini_rotate: false,
             mini_objects: true,
@@ -3949,6 +4279,25 @@ mod tests {
     }
 
     #[test]
+    fn voice_output_device_defaults_to_audio_output_and_survives_settings_round_trip() {
+        use super::Settings;
+
+        assert!(Settings::default().audio.voice_output_device.is_empty());
+        // An older settings file has no voice-specific output choice. Empty
+        // means the selected normal output remains in use.
+        let old: Settings = serde_json::from_str(r#"{"audio":{"output_device":"Speakers"}}"#).expect("older preferences");
+        assert_eq!(old.audio.output_device, "Speakers");
+        assert!(old.audio.voice_output_device.is_empty());
+
+        let mut settings = old;
+        settings.audio.voice_output_device = "Headset".into();
+        let saved = serde_json::to_vec(&settings).expect("save preferences");
+        let restored: Settings = serde_json::from_slice(&saved).expect("restore preferences");
+        assert_eq!(restored.audio.output_device, "Speakers");
+        assert_eq!(restored.audio.voice_output_device, "Headset");
+    }
+
+    #[test]
     fn automatic_texture_budget_uses_shared_heap_only_for_integrated_gpus() {
         use super::auto_texture_budget;
         assert_eq!(auto_texture_budget(Some(512), Some(7800), true), 3900);
@@ -3996,6 +4345,30 @@ mod tests {
                 let restored: Settings = serde_json::from_slice(&bytes).expect("restart");
                 assert_eq!((restored.appearance_camera_movement, restored.customize_animation), (camera, pose));
             }
+        }
+    }
+
+    #[test]
+    fn cursor_preferences_keep_defaults_and_clamp_both_saved_sizes() {
+        use super::Settings;
+        let old: Settings = serde_json::from_str("{}").expect("older preferences");
+        assert_eq!(old.pointer.size, 32);
+        assert_eq!(old.pointer.touch_size, 32);
+        assert_eq!(old.pointer.look, crate::cursors::PointerLook::System);
+        assert_eq!(old.pointer.touch_look, crate::cursors::TouchLook::Finger);
+
+        for (size, touch_size, expected_size, expected_touch_size) in [(0, 90, 16, 64), (48, 24, 48, 24), (90, 0, 64, 16)] {
+            let settings = Settings {
+                pointer: crate::cursors::Preferences {
+                    size,
+                    touch_size,
+                    ..Default::default()
+                },
+                ..Settings::default()
+            }
+            .sanitized();
+            assert_eq!(settings.pointer.size, expected_size);
+            assert_eq!(settings.pointer.touch_size, expected_touch_size);
         }
     }
 
@@ -4814,6 +5187,42 @@ mod tests {
         assert!(!chosen.sanitized().chat_keep_focus);
     }
 
+    /// "Hide the chat bar when not in use" became the "Chat bar" choice
+    /// (#2696): on is "Shown when typing", anything else "Always shown",
+    /// once for earlier files; a choice made since stays.
+    #[test]
+    fn chat_bar_is_always_shown_by_default_and_once_for_earlier_files() {
+        assert_eq!(Settings::default().sanitized().chat_bar, ChatBar::Always);
+        let read = |file: serde_json::Value| serde_json::from_value::<Settings>(file).expect("read settings").sanitized();
+        for version in [0, 16, 33, 34, 35, 36, 37, 38, 39, 40] {
+            let on = read(serde_json::json!({ "settings_version": version, "autohide_chat_bar": true }));
+            assert_eq!(on.chat_bar, ChatBar::WhenTyping, "version {version}");
+            assert_eq!(on.settings_version, SETTINGS_VERSION);
+            let off = read(serde_json::json!({ "settings_version": version, "autohide_chat_bar": false }));
+            assert_eq!(off.chat_bar, ChatBar::Always, "version {version}");
+            let absent = read(serde_json::json!({ "settings_version": version }));
+            assert_eq!(absent.chat_bar, ChatBar::Always, "version {version}");
+        }
+        // saved: the choice, without the former switch
+        let saved =
+            serde_json::to_value(read(serde_json::json!({ "settings_version": 33, "autohide_chat_bar": true }))).expect("serialize");
+        assert_eq!(saved["chat_bar"], serde_json::json!("WhenTyping"));
+        assert!(saved.get("autohide_chat_bar").is_none());
+        // chosen since: kept, even with the switch an older build wrote back
+        for autohide in [None, Some(false), Some(true)] {
+            let mut file = serde_json::json!({ "settings_version": SETTINGS_VERSION, "chat_bar": "ConversationsOnly" });
+            if let Some(on) = autohide {
+                file["autohide_chat_bar"] = serde_json::json!(on);
+            }
+            assert_eq!(read(file).chat_bar, ChatBar::ConversationsOnly, "{autohide:?}");
+        }
+        let again = Settings {
+            chat_bar: ChatBar::Always,
+            ..Settings::default()
+        };
+        assert_eq!(again.sanitized().chat_bar, ChatBar::Always);
+    }
+
     /// ArrowKeysAlwaysMove is off in the Legacy Viewer: the arrows move the
     /// chat bar's cursor. Earlier files all held Aurora's former "on".
     #[test]
@@ -5236,6 +5645,33 @@ mod tests {
         assert_eq!(saved.sanitized().keybinds, existing.keybinds);
     }
 
+    /// A file older than version 40 had its letters placed for the first
+    /// layout of a Wayland keymap: they follow the first reported layout,
+    /// once (`KeyBindings::follow_layout_change`); a newer file waits for none.
+    #[test]
+    fn older_files_follow_the_reported_keyboard_layout_once() {
+        for (version, follows) in [
+            (12, true),
+            (31, true),
+            (33, true),
+            (37, true),
+            (38, true),
+            (39, true),
+            (SETTINGS_VERSION, false),
+        ] {
+            let file = Settings {
+                settings_version: version,
+                ..Settings::default()
+            };
+            let loaded = file.sanitized();
+            assert_eq!(loaded.defaults_follow_reported_layout, follows, "version {version}");
+            assert_eq!(loaded.settings_version, SETTINGS_VERSION);
+            // saved, the file is the current version: the next launch waits for no report
+            let saved: Settings = serde_json::from_slice(&serde_json::to_vec(&loaded).expect("write settings")).expect("read settings");
+            assert!(!saved.sanitized().defaults_follow_reported_layout, "only once");
+        }
+    }
+
     /// The move of the letter shortcuts to the layout's letters runs once
     /// (`KeyBindings::follow_layout_letters`, tested per layout there): a
     /// key chosen afterwards, even the former QWERTY place, is kept.
@@ -5418,6 +5854,38 @@ mod tests {
         let mut off = Settings::default();
         off.colors.relation_names = false;
         assert!(!off.sanitized().colors.relation_names);
+    }
+
+    #[test]
+    fn a_voice_box_unticked_before_it_meant_voice_turns_voice_off() {
+        // any version: an earlier build sharing the file can write it again
+        for version in [30, SETTINGS_VERSION] {
+            let mut old = Settings {
+                settings_version: version,
+                ..Settings::default()
+            };
+            old.audio.enabled[VOICE_CHANNEL] = false;
+            let audio = old.sanitized().audio;
+            assert!(!audio.voice_enabled);
+            assert!(audio.enabled[VOICE_CHANNEL], "nothing else can tick this channel back on");
+        }
+        // ticked: voice stays as it was
+        assert!(Settings::default().sanitized().audio.voice_enabled);
+        // only the voice box repairs
+        let mut music = Settings::default();
+        music.audio.enabled[4] = false;
+        let audio = music.sanitized().audio;
+        assert!(audio.voice_enabled && !audio.enabled[4]);
+    }
+
+    #[test]
+    fn the_voice_box_of_every_panel_is_the_voice_connection() {
+        let mut audio = AudioSettings::default();
+        *audio.channel_box(VOICE_CHANNEL) = false;
+        assert!(!audio.voice_enabled && !audio.channel_on(VOICE_CHANNEL));
+        assert!(audio.enabled[VOICE_CHANNEL], "the mixer channel keeps playing");
+        *audio.channel_box(1) = false;
+        assert!(!audio.enabled[1] && !audio.channel_on(1));
     }
 
     #[test]
@@ -5639,6 +6107,21 @@ mod tests {
             .join(uuid::Uuid::new_v4().to_string());
         std::fs::create_dir_all(&dir).expect("scratch folder");
         dir.join("settings.json")
+    }
+
+    #[test]
+    fn glow_off_survives_saving_and_loading_settings() {
+        let path = scratch_settings_file();
+        let settings = Settings {
+            glow: false,
+            ..Settings::default()
+        };
+
+        settings.save_to(&path);
+        let loaded = Settings::load_from(&path);
+
+        assert!(!loaded.glow);
+        let _ = std::fs::remove_dir_all(path.parent().expect("settings directory"));
     }
 
     fn read_back(path: &Path) -> serde_json::Value {

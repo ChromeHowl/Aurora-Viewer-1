@@ -48,6 +48,26 @@ impl App {
                     self.panels.ao = false;
                     self.toolbar_ui.ao_quick.open = true;
                 }
+                Some("unavailable") => {
+                    // The catalogue has already loaded #Aurora. OpenSim's
+                    // Hypergrid rename keeps the id and the parent.
+                    if let Some(brand) = inventory::child(&self.world.inventory, self.world.inventory.root, "#Aurora") {
+                        let mut info = self.world.inventory.folders[&brand].info.clone();
+                        info.name = "#Aurora (Unavailable)".into();
+                        info.version = -1;
+                        self.world.inventory.server_updated(vec![info], Vec::new());
+                    }
+                    self.panels.inventory = true;
+                    let brand = self
+                        .world
+                        .inventory
+                        .folders
+                        .values()
+                        .find_map(|folder| (folder.info.name == "#Aurora (Unavailable)").then_some(folder.info.id));
+                    self.inventory_ui
+                        .open_folders([Some(self.world.inventory.root), brand].into_iter().flatten());
+                    crate::ui::widgets::place_floater(&self.egui_ctx, "ao", egui::pos2(90.0, 80.0), egui::vec2(600.0, 710.0));
+                }
                 Some("folder-names" | "folder-names-wait") => {
                     self.panels.inventory = true;
                     let inv = &self.world.inventory;
@@ -300,7 +320,7 @@ impl App {
             .index_of_uuid(&self.world.agent_id)
             .and_then(|i| self.world.objects.get(i))
             .is_some_and(|o| o.parent_id != 0);
-        let water = self.world.main_water_height();
+        let water = self.movement_water.unwrap_or_else(|| self.world.main_water_height());
         let mut swim_input = self.input;
         swim_input.run |= self.always_run;
         if self.demo
@@ -493,6 +513,14 @@ impl App {
                     migration.source.reload(&mut self.world.inventory);
                     migration.message.clear();
                 }
+            }
+            Action::FinishRecovery(recovery) => match inventory::finish_recovery(&self.world.inventory, recovery) {
+                Ok(change) => self.apply_ao_action(Action::Edit(change, None)),
+                Err(reason) => self.ao_ui.message = reason,
+            },
+            Action::ShowRecovery(id) => {
+                self.inventory_ui.show_folder(&self.world.inventory, id);
+                self.panels.inventory = true;
             }
             Action::Edit(change, select) => self.queue_ao_edit(change, select, None),
             Action::EditContainer(change, target) => self.queue_ao_edit(change, None, Some(target)),

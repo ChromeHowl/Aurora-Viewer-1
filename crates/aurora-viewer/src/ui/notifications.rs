@@ -68,6 +68,8 @@ pub struct ToastEnv<'a> {
     /// full-width bars are shown (their room has no margin of its own).
     pub presence_at: crate::settings::PresencePosition,
     pub classic_bars: bool,
+    /// Reduce animations: a poke card does not jiggle (`ui/poke.rs`).
+    pub still: bool,
 }
 
 /// Show the Conversations window for a clicked card: opened if closed,
@@ -87,6 +89,8 @@ fn toast_seconds(n: &Notification, message_seconds: f64, o: &NotificationOptions
         Data::Message { .. } => message_seconds,
         // ShowMyComplexityChanges (the notice's expiry)
         Data::Complexity { seconds } => f64::from(seconds),
+        // long enough to poke back
+        Data::Poke { .. } => f64::from(o.offer_toast_seconds),
         _ if n.interactive() => f64::from(o.offer_toast_seconds),
         _ => f64::from(o.info_toast_seconds),
     }
@@ -252,6 +256,35 @@ pub(super) fn time_width(ui: &egui::Ui, time: &str) -> f32 {
     })
 }
 
+/// Side of an icon action of a poke card (Poke back, Send IM).
+const ACTION: f32 = 20.0;
+
+/// An icon action of a card, drawn like its close cross (the card's cover
+/// takes the click): its rectangle. Greyed out when not `enabled`.
+fn action_slot(ui: &mut egui::Ui, p: &Palette, icons: &Icons, icon: &str, enabled: bool) -> egui::Rect {
+    let (r, _) = ui.allocate_exact_size(Vec2::splat(ACTION), egui::Sense::hover());
+    let hot = enabled && ui.rect_contains_pointer(r);
+    if hot {
+        ui.painter().rect_filled(r, ui.visuals().window_corner_radius, p.raised);
+    }
+    if let Some(t) = icons.get(icon) {
+        let color = if !enabled {
+            p.muted_dim
+        } else if hot {
+            p.ink
+        } else {
+            p.muted
+        };
+        ui.painter().image(
+            t.id(),
+            egui::Rect::from_center_size(r.center(), Vec2::splat(14.0)),
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            color,
+        );
+    }
+    r
+}
+
 /// The card of a friend online / offline or of the messages of a
 /// conversation: their picture, the name, the start of the last message.
 /// Clicking the card opens the conversation (`Notification::opens`), its
@@ -269,9 +302,16 @@ pub(super) fn person_card(
     let (who, status, count) = match n.data {
         Data::Presence { who, online } => (who, Some(if online { Status::Online } else { Status::Offline }), 1),
         Data::Message { from, count, .. } => (from, None, count),
+        // the count is in its text ("poked you (3 times)")
+        Data::Poke { from, .. } => (from, None, 1),
         _ => return None,
     };
+    // a poke card: Poke back (while a poke may go to them) and Send IM
+    let poke = matches!(n.data, Data::Poke { .. });
+    let poke_back = if poke { super::poke::button(ui.ctx(), world, &who) } else { None };
     let mut close = egui::Rect::NOTHING;
+    let mut poke_rect = egui::Rect::NOTHING;
+    let mut im_rect = egui::Rect::NOTHING;
     let mut name_hover = None;
     let surface = if toast { p.panel } else { p.raised.gamma_multiply(0.55) };
     // a toast floats at its own width, a card fills its list
@@ -288,7 +328,7 @@ pub(super) fn person_card(
             }
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
-                    let time = super::chat::hhmm(n.time);
+                    let time = super::chat::hhmm_minutes(n.time);
                     let w = (ui.available_width() - 34.0 - time_width(ui, &time)).max(40.0);
                     let title = if count > 1 {
                         format!("{} ({count})", n.title)
@@ -316,22 +356,45 @@ pub(super) fn person_card(
                     });
                 });
                 let shown = world.notification_body(n);
-                if !shown.is_empty() {
+                if poke {
+                    // "👉 poked you (3 times)", its two actions at the end
+                    ui.horizontal(|ui| {
+                        let actions = 2.0 * ACTION + 4.0;
+                        ui.allocate_ui(Vec2::new((ui.available_width() - actions).max(40.0), 18.0), |ui| {
+                            name_hover = name_hover.or(text::person_body(ui, p, env.emoji, &n.body, &n.name_links));
+                        });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.spacing_mut().item_spacing.x = 4.0;
+                            im_rect = action_slot(ui, p, icons, "message-circle-filled", true);
+                            if let Some(b) = &poke_back {
+                                poke_rect = action_slot(ui, p, icons, super::poke::ICON, b.enabled);
+                            }
+                        });
+                    });
+                } else if !shown.is_empty() {
                     let text = message_excerpt(world, &shown);
                     name_hover = name_hover.or(text::person_body(ui, p, env.emoji, &text, &n.name_links));
                 }
             });
         });
     };
-    let frame = if toast {
-        super::widgets::overlay(ui, p, egui::Margin::same(8), body).response
+    let draw = |ui: &mut egui::Ui| {
+        if toast {
+            super::widgets::overlay(ui, p, egui::Margin::same(8), body).response
+        } else {
+            egui::Frame::new()
+                .fill(surface)
+                .corner_radius(ui.visuals().window_corner_radius)
+                .inner_margin(egui::Margin::same(8))
+                .show(ui, body)
+                .response
+        }
+    };
+    // a poke card jiggles when it comes out and at each new poke
+    let frame = if poke {
+        super::poke::jiggle(ui, who, n.id, env.still, draw)
     } else {
-        egui::Frame::new()
-            .fill(surface)
-            .corner_radius(ui.visuals().window_corner_radius)
-            .inner_margin(egui::Margin::same(8))
-            .show(ui, body)
-            .response
+        draw(ui)
     };
     // the whole card answers the click, over its text: the cross hides it,
     // the rest opens what it is about
@@ -341,16 +404,26 @@ pub(super) fn person_card(
         egui::Sense::click(),
     );
     let on_close = cover.hover_pos().is_some_and(|pos| close.contains(pos));
-    if n.opens() && !on_close && cover.hovered() {
+    let on_poke = cover.hover_pos().is_some_and(|pos| poke_rect.contains(pos));
+    let on_im = cover.hover_pos().is_some_and(|pos| im_rect.contains(pos));
+    let poke_enabled = poke_back.as_ref().is_some_and(|b| b.enabled);
+    if n.opens() && !on_close && !(on_poke && !poke_enabled) && cover.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
     let tip = if on_close {
-        if toast {
+        if poke {
+            // a poke card is a toast only: closing it is the end of it
+            aurora_i18n::tr!("common-close")
+        } else if toast {
             aurora_i18n::tr!("ui-notifications-hide-keep-in-bell")
         } else {
             aurora_i18n::tr!("common-close")
         }
-    } else if matches!(n.data, Data::Message { .. }) {
+    } else if on_poke && let Some(b) = &poke_back {
+        if b.enabled { aurora_i18n::tr!("ui-poke-back") } else { b.tip }
+    } else if on_im {
+        aurora_i18n::tr!("ui-context-send-im")
+    } else if matches!(n.data, Data::Message { .. } | Data::Poke { .. }) {
         aurora_i18n::tr!("ui-notifications-open-conversation")
     } else if n.opens() {
         aurora_i18n::tr!("ui-notifications-send-im")
@@ -359,6 +432,13 @@ pub(super) fn person_card(
     };
     let cover = if tip.is_empty() { cover } else { cover.on_hover_text(tip) };
     if cover.clicked() {
+        if on_poke {
+            // greyed out (offline, just poked): nothing
+            return poke_enabled.then_some(Response::Poke);
+        }
+        if on_im {
+            return Some(Response::Open);
+        }
         if !on_close && let Some(target) = name_hover {
             text::open(ui.ctx(), target);
             return None;
@@ -445,7 +525,7 @@ pub(super) fn card(
                     super::widgets::maturity_badge_of(ui, p, n.maturity, 14.0);
                 }
                 // keep room for the time and the close button
-                let time = super::chat::hhmm(n.time);
+                let time = super::chat::hhmm_minutes(n.time);
                 let w = (ui.available_width() - 34.0 - time_width(ui, &time)).max(40.0);
                 ui.allocate_ui(Vec2::new(w, 18.0), |ui| {
                     if update && aurora {
@@ -509,6 +589,7 @@ pub(super) fn card(
                 Data::None
                 | Data::Presence { .. }
                 | Data::Message { .. }
+                | Data::Poke { .. }
                 | Data::RegionRestart
                 | Data::RegionMessage { .. }
                 | Data::Complexity { .. } => {}
@@ -773,15 +854,22 @@ pub(super) fn card(
                 }
             }
             if !buttons.is_empty() {
+                // Indent the whole wrap column: a leading `add_space` inside
+                // `horizontal_wrapped` only shifts the first row, so a long
+                // Mute Owner label in French started left of the card text
+                // (#2932). Nesting the wrap after the indent keeps every row
+                // aligned with the body.
                 ui.add_space(4.0);
-                ui.horizontal_wrapped(|ui| {
+                ui.horizontal(|ui| {
                     ui.add_space(indent);
-                    ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
-                    for (label, r, primary) in buttons {
-                        if button(ui, p, &label, primary).clicked() {
-                            out = Some(r);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+                        for (label, r, primary) in buttons {
+                            if button(ui, p, &label, primary).clicked() {
+                                out = Some(r);
+                            }
                         }
-                    }
+                    });
                 });
             }
         }
@@ -820,14 +908,38 @@ pub(super) fn card(
     out
 }
 
-/// Script prompts are windows for Close All in both notification styles.
-/// Dismissing one uses the existing ignore-without-reply response.
-pub(super) fn close_script_prompt(ctx: &egui::Context, n: &Notification) -> bool {
-    if !matches!(n.data, Data::Dialog { .. } | Data::TextBox { .. }) {
+/// The windows a scripted object opens that Close Window closes: the Legacy
+/// Viewer's `LLScriptFloater` types -- `ScriptDialog` (llDialog and
+/// llTextBox), `LoadWebPage` (llLoadURL), `ObjectGiveItem` and
+/// `OwnObjectGiveItem` (llGiveInventory) -- and, beyond the Legacy Viewer, a
+/// permission question (`ScriptQuestion`).
+///
+/// A permission question is `LLToastScriptQuestion`, a toast, in the Legacy
+/// Viewer: Close Window never reaches it there. Aurora stacks it with the
+/// script windows, though, so Ctrl+W on the top card would otherwise skip it
+/// and close the card below, surprising the user. Closing it refuses the
+/// request, as its own cross does (the `ScriptAnswer` with no permission
+/// bit).
+fn script_window(n: &Notification) -> bool {
+    matches!(
+        n.data,
+        Data::Dialog { .. } | Data::TextBox { .. } | Data::Url(_) | Data::Inventory { task: true, .. } | Data::Permissions { .. }
+    )
+}
+
+/// Script windows are windows for Close Window while they show as toasts and
+/// for Close All wherever they show. Dismissing one uses the existing
+/// close/ignore response.
+pub(super) fn close_script_prompt(ctx: &egui::Context, n: &Notification, window: bool) -> bool {
+    if !script_window(n) {
         return false;
     }
     let id = egui::Id::NULL.with(("script_prompt", n.id));
-    super::close_key::shown_extra(ctx, id);
+    if window {
+        super::close_key::shown_prompt(ctx, id, n.id);
+    } else {
+        super::close_key::shown_extra(ctx, id);
+    }
     super::close_key::take(ctx, id)
 }
 
@@ -1092,11 +1204,11 @@ pub fn show(
                                 ui.spacing_mut().item_spacing.y = 4.0;
                                 // newest first
                                 for n in list.list.iter_mut().rev().filter(|n| !n.transient) {
-                                    if close_script_prompt(ctx, n) {
+                                    if close_script_prompt(ctx, n, false) {
                                         answers.push((n.id, Response::Dismiss));
                                         continue;
                                     }
-                                    let r = if matches!(n.data, Data::Message { .. }) {
+                                    let r = if matches!(n.data, Data::Message { .. } | Data::Poke { .. }) {
                                         person_card(ui, p, icons, world, env, &mut nui.wanted_pics, n, false)
                                     } else {
                                         card(ui, p, icons, world, env.images, &mut nui.wanted_images, n, false, false)
@@ -1137,7 +1249,7 @@ pub fn show(
                 let (ids, behind) = shown_toasts(list, nui, dnd);
                 for id in ids.into_iter().rev() {
                     if let Some(n) = list.list.iter_mut().find(|n| n.id == id) {
-                        if close_script_prompt(ctx, n) {
+                        if close_script_prompt(ctx, n, true) {
                             answers.push((id, Response::Dismiss));
                             nui.toasts.retain(|(t, _)| *t != id);
                             continue;
@@ -1152,7 +1264,7 @@ pub fn show(
                         let r = ui
                             .scope(|ui| {
                                 ui.multiply_opacity(opacity);
-                                if matches!(n.data, Data::Presence { .. } | Data::Message { .. }) {
+                                if matches!(n.data, Data::Presence { .. } | Data::Message { .. } | Data::Poke { .. }) {
                                     person_card(ui, p, icons, world, env, &mut nui.wanted_pics, n, true)
                                 } else {
                                     card(ui, p, icons, world, env.images, &mut nui.wanted_images, n, true, false)
@@ -1161,8 +1273,10 @@ pub fn show(
                             .inner;
                         match r {
                             // closing a toast only hides it: the offer waits in
-                            // the list (a scripted window too, until answered)
-                            Some(Response::Dismiss) if !matches!(n.data, Data::Dialog { .. }) => {
+                            // the list (a scripted window too, until answered);
+                            // a poke card, a toast only, is answered (its count
+                            // ends)
+                            Some(Response::Dismiss) if !matches!(n.data, Data::Dialog { .. } | Data::Poke { .. }) => {
                                 nui.toasts.retain(|(t, _)| *t != id);
                                 nui.hidden.insert(id);
                             }
@@ -1314,6 +1428,64 @@ fn script_rows(count: usize) -> impl Iterator<Item = std::ops::Range<usize>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Close Window reaches the Legacy Viewer's script floaters (a dialog,
+    /// a text box, a URL, an object's offer) and Aurora's stacked permission
+    /// question; a resident's offer stays out.
+    #[test]
+    fn script_windows_include_permission_questions_over_the_legacy_viewer() {
+        let note = |data| Notification {
+            id: 1,
+            time: std::time::SystemTime::UNIX_EPOCH,
+            kind: Kind::Script,
+            title: String::new(),
+            body: String::new(),
+            name_links: Vec::new(),
+            read: false,
+            data,
+            text: String::new(),
+            transient: false,
+            quiet: false,
+            maturity: 0,
+        };
+        let sender = ([127, 0, 0, 1], 1).into();
+        let offer = |task, object| Data::Inventory {
+            from: Uuid::nil(),
+            tx: Uuid::nil(),
+            asset_type: 6,
+            object,
+            task,
+            task_offer: None,
+        };
+        for data in [
+            Data::Dialog {
+                sender,
+                object: Uuid::nil(),
+                object_name: String::new(),
+                own_object: false,
+                channel: 0,
+                buttons: Vec::new(),
+            },
+            Data::TextBox {
+                sender,
+                object: Uuid::nil(),
+                channel: 0,
+            },
+            Data::Url("https://example.invalid".into()),
+            offer(true, Uuid::nil()),
+            Data::Permissions {
+                task: Uuid::nil(),
+                item: Uuid::nil(),
+                questions: 0,
+                region: Default::default(),
+                experience: None,
+                caution: None,
+            },
+        ] {
+            assert!(script_window(&note(data)));
+        }
+        assert!(!script_window(&note(offer(false, Uuid::from_u128(7)))));
+    }
 
     #[test]
     fn bell_right_click_turns_do_not_disturb_over_and_keeps_the_rest() {
@@ -1791,6 +1963,108 @@ mod tests {
                 "aurora={aurora}: saved"
             );
         }
+    }
+
+    /// In the Legacy toast style, a Mute Owner that wraps under Accept /
+    /// Discard must keep the same left edge as those buttons (#2932). The
+    /// card is narrowed to force the wrap the long French label causes,
+    /// because switching the process-wide language here raced with the
+    /// other tests that compare the interface text.
+    #[test]
+    fn legacy_object_offer_wrapped_buttons_keep_the_text_indent() {
+        let mute = aurora_i18n::tr!("ui-notifications-mute-owner");
+        let accept = aurora_i18n::tr!("ui-notifications-accept");
+        let discard = aurora_i18n::tr!("ui-notifications-discard");
+
+        let ctx = egui::Context::default();
+        let theme = crate::theme::Theme::default();
+        theme.apply(&ctx, 1.0);
+        let p = theme.palette();
+        let icons = Icons::default();
+        let world = World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
+        let mut list = Notifications::default();
+        let body = "An object named Dispenser owned by Jane Doe gave you this item:\nWelcome note";
+        list.push(
+            Kind::Inventory,
+            "Dispenser",
+            body,
+            Data::Inventory {
+                from: JANE,
+                tx: Uuid::from_u128(3),
+                asset_type: 7,
+                object: Uuid::nil(),
+                task: true,
+                task_offer: Some(crate::world::inventory_offers::TaskOffer {
+                    object_name: "Dispenser".into(),
+                    item_name: "Welcome note".into(),
+                    from_group: false,
+                    own_object: false,
+                }),
+            },
+        );
+        list.link_name(list.last_id(), "Jane Doe", crate::world::notifications::NameTarget::Avatar(JANE));
+
+        let mut time = 0.0;
+        let mut frame = || {
+            time += 0.1;
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 900.0))),
+                    time: Some(time),
+                    ..Default::default()
+                },
+                |ui| {
+                    ui.set_width(240.0);
+                    card(
+                        ui,
+                        &p,
+                        &icons,
+                        &world,
+                        &HashMap::new(),
+                        &mut HashSet::new(),
+                        &mut list.list[0],
+                        true,
+                        false,
+                    );
+                },
+            );
+            output.textures_delta.clear();
+            output
+        };
+        for _ in 0..3 {
+            frame();
+        }
+        let output = frame();
+        let text_rect = |wanted: &str| {
+            output.shapes.iter().find_map(|s| match &s.shape {
+                egui::Shape::Text(t) if t.galley.text() == wanted => Some(egui::Rect::from_min_size(t.pos, t.galley.size())),
+                _ => None,
+            })
+        };
+        let accept_rect = text_rect(accept).expect("Accept visible");
+        let discard_rect = text_rect(discard).expect("Discard visible");
+        let mute_rect = text_rect(mute).expect("Mute Owner visible");
+        assert!(
+            (accept_rect.min.y - discard_rect.min.y).abs() < 1.0,
+            "Accept and Discard stay on the first row: {accept_rect:?} {discard_rect:?}"
+        );
+        assert!(
+            mute_rect.min.y > accept_rect.max.y + 1.0,
+            "Mute Owner wraps under the first row: {mute_rect:?} above {accept_rect:?}"
+        );
+        // Label glyphs sit inside each button face, and the English labels
+        // differ in width (the French ones were all wider than the faces'
+        // minimum), so allow an inset difference of up to 10 px while still
+        // catching the old bug that dropped the whole 22 px Legacy indent
+        // on the wrapped row (it put Mute Owner about 30 px to the left).
+        assert!(
+            (mute_rect.min.x - accept_rect.min.x).abs() < 10.0,
+            "wrapped Mute Owner keeps Accept's left edge: mute={mute_rect:?} accept={accept_rect:?}"
+        );
+        assert!(
+            mute_rect.min.x > accept_rect.min.x - 10.0,
+            "wrapped Mute Owner must not lose the Legacy indent: mute={mute_rect:?} accept={accept_rect:?}"
+        );
     }
 
     #[test]

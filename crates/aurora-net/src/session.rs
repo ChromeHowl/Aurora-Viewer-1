@@ -169,6 +169,13 @@ struct Sim {
     link_up: bool,
     /// When the seed capability was last asked for (timelines).
     caps_asked_at: Option<Instant>,
+    /// The interest list mode this region was last told
+    /// (LLViewerRegion::mInterestListMode): the same one is not posted again.
+    interest_list: InterestListMode,
+    /// The queue of this region's InterestList posts: one task sends them
+    /// in order, so a slow `360` can never land after the `default` that
+    /// followed it.
+    interest_tx: Option<mpsc::UnboundedSender<(String, InterestListMode)>>,
 }
 
 impl Sim {
@@ -200,6 +207,8 @@ impl Sim {
             decode_failures: 0,
             link_up: false,
             caps_asked_at: None,
+            interest_list: InterestListMode::Default,
+            interest_tx: None,
         }
     }
 }
@@ -348,6 +357,8 @@ struct Session<'a> {
     refuse_neighbours: bool,
     /// The camera's vertical viewing angle, last told to the simulator.
     fov: f32,
+    /// The interest list mode asked of the regions (LLAgent::mInterestListMode).
+    interest_list: InterestListMode,
     logout_started: Option<Instant>,
     finished: bool,
     agent_moved: bool,
@@ -393,6 +404,8 @@ struct Session<'a> {
     attach_queue: attach_queue::AttachQueue,
     inventory_merchant_pending: bool,
     next_inventory_callback: u32,
+    /// Bakes fetched from the simulator with `RequestImage` (`image_udp`).
+    images: crate::image_udp::Fetch,
 }
 
 /// The packet counters the bandwidth asked is adjusted from.
@@ -591,6 +604,7 @@ pub(crate) async fn run_session(sh: &Shared, req: LoginRequest, cmd_rx: &mut mps
         far: FarStep::new(Instant::now()),
         refuse_neighbours: false,
         fov: DEFAULT_FOV,
+        interest_list: InterestListMode::Default,
         logout_started: None,
         finished: false,
         agent_moved: false,
@@ -628,6 +642,7 @@ pub(crate) async fn run_session(sh: &Shared, req: LoginRequest, cmd_rx: &mut mps
         offer_hosts: Default::default(),
         inventory_merchant_pending: false,
         next_inventory_callback: 0,
+        images: Default::default(),
     };
 
     log::info!(
@@ -1128,6 +1143,11 @@ impl Session<'_> {
             self.update_agent_language();
             // LLEnvironment::onRegionChange -> requestRegion once caps arrive
             self.request_environment(None);
+            // LLAgent::capabilityReceivedCallback: the 360° snapshot's mode
+            // again for the agent's region
+            if self.interest_list != InterestListMode::Default {
+                self.post_interest_list(addr);
+            }
             if self.inventory_merchant_pending {
                 self.inventory_merchant_pending = false;
                 self.on_command(NetCommand::RequestInventoryMerchant);
@@ -1477,6 +1497,7 @@ impl Session<'_> {
     // ----------------------------------------------------------------- tick
 
     fn tick(&mut self) {
+        self.flush_host_images(Instant::now());
         if self.logout_started.is_none() && self.viewer_stats.due(Instant::now(), self.agent_moved) {
             self.send_viewer_stats();
         }
@@ -1908,6 +1929,17 @@ impl Session<'_> {
                     self.fov = angle;
                     if let Some(main) = self.main {
                         self.send_fov(main);
+                    }
+                }
+            }
+            // LLAgent::changeInterestListMode: every region alive with its
+            // capabilities, the ones already in that mode unaffected
+            NetCommand::SetInterestListMode(mode) => {
+                if mode != self.interest_list {
+                    self.interest_list = mode;
+                    let addrs: Vec<SocketAddr> = self.sims.keys().copied().collect();
+                    for addr in addrs {
+                        self.post_interest_list(addr);
                     }
                 }
             }
@@ -3205,6 +3237,10 @@ impl Session<'_> {
                 }
             }
             NetCommand::ClearObjectCache => self.object_cache.clear(),
+            NetCommand::SyncHostImages(wants) => {
+                self.images.sync(&wants);
+                self.flush_host_images(Instant::now());
+            }
             NetCommand::Build(b) => self.on_build(b),
             // handled by on_social_command
             NetCommand::RequestMuteList { .. }
@@ -3232,6 +3268,7 @@ impl Session<'_> {
             | NetCommand::Call { .. } => {}
             // handled by on_offline_command
             NetCommand::RequestOfflineMessages
+            | NetCommand::RequestRecentParticipants { .. }
             | NetCommand::RequestOfflineMessagesLegacy
             | NetCommand::AnswerOfflineFriendship { .. }
             | NetCommand::AnswerOfflineGroupInvite { .. } => {}
@@ -3505,7 +3542,12 @@ impl Session<'_> {
                         }
                         Err(error) => {
                             log::warn!("inventory fetch failed: {error}");
-                            let _ = events.send(NetEvent::InventoryFetchFailed { folders: chunk.to_vec() });
+                            let too_big = error.kind == crate::inventory::ais::FetchFailure::TooBig;
+                            let _ = events.send(NetEvent::InventoryFetchFailed {
+                                folders: chunk.to_vec(),
+                                too_big,
+                                status: error.status,
+                            });
                         }
                     }
                 }
@@ -3522,7 +3564,14 @@ impl Session<'_> {
             .and_then(|a| self.sims.get(&a))
             .and_then(|s| s.caps.get(cap_name).cloned());
         let Some(url) = url else {
-            emit(self.sh, NetEvent::InventoryFetchFailed { folders });
+            emit(
+                self.sh,
+                NetEvent::InventoryFetchFailed {
+                    folders,
+                    too_big: false,
+                    status: None,
+                },
+            );
             return;
         };
         let http = self.sh.caps_http.clone();
@@ -3537,7 +3586,15 @@ impl Session<'_> {
                     }
                     Err(e) => {
                         log::warn!("inventory fetch failed: {e}");
-                        let _ = events.send(NetEvent::InventoryFetchFailed { folders: chunk.to_vec() });
+                        let status = match &e {
+                            caps::CapsError::Status(status) => Some(*status),
+                            _ => None,
+                        };
+                        let _ = events.send(NetEvent::InventoryFetchFailed {
+                            folders: chunk.to_vec(),
+                            too_big: status == Some(403),
+                            status,
+                        });
                     }
                 }
             }
@@ -3565,6 +3622,7 @@ impl Session<'_> {
         let http = self.sh.caps_http.clone();
         let events = self.sh.events.clone();
         tokio::spawn(async move {
+            let count = if children.is_empty() { 1 } else { children.len() };
             let result = if let Some(cap) = ais {
                 crate::inventory::ais::fetch_tree(&http, &cap, owner, parent, &children, depth).await
             } else if let Some(url) = legacy {
@@ -3573,17 +3631,17 @@ impl Session<'_> {
                 caps::post_llsd_as(&http, &url, &body, crate::probe::HttpKind::Inventory)
                     .await
                     .map(|v| crate::inventory::parse_fetch_response(&v))
-                    .map_err(|_| "inventory read failed")
+                    .map_err(crate::inventory::ais::FetchError::from)
             } else {
-                Err("no inventory capability")
+                Err(crate::inventory::ais::FetchError::new(
+                    crate::inventory::ais::FetchFailure::Fatal,
+                    None,
+                ))
             };
             if let Err(error) = result {
-                log::debug!("background inventory fetch of {parent} failed: {error}");
+                log::warn!("background inventory fetch of {parent} failed ({count} folders, depth {depth}): {error}");
             }
-            let _ = events.send(NetEvent::InventoryTreeFetched {
-                request,
-                result: result.map_err(str::to_owned),
-            });
+            let _ = events.send(NetEvent::InventoryTreeFetched { request, result });
         });
     }
 
@@ -3632,6 +3690,39 @@ impl Session<'_> {
             crate::viewer_stats::post(&http, &url, &body).await;
             posts.end();
         });
+    }
+
+    /// LLViewerRegion::setInterestListMode: the mode posted to one region's
+    /// InterestList capability, `{"mode": "360" | "default"}` (nothing
+    /// without the capability, nothing to a region already in that mode);
+    /// the reply only logged.
+    fn post_interest_list(&mut self, addr: SocketAddr) {
+        let mode = self.interest_list;
+        let Some(sim) = self.sims.get_mut(&addr) else { return };
+        // (a region whose capabilities have not come is left for their
+        // arrival, as LLAgent::changeInterestListMode skips it)
+        let Some(url) = sim.caps.get("InterestList").cloned() else { return };
+        if sim.interest_list == mode {
+            return;
+        }
+        sim.interest_list = mode;
+        let handle = sim.handle;
+        let http = self.sh.caps_http.clone();
+        let tx = sim.interest_tx.get_or_insert_with(|| {
+            let (tx, rx) = mpsc::unbounded_channel();
+            tokio::spawn(interest_list_worker(rx, move |url, mode| {
+                let http = http.clone();
+                async move {
+                    let body = caps::interest_list_body(mode);
+                    match caps::post_llsd(&http, &url, &body).await {
+                        Ok(_) => log::info!("InterestList mode {} posted to region {handle}", mode.as_str()),
+                        Err(e) => log::warn!("InterestList mode {} not posted to region {handle}: {e}", mode.as_str()),
+                    }
+                }
+            }));
+            tx
+        });
+        let _ = tx.send((url, mode));
     }
 
     /// The capability of the agent's region (cloned for a request task).
@@ -4056,7 +4147,8 @@ impl Session<'_> {
             "EstablishAgentCommunication" => {
                 let ipport = b["sim-ip-and-port"].as_str();
                 transition::link(|| format!("EstablishAgentCommunication for {ipport}"));
-                let seed = b["seed-capability"].as_str().to_owned();
+                // EstablishAgentCommunication's seed, same guess as the login seed.
+                let seed = crate::curl_url::ensure_scheme(b["seed-capability"].as_str());
                 if let Ok(addr) = ipport.parse::<SocketAddr>() {
                     self.set_seed(addr, seed);
                 }
@@ -4117,12 +4209,18 @@ impl Session<'_> {
             }
             "TeleportFailed" => {
                 let reason = b["Info"][0]["Reason"].as_str().to_owned();
+                let alert = &b["AlertInfo"][0];
+                let code = alert["Message"].as_str().to_owned();
                 transition::end(
                     Some(transition::Kind::Teleport),
-                    &format!("failed (TeleportFailed: {reason})"),
+                    &format!(
+                        "failed (TeleportFailed: {reason}{})",
+                        if code.is_empty() { String::new() } else { format!(", {code}") }
+                    ),
                     &self.sh.stats,
                 );
-                emit(self.sh, NetEvent::TeleportFailed { reason });
+                let extra = crate::teleport_failed::llsd_bytes(&alert["ExtraParams"]);
+                emit(self.sh, crate::teleport_failed::event(reason, Some((code, &extra))));
             }
             "DisableSimulator" => {
                 transition::link(|| {
@@ -4273,6 +4371,75 @@ impl Session<'_> {
         self.sims.get(&addr).map(|s| s.handle).unwrap_or(0)
     }
 
+    fn addr_of_handle(&self, handle: RegionHandle) -> Option<SocketAddr> {
+        self.sims.iter().find(|(_, sim)| sim.handle == handle).map(|(addr, _)| *addr)
+    }
+
+    /// `LLMessageSystem::sendSemiReliable`: one reliable send, no resend,
+    /// timeout `max(1s, 5 × ping)` (`llmessage/message.cpp`).
+    fn send_semi<M: Msg>(&mut self, addr: SocketAddr, msg: &M) {
+        let Some(sim) = self.sims.get_mut(&addr) else {
+            return;
+        };
+        let timeout = (sim.circuit.rtt * 5).max(Duration::from_secs(1));
+        let _ = sim.circuit.send_reliable_with(
+            &self.sock,
+            &self.sh.stats,
+            msg,
+            Resend {
+                timeout: Some(timeout),
+                max_retries: 0,
+            },
+        );
+    }
+
+    fn flush_host_images(&mut self, now: Instant) {
+        for batch in self.images.take_outbound(now) {
+            let Some(addr) = self.addr_of_handle(batch.region) else {
+                log::debug!("host bake request for region {:#x} has no circuit yet", batch.region);
+                continue;
+            };
+            let message = crate::image_udp::request_message(self.agent_id(), self.session_id(), &batch.items);
+            self.send_semi(addr, &message);
+        }
+    }
+
+    fn on_image_data(&mut self, pkt: &IncomingPacket) -> Result<(), aurora_msg::DecodeError> {
+        let message: ImageData = pkt.decode()?;
+        let id = message.image_id.id;
+        if let Some(bytes) = self.images.header(
+            id,
+            message.image_id.packets,
+            message.image_id.size,
+            message.image_data.data,
+            Instant::now(),
+        ) {
+            emit(self.sh, NetEvent::HostImage { id, bytes: Some(bytes) });
+        }
+        Ok(())
+    }
+
+    fn on_image_packet(&mut self, pkt: &IncomingPacket) -> Result<(), aurora_msg::DecodeError> {
+        let message: ImagePacket = pkt.decode()?;
+        let id = message.image_id.id;
+        if let Some(bytes) = self
+            .images
+            .packet(id, message.image_id.packet, message.image_data.data, Instant::now())
+        {
+            emit(self.sh, NetEvent::HostImage { id, bytes: Some(bytes) });
+        }
+        Ok(())
+    }
+
+    fn on_image_missing(&mut self, pkt: &IncomingPacket) -> Result<(), aurora_msg::DecodeError> {
+        let message: ImageNotInDatabase = pkt.decode()?;
+        let id = message.image_id.id;
+        if self.images.not_in_database(id) {
+            emit(self.sh, NetEvent::HostImage { id, bytes: None });
+        }
+        Ok(())
+    }
+
     fn dispatch(&mut self, from: SocketAddr, pkt: &IncomingPacket) -> Result<(), aurora_msg::DecodeError> {
         let id = pkt.id;
         if self.dispatch_inventory_upload(from, pkt)?
@@ -4289,6 +4456,13 @@ impl Session<'_> {
             || self.dispatch_god(pkt)?
         {
             return Ok(());
+        }
+        if id == ImageData::ID {
+            return self.on_image_data(pkt);
+        } else if id == ImagePacket::ID {
+            return self.on_image_packet(pkt);
+        } else if id == ImageNotInDatabase::ID {
+            return self.on_image_missing(pkt);
         }
         if id == PacketAck::ID {
             let m: PacketAck = pkt.decode()?;
@@ -4572,6 +4746,7 @@ impl Session<'_> {
                     object_name: field_str(&d.object_name),
                     object_id: d.object_id,
                     owner_id: d.owner_id,
+                    owner_is_group: d.owner_is_group,
                     message: field_str(&d.message),
                     url: field_str(&d.url),
                 },
@@ -5463,17 +5638,23 @@ impl Session<'_> {
             );
         } else if id == TeleportFailed::ID {
             let m: TeleportFailed = pkt.decode()?;
+            let alert = m
+                .alert_info
+                .first()
+                .map(|info| (field_str(&info.message), info.extra_params.as_slice()));
             transition::end(
                 Some(transition::Kind::Teleport),
-                &format!("failed (TeleportFailed: {})", field_str(&m.info.reason)),
+                &format!(
+                    "failed (TeleportFailed: {}{})",
+                    field_str(&m.info.reason),
+                    alert
+                        .as_ref()
+                        .filter(|(code, _)| !code.is_empty())
+                        .map_or(String::new(), |(code, _)| format!(", {code}"))
+                ),
                 &self.sh.stats,
             );
-            emit(
-                self.sh,
-                NetEvent::TeleportFailed {
-                    reason: field_str(&m.info.reason),
-                },
-            );
+            emit(self.sh, crate::teleport_failed::event(field_str(&m.info.reason), alert));
         } else if id == ParcelMediaCommandMessage::ID {
             let m: ParcelMediaCommandMessage = pkt.decode()?;
             let c = &m.command_block;
@@ -5772,6 +5953,23 @@ fn coarse_position(x: u8, y: u8, z: u8, size: (u32, u32)) -> Vec3 {
         f32::from(y) * size.1 as f32 / 256.0,
         f32::from(z) * 4.0,
     )
+}
+
+/// One region's InterestList posts, in the order asked and one at a time
+/// (the Legacy Viewer's posts are independent coroutines; a slow reply
+/// must not reorder the modes here). Modes queued while one is being
+/// posted are folded into the last, which is the one the region must end on.
+async fn interest_list_worker<F, Fut>(mut rx: mpsc::UnboundedReceiver<(String, InterestListMode)>, post: F)
+where
+    F: Fn(String, InterestListMode) -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
+    while let Some(mut latest) = rx.recv().await {
+        while let Ok(next) = rx.try_recv() {
+            latest = next;
+        }
+        post(latest.0, latest.1).await;
+    }
 }
 
 #[cfg(test)]
@@ -6835,6 +7033,7 @@ mod event_queue_tests {
             far: FarStep::new(Instant::now()),
             refuse_neighbours: false,
             fov: DEFAULT_FOV,
+            interest_list: InterestListMode::Default,
             logout_started: None,
             finished: false,
             agent_moved: false,
@@ -6863,6 +7062,7 @@ mod event_queue_tests {
             attach_queue: Default::default(),
             inventory_merchant_pending: false,
             next_inventory_callback: 0,
+            images: Default::default(),
         }
     }
 
@@ -7192,6 +7392,7 @@ mod script_dialog_tests {
             far: FarStep::new(Instant::now()),
             refuse_neighbours: false,
             fov: DEFAULT_FOV,
+            interest_list: InterestListMode::Default,
             logout_started: None,
             finished: false,
             agent_moved: false,
@@ -7220,6 +7421,7 @@ mod script_dialog_tests {
             attach_queue: Default::default(),
             inventory_merchant_pending: false,
             next_inventory_callback: 0,
+            images: Default::default(),
         }
     }
 
@@ -7789,5 +7991,56 @@ mod script_dialog_tests {
             }
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod interest_list_tests {
+    use super::*;
+
+    /// A slow `360` post finishes before the `default` asked after it is
+    /// sent, and the region ends on the latest mode.
+    #[tokio::test]
+    async fn interest_list_posts_are_ordered_and_end_on_the_latest() {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let seen = log.clone();
+        let worker = tokio::spawn(interest_list_worker(rx, move |_url, mode| {
+            let seen = seen.clone();
+            async move {
+                if mode == InterestListMode::Capture360 {
+                    tokio::time::sleep(Duration::from_millis(60)).await;
+                }
+                seen.lock().push(mode);
+            }
+        }));
+        tx.send(("u".into(), InterestListMode::Capture360)).expect("queue");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        tx.send(("u".into(), InterestListMode::Default)).expect("queue");
+        drop(tx);
+        worker.await.expect("worker");
+        assert_eq!(*log.lock(), vec![InterestListMode::Capture360, InterestListMode::Default]);
+    }
+
+    /// Modes queued behind a post in flight fold into the last one.
+    #[tokio::test]
+    async fn queued_modes_fold_into_the_last() {
+        let (tx, rx) = mpsc::unbounded_channel();
+        for mode in [
+            InterestListMode::Capture360,
+            InterestListMode::Default,
+            InterestListMode::Capture360,
+        ] {
+            tx.send(("u".into(), mode)).expect("queue");
+        }
+        drop(tx);
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let seen = log.clone();
+        interest_list_worker(rx, move |_url, mode| {
+            let seen = seen.clone();
+            async move { seen.lock().push(mode) }
+        })
+        .await;
+        assert_eq!(*log.lock(), vec![InterestListMode::Capture360]);
     }
 }

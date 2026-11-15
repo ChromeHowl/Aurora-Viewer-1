@@ -11,6 +11,14 @@ impl Editor {
         self.poser.marker_spots.iter().any(|r| r.contains(pointer))
     }
     pub(in crate::ik_edit) fn select_pose_bone(&mut self, bone: usize, rig: &Rig, frame: &Frame) {
+        if self.selected != Some(bone) {
+            let cause = if std::mem::take(&mut self.poser.open_frame_pending) {
+                crate::camera::AutoCameraMove::PoserOpenFraming
+            } else {
+                crate::camera::AutoCameraMove::PoserSelectionFraming
+            };
+            self.poser.focus_requested = Some((bone, cause));
+        }
         self.mirrors.initialize(rig);
         self.selected = Some(bone);
         self.poser.unselected = false;
@@ -258,10 +266,21 @@ impl Editor {
             painter.multiply_opacity(fade);
             self.draw_segments(&painter, p, &segments);
         }
+        let selected_enabled = self.selected.is_none_or(|bone| {
+            self.poser
+                .sessions
+                .get(&self.poser.subject)
+                .is_none_or(|session| session.pose.enabled[bone])
+        });
         let gizmo_owns = if !self.poser.gizmo {
             // hidden: the sliders and the markers' drags still pose
             self.gizmo.cancel();
             self.poser.scale_gizmo.cancel();
+            false
+        } else if !selected_enabled {
+            self.gizmo.cancel();
+            self.poser.scale_gizmo.cancel();
+            self.drag = None;
             false
         } else if self.poser.transform == 2 {
             self.gizmo.cancel();
@@ -280,7 +299,8 @@ impl Editor {
         }
         // Paint the selected joint last so it wins over coincident markers.
         let chosen = self.selected;
-        let shift = ctx.input(|i| i.modifiers.shift);
+        // Shift or Ctrl adds the joint to the selection, as on its row
+        let add = ctx.input(|i| together::adds_to_selection(i.modifiers));
         for joint in (0..rig.len()).filter(|b| chosen != Some(*b)).chain(chosen) {
             let name = &rig.canonical_names[joint];
             if !self.bone_visible(name) {
@@ -291,6 +311,11 @@ impl Editor {
             };
             let selected = chosen == Some(joint);
             let follower = !selected && self.poser.together.contains(&joint);
+            let enabled = self
+                .poser
+                .sessions
+                .get(&self.poser.subject)
+                .is_none_or(|session| session.pose.enabled[joint]);
             let response = egui::Area::new(egui::Id::unique(("poser-joint", joint)))
                 .fixed_pos(at - egui::Vec2::splat(MARKER_SIZE / 2.0))
                 .order(egui::Order::Background)
@@ -300,7 +325,7 @@ impl Editor {
                     ui.multiply_opacity(fade);
                     let sense = if gizmo_owns {
                         Sense::hover()
-                    } else if self.poser.transform == 2 {
+                    } else if !enabled || self.poser.transform == 2 {
                         Sense::click()
                     } else {
                         Sense::click_and_drag()
@@ -312,24 +337,32 @@ impl Editor {
                         // a joint that follows the selected one: a thinner ring
                         ui.painter().circle_stroke(rect.center(), 6.0, Stroke::new(1.5, p.teal));
                     }
-                    ui.painter().circle_filled(
-                        rect.center(),
-                        if selected || follower { 4.5 } else { 2.5 },
-                        if self.poser_edited(joint) {
-                            p.violet_light
-                        } else if selected || follower {
-                            p.teal
-                        } else {
-                            p.ink
-                        },
-                    );
+                    if enabled {
+                        ui.painter().circle_filled(
+                            rect.center(),
+                            if selected || follower { 4.5 } else { 2.5 },
+                            if self.poser_edited(joint) {
+                                p.violet_light
+                            } else if selected || follower {
+                                p.teal
+                            } else {
+                                p.ink
+                            },
+                        );
+                    } else {
+                        ui.painter().circle_stroke(
+                            rect.center(),
+                            if selected || follower { 4.5 } else { 3.0 },
+                            Stroke::new(1.0, p.muted_dim),
+                        );
+                    }
                     response
                 })
                 .inner;
             self.poser.pointer_owned |= response.contains_pointer();
             self.poser.marker_hover |= response.contains_pointer();
             if response.clicked() {
-                self.click_pose_bone(joint, rig, frame, shift);
+                self.click_pose_bone(joint, rig, frame, add);
             } else if response.drag_started() {
                 self.grab_pose_bone(joint, rig, frame);
             }
@@ -380,7 +413,7 @@ impl Editor {
             painter.line_segment([segment.a.0, segment.b.0], Stroke::new(3.0, p.violet_light));
         }
         if response.clicked() {
-            self.click_pose_bone(bone, rig, frame, ctx.input(|i| i.modifiers.shift));
+            self.click_pose_bone(bone, rig, frame, ctx.input(|i| together::adds_to_selection(i.modifiers)));
         }
         response.on_hover_text(&rig.canonical_names[bone]);
     }

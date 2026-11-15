@@ -74,16 +74,21 @@ mod login_wait;
 mod lsl_keywords;
 #[cfg(target_os = "macos")]
 mod mac_quit;
+#[cfg(target_os = "macos")]
+mod mac_window_menu;
 mod machine_id;
 mod media;
 mod movement;
+mod native_viewports;
 mod natural_order;
 mod net_adapters;
 mod net_profile;
+mod omnifilter;
 mod open_path;
 mod overlay_hooks;
 mod own_motion;
 mod physics_editor;
+mod pose_stand;
 mod raw_mouse;
 mod report_abuse;
 mod scene;
@@ -102,6 +107,7 @@ mod stream_title;
 mod sys_probe;
 mod system_info;
 mod system_notify;
+mod system_theme;
 mod text_validation;
 mod theme;
 mod tolerant;
@@ -113,6 +119,8 @@ mod url_scheme;
 mod voice;
 mod wearable_editor;
 mod weather;
+mod wide_chars;
+mod window_display;
 mod window_hold;
 mod window_show;
 mod world;
@@ -302,7 +310,8 @@ fn run_viewer() -> anyhow::Result<()> {
         .build_global();
 
     let mut event_loop = winit::event_loop::EventLoop::builder();
-    // the absolute positions of remote desktops made motions (raw_mouse.rs)
+    // the absolute positions of remote desktops made motions (raw_mouse.rs),
+    // and their emoji typed as two halves were lost (wide_chars.rs)
     #[cfg(windows)]
     raw_mouse::install(&mut event_loop);
     let event_loop = event_loop.build()?;

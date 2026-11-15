@@ -410,6 +410,27 @@ pub fn page(cx: &mut Cx, tab: usize) {
                     &field!(colored_sky_ambient),
                     &[(true, aurora, true), (false, tr!("ui-options-aurora-classic"), false)],
                 );
+                // the Legacy Viewer's flat layer until tried on modest GPUs;
+                // the two buttons leave it alone
+                let help = warned(tr!("ui-options-aurora-clouds-help"), tr!("ui-options-aurora-clouds-experimental"));
+                cx.wide().experimental().choice(
+                    tr!("ui-options-aurora-clouds"),
+                    &help,
+                    &field!(volumetric_clouds),
+                    &[
+                        (true, tr!("ui-options-aurora-clouds-volumetric"), true),
+                        (false, tr!("ui-options-aurora-clouds-flat"), false),
+                    ],
+                );
+                // also in Graphics › Image › Transparency (aurora-render
+                // oit_stochastic.rs): an opt-in, off by default and left as
+                // the user set it by the two buttons above
+                cx.wide().experimental().choice(
+                    tr!("ui-options-oit"),
+                    tr!("ui-options-aurora-oit-help"),
+                    &field!(oit),
+                    &[(true, aurora, true), (false, tr!("ui-options-aurora-oit-legacy"), false)],
+                );
             });
             cx.group(tr!("common-interface"), |cx| {
                 cx.wide().choice(
@@ -439,6 +460,7 @@ pub fn page(cx: &mut Cx, tab: usize) {
                 );
             });
         }
+        3 => system_folders(cx),
         _ => {
             cx.group(tr!("ui-options-aurora-building"), |cx| {
                 cx.wide().choice(
@@ -518,6 +540,53 @@ pub fn page(cx: &mut Cx, tab: usize) {
     }
 }
 
+/// Preferences › Aurora › System folders (feedback #533): Hide empty
+/// folders, and a switch per system folder, on while it shows in the
+/// inventory. A hidden folder leaves the inventory's trees only; it stays on
+/// the server with its contents (`ui/inventory/hidden_folders.rs`).
+fn system_folders(cx: &mut Cx) {
+    use super::super::cx::Custom;
+    use crate::ui::inventory::hidden_folders::{HIDEABLE, label};
+    use aurora_i18n::tr;
+    fn hidden(s: &Settings, name: &str) -> bool {
+        s.inventory.hidden_system_folders.iter().any(|n| n == name)
+    }
+    fn set_hidden(s: &mut Settings, name: &str, hide: bool) {
+        let list = &mut s.inventory.hidden_system_folders;
+        list.retain(|n| n != name);
+        if hide {
+            list.push(name.to_owned());
+        }
+    }
+    cx.group(tr!("ui-options-empty-folders"), |cx| {
+        cx.toggle(
+            tr!("ui-options-hide-empty-folders"),
+            tr!("ui-options-hide-empty-folders-hint"),
+            &field!(inventory.hide_empty_folders),
+        );
+    });
+    cx.group(tr!("ui-options-tab-system-folders"), |cx| {
+        cx.note(tr!("ui-options-system-folders-note"));
+        for &(name, _) in HIDEABLE {
+            let track = Custom {
+                path: "inventory.hidden_system_folders",
+                modified: move |s: &Settings, d: &Settings| hidden(s, name) != hidden(d, name),
+                reset: move |s: &mut Settings, d: &Settings| set_hidden(s, name, hidden(d, name)),
+            };
+            let p = cx.p;
+            cx.row(label(name), tr!("ui-options-system-folder-hint"), &track, |ui, s| {
+                let mut shown = !hidden(s, name);
+                if super::super::toggle(ui, &p, &mut shown) {
+                    set_hidden(s, name, !shown);
+                    true
+                } else {
+                    false
+                }
+            });
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -533,6 +602,20 @@ mod tests {
     }
 
     #[test]
+    fn the_two_buttons_leave_order_independent_transparency_as_set() {
+        let mut s = Settings::default();
+        assert!(!s.oit, "an opt-in: off by default");
+        s.oit = true;
+        set_all(&mut s, Look::Legacy);
+        assert!(s.oit, "turned on, it stays on with every Legacy look");
+        set_all(&mut s, Look::Aurora);
+        assert!(s.oit);
+        s.oit = false;
+        set_all(&mut s, Look::Aurora);
+        assert!(!s.oit, "nor does the Aurora look turn it on");
+    }
+
+    #[test]
     fn the_two_buttons_set_the_colored_sky_ambient_too() {
         let mut s = Settings::default();
         assert!(!s.colored_sky_ambient, "off by default");
@@ -540,6 +623,19 @@ mod tests {
         assert!(s.colored_sky_ambient);
         set_all(&mut s, Look::Legacy);
         assert!(!s.colored_sky_ambient);
+    }
+
+    #[test]
+    fn the_two_buttons_leave_the_volumetric_clouds_as_set() {
+        let mut s = Settings::default();
+        assert!(!s.volumetric_clouds, "the Legacy Viewer's layer by default");
+        set_all(&mut s, Look::Aurora);
+        assert!(!s.volumetric_clouds, "never switched on by the Aurora button");
+        s.volumetric_clouds = true;
+        set_all(&mut s, Look::Legacy);
+        assert!(s.volumetric_clouds, "nor off by the Legacy one");
+        set_all(&mut s, Look::Aurora);
+        assert!(s.volumetric_clouds);
     }
 
     #[test]
@@ -640,6 +736,7 @@ mod tests {
         assert!(s.water_effects.enabled, "the explicit Aurora bulk choice enables water effects");
         assert!(!fresh.water_effects.enabled, "enhanced water is disabled by default");
         assert!(!fresh.synchronize_animations, "Legacy animation timing is the default");
+        assert!(!fresh.oit, "transparency sorted, as the Legacy Viewer, by default");
         assert!(s.plates_friends_only_full);
     }
 

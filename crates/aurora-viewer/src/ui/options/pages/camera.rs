@@ -5,7 +5,7 @@
 
 use super::super::COMBO_W;
 use super::super::cx::{Custom, Cx, Nothing, field, fields};
-use crate::camera::{CameraPreset, CameraSettings, DEFAULT_FOV, FOV_RANGE, SMOOTHING_RANGE};
+use crate::camera::{CameraPreset, CameraSettings, DEFAULT_FOV, FOV_RANGE, NEAR_CLIP_RANGE, SMOOTHING_RANGE};
 use egui::RichText;
 
 /// Three fields x / y / z (x forward, y left, z up).
@@ -147,6 +147,28 @@ pub fn page(cx: &mut Cx, tab: usize) {
                         ch
                     },
                 );
+                // Aurora addition (camera/settings.rs, `near_clip`); the far
+                // clip is the Draw Distance (Graphics)
+                cx.keywords("near clip plane znear clipping").row(
+                    tr!("ui-options-camera-near-clip"),
+                    tr!("ui-options-camera-near-clip-hint"),
+                    &field!(camera.near_clip),
+                    |ui, s| {
+                        ui.spacing_mut().slider_width = super::super::SLIDER_W;
+                        // logarithmic: the default 0.1 m sits mid-way between
+                        // the 1 cm of a close-up and the 1 m end
+                        ui.add(crate::ui::widgets::restricted_number(
+                            egui::Slider::new(&mut s.camera.near_clip, NEAR_CLIP_RANGE)
+                                .logarithmic(true)
+                                .max_decimals(2)
+                                .suffix(" m")
+                                .custom_parser(aurora_i18n::parse_number)
+                                .trailing_fill(true),
+                            crate::ui::widgets::TextPolicy::Decimal,
+                        ))
+                        .changed()
+                    },
+                );
                 cx.slider(
                     tr!("common-distance"),
                     tr!("ui-options-camera-camera-distance-behind-avatar-1-by-default"),
@@ -207,6 +229,11 @@ pub fn page(cx: &mut Cx, tab: usize) {
                     tr!("ui-options-camera-click-my-avatar-keep-camera"),
                     tr!("ui-options-camera-clicking-your-avatar-does-not-return-the-camera-behind"),
                     &field!(camera.click_avatar_keeps_camera),
+                );
+                cx.toggle(
+                    tr!("ui-options-camera-move-while-posing"),
+                    tr!("ui-options-camera-move-while-posing-tip"),
+                    &field!(camera.auto_move_while_posing),
                 );
                 cx.toggle(
                     tr!("ui-options-camera-follow-the-targeted-object"),

@@ -12,7 +12,7 @@ use super::context::{self, AvatarList, CtxAction};
 use super::map_tiles::MapTiles;
 use super::menu;
 use crate::scene::Scene;
-use crate::settings::MapSettings;
+use crate::settings::{MapSettings, MiniAvatarNameFormat};
 use crate::theme::Palette;
 use crate::world::World;
 use aurora_net::RegionHandle;
@@ -157,6 +157,9 @@ pub struct MiniMap {
     popup: Option<((f64, f64), Vec<Uuid>)>,
     /// Shift + drag pan in progress.
     dragging: bool,
+    /// Avatars ringed as selected: the People window's map only
+    /// (LLNetMap::setSelected), the floater never sets them.
+    selected: Vec<Uuid>,
 }
 
 /// Map frame: global meters <-> screen points around the camera.
@@ -242,11 +245,141 @@ pub fn avatars(world: &World) -> Vec<(Uuid, Vec3, bool)> {
     out
 }
 
-pub fn avatar_name(world: &World, id: &Uuid) -> String {
+fn formatted_avatar_name(
+    name: &crate::world::names::AvatarName,
+    options: &crate::world::names::NameOptions,
+    format: MiniAvatarNameFormat,
+) -> String {
+    let legacy = name.user_name_for_display(options);
+    match format {
+        MiniAvatarNameFormat::Display => name.display_name.clone(),
+        MiniAvatarNameFormat::Legacy => legacy,
+        MiniAvatarNameFormat::DisplayAndLegacy => {
+            if name.is_default || name.display_name == legacy {
+                name.display_name.clone()
+            } else {
+                format!("{} ({})", name.display_name, legacy)
+            }
+        }
+    }
+}
+
+pub fn avatar_name(world: &World, id: &Uuid, format: MiniAvatarNameFormat) -> String {
+    if let Some(name) = world.social.avatar_names.get(id) {
+        return formatted_avatar_name(name, &world.social.avatar_names.options, format);
+    }
     world
         .avatar_name(id)
         .or_else(|| world.social.names.get(id).cloned())
         .unwrap_or_else(|| "…".into())
+}
+
+#[cfg(test)]
+mod name_format_tests {
+    use super::*;
+    use crate::world::names::{AvatarName, NameOptions};
+
+    fn example_name() -> AvatarName {
+        AvatarName {
+            username: "john.smith".into(),
+            display_name: "Captain Jack".into(),
+            legacy_first: "John".into(),
+            legacy_last: "Smith".into(),
+            ..AvatarName::default()
+        }
+    }
+
+    #[test]
+    fn each_minimap_name_format() {
+        let name = example_name();
+        let options = NameOptions::default();
+        assert_eq!(
+            formatted_avatar_name(&name, &options, MiniAvatarNameFormat::Display),
+            "Captain Jack"
+        );
+        assert_eq!(formatted_avatar_name(&name, &options, MiniAvatarNameFormat::Legacy), "John Smith");
+        assert_eq!(
+            formatted_avatar_name(&name, &options, MiniAvatarNameFormat::DisplayAndLegacy),
+            "Captain Jack (John Smith)"
+        );
+    }
+
+    #[test]
+    fn default_or_identical_names_are_not_repeated() {
+        let mut name = example_name();
+        let options = NameOptions::default();
+        name.is_default = true;
+        assert_eq!(
+            formatted_avatar_name(&name, &options, MiniAvatarNameFormat::DisplayAndLegacy),
+            "Captain Jack"
+        );
+        name.is_default = false;
+        name.display_name = "John Smith".into();
+        assert_eq!(
+            formatted_avatar_name(&name, &options, MiniAvatarNameFormat::DisplayAndLegacy),
+            "John Smith"
+        );
+    }
+
+    #[test]
+    fn minimap_names_honor_rlva_privacy_in_all_formats() {
+        let mut world = World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
+        let known = Uuid::from_u128(42);
+        let not_cached = Uuid::from_u128(43);
+        world.social.avatar_names.on_display_names(
+            &[aurora_net::AvatarNameData {
+                id: known,
+                username: "john.smith".into(),
+                display_name: "Captain Jack".into(),
+                legacy_first: "John".into(),
+                legacy_last: "Smith".into(),
+                ..Default::default()
+            }],
+            &[],
+            Some(3600),
+        );
+        // The legacy fallback has a real name even though the display cache does not.
+        world.social.names.insert(not_cached, "Other Resident".into());
+
+        let formats = [
+            MiniAvatarNameFormat::Display,
+            MiniAvatarNameFormat::Legacy,
+            MiniAvatarNameFormat::DisplayAndLegacy,
+        ];
+        let expected = ["Captain Jack", "John Smith", "Captain Jack (John Smith)"];
+        for (format, name) in formats.into_iter().zip(expected) {
+            assert_eq!(avatar_name(&world, &known, format), name);
+        }
+
+        // RLVa must win over both a cached real name and the legacy fallback.
+        world.social.avatar_names.set_rlva_privacy(true, Default::default());
+        for id in [known, not_cached] {
+            let anonymous = crate::world::rlva::privacy::anonymous(id).display_name.as_str();
+            for format in formats {
+                assert_eq!(avatar_name(&world, &id, format), anonymous, "privacy leak for {id} in {format:?}");
+            }
+        }
+
+        // An explicit RLVa exception can reveal only that resident's name.
+        world
+            .social
+            .avatar_names
+            .set_rlva_privacy(true, std::collections::HashSet::from([known]));
+        for (format, name) in formats.into_iter().zip(expected) {
+            assert_eq!(avatar_name(&world, &known, format), name);
+            assert_eq!(
+                avatar_name(&world, &not_cached, format),
+                crate::world::rlva::privacy::anonymous(not_cached).display_name
+            );
+        }
+
+        // Removing the restriction restores the normal formatting and fallback.
+        world.social.avatar_names.set_rlva_privacy(false, Default::default());
+        for (format, name) in formats.into_iter().zip(expected) {
+            assert_eq!(avatar_name(&world, &known, format), name);
+            assert_eq!(avatar_name(&world, &not_cached, format), "Other Resident");
+        }
+    }
 }
 
 /// LLWorldMapView::drawAvatar: a dot, with a cap above / below when the
@@ -333,6 +466,37 @@ pub fn draw_tracking(painter: &egui::Painter, frame: Rect, at: Pos2, color: Colo
     }
 }
 
+/// How an avatar shows on the map.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Mark {
+    /// Its dot; `ring` when it is selected.
+    Dot { ring: bool },
+    /// Selected and out of view: an arrow on the border.
+    Border,
+}
+
+/// The mark of an avatar at `at` on a map of `frame` (dot radius `r`):
+/// none out of view unless it is selected.
+fn avatar_mark(frame: Rect, at: Pos2, r: f32, selected: bool) -> Option<Mark> {
+    if frame.expand(r).contains(at) {
+        Some(Mark::Dot { ring: selected })
+    } else {
+        selected.then_some(Mark::Border)
+    }
+}
+
+/// The ring of a selected avatar (LLWorldMapView::drawTrackingDot at
+/// relative z 0), in its own colour, around its dot and its above / below
+/// cap (`draw_avatar`). It grows with the dot: the Legacy Viewer's
+/// fixed-size ring vanishes into a dot of the same colour when the map is
+/// zoomed in.
+fn draw_selected(painter: &egui::Painter, c: Pos2, r: f32, color: Color32, dz: Option<f32>) {
+    let capped = dz.is_some_and(|d| d.abs() > HEIGHT_THRESHOLD);
+    let radius = if capped { r * 1.75 } else { r } + 3.0;
+    painter.circle_stroke(c, radius, Stroke::new(3.5, Color32::from_black_alpha(160)));
+    painter.circle_stroke(c, radius, Stroke::new(2.0, color));
+}
+
 /// White label with a drop shadow (map labels).
 pub fn text_shadow(painter: &egui::Painter, pos: Pos2, align: egui::Align2, text: &str, size: f32, color: Color32) -> Rect {
     let font = egui::FontId::proportional(size);
@@ -378,6 +542,14 @@ pub fn draw_directions(painter: &egui::Painter, rect: Rect, rot: f32) {
 }
 
 impl MiniMap {
+    /// The avatars to ring (LLNetMap::setSelected): the selection of the
+    /// People window's list, given before each frame of its map; an empty
+    /// one clears the rings.
+    pub fn set_selected(&mut self, ids: impl IntoIterator<Item = Uuid>) {
+        self.selected.clear();
+        self.selected.extend(ids);
+    }
+
     /// The floater (Ctrl+Shift+M).
     #[allow(clippy::too_many_arguments)]
     pub fn window(
@@ -395,13 +567,14 @@ impl MiniMap {
             return actions;
         }
         let id = egui::Id::unique("minimap");
-        // File › Close All Windows. Ctrl+W does not pick it: no title bar,
-        // so it is not in the frontmost floater list.
+        // File › Close Window and Close All Windows: the map hides its title
+        // bar, but it is a window like the others (LLFloaterMap "mini_map",
+        // floater_map.xml).
         if super::close_key::take(ctx, id) {
             *open = false;
             return actions;
         }
-        super::close_key::shown_extra(ctx, id);
+        super::close_key::shown(ctx, id);
         super::sound_cues::floater_shown(ctx, id);
         // floater_map.xml: no header nor border, DkGray background at
         // FSMiniMapOpacity (0.66); dragged anywhere, resized by its corner
@@ -429,6 +602,7 @@ impl MiniMap {
             default,
             vec2(64.0, 64.0),
             opts.mini_locked,
+            true,
             |ui| {
                 let size = ui.available_size().max(vec2(60.0, 60.0));
                 actions = self.draw(ui, p, world, tiles, cam, opts, size, true);
@@ -628,10 +802,19 @@ impl MiniMap {
         for (id, pos, known) in avatars(world) {
             let g = to_global(world, pos);
             let sp = view.to_screen(g.0, g.1);
-            if !rect.expand(dot_r).contains(sp) {
+            // the avatars selected in People › Near you (LLNetMap::draw,
+            // indra/newview/llnetmap.cpp, fed by FSPanelRadar::onRadarListCommitted,
+            // fspanelradar.cpp): a ring in view, an arrow on the border out of
+            // it. Deliberate differences: every selected avatar is ringed, as
+            // LLPanelPeople::onAvatarListCommitted (llpanelpeople.cpp) did,
+            // where the Legacy Viewer rings only the first selected row
+            // (getSelectedValue); the rings go when the selection is cleared
+            // (the Legacy Viewer keeps the last one); out of view, the
+            // beacon's arrow instead of drawTrackingCircle's arc
+            let Some(mark) = avatar_mark(rect, sp, dot_r, self.selected.contains(&id)) else {
                 continue;
-            }
-            let name = avatar_name(world, &id);
+            };
+            let name = avatar_name(world, &id, opts.mini_avatar_name_format);
             let col = super::colors::map_color(world, &id, &name);
             let col = world.contact_appearance(&id).minimap.map(super::colors::set_color).unwrap_or(col);
             // a mark from the radar's or this menu wins (LLNetMap::getAvatarColor)
@@ -646,7 +829,18 @@ impl MiniMap {
             } else {
                 None
             };
-            draw_avatar(&painter, sp, dot_r, col, dz);
+            match mark {
+                Mark::Border => {
+                    draw_tracking(&painter, rect, sp, col, 0.0, None);
+                    continue;
+                }
+                Mark::Dot { ring } => {
+                    draw_avatar(&painter, sp, dot_r, col, dz);
+                    if ring {
+                        draw_selected(&painter, sp, dot_r, col, dz);
+                    }
+                }
+            }
             if let Some(m) = pointer {
                 let d = sp.distance(m);
                 if d < dot_r * PICK_SCALE {
@@ -720,7 +914,7 @@ impl MiniMap {
             } else {
                 pos.truncate().distance(me.truncate())
             };
-            let name = avatar_name(world, &id);
+            let name = avatar_name(world, &id, opts.mini_avatar_name_format);
             let text = aurora_i18n::tr!(
                 "status-name-distance-d-m",
                 name = name.to_string(),
@@ -805,7 +999,7 @@ impl MiniMap {
                     // "View profile ▸" lists the avatars under the pointer
                     menu::submenu(ui, p, "user-filled", aurora_i18n::tr!("common-view-profile"), true, |ui| {
                         for id in &avs {
-                            if menu::item(ui, p, "user-filled", &avatar_name(world, id)) {
+                            if menu::item(ui, p, "user-filled", &avatar_name(world, id, opts.mini_avatar_name_format)) {
                                 actions.push(MiniMapAction::Profile(*id));
                             }
                         }
@@ -899,6 +1093,27 @@ impl MiniMap {
                     &mut opts.mini_collision,
                 );
             });
+            menu::submenu(
+                ui,
+                p,
+                "user-filled",
+                aurora_i18n::tr!("ui-minimap-avatar-name-format"),
+                true,
+                |ui| {
+                    for (label, choice) in [
+                        (aurora_i18n::tr!("ui-minimap-name-display"), MiniAvatarNameFormat::Display),
+                        (aurora_i18n::tr!("ui-minimap-name-legacy"), MiniAvatarNameFormat::Legacy),
+                        (
+                            aurora_i18n::tr!("ui-minimap-name-display-legacy"),
+                            MiniAvatarNameFormat::DisplayAndLegacy,
+                        ),
+                    ] {
+                        if menu::check(ui, p, "user-filled", label, opts.mini_avatar_name_format == choice, true) {
+                            opts.mini_avatar_name_format = choice;
+                        }
+                    }
+                },
+            );
             if menu::check(
                 ui,
                 p,
@@ -1051,7 +1266,13 @@ impl MiniMap {
         handle: RegionHandle,
     ) -> Option<egui::TextureHandle> {
         let (ox, oy) = aurora_net::handle_to_origin(handle);
-        if let Ok(tile) = tiles.get(1, ox / 256, oy / 256, true) {
+        let (size_x, size_y) = world
+            .regions
+            .get(&handle)
+            .map(|region| (region.heightmap.size_x, region.heightmap.size_y))
+            .unwrap_or((256, 256));
+        let (cells_x, cells_y) = super::map_tiles::region_cells(size_x, size_y);
+        if let Ok(tile) = tiles.region_picture(ctx, ox / 256, oy / 256, cells_x, cells_y) {
             return Some(tile);
         }
         let region = world.regions.get(&handle)?;
@@ -1570,5 +1791,37 @@ mod beacon_tests {
         track.pending = false;
         track.invalid = true;
         assert!(!hit.contains(hit.rect.center(), &track));
+    }
+}
+
+#[cfg(test)]
+mod selection_tests {
+    use super::*;
+
+    #[test]
+    fn a_selected_avatar_is_ringed_in_view_and_pointed_at_out_of_it() {
+        let frame = Rect::from_min_max(Pos2::ZERO, pos2(200.0, 150.0));
+        let r = 3.5;
+        assert_eq!(avatar_mark(frame, pos2(100.0, 75.0), r, false), Some(Mark::Dot { ring: false }));
+        assert_eq!(avatar_mark(frame, pos2(100.0, 75.0), r, true), Some(Mark::Dot { ring: true }));
+        // a dot cut by the border is still drawn, with its ring
+        assert_eq!(avatar_mark(frame, pos2(202.0, 75.0), r, true), Some(Mark::Dot { ring: true }));
+        // out of view: an arrow for the selected one only
+        assert_eq!(avatar_mark(frame, pos2(400.0, -50.0), r, true), Some(Mark::Border));
+        assert_eq!(avatar_mark(frame, pos2(400.0, -50.0), r, false), None);
+    }
+
+    #[test]
+    fn clearing_the_selection_clears_the_rings() {
+        let (a, b) = (Uuid::from_u128(1), Uuid::from_u128(2));
+        let mut map = MiniMap::default();
+        assert!(map.selected.is_empty(), "the floater rings nobody");
+        map.set_selected([a, b]);
+        assert_eq!(map.selected, [a, b]);
+        map.set_selected([b]);
+        assert_eq!(map.selected, [b]);
+        // unlike the Legacy Viewer, an emptied list leaves no ring behind
+        map.set_selected([]);
+        assert!(map.selected.is_empty());
     }
 }

@@ -299,8 +299,10 @@ opens. It also works when placed in the project folder, next to
 `aurora-viewer/`; alone in an empty folder, it downloads the installer from
 the `main` of GitHub. On the command line, it passes the arguments to the
 tools and returns their exit code, for example
-`aurora-tools.cmd -Action diagnose`. Exclamation marks in the path stay valid
-even from a prompt with delayed expansion.
+`aurora-tools.cmd -Action diagnose` (`.\aurora-tools.cmd` in PowerShell, which
+does not look in the current folder; Windows PowerShell and PowerShell 7 both
+work). Exclamation marks in the path stay valid even from a prompt with delayed
+expansion.
 
 The active choice carries a **›** mark on a violet background; the text
 cursor stays hidden while navigating. Long lists scroll with the selection
@@ -323,7 +325,19 @@ action; a repair that does not change the tools keeps the current session.
 
 To check these behaviours without installing or publishing anything:
 `powershell -NoProfile -File scripts/test-tools.ps1` tests the menus in
-hidden Windows consoles and the restart on isolated temporary scripts.
+hidden Windows consoles (a pseudo-terminal on Linux) and the restart on isolated temporary scripts.
+
+**On Linux**, `aurora-tools.sh` is the same tool: same menus, arguments and
+installation in an empty folder; double-clicked, it opens a terminal. It needs
+PowerShell 7 (`pwsh`). What stands for a Windows part: `pacman` or `apt` through
+`sudo` for `winget`, with rustup.rs for Rust where `apt` has no package; a
+terminal window (`$TERMINAL` or a usual one) for the Debug viewer's console;
+`RELEASE/build-release.sh` for the `.bat`; `notify-send` for the notifications;
+desktop entries for the shortcuts; `~/.local/share/auroraviewer/logs` for the
+logs; `wl-clipboard`, `xclip` or `xsel` for the clipboard. Repair installs these
+desktop tools like the others. Claude permissions writes the same rules for the
+Bash tool. `scripts/test-tools.ps1` runs its console tests on a pseudo-terminal
+there (`scripts/test-tools-console.py`, Python 3).
 
 | Choice | What it does |
 |---|---|

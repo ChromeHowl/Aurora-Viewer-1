@@ -918,6 +918,14 @@ pub struct BuildTool {
     pub(crate) commit_sale_on_change: bool,
     /// Selection rectangle being dragged (start, current in pixels, extend).
     pub rect: Option<((f32, f32), (f32, f32), bool)>,
+    /// The press behind `rect`, until it is known to be a click: the object
+    /// under it, selected on release (LLToolSelect::handleMouseUp). A drag
+    /// past the slop drops it, so the object it started on has to be taken
+    /// by the rectangle like any other (LLToolSelectRect::handleHover).
+    press: Option<Option<ObjKey>>,
+    /// The rectangle being dragged started in HUD space, which it keeps
+    /// after the drag has cleared the selection that said so.
+    rect_hud: bool,
     /// Compact section (Rights, Transform, Features, Materials, Contents, Shape).
     pub tab: usize,
     /// Last message for the floater's status line.
@@ -979,6 +987,8 @@ impl Default for BuildTool {
             caps_lock_held: false,
             commit_sale_on_change: false,
             rect: None,
+            press: None,
+            rect_hud: false,
             tab: 6,
             status: String::new(),
             last_frame: None,
@@ -1102,6 +1112,11 @@ pub fn family(world: &World, root: usize) -> Vec<usize> {
         i += 1;
     }
     out
+}
+
+/// Whether a press moved from `a` to `b` is a rectangle and not a click.
+fn rect_dragged(a: (f32, f32), b: (f32, f32)) -> bool {
+    (a.0 - b.0).abs() >= 3.0 || (a.1 - b.1).abs() >= 3.0
 }
 
 /// Object indices of a selection with their highlight (true = root color):
@@ -1246,6 +1261,8 @@ impl BuildTool {
         self.manip.cancel();
         self.land.cancel();
         self.grab_up();
+        self.rect = None;
+        self.press = None;
         self.deselect_all(world);
         self.faces.clear();
         self.sync_hud_zoom(world);
@@ -1459,6 +1476,13 @@ impl BuildTool {
         self.selection.retain(|k| !keys.contains(k));
     }
 
+    /// A restriction takes these out of the selection: a drag of them stops
+    /// with it, or it would go on moving what is no longer selected.
+    pub fn drop_selected(&mut self, world: &World, keys: &[ObjKey]) {
+        self.deselect(world, keys);
+        self.manip.cancel();
+    }
+
     pub fn deselect_all(&mut self, world: &World) {
         let keys = std::mem::take(&mut self.selection);
         for (handle, ids) in self.wire_ids(world, &keys, self.selection_linked) {
@@ -1518,6 +1542,9 @@ impl BuildTool {
     }
 
     pub fn hud_selected(&self, world: &World) -> bool {
+        if self.rect.is_some() && self.rect_hud {
+            return true;
+        }
         self.selection
             .first()
             .and_then(|key| world.objects.index_of(key))
@@ -2037,8 +2064,8 @@ impl BuildTool {
     /// Without `scene` (tests) or geometry yet, a prim across the edge is
     /// taken only without "Select by surrounding".
     fn rect_select(&mut self, world: &mut World, s: &BuildSettings, scene: Option<&Scene>, a: (f32, f32), b: (f32, f32), extend: bool) {
-        if (a.0 - b.0).abs() < 3.0 && (a.1 - b.1).abs() < 3.0 {
-            return; // a click, already handled
+        if !rect_dragged(a, b) {
+            return; // a click, handled by `mouse_up`
         }
         let rect = egui::Rect::from_two_pos(egui::pos2(a.0, a.1), egui::pos2(b.0, b.1));
         let now = Instant::now();
@@ -2088,6 +2115,7 @@ impl BuildTool {
             if taken
                 && passes_select_filters(world, s, idx)
                 && passes_rect_group_filter(world, s, idx)
+                && world.rlva_can_designate(idx, None)
                 && let Some(u) = Self::unit_of(world, idx, s.edit_linked)
                 && seen.insert(u)
             {
@@ -2213,9 +2241,7 @@ impl BuildTool {
                         self.send_stretch_materials(world, scene, idx, s.scale_stretch_textures);
                     }
                 }
-                if let Some(r) = self.rect.as_mut() {
-                    r.1 = cursor;
-                }
+                self.drag_rect(world, cursor);
             }
             Tool::Grab => self.grab_hover(world, cursor, mods),
             Tool::Land => {
@@ -2225,11 +2251,35 @@ impl BuildTool {
                     self.send(c);
                 }
             }
-            Tool::Create | Tool::Focus => {
-                if let Some(r) = self.rect.as_mut() {
-                    r.1 = cursor;
-                }
+            Tool::Create | Tool::Focus => self.drag_rect(world, cursor),
+        }
+    }
+
+    /// LLToolSelectRect::handleHover: a press that leaves the slop is a
+    /// rectangle and not a click; without Shift or Ctrl it starts from an
+    /// empty selection. With them it keeps the selection, unless the press
+    /// is in another space: a selection never mixes them, as
+    /// LLToolSelect::handleObjectSelection's click would have decided.
+    fn drag_rect(&mut self, world: &World, cursor: (f32, f32)) {
+        let Some(r) = self.rect.as_mut() else { return };
+        r.1 = cursor;
+        let (dragged, extend) = (rect_dragged(r.0, r.1), r.2);
+        if dragged && let Some(pick) = self.press.take() {
+            let other_space = pick
+                .and_then(|key| world.objects.index_of(&key))
+                .is_some_and(|idx| select_type(world, idx) != self.select_type(world));
+            if !extend || other_space {
+                self.deselect_all(world);
             }
+        }
+    }
+
+    /// The press is abandoned without its release, as the focus going ends
+    /// the mouse capture (LLToolSelect::onMouseCaptureLost): it selects
+    /// nothing. A rectangle already dragged is left to its release.
+    pub fn drop_press(&mut self) {
+        if self.press.take().is_some() {
+            self.rect = None;
         }
     }
 
@@ -2265,7 +2315,7 @@ impl BuildTool {
             Some((o.key, crate::world::lookat::local_offset(point, at, rot)))
         });
         // what a click may select; Create still places on any surface
-        let pick = target.filter(|&idx| passes_select_filters(world, s, idx));
+        let pick = target.filter(|&idx| passes_select_filters(world, s, idx) && world.rlva_can_designate(idx, hit));
         match self.tool {
             Tool::Focus => false,
             Tool::Grab => {
@@ -2309,7 +2359,8 @@ impl BuildTool {
                         // not on a handle: select, or drag a selection rectangle
                         // (LLToolCompTranslate -> LLToolSelectRect)
                         let extend = mods.shift || mods.ctrl;
-                        self.click_select(world, s, pick, extend);
+                        self.press = Some(pick.and_then(|idx| world.objects.get(idx)).map(|o| o.key));
+                        self.rect_hud = pick.is_some_and(|idx| select_type(world, idx) == SelectType::Hud);
                         self.rect = Some((cursor, cursor, extend));
                         true
                     }
@@ -2436,7 +2487,13 @@ impl BuildTool {
     /// `scene` gives the selection rectangle the drawn vertices of the prims.
     pub fn mouse_up(&mut self, world: &mut World, s: &BuildSettings, scene: Option<&Scene>) {
         if let Some((a, b, extend)) = self.rect.take() {
-            self.rect_select(world, s, scene, a, b, extend);
+            match self.press.take() {
+                Some(pick) => {
+                    let pick = pick.and_then(|key| world.objects.index_of(&key));
+                    self.click_select(world, s, pick, extend);
+                }
+                None => self.rect_select(world, s, scene, a, b, extend),
+            }
         }
         let mut cmds = Vec::new();
         self.manip.release(world, s, self.selection_linked, &mut cmds);
@@ -2496,7 +2553,7 @@ impl BuildTool {
         let Some(point) = hit else {
             return;
         };
-        if s.select_limit().is_some_and(|max| point.distance(world.agent.position) > max) {
+        if s.select_limit().is_some_and(|max| point.distance(world.agent.position) > max) || !world.rlva_can_place_at(point) {
             self.status = aurora_i18n::tr!("build-mod-too-far-away-to-create-an-object-here").into();
             return;
         }
@@ -2584,7 +2641,7 @@ impl BuildTool {
             return;
         }
         // raycastForNewObjPos refuses the duplicate's surface too
-        if s.select_limit().is_some_and(|max| point.distance(world.agent.position) > max) {
+        if s.select_limit().is_some_and(|max| point.distance(world.agent.position) > max) || !world.rlva_can_place_at(point) {
             self.status = aurora_i18n::tr!("build-mod-too-far-away-to-create-an-object-here").into();
             return;
         }
@@ -2676,13 +2733,25 @@ impl BuildTool {
         Some((s.move_hologram, self.manip.move_ghost()?))
     }
 
-    fn face_mode(&self) -> bool {
+    /// The Edit tool in Select face mode (LLSelectMgr::getTEMode).
+    pub fn face_mode(&self) -> bool {
         self.open && self.tool == Tool::Edit && self.edit_mode == EditMode::Face
     }
 
     /// LLSelectMgr's TE mode: the selected surfaces, not whole-object outlines.
     pub fn face_selection(&self, world: &World, s: &BuildSettings) -> HashMap<usize, u64> {
-        if !self.face_mode() || !s.show_highlight {
+        if !s.show_highlight {
+            return HashMap::new();
+        }
+        self.face_picks(world)
+    }
+
+    /// The faces picked in Select face mode, whatever "Show highlight" says:
+    /// the face-select pattern is drawn for them anyway
+    /// (LLPipeline::renderHighlights draws renderSelectedFaces in TE mode;
+    /// RenderHighlightSelections gates only the silhouettes, llselectmgr.cpp).
+    pub fn face_picks(&self, world: &World) -> HashMap<usize, u64> {
+        if !self.face_mode() {
             return HashMap::new();
         }
         self.sel_prims(world)
@@ -2695,6 +2764,15 @@ impl BuildTool {
                 (idx, mask)
             })
             .collect()
+    }
+
+    pub fn draw_world_guides(&self, ctx: &egui::Context, pal: &crate::theme::Palette, world: &World, s: &BuildSettings, mods: Mods) {
+        if !self.open || self.tool != Tool::Edit || self.cam.hud.is_some() || self.replacement_active() || self.ui.color_picker.pipette {
+            return;
+        }
+        let p = draw::Painter3d::new(crate::ui::hud::world_painter(ctx), &self.cam, *pal);
+        self.manip
+            .draw_world_guides(&p, world, s, &self.selection, self.selection_linked, self.effective_mode(mods));
     }
 
     /// Selection outlines, manipulators, land brush and selection rectangle

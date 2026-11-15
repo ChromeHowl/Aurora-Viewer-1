@@ -16,6 +16,9 @@ use uuid::Uuid;
 
 /// ANIM_AGENT_STAND (llanimationstates.cpp).
 const ANIM_STAND: Uuid = Uuid::from_u128(0x2408fe9e_df1d_1d7d_f4ff_1384fa7b350f);
+/// ANIM_AGENT_BENTO_IDLE (llanimationstates.cpp): the priority 0 pose of
+/// hands, mouth, wings and tail played under everything else.
+pub(super) const ANIM_BENTO_IDLE: Uuid = Uuid::from_u128(0x0e720142_0d4b_cf1d_cae5_277f58299604);
 /// SCRIPT_PERMISSION_TRIGGER_ANIMATION | SCRIPT_PERMISSION_OVERRIDE_ANIMATIONS,
 /// the only bits the simulator accepts in RevokePermissions.
 const ANIMATION_PERMISSIONS: u32 = 0x10 | 0x8000;
@@ -45,13 +48,14 @@ impl App {
         }
     }
 
-    /// LLAgent::stopCurrentAnimations, with Firestorm's defaults
-    /// (RevokePermsOnStopAnimation on, FSPlayDefaultBentoAnimation off):
+    /// LLAgent::stopCurrentAnimations, with the Legacy Viewer's default
+    /// RevokePermsOnStopAnimation on:
     /// every animation of ours but do-not-disturb and the ground sit stops,
     /// here at once and on the simulator, its animation overrides are
     /// cleared, the scripts of the region lose their animation permissions
     /// (sitting, we stand up: the seat's own permission is revoked too), and
-    /// the stand starts again unless we sat on the ground.
+    /// the stand starts again unless we sat on the ground, and so does the
+    /// Bento idle pose when it is on.
     pub(super) fn stop_current_animations(&mut self) {
         self.stop_animations(true);
     }
@@ -75,6 +79,9 @@ impl App {
         }
         self.send(NetCommand::AgentAnimations { anims: stop, start: false });
         self.send(NetCommand::AnimationStateReset);
+        // The stop above includes STATIC_EYES: ask for it again, as after an
+        // arrival, or the eyes move until the next teleport (#1905).
+        self.static_eyes.on_arrival();
         let region = self
             .world
             .main_region
@@ -96,6 +103,8 @@ impl App {
                 start: true,
             });
         }
+        // stopped with the rest: the frame's sync starts it again
+        self.bento_idle.on_arrival();
     }
 }
 

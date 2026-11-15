@@ -31,26 +31,23 @@ use std::collections::HashSet;
 pub(super) const GUTTER: f32 = 56.0;
 const AVATAR: f32 = 36.0;
 /// The time column of the compact rows: "23:59", or "12:59 PM" in 12 hours
-/// (`time_w`).
+/// (`time_w`), wider with the seconds: "23:59:59", "12:59:59 PM".
 const TIME_W: f32 = 40.0;
 const TIME_W_12: f32 = 62.0;
-const TIME_W_SECONDS: f32 = 18.0;
+const TIME_W_S: f32 = 56.0;
+const TIME_W_12_S: f32 = 82.0;
 
 /// The width of the compact rows' time column, as the chat writes its times;
 /// it grows with the chat's text size, like the time it holds.
 fn time_w(ctx: &egui::Context) -> f32 {
-    let w = if crate::ui::bars::clock::chat_twelve_hours() {
-        TIME_W_12
-    } else {
-        TIME_W
+    use crate::ui::bars::clock::{chat_seconds, chat_twelve_hours};
+    let w = match (chat_twelve_hours(), chat_seconds()) {
+        (true, true) => TIME_W_12_S,
+        (true, false) => TIME_W_12,
+        (false, true) => TIME_W_S,
+        (false, false) => TIME_W,
     };
-    // ":59" more with the seconds (FSSecondsinChatTimestamps)
-    let seconds = if super::display::get().seconds_in_timestamps {
-        TIME_W_SECONDS
-    } else {
-        0.0
-    };
-    (w + seconds) * chat_size(ctx, 1.0)
+    w * chat_size(ctx, 1.0)
 }
 const TEXT: f32 = 13.5;
 /// Room kept at the right of a row.
@@ -362,8 +359,8 @@ fn name_label(ui: &mut egui::Ui, env: &LineEnv, th: &Thread, line: &ChatLine, na
     let size = chat_size(ui.ctx(), 13.5);
     let text = styled_name(ui.ctx(), name, size, color, moderator_styles(th.moderators, line));
     let r = ui.add(crate::ui::widgets::elided_label(ui, text, max).sense(egui::Sense::click()));
-    if who.object && !line.source.is_nil() {
-        super::object_sender(&r.on_hover_cursor(egui::CursorIcon::PointingHand), env.p, env.world, line);
+    if who.object {
+        super::line_object_sender(r, env.p, env.world, line, env.menu);
         return;
     }
     if who.avatar.is_nil() {
@@ -533,7 +530,15 @@ fn picture(ui: &mut egui::Ui, env: &mut LineEnv, line: &ChatLine, name: &str, wh
     if who.object {
         ui.painter().rect_filled(rect, ui.visuals().window_corner_radius, p.raised);
         let (glyph, tint) = super::object_row::object_glyph(line, p, crate::ui::colors::sender_color(line));
-        paint_icon(ui.painter(), glyph, rect.shrink(9.0), tint);
+        if !super::object_row::paint_wearer(ui.painter(), env.world, line, env.pics, env.wanted, rect, 1.0) {
+            paint_icon(ui.painter(), glyph, rect.shrink(9.0), tint);
+        }
+        let cube = ui.interact(
+            rect,
+            ui.scope_id().with(("thread_pic", line.time, line.source)),
+            egui::Sense::click(),
+        );
+        super::line_object_sender(cube.on_hover_text(name), p, env.world, line, env.menu);
         return;
     }
     if !who.avatar.is_nil() {
@@ -708,6 +713,9 @@ pub(super) fn message_menu(ui: &mut egui::Ui, env: &LineEnv, th: &mut Thread, ta
     if !who.avatar.is_nil() {
         crate::ui::menu::separator(ui, p);
         crate::ui::context::chat_sender_menu(ui, p, env.world, who.avatar, line);
+    } else if let Some(object) = super::line_object(line) {
+        crate::ui::menu::separator(ui, p);
+        super::sender_menu(ui, p, env.world, object, line);
     }
 }
 
@@ -756,7 +764,14 @@ mod tests {
             let ctx = egui::Context::default();
             crate::ui::fonts::apply(&ctx, font);
             ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
-            for (text, column) in [("00:00", TIME_W), ("12:58 PM", TIME_W_12), ("12:58 午後", TIME_W_12)] {
+            for (text, column) in [
+                ("00:00", TIME_W),
+                ("12:58 PM", TIME_W_12),
+                ("12:58 午後", TIME_W_12),
+                ("00:00:00", TIME_W_S),
+                ("12:58:58 PM", TIME_W_12_S),
+                ("12:58:58 午後", TIME_W_12_S),
+            ] {
                 let w = ctx
                     .fonts_mut(|f| f.layout_no_wrap(text.into(), egui::FontId::proportional(10.5), egui::Color32::PLACEHOLDER))
                     .size()

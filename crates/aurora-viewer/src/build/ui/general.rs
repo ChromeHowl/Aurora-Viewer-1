@@ -310,10 +310,18 @@ fn name_description_fields(ui: &mut egui::Ui, p: &Palette, tool: &mut BuildTool,
             };
             let width = ui.available_width();
             // Read only without the modify right, still selectable.
+            // Stable id: an empty click focuses this row (name_focus,
+            // LLLineEditor::setFocus when select_on_focus is set).
+            let field_id = super::name_focus::field_id(field);
             let r =
                 crate::ui::widgets::restricted_text_field(ui, modify, &mut v, crate::ui::widgets::TextPolicy::PrintableNoPipe, |b, _| {
-                    egui::TextEdit::singleline(b).desired_width(width).char_limit(limit).hint_text(hint)
+                    egui::TextEdit::singleline(b)
+                        .id(field_id)
+                        .desired_width(width)
+                        .char_limit(limit)
+                        .hint_text(hint)
                 });
+            super::name_focus::remember_value(ui.ctx(), field, &v);
             if description {
                 r.clone().on_hover_text(aurora_i18n::tr!("build-ui-general-127-bytes-maximum"));
             } else {
@@ -738,7 +746,7 @@ fn ownership_permissions(
             let (v, t) = bit(next, mask);
             // Transfer remains enabled by the next owner's Copy bit (LLPanelPermissions).
             let (caption, tentative, enabled) = match mask {
-                perm::MODIFY => (aurora_i18n::tr!("common-edit"), t, next_ok && base.0 & perm::MODIFY != 0),
+                perm::MODIFY => (aurora_i18n::tr!("common-modify"), t, next_ok && base.0 & perm::MODIFY != 0),
                 perm::COPY => (
                     aurora_i18n::tr!("common-copy-2"),
                     t || !can_copy,

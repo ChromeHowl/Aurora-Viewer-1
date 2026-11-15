@@ -290,7 +290,7 @@ fn person(
         Btn::new("map", aurora_i18n::tr!("ui-profile-show-on-map-2")).enabled(here && !own),
         Btn::new("send-filled", aurora_i18n::tr!("ui-profile-offer-teleport")).enabled(!own),
         Btn::new("user-plus", aurora_i18n::tr!("ui-profile-add-friend")).enabled(can_befriend),
-        Btn::new("coin-filled", aurora_i18n::tr!("common-pay")).enabled(!own),
+        Btn::new("coin-filled", aurora_i18n::tr!("common-pay")).enabled(!own && world.rlva_can_pay()),
         Btn::new("message-circle-filled", aurora_i18n::tr!("ui-profile-instant-message")).enabled(!own),
         Btn::new("ban", block).enabled(!own),
         Btn::new("settings-filled", aurora_i18n::tr!("ui-profile-more")).menu(&gear),
@@ -642,7 +642,8 @@ fn event(ui: &mut egui::Ui, c: &mut Ctx, id: u32, row_name: &str, actions: &mut 
                 },
             )
         });
-        text_field(ui, p, aurora_i18n::tr!("search-event-date"), &e.date);
+        let date = super::event_date_text(&e.date, i64::from(e.date_utc), crate::ui::bars::clock::zone());
+        text_field(ui, p, aurora_i18n::tr!("search-event-date"), &date);
         text_field(
             ui,
             p,

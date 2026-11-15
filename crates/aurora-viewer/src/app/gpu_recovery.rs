@@ -32,6 +32,8 @@ impl App {
         }
         let window = Arc::new(event_loop.create_window(attrs)?);
         crate::window_hold::install(&window);
+        // kept with the option off too: turning it on starts from this mode
+        crate::system_theme::window_theme(window.theme());
         crate::slurl_handoff::window_ready(&window);
         Ok(window)
     }
@@ -208,8 +210,21 @@ impl App {
             fullscreen: old.window.fullscreen(),
         };
         let maximized = old.window.is_maximized();
-        let Gfx { mut renderer, window, .. } = old;
+        // the layout watch is the connection's keyboard, not the window's:
+        // it carries over
+        let Gfx {
+            mut renderer,
+            window,
+            layout_watch,
+            ..
+        } = old;
+        let released = Instant::now();
         self.forget_gpu_scene(&mut renderer);
+        // (#2997: a scene paged out to the disk once took over 10 s here)
+        log::info!(
+            "GPU recovery: the scene let go of the lost device in {} ms",
+            released.elapsed().as_millis()
+        );
         // the lost renderer first: its surface is made from this window's
         // handles (Renderer::new's contract)
         drop(renderer);
@@ -242,6 +257,7 @@ impl App {
             window,
             shown: false,
             maximize_on_show: maximized,
+            layout_watch,
         });
         self.gpu_stall = Default::default();
         // the crash report's state froze at the loss; it follows the session

@@ -21,6 +21,7 @@ pub(crate) mod default_motions;
 pub mod describe;
 pub mod draw_limits;
 pub mod drawn;
+pub mod face_pattern;
 pub mod fetch_priority;
 pub(crate) mod flexible;
 mod foot_scope;
@@ -47,6 +48,7 @@ pub mod mesh_bytes;
 pub mod mesh_inspection;
 pub mod meshes;
 pub mod morph;
+pub mod particle_order;
 pub mod particles;
 pub mod physics_shapes;
 mod pick_accel;
@@ -888,6 +890,10 @@ pub struct Scene {
     pub poser: HashMap<Uuid, Arc<crate::ik_edit::poser::SubjectPose>>,
     /// Follow receipt clocks instead of the Legacy Viewer's activation / pause clock.
     pub synchronize_animations: bool,
+    /// Session-only keyframe animation rate for every avatar and animesh.
+    pub animation_speed: f32,
+    /// Session-only slow motion on our avatar (the Legacy Viewer's 0.2 factor).
+    pub slow_motion_animations: bool,
     pub ground_avatar_feet: bool,
     /// Our head and eye look limits (radians, `settings::avatar_motion`).
     pub own_look_limits: (f32, f32),
@@ -1048,6 +1054,11 @@ pub struct Scene {
     pub selection_silhouettes: HashSet<usize>,
     /// Selected texture-entry bits for each prim; all 45 TE slots must fit.
     pub selection_faces: HashMap<usize, u64>,
+    /// The faces of `selection_faces` picked in the build tool's Select face
+    /// mode, which also get the face-select pattern (`face_pattern.rs`).
+    pub pattern_faces: HashMap<usize, u64>,
+    /// The face-select pattern's texture, held once a face showed it.
+    face_pattern: face_pattern::Texture,
     selection_changed: Option<Instant>,
     /// Far avatars drawn as pictures (RenderAvatarMaxNonImpostors).
     impostors: impostors::Impostors,
@@ -1145,7 +1156,20 @@ pub struct Scene {
     pub tree_lod_factor: f32,
     pub draw_distance: f32,
     last_origin: Option<(u32, u32)>,
-    blend_tmp: Vec<blend_order::BlendEntry>,
+    /// The frame's blended faces in drawing order, as `lists.blend` was made
+    /// from them, and those under the water (`blend_under_sorted`, its first
+    /// `blend_under_rigged` rigged): kept for the particles to be placed
+    /// among them (`particle_order`) after this frame's `build_lists`.
+    blend_sorted: Vec<blend_order::BlendEntry>,
+    /// The blended faces under the water, sorted (`order_particles`).
+    blend_under_sorted: Vec<blend_order::BlendEntry>,
+    /// How many of `blend_under_sorted` are rigged, drawn first.
+    blend_under_rigged: usize,
+    /// The frame's blended-face sort basis and the water plane the lists were
+    /// split at (the camera above the water), for the particles
+    /// (`particle_order`).
+    alpha_view: Option<particle_order::AlphaView>,
+    particle_work: particle_order::Work,
     pub anims: anim::AnimStreamer,
     object_signals: FastMap<Uuid, animesh::Signals>,
     /// World and interface sounds.
@@ -1640,6 +1664,8 @@ impl Scene {
             ik_edit: ik::EditRequest::default(),
             poser: HashMap::new(),
             synchronize_animations: false,
+            animation_speed: 1.0,
+            slow_motion_animations: false,
             ground_avatar_feet: false,
             own_look_limits: crate::settings::avatar_motion::AvatarMotion::default().look_limits(),
             ground_feet_while_moving: false,
@@ -1714,6 +1740,8 @@ impl Scene {
             mesh_lod_resets: HashMap::new(),
             selection_silhouettes: Default::default(),
             selection_faces: Default::default(),
+            pattern_faces: Default::default(),
+            face_pattern: Default::default(),
             selection_changed: None,
             debug_alpha: None,
             beacon_highlights: Default::default(),
@@ -1769,7 +1797,11 @@ impl Scene {
             tree_lod_factor: 0.5,
             draw_distance: 96.0,
             last_origin: None,
-            blend_tmp: Vec::new(),
+            blend_sorted: Vec::new(),
+            blend_under_sorted: Vec::new(),
+            blend_under_rigged: 0,
+            alpha_view: None,
+            particle_work: Default::default(),
             sounds: sounds::SoundManager::new(cache_dir_anim.clone()),
             sound_occlusion: Default::default(),
             sound_reverb: Default::default(),
@@ -2422,18 +2454,28 @@ impl Scene {
                 self.textures.release(&id);
             }
         }
+        self.face_pattern.forget(&mut self.textures);
         for (_, (id, _)) in std::mem::take(&mut self.light_textures) {
             self.textures.release(&id);
         }
         self.clear(old);
-        // every GpuGeom holds allocations of the lost device's arena
-        self.geoms.clear();
+        // every GpuGeom holds allocations of the lost device's arena. The
+        // tables go to the trash thread whole (`Jobs::discard`), as the
+        // geometries collected each frame do: freeing them touches every
+        // geometry's picking faces and joint bounds, and after a driver
+        // reset Windows has often paged the viewer's memory out, so each
+        // free read it back from the disk first. Two freeze reports
+        // (#2997, #2998) stopped there, in `forget_gpu`, with the window
+        // not answering for 10 s.
+        self.jobs.discard((
+            std::mem::take(&mut self.geoms),
+            std::mem::take(&mut self.geom_waiting),
+            std::mem::take(&mut self.geom_delayed),
+        ));
+        self.geom_trash.empty(&self.jobs);
         self.geom_zero.clear();
         self.geom_pending = 0;
-        self.geom_waiting.clear();
         self.geom_waiting_spare.clear();
-        self.geom_delayed.clear();
-        self.geom_trash = Default::default();
         self.joint_boxes = Default::default();
         self.skin_binds = Default::default();
         self.sculpt_area.clear();
@@ -2844,7 +2886,7 @@ impl Scene {
                     renderer.cull.objects.set(idx, g.cull_object(idx));
                 }
             }
-        } else if iso.applied() || types.any_object() || !selected.is_empty() || world.shadow_realm.active() || world.avatar_studio {
+        } else if iso.hides() || types.any_object() || !selected.is_empty() || world.shadow_realm.active() || world.avatar_studio {
             for &idx in synced {
                 if let Some(g) = self.gpu.get_mut(idx) {
                     g.hidden = left_out(idx, g.hud);
@@ -4157,6 +4199,8 @@ impl Scene {
                 continue;
             }
             let mut rec = te_record_base(model, &tf);
+            // the OIT tie-break: the object's id and this face
+            rec.identity[0] = aurora_render::oit_tie(*o.full_id.as_bytes(), fi as u32);
             // Linden plants cut at 0.5, not the 0.33 of other faces without a
             // material (LLDrawPoolTree, setMinimumAlpha(0.5))
             if plant.is_some() {
@@ -4261,11 +4305,7 @@ impl Scene {
                     .flatten();
                 let material = loaded.map(|m| (*m).clone()).or_else(|| {
                     (local_normal.is_some() || local_specular.is_some()).then(|| legacy_mat::LegacyMaterial {
-                        diffuse_alpha_mode: if self.textures.has_alpha(&tf.texture).unwrap_or(false) {
-                            legacy_mat::alpha_mode::BLEND
-                        } else {
-                            legacy_mat::alpha_mode::NONE
-                        },
+                        diffuse_alpha_mode: self.textures.default_alpha_mode(&tf.texture),
                         ..Default::default()
                     })
                 });
@@ -4721,6 +4761,9 @@ impl Scene {
                     model: record_model,
                     params: [0.0, 0.0, 0.8, minimum_alpha],
                     flags: [flags::SKINNED, palette, system_binds, 0],
+                    // the OIT tie-break: the avatar's id and the part, in a
+                    // range of its own above the faces of an object
+                    identity: [aurora_render::oit_tie(*o.full_id.as_bytes(), 0x8000 | pi as u32), 0, 0, 0],
                     ..Default::default()
                 };
                 if let Some((base, count, moving)) = self.live_morphs.parts.get(pi).copied().flatten() {
@@ -5124,6 +5167,7 @@ impl Scene {
         let mirror_plane = self.mirror_plane;
         let selection_wire = &self.selection_wire;
         let selection_faces = &self.selection_faces;
+        let pattern_faces = &self.pattern_faces;
         let photo_marks = &self.photo_marks;
         let poser_part = self.poser_part;
         let give_marks = &self.give_marks.1;
@@ -5154,6 +5198,7 @@ impl Scene {
             select_root: Vec<DrawCmd>,
             select_child: Vec<DrawCmd>,
             select_faces: Vec<DrawCmd>,
+            select_pattern: Vec<DrawCmd>,
             part_faces: Vec<DrawCmd>,
             part_skinned: usize,
             debug_blue: Vec<DrawCmd>,
@@ -5182,6 +5227,7 @@ impl Scene {
             select_root: Vec::new(),
             select_child: Vec::new(),
             select_faces: Vec::new(),
+            select_pattern: Vec::new(),
             part_faces: Vec::new(),
             part_skinned: 0,
             debug_blue: Vec::new(),
@@ -5341,12 +5387,13 @@ impl Scene {
                         Some(false) => l.select_child.push(cmd),
                         None => {}
                     }
-                    if selection_faces
-                        .get(&idx)
-                        .is_some_and(|mask| mask & 1u64.checked_shl(f.te_index.into()).unwrap_or(0) != 0)
+                    if face_pattern::has_face(selection_faces, idx, f.te_index)
                         || ((photo_marks.contains(&idx) || give_marks.contains(&idx)) && pass != Pass::Hidden)
                     {
                         l.select_faces.push(cmd);
+                    }
+                    if face_pattern::has_face(pattern_faces, idx, f.te_index) {
+                        l.select_pattern.push(cmd);
                     }
                     // the poser's hovered part: the subject's body and what it
                     // wears (the shader keeps the part's own skinned
@@ -5482,6 +5529,7 @@ impl Scene {
             a.select_root.append(&mut b.select_root);
             a.select_child.append(&mut b.select_child);
             a.select_faces.append(&mut b.select_faces);
+            a.select_pattern.append(&mut b.select_pattern);
             a.part_faces.append(&mut b.part_faces);
             a.part_skinned += b.part_skinned;
             a.casters.append(&mut b.casters);
@@ -5500,8 +5548,8 @@ impl Scene {
         self.lists.opaque_two_sided = result.opaque2;
         self.lists.mask = result.mask;
         self.lists.mask_two_sided = result.mask2;
-        self.blend_tmp = result.blend;
-        self.blend_tmp.extend(
+        self.blend_sorted = result.blend;
+        self.blend_sorted.extend(
             [
                 (self.banlines.cmds.as_slice(), false, false),
                 (self.portals.cmds.as_slice(), true, true),
@@ -5524,33 +5572,43 @@ impl Scene {
                 })
             }),
         );
-        self.lists.blend_depth = blend_order::sort(&mut self.blend_tmp, blend_order::rigged_apart());
+        self.lists.blend_depth = blend_order::sort(&mut self.blend_sorted, blend_order::rigged_apart());
         self.lists.blend_depth_mode = blend_order::depth_mode();
         self.lists.blend_precision = blend_order::precision();
         if self.lists.blend_depth_mode == aurora_render::RiggedBlendDepth::Exact {
-            blend_order::nearest_first(&mut self.blend_tmp, self.lists.blend_depth);
+            blend_order::nearest_first(&mut self.blend_sorted, self.lists.blend_depth);
         }
         let runs = match self.lists.blend_depth_mode {
             aurora_render::RiggedBlendDepth::Layers => blend_order::each_object,
             aurora_render::RiggedBlendDepth::Split => blend_order::rig_objects,
             _ => blend_order::rig_runs,
         };
-        runs(&self.blend_tmp, self.lists.blend_depth, &mut self.lists.blend_depth_runs);
+        runs(&self.blend_sorted, self.lists.blend_depth, &mut self.lists.blend_depth_runs);
         if self.lists.blend_depth_mode == aurora_render::RiggedBlendDepth::Layers {
-            blend_order::quiet_runs(&self.blend_tmp, &self.lists.blend_depth_runs, &mut self.lists.blend_depth_quiet);
+            blend_order::quiet_runs(&self.blend_sorted, &self.lists.blend_depth_runs, &mut self.lists.blend_depth_quiet);
         } else {
             self.lists.blend_depth_quiet.clear();
         }
-        self.lists.blend.extend(self.blend_tmp.iter().map(|e| e.cmd));
+        self.lists.blend.extend(self.blend_sorted.iter().map(|e| e.cmd));
         // under the water: back to front, the rigged first
         // (LLDrawPoolAlpha::renderPostDeferred: forwardRender(true), then
         // forwardRender()), all writing depth and without glow
         let mut under = result.blend_under;
-        blend_order::sort(&mut under, true);
+        self.blend_under_rigged = blend_order::sort(&mut under, true);
         self.lists.blend_under_water.extend(under.iter().map(|e| e.cmd));
         self.lists.blend_under_double_sided.extend(under.iter().map(|e| e.double_sided));
-        self.lists.blend_glow.extend(self.blend_tmp.iter().map(|e| e.glow));
-        self.lists.blend_double_sided.extend(self.blend_tmp.iter().map(|e| e.double_sided));
+        self.blend_under_sorted = under;
+        self.alpha_view = Some(particle_order::AlphaView {
+            basis: particle_order::SortBasis {
+                eye: view.eye,
+                forward: face_sort.then_some(alpha_forward),
+            },
+            plane: under_water_plane,
+        });
+        self.lists.blend_glow.extend(self.blend_sorted.iter().map(|e| e.glow));
+        self.lists
+            .blend_double_sided
+            .extend(self.blend_sorted.iter().map(|e| e.double_sided));
         self.lists.shadow_casters.extend(result.casters);
         self.lists.shelter_casters.extend(result.shelter);
         self.lists.reflection = result.refl;
@@ -5562,6 +5620,7 @@ impl Scene {
         self.lists.probe = result.probe;
         self.lists.glow = result.glow;
         self.lists.select_faces = result.select_faces;
+        self.lists.select_pattern = result.select_pattern;
         self.lists.part_faces = result.part_faces;
         self.poser_part_skinned = result.part_skinned > 0;
         self.lists.glow_alpha = result.glow_alpha;
@@ -5726,22 +5785,6 @@ impl Scene {
         )
     }
 
-    /// Evaluate skeleton poses of every palette owner near the camera; the
-    /// sync of the same frame uploads their joint palettes
-    /// (`update_anchors`). Only our avatar reports timed animation stops
-    /// to the simulator (LLVOAvatarSelf::requestStopMotion).
-    /// Objects our avatar wears (HUDs left out): a step of the teleport and
-    /// crossing timelines (AURORA_PROFILE).
-    pub fn own_attachment_count(&self) -> usize {
-        let Some(own) = self.agent_idx else {
-            return 0;
-        };
-        self.gpu
-            .iter()
-            .filter(|g| g.owner_avatar == Some(own) && !g.hud && !g.is_avatar)
-            .count()
-    }
-
     /// What the avatars wear and play (`avatar summary`, AURORA_PROFILE):
     /// one walk over the objects, every 10 s.
     pub fn avatar_sample(&self) -> AvatarSample {
@@ -5782,6 +5825,10 @@ impl Scene {
         s
     }
 
+    /// Evaluate skeleton poses of every palette owner near the camera; the
+    /// sync of the same frame uploads their joint palettes
+    /// (`update_anchors`). Only our avatar reports timed animation stops
+    /// to the simulator (LLVOAvatarSelf::requestStopMotion).
     pub fn update_poses(&mut self, world: &mut World, eye: Vec3, now: Instant) -> Vec<Uuid> {
         let mut completed = Vec::new();
         // free palettes of owners that disappeared
@@ -5901,6 +5948,10 @@ impl Scene {
             };
             let pose_now = preview.map_or(now, |(_, _, sample)| sample);
             motions.set_preview_clock(preview.map(|(id, start, _)| (Some(id), start)));
+            motions.set_time_factor(
+                anim::effective_animation_speed(self.animation_speed, self.slow_motion_animations, owner == world.agent_id),
+                now,
+            );
             motions.set_synchronized(self.synchronize_animations);
             // The static layer freezes the displayed pose, while normal motion
             // clocks keep running so Stop restores the current animation phase.
@@ -6347,6 +6398,11 @@ impl Scene {
                 ))
             }
         }
+    }
+
+    /// The cached rest skeleton of `owner`, as last built by `skeleton_of`.
+    pub(crate) fn skeleton_base(&self, owner: &Uuid) -> Option<Arc<anim::SkeletonBase>> {
+        self.skeletons.get(owner).map(|skeleton| skeleton.base.clone())
     }
 
     /// Rest skeleton of an avatar (or animesh) and the vertical offset of
@@ -7929,6 +7985,21 @@ mod tests {
         assert_eq!(classify(&face(true, blend, 0.0), AlphaKind::Mask), Pass::Hidden);
     }
 
+    /// The particles are placed among the faces of `blend` (`particle_order`):
+    /// a translucent face is in it whether it is fullbright or glows (neither
+    /// is a pass of its own; a glow only adds a draw right after the face), as
+    /// the Legacy Viewer's alpha pool holds them (LLDrawPoolAlpha::renderAlpha).
+    #[test]
+    fn a_translucent_face_is_blended_whatever_its_glow() {
+        for glow in [false, true] {
+            let face = FaceDraw {
+                te_alpha: 0.45,
+                ..test_face(Pass::Hidden, glow)
+            };
+            assert_eq!(classify(&face, AlphaKind::Opaque), Pass::Blend, "glow {glow}");
+        }
+    }
+
     #[test]
     fn hide_water_is_invisible_but_keeps_its_gpu_exclusion_draw() {
         let mut face = FaceDraw {
@@ -7993,6 +8064,28 @@ mod tests {
             ..test_face(Pass::Blend, false)
         };
         assert_eq!(prim.record_flags(), flags::ALPHA_BLEND);
+    }
+
+    /// The build tools default a face to Alpha blending from the texture's
+    /// alpha channel, and offer Alpha mode for it: a channel with no
+    /// see-through texel stays in the opaque pass with or without that
+    /// material, and an explicit Mask leaves it.
+    #[test]
+    fn blending_an_opaque_alpha_channel_keeps_the_opaque_pass() {
+        let alpha = [AlphaKind::Opaque];
+        let channel = [true];
+        let face = |legacy: Option<u8>| FaceDraw {
+            legacy_alpha: legacy,
+            base_slot: 0,
+            ..test_face(Pass::Hidden, false)
+        };
+        for legacy in [None, Some(legacy_mat::alpha_mode::BLEND), Some(legacy_mat::alpha_mode::NONE)] {
+            assert_eq!(face_mode(&face(legacy), &alpha, &channel, true).0, Pass::Opaque);
+        }
+        assert_eq!(
+            face_mode(&face(Some(legacy_mat::alpha_mode::MASK)), &alpha, &channel, true).0,
+            Pass::Mask
+        );
     }
 
     /// LLFace::canRenderAsMask: never auto alpha-mask a rigged face, a HUD

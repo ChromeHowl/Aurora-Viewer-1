@@ -7,29 +7,6 @@ use std::collections::VecDeque;
 use uuid::Uuid;
 
 impl App {
-    /// Me › Favorite wearables: the starred wearables, worn, added, taken
-    /// off and unstarred through the inventory's own paths (the appearance
-    /// actions and `actions::set_favorites`), so RLVa and the outfit write
-    /// apply as they do from the inventory.
-    pub(super) fn wearable_favorites_window(&mut self, ctx: &egui::Context, p: &crate::theme::Palette) {
-        if !self.panels.wearable_favorites {
-            return;
-        }
-        let facts = ui::inventory::Facts::from_world(&self.world, self.appearance_ui.pending.is_some());
-        let actions = self
-            .wearable_favorites_ui
-            .show(ctx, p, &self.world.inventory, &facts, &mut self.panels.wearable_favorites);
-        for action in actions {
-            match action {
-                ui::wearable_favorites::FavoriteAction::Appearance(wear) => self.apply_appearance_action(wear),
-                ui::wearable_favorites::FavoriteAction::Unstar(ids) => match rules::set_favorites(&self.world.inventory, &ids, false) {
-                    Ok(change) => self.apply_inventory_action(InvAction::Edit(change)),
-                    Err(reason) => log::warn!("wearable favorites: star not removed: {reason}"),
-                },
-            }
-        }
-    }
-
     /// `AURORA_DEMO_INVENTORY=big,toggle=…,churn=…`: open and close the
     /// window, and change one item now and then, once in the world.
     pub(super) fn demo_big_inventory(&mut self, big: &crate::world::inventory::demo::Big) {
@@ -333,6 +310,7 @@ impl App {
             }
             InvAction::TakeTask(request) => self.take_task_inventory(*request),
             InvAction::StopConfirmingDelete => self.settings.inventory.confirm_delete = false,
+            InvAction::Notice(text) => self.world.system_message(text),
             InvAction::Edit(change) => self.edit_inventory(change, false),
             InvAction::Delete(deletion) => {
                 if let Some(deletion) = self.listings_ui.guard_inventory_delete(&self.world.inventory, *deletion) {
@@ -420,6 +398,28 @@ impl App {
             }
             InvAction::WearCopy { item, replace } => self.wear_copy(item, replace),
             InvAction::EditEnvironment(id) => self.env_editor_load(id),
+            InvAction::PreviewMany(ids) => {
+                let (resources, documents): (Vec<_>, Vec<_>) = ids
+                    .into_iter()
+                    .partition(|id| crate::ui::texture_library::catalogue::resource(&self.world.inventory, *id).is_some());
+                self.texture_library.open_group(&self.egui_ctx, &self.world, resources);
+                for id in &documents {
+                    self.apply_inventory_action(InvAction::Preview(*id));
+                }
+                let previews: Vec<_> = documents
+                    .iter()
+                    .copied()
+                    .filter(|id| {
+                        self.world
+                            .inventory
+                            .items
+                            .get(id)
+                            .is_some_and(|item| matches!(item.asset_type, 1 | 7 | 20))
+                    })
+                    .collect();
+                self.inventory_ui.group_documents(&previews);
+                self.script_editors.group_inventory(&documents);
+            }
             InvAction::Preview(id) => {
                 if self
                     .world
@@ -553,6 +553,12 @@ impl App {
                 }
             }
             InvAction::EnvironmentParcel(item) => self.inventory_environment_parcel(item),
+            InvAction::EnvironmentSaveParcel(asset, flags) => {
+                if let Some(kind) = crate::world::env_select::SettingsKind::from_flags(flags) {
+                    self.world.eep.request_local(asset, kind);
+                    self.world.save_parcel_environment();
+                }
+            }
             InvAction::Marketplace(item, command) => self.inventory_marketplace_command(item, command),
             InvAction::ShowMain(item) => {
                 self.inventory_ui.show_original(&self.world.inventory, item);
@@ -940,6 +946,10 @@ impl App {
                 ui::widgets::open_floater(&self.egui_ctx, "inventory", &mut self.panels.inventory);
                 self.inventory_ui.show_original(&self.world.inventory, id);
             }
+            return;
+        }
+        if let crate::world::appearance::Action::Gesture(ids, on) = action {
+            self.gesture_action(crate::ui::gestures::Action::Active(ids, on));
             return;
         }
         if let crate::world::appearance::Action::Favorite(id) = action {

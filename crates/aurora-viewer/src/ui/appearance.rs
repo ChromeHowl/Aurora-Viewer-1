@@ -23,6 +23,7 @@ mod perf_tests;
 pub(crate) mod portrait;
 mod selection;
 mod showcase;
+pub(crate) mod wearable_favorites;
 pub use clipboard::{PasteTo, Request as ClipboardRequest};
 
 #[derive(Default)]
@@ -71,7 +72,8 @@ pub struct AppearanceUi {
     select_name: bool,
     adding: bool,
     add_search: String,
-    reverse_sort: bool,
+    /// The order of the outfits, kept in the settings (`app.rs`).
+    pub sort: crate::world::outfit_folders::Sort,
     pub pending: Option<(Uuid, bool)>,
     pub pending_actor: Uuid,
     pub saved_new: bool,
@@ -101,6 +103,8 @@ pub struct AppearanceUi {
     /// The heights of the rows last drawn, for those left out.
     rows: RowHeights,
     selection_info: Option<SelectionInfo>,
+    /// The Favorite Wearables window, which shares the rows and their menu.
+    pub(crate) wearable_favorites: wearable_favorites::State,
 }
 
 struct SelectionInfo {
@@ -158,7 +162,7 @@ struct Prepared {
 struct Shown {
     generation: u64,
     search: String,
-    reverse: bool,
+    sort: crate::world::outfit_folders::Sort,
     closed: u64,
     order: crate::world::outfit_folders::Order,
     /// The showcase lists the outfits of closed groups too: it has no
@@ -471,14 +475,14 @@ impl AppearanceUi {
         let fresh = self.shown.as_ref().is_some_and(|shown| {
             shown.generation == inv.generation
                 && shown.search == self.search
-                && shown.reverse == self.reverse_sort
+                && shown.sort == self.sort
                 && shown.closed == self.closed_version
                 && shown.order == order
                 && shown.showcase == showcase
         });
         if !fresh {
             let needle = self.search.trim().to_lowercase();
-            let tree = tree(inv, &needle, self.reverse_sort, order);
+            let tree = tree(inv, &needle, self.sort, order);
             let total = tree.iter().filter(|e| !e.group).count();
             let mut entries = Vec::with_capacity(tree.len());
             let mut hidden_below = None;
@@ -495,7 +499,7 @@ impl AppearanceUi {
             self.shown = Some(Shown {
                 generation: inv.generation,
                 search: self.search.clone(),
-                reverse: self.reverse_sort,
+                sort: self.sort,
                 closed: self.closed_version,
                 order,
                 showcase,
@@ -775,25 +779,25 @@ fn not_worn_row(ui: &mut egui::Ui, p: &Palette, icon_name: &str, text: &str) {
 
 /// LLWearingContextMenu (llpanelwearing.cpp) on the worn `selected` items:
 /// Edit and Show original need one; Take off / Detach takes them all.
+#[allow(clippy::too_many_arguments)]
 fn item_menu(
     response: &egui::Response,
     p: &Palette,
     world: &World,
+    st: &mut AppearanceUi,
     locks: &crate::world::rlva::WearLocks,
     selected: &[Uuid],
     actions: &mut Vec<Action>,
     edit: bool,
 ) {
-    let inv = &world.inventory;
     menu::context_menu(response, p, |ui| {
+        let inv = &world.inventory;
         let items: Vec<&InvItem> = selected.iter().filter_map(|id| inv.items.get(id)).collect();
-        if let [it] = items.as_slice()
-            && matches!(it.asset_type, 5 | 13)
-            && menu::item(ui, p, "pencil-filled", aurora_i18n::tr!("common-edit"))
-        {
-            super::context::request(ui.ctx(), super::context::CtxAction::EditWorn(it.id));
+        if let [it] = items.as_slice() {
+            items::worn_touch_edit_menu(ui, p, world, it);
         }
         items::remove_item(ui, p, &items, locks, aurora_i18n::tr!("common-remove"), actions);
+        items::favorites_menu(ui, p, st, &items, actions);
         if !edit && let [it] = items.as_slice() {
             // menu_wearing_tab.xml: Worn-only, disabled by RLV.EnableIfNot(showinv).
             menu::separator(ui, p);
@@ -806,6 +810,9 @@ fn item_menu(
             ) {
                 actions.push(Action::ShowOriginal(it.id));
             }
+        }
+        if !st.editing && menu::item(ui, p, "pencil-filled", aurora_i18n::tr!("ui-context-edit-outfit")) {
+            st.editing = true;
         }
     });
 }
@@ -1201,7 +1208,7 @@ fn outfit_list(
                                 st.select_item(&response, *id, it.id, &order);
                                 items::double_click(&response, world, it, worn.contains_key(&it.id), actions);
                                 let selected = st.selected_items(*id, it.id, &order);
-                                items::context_menu(&response, p, world, st, *id, it, &selected, actions);
+                                items::context_menu(&response, p, world, st, items::List::Outfit(*id), it, &selected, actions);
                             });
                             row_gap(ui);
                         } else {
@@ -1386,18 +1393,11 @@ fn worn_list(ui: &mut egui::Ui, p: &Palette, world: &World, st: &mut AppearanceU
                     clipboard::request_focus(ui.ctx());
                     st.selected_item = Some(it.id);
                 }
-                item_menu(&resp, p, world, &locks, &[it.id], actions, true);
+                item_menu(&resp, p, world, st, &locks, &[it.id], actions, true);
             } else {
                 st.select_item(&resp, WORN_SCOPE, it.id, &order);
-                item_menu(
-                    &resp,
-                    p,
-                    world,
-                    &locks,
-                    &st.selected_items(WORN_SCOPE, it.id, &order),
-                    actions,
-                    false,
-                );
+                let selected = st.selected_items(WORN_SCOPE, it.id, &order);
+                item_menu(&resp, p, world, st, &locks, &selected, actions, false);
             }
             // a body part has none of these buttons: no empty row under it
             if edit && st.selected_item == Some(it.id) && it.asset_type != 13 {
@@ -1805,14 +1805,40 @@ pub fn show(
                     "sort-ascending-2-filled",
                     aurora_i18n::tr!("ui-appearance-sort-outfits"),
                     |ui| {
-                        for (reverse, icon, label) in [
-                            (false, "sort-ascending-letters", aurora_i18n::tr!("ui-appearance-name-a-z")),
-                            (true, "sort-descending-letters", aurora_i18n::tr!("ui-appearance-name-z-a")),
+                        use crate::world::outfit_folders::SortBy;
+                        for (by, icon, label) in [
+                            (
+                                SortBy::NameAscending,
+                                "sort-ascending-letters",
+                                aurora_i18n::tr!("ui-appearance-name-a-z"),
+                            ),
+                            (
+                                SortBy::NameDescending,
+                                "sort-descending-letters",
+                                aurora_i18n::tr!("ui-appearance-name-z-a"),
+                            ),
+                            (SortBy::Newest, "clock-filled", aurora_i18n::tr!("ui-appearance-date-newest-first")),
+                            (SortBy::Oldest, "clock-filled", aurora_i18n::tr!("ui-appearance-date-oldest-first")),
                         ] {
-                            if menu::check(ui, p, icon, label, st.reverse_sort == reverse, true) {
-                                st.reverse_sort = reverse;
+                            if menu::check(ui, p, icon, label, st.sort.by == by, true) {
+                                st.sort.by = by;
                             }
                         }
+                        menu::separator(ui, p);
+                        menu::toggle(
+                            ui,
+                            p,
+                            "star-filled",
+                            aurora_i18n::tr!("ui-appearance-favorites-to-top"),
+                            &mut st.sort.favorites_first,
+                        );
+                        menu::toggle(
+                            ui,
+                            p,
+                            "photo-filled",
+                            aurora_i18n::tr!("ui-appearance-images-to-top"),
+                            &mut st.sort.images_first,
+                        );
                     },
                 );
             });
@@ -1844,7 +1870,9 @@ pub fn show(
         // a guess too small (buttons wrapped in a narrow window, a long
         // message) made the window grow to fit them, the list take the new
         // room, and the window grow again at every frame.
-        let below_id = ui.scope_id().with("appearance_below_list");
+        let below_id = ui
+            .scope_id()
+            .with(("appearance_below_list", st.editing, st.adding, st.tab, st.edit_tab));
         let estimate = if st.editing || st.tab == 2 { 130.0 } else { 154.0 };
         let reserved = ui.ctx().data(|d| d.get_temp::<f32>(below_id)).unwrap_or(estimate);
         let list_top = ui.cursor().top();
@@ -1863,7 +1891,7 @@ pub fn show(
                     let list_width = ui.available_width();
                     clipboard::list_focus(ui, egui::Rect::from_min_size(ui.cursor().min, Vec2::new(list_width, height)));
                     egui::ScrollArea::vertical()
-                        .id_salt("appearance_list")
+                        .id_salt(("appearance_list", st.editing, st.adding, st.tab, st.edit_tab))
                         .max_height(height)
                         .min_scrolled_height(height)
                         .auto_shrink([false, false])
@@ -2278,6 +2306,92 @@ mod tests {
         assert_eq!(landscape.min.y, 0.0);
     }
 
+    /// After the user made Appearance wider, dragging it narrower must stick:
+    /// the old `set_min_width(available_width)` ratcheted the body's min so
+    /// the floater could grow but never shrink again (#3035).
+    #[test]
+    fn appearance_window_can_shrink_again_after_it_was_made_wider() {
+        let ctx = egui::Context::default();
+        crate::theme::Theme::default().apply(&ctx, 1.0);
+        let _icons = icons::Icons::load(&ctx, None);
+        let mut world = wardrobe(0);
+        let mut st = AppearanceUi::default();
+        let area = || ctx.memory(|m| m.area_rect(egui::Id::unique("appearance"))).expect("floater");
+        for _ in 0..10 {
+            draw(&ctx, &mut world, &mut st, None);
+        }
+        let opened = area();
+        assert!((opened.width() - 580.0).abs() < 1.0, "opens at its default width: {opened:?}");
+        let input = |pos: egui::Pos2, pressed: Option<bool>| egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1600.0, 900.0))),
+            events: std::iter::once(egui::Event::PointerMoved(pos))
+                .chain(pressed.map(|pressed| egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: Default::default(),
+                }))
+                .collect(),
+            ..Default::default()
+        };
+        let drag_right_edge = |world: &mut World, st: &mut AppearanceUi, delta_x: f32| {
+            let rect = area();
+            let grab = egui::pos2(rect.right() - 1.0, rect.center().y);
+            draw_input(&ctx, world, st, input(grab, None));
+            draw_input(&ctx, world, st, input(grab, Some(true)));
+            for i in 1..=40 {
+                draw_input(
+                    &ctx,
+                    world,
+                    st,
+                    input(grab + Vec2::new(delta_x * (i as f32 / 20.0).min(1.0), 0.0), None),
+                );
+            }
+            let dragged = area();
+            draw_input(&ctx, world, st, input(grab + Vec2::new(delta_x, 0.0), Some(false)));
+            for _ in 0..20 {
+                draw(&ctx, world, st, None);
+            }
+            (dragged, area())
+        };
+        let (wide_drag, wide) = drag_right_edge(&mut world, &mut st, 200.0);
+        assert!(
+            wide.width() >= opened.width() + 150.0,
+            "grew wider: {opened:?} -> drag {wide_drag:?} -> rest {wide:?}"
+        );
+        assert_eq!(wide.size(), wide_drag.size(), "wide size sticks after release");
+        let (narrow_drag, narrow) = drag_right_edge(&mut world, &mut st, -180.0);
+        assert!(
+            narrow.width() + 50.0 < wide.width(),
+            "must shrink again after widening: {wide:?} -> drag {narrow_drag:?} -> rest {narrow:?}"
+        );
+        assert_eq!(
+            narrow.size(),
+            narrow_drag.size(),
+            "narrow size sticks after release: {narrow_drag:?} vs {narrow:?}"
+        );
+    }
+
+    #[test]
+    fn the_outfit_sort_defaults_to_name_and_is_saved() {
+        use crate::settings::Settings;
+        use crate::world::outfit_folders::{Sort, SortBy};
+        let old: Settings = serde_json::from_str("{}").expect("old settings");
+        assert_eq!(old.appearance_outfit_sort, Sort::default());
+        let sort = Sort {
+            by: SortBy::Newest,
+            favorites_first: true,
+            images_first: false,
+        };
+        let settings = Settings {
+            appearance_outfit_sort: sort,
+            ..Default::default()
+        };
+        let saved = serde_json::to_vec(&settings).expect("save settings");
+        let restored: Settings = serde_json::from_slice(&saved).expect("restore settings");
+        assert_eq!(restored.appearance_outfit_sort, sort);
+    }
+
     #[test]
     fn outfit_previews_default_to_fit_and_remember_the_saved_choice() {
         use crate::settings::Settings;
@@ -2339,6 +2453,50 @@ mod tests {
             st.editing = true;
             st.open_outfits();
             assert_eq!((st.tab, st.editing), (to, false), "from tab {from}");
+        }
+    }
+
+    #[test]
+    fn the_sort_menu_sets_each_order_and_both_toggles() {
+        use crate::world::outfit_folders::SortBy;
+        let ctx = egui::Context::default();
+        crate::theme::Theme::default().apply(&ctx, 1.0);
+        let _icons = icons::Icons::load(&ctx, None);
+        let mut world = World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
+        model::seed_demo(&mut world.inventory, Uuid::from_u128(1));
+        let mut st = AppearanceUi::default();
+        for _ in 0..4 {
+            draw(&ctx, &mut world, &mut st, None);
+        }
+        let rect = ctx.memory(|m| m.area_rect(egui::Id::unique("appearance"))).expect("appearance");
+        // the sort button ends the row of the filter
+        let filter = label_position(&ctx, &mut world, &mut st, aurora_i18n::tr!("ui-appearance-filter-outfits"));
+        let button = egui::pos2(rect.right() - 28.0, filter.y);
+        let open = |ctx: &egui::Context, world: &mut World, st: &mut AppearanceUi| {
+            let none = egui::Modifiers::NONE;
+            modified_click(ctx, world, st, button, none, egui::PointerButton::Primary);
+            for _ in 0..4 {
+                draw(ctx, world, st, None);
+            }
+        };
+        for (label, by) in [
+            (aurora_i18n::tr!("ui-appearance-date-newest-first"), SortBy::Newest),
+            (aurora_i18n::tr!("ui-appearance-date-oldest-first"), SortBy::Oldest),
+            (aurora_i18n::tr!("ui-appearance-name-z-a"), SortBy::NameDescending),
+            (aurora_i18n::tr!("ui-appearance-name-a-z"), SortBy::NameAscending),
+        ] {
+            open(&ctx, &mut world, &mut st);
+            click_menu(&ctx, &mut world, &mut st, label);
+            assert_eq!(st.sort.by, by, "{label}");
+        }
+        for expected in [true, false] {
+            open(&ctx, &mut world, &mut st);
+            click_menu(&ctx, &mut world, &mut st, aurora_i18n::tr!("ui-appearance-favorites-to-top"));
+            assert_eq!(st.sort.favorites_first, expected);
+            open(&ctx, &mut world, &mut st);
+            click_menu(&ctx, &mut world, &mut st, aurora_i18n::tr!("ui-appearance-images-to-top"));
+            assert_eq!(st.sort.images_first, expected);
+            assert_eq!(st.sort.by, SortBy::NameAscending, "the toggles keep the order");
         }
     }
 
@@ -2947,7 +3105,7 @@ mod tests {
                 draw_input(&ctx, &mut world, &mut st, input(grab + delta * (i as f32 / 20.0).min(1.0), None));
             }
             let dragged = area();
-            assert_eq!(dragged.width(), 390.0, "down to its minimum width");
+            assert!((dragged.width() - 390.0).abs() < 0.1, "down to its minimum width: {dragged:?}");
             draw_input(&ctx, &mut world, &mut st, input(grab + delta, Some(false)));
             for _ in 0..20 {
                 draw(&ctx, &mut world, &mut st, None);
@@ -3003,6 +3161,60 @@ mod tests {
             draw(&ctx, &mut world, &mut st, None);
         }
         assert!(egui::Popup::is_any_open(&ctx), "menu must remain open");
+    }
+
+    #[test]
+    fn worn_attachment_context_menu_offers_touch_edit_favorite_and_edit_outfit() {
+        let item = Uuid::from_u128(717);
+        for (label, expected) in [
+            (aurora_i18n::tr!("ui-context-touch").to_string(), "touch"),
+            (aurora_i18n::tr!("common-edit").to_string(), "edit"),
+            (aurora_i18n::tr!("common-add-to-favorites").to_string(), "favorite"),
+            (aurora_i18n::tr!("ui-context-edit-outfit").to_string(), "edit-outfit"),
+        ] {
+            let ctx = egui::Context::default();
+            crate::theme::Theme::default().apply(&ctx, 1.0);
+            let _icons = icons::Icons::load(&ctx, None);
+            let mut world = World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
+            world.agent_id = crate::demo::DEMO_AGENT;
+            model::seed_demo(&mut world.inventory, world.agent_id);
+            world.objects.upsert(1, crate::demo::action_avatar(false));
+            let mut object = crate::demo::hud::object(2, false);
+            object.full_id = Uuid::from_u128(80_717);
+            object.name_values = format!("AttachItemID STRING RW SV {item}");
+            object.update_flags |= crate::ui::context::flags::HANDLE_TOUCH;
+            world.objects.upsert(1, object);
+            assert!(items::worn_items(&world).contains(&item));
+
+            let mut st = AppearanceUi::default();
+            st.open(2, false);
+            for _ in 0..4 {
+                draw(&ctx, &mut world, &mut st, None);
+            }
+            let name = world.inventory.items[&item].name.clone();
+            click_row(
+                &ctx,
+                &mut world,
+                &mut st,
+                &name,
+                egui::Modifiers::NONE,
+                egui::PointerButton::Secondary,
+            );
+            let actions = click_menu(&ctx, &mut world, &mut st, &label);
+            match expected {
+                "touch" => assert!(
+                    matches!(crate::ui::context::take_requests(&ctx).as_slice(), [crate::ui::context::CtxAction::TouchWorn(id)] if *id == item),
+                    "touch requests"
+                ),
+                "edit" => assert!(
+                    matches!(crate::ui::context::take_requests(&ctx).as_slice(), [crate::ui::context::CtxAction::EditWorn(id)] if *id == item),
+                    "edit requests"
+                ),
+                "favorite" => assert!(matches!(actions.as_slice(), [Action::Favorite(id)] if *id == item), "{actions:?}"),
+                "edit-outfit" => assert!(st.editing, "Edit outfit opens the editor"),
+                _ => unreachable!(),
+            }
+        }
     }
 
     #[test]
@@ -3827,7 +4039,7 @@ mod tests {
         let beach = st.shown_outfits(inv);
         assert_eq!(beach.len(), 3);
         assert!(beach.iter().all(|id| name(inv, id).contains("beach")));
-        st.reverse_sort = true;
+        st.sort.by = crate::world::outfit_folders::SortBy::NameDescending;
         let reversed = st.shown_outfits(inv);
         assert_eq!(reversed.iter().rev().copied().collect::<Vec<_>>(), beach);
     }
@@ -3860,6 +4072,129 @@ mod tests {
         hits.iter()
             .find(|(clip, pos)| clip.height() < window && clip.contains(*pos))
             .map(|(clip, pos)| (pos.y - clip.top(), clip.bottom() - pos.y))
+    }
+
+    fn visible_list_outfit(ctx: &egui::Context, world: &mut World, st: &mut AppearanceUi) -> Option<(Uuid, String, egui::Pos2)> {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1600.0, 900.0))),
+            ..Default::default()
+        };
+        let shapes = draw_output(ctx, world, st, input).1;
+        let window_height = shapes.iter().map(|shape| shape.clip_rect.height()).fold(0.0, f32::max);
+        st.shown_outfits(&world.inventory).into_iter().find_map(|id| {
+            let folder = world.inventory.folders.get(&id)?;
+            if model::folder_links(&world.inventory, id).is_empty() {
+                return None;
+            }
+            shapes.iter().find_map(|shape| {
+                let pos = text_position(&shape.shape, &folder.info.name)?;
+                (shape.clip_rect.height() < window_height && shape.clip_rect.contains(pos)).then(|| (id, folder.info.name.clone(), pos))
+            })
+        })
+    }
+
+    #[test]
+    fn outfit_list_keeps_its_position_and_window_size_after_visiting_worn() {
+        let ctx = egui::Context::default();
+        crate::theme::Theme::default().apply(&ctx, 1.0);
+        let _icons = icons::Icons::load(&ctx, None);
+        let mut world = wardrobe(120);
+        let mut st = AppearanceUi::default();
+        st.open(1, false);
+        for _ in 0..4 {
+            draw(&ctx, &mut world, &mut st, None);
+        }
+
+        for _ in 0..3 {
+            draw_input(
+                &ctx,
+                &mut world,
+                &mut st,
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1600.0, 900.0))),
+                    events: vec![
+                        egui::Event::PointerMoved(egui::pos2(300.0, 450.0)),
+                        egui::Event::MouseWheel {
+                            unit: egui::MouseWheelUnit::Point,
+                            delta: egui::vec2(0.0, -600.0),
+                            phase: egui::TouchPhase::Move,
+                            source: egui::MouseWheelSource::Unknown,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                    ..Default::default()
+                },
+            );
+        }
+
+        let (outfit, _, _) = visible_list_outfit(&ctx, &mut world, &mut st).expect("scrolled outfit is in sight");
+        assert!(
+            st.shown_outfits(&world.inventory)
+                .iter()
+                .position(|id| *id == outfit)
+                .unwrap_or_default()
+                > 10
+        );
+        st.outfit_selection.single(outfit);
+        st.reveal_outfit = Some(outfit);
+        for _ in 0..4 {
+            draw(&ctx, &mut world, &mut st, None);
+        }
+        assert_eq!(st.outfit_selection.focus, Some(outfit), "the outfit is selected");
+        assert!(
+            st.list_open.as_ref().is_some_and(|open| open.contains(&outfit)),
+            "the outfit is expanded"
+        );
+        let item = model::folder_links(&world.inventory, outfit)
+            .into_iter()
+            .find_map(|link| world.inventory.items.get(&link.target).map(|item| item.name.clone()))
+            .expect("outfit item");
+        click_row(
+            &ctx,
+            &mut world,
+            &mut st,
+            &item,
+            egui::Modifiers::NONE,
+            egui::PointerButton::Primary,
+        );
+        assert!(
+            st.item_selected(outfit, model::folder_links(&world.inventory, outfit)[0].target),
+            "item row click selects an item"
+        );
+        let first_visible = visible_list_outfit(&ctx, &mut world, &mut st)
+            .expect("outfit list remains scrolled")
+            .0;
+        assert_eq!(first_visible, outfit, "the expanded outfit is the first visible row");
+        let before_size = ctx
+            .memory(|m| m.area_rect(egui::Id::unique("appearance")))
+            .expect("appearance window")
+            .size();
+
+        st.open(2, false);
+        for _ in 0..4 {
+            draw(&ctx, &mut world, &mut st, None);
+        }
+        let worn_size = ctx
+            .memory(|m| m.area_rect(egui::Id::unique("appearance")))
+            .expect("appearance window")
+            .size();
+        st.open(1, false);
+        for _ in 0..4 {
+            draw(&ctx, &mut world, &mut st, None);
+        }
+
+        let after_visible = visible_list_outfit(&ctx, &mut world, &mut st)
+            .expect("outfit list remains visible")
+            .0;
+        let after_size = ctx
+            .memory(|m| m.area_rect(egui::Id::unique("appearance")))
+            .expect("appearance window")
+            .size();
+        assert_eq!(after_visible, first_visible, "top of the visible outfit list changed");
+        assert!(
+            (before_size.y - after_size.y).abs() < 1.0,
+            "window height changed: outfits {before_size:?}, worn {worn_size:?}, returned {after_size:?}"
+        );
     }
 
     /// The banner's locate button brings the current outfit into view and

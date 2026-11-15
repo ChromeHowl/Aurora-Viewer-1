@@ -363,6 +363,23 @@ pub(super) fn actions(
     buttons: &[(&str, &str)],
     salt: impl std::hash::Hash + std::fmt::Debug,
 ) -> Vec<egui::Response> {
+    actions_if(ui, p, slot, buttons, salt, |_| true)
+}
+
+/// `actions` where the buttons `enabled` refuses are greyed out: their
+/// tooltip (the reason) still shows. Such a button still catches the
+/// pointer, or a click on it would reach the row under it (a second quick
+/// click there is the row's double click, its IM): it senses drags too,
+/// which keeps it out of the click sound (`sound_cues`), and the caller
+/// ignores its clicks.
+pub(super) fn actions_if(
+    ui: &mut egui::Ui,
+    p: &Palette,
+    slot: Rect,
+    buttons: &[(&str, &str)],
+    salt: impl std::hash::Hash + std::fmt::Debug,
+    enabled: impl Fn(usize) -> bool,
+) -> Vec<egui::Response> {
     let (pill, cells) = action_rects(slot, buttons.len(), BUTTON);
     ui.painter()
         .rect_filled(pill, ui.visuals().widgets.inactive.corner_radius, p.raised);
@@ -372,24 +389,69 @@ pub(super) fn actions(
         .zip(cells)
         .enumerate()
         .map(|(i, ((icon, tip), r))| {
-            let resp = ui.interact(r, id.with(i), Sense::click());
-            if resp.hovered() {
+            let on = enabled(i);
+            let resp = ui.interact(r, id.with(i), if on { Sense::click() } else { Sense::click_and_drag() });
+            if on && resp.hovered() {
                 ui.painter().rect_filled(r, widgets::inner_radius(ui.visuals()), p.bar);
             }
-            super::radar::icon(ui, icon, r, 14.0, p.ink);
-            resp.on_hover_text(*tip).on_hover_cursor(egui::CursorIcon::PointingHand)
+            super::radar::icon(ui, icon, r, 14.0, if on { p.ink } else { p.muted_dim });
+            let resp = resp.on_hover_text(*tip);
+            if on {
+                resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+            } else {
+                resp
+            }
         })
         .collect()
 }
 
 /// A deliberate hold opens contact settings; ordinary clicks keep the
-/// Legacy list's selection and double-click actions (LLPanelPeople).
-const SHEET_HOLD_SECONDS: f64 = 0.5;
+/// Legacy list's selection and double-click actions (LLPanelPeople). Past
+/// `HOLD_DELAY` a wash spreads from the press along the row, and the sheet
+/// opens as it reaches the row's far end.
+const HOLD_DELAY: f64 = 0.5;
+const HOLD_SPREAD: f64 = 0.6;
+const SHEET_HOLD_SECONDS: f64 = HOLD_DELAY + HOLD_SPREAD;
+// the wash takes between half a second and a second
+const _: () = assert!(HOLD_SPREAD >= 0.5 && HOLD_SPREAD <= 1.0);
+
+/// How far the pointer may wander during a hold.
+const HOLD_SLOP: f32 = 6.0;
 
 #[derive(Clone, Copy)]
 struct SheetPress {
     started: f64,
     opened: bool,
+    /// Where the row was pressed: the wash spreads from there.
+    origin: Pos2,
+}
+
+/// How far the hold's wash has spread, 0 to 1, `held` seconds into it.
+fn hold_spread(held: f64) -> f32 {
+    let t = ((held - HOLD_DELAY) / HOLD_SPREAD).clamp(0.0, 1.0) as f32;
+    // eased out: quick at first, settling as it reaches the end
+    1.0 - (1.0 - t) * (1.0 - t)
+}
+
+/// The hold's wash: a soft disc of the accent from the press, reaching the
+/// row's farthest corner at `spread` 1, its edge a little brighter.
+fn paint_hold(ui: &egui::Ui, row: Rect, origin: Pos2, spread: f32) {
+    if spread <= 0.0 {
+        return;
+    }
+    let reach = [row.left_top(), row.right_top(), row.left_bottom(), row.right_bottom()]
+        .iter()
+        .map(|c| c.distance(origin))
+        .fold(0.0, f32::max);
+    let r = reach * spread;
+    let accent = ui.visuals().selection.bg_fill;
+    let painter = ui.painter().with_clip_rect(row.intersect(ui.clip_rect()));
+    painter.circle_filled(origin, r, accent.gamma_multiply(0.16));
+    painter.circle_stroke(
+        origin,
+        r,
+        egui::Stroke::new(2.0, accent.gamma_multiply(0.35 * (1.0 - spread * 0.6))),
+    );
 }
 
 #[derive(Default)]
@@ -427,25 +489,37 @@ pub(super) fn select(
         let child_clicked = hovered
             .iter()
             .any(|other| *other != resp.id && ui.ctx().read_response(*other).is_some_and(|r| r.sense.senses_click()));
+        let origin = ui.input(|i| i.pointer.press_origin()).unwrap_or(resp.rect.center());
         press = (resp.is_pointer_button_down_on() && !child_clicked && !mods.command && !mods.shift && !secondary).then_some(SheetPress {
             started: now,
             opened: false,
+            origin,
         });
     }
     let consumed = press.is_some_and(|p| p.opened);
     let mut action = RowAction::default();
     if !consumed {
-        if !down || secondary || mods.command || mods.shift || !resp.contains_pointer() || resp.dragged() {
+        // moved away from the press: a drag, not a hold (egui counts a
+        // still press longer than its click as a drag too: not here)
+        let moved = press.is_some_and(|p| {
+            ui.input(|i| i.pointer.interact_pos())
+                .is_some_and(|at| at.distance(p.origin) > HOLD_SLOP)
+        });
+        if !down || secondary || mods.command || mods.shift || !resp.contains_pointer() || moved {
             press = None;
         } else if let Some(p) = &mut press {
-            let remaining = SHEET_HOLD_SECONDS - (now - p.started);
-            if remaining <= 0.0 {
+            let held = now - p.started;
+            if held >= SHEET_HOLD_SECONDS {
                 p.opened = true;
                 action.sheet = true;
                 *sel = vec![id];
                 *anchor = Some(id);
+            } else if held >= HOLD_DELAY {
+                paint_hold(ui, resp.rect, p.origin, hold_spread(held));
+                ui.ctx().request_repaint();
             } else {
-                ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(remaining));
+                ui.ctx()
+                    .request_repaint_after(std::time::Duration::from_secs_f64(HOLD_DELAY - held));
             }
         }
     }
@@ -459,7 +533,16 @@ pub(super) fn select(
     if consumed {
         return action;
     }
-    resp.dnd_set_drag_payload(crate::ui::call_invite::PersonDrag(id));
+    // a still hold is not a drag yet, whatever egui counts
+    if press.is_none() {
+        resp.dnd_set_drag_payload(crate::ui::call_invite::PersonDrag(id));
+        // egui started the drag of a still press at its click time, while
+        // the hold had it: the hold given up for a move hands the resident
+        // to that drag (dnd_set_drag_payload only acts on its first frame)
+        if resp.dragged() && !egui::DragAndDrop::has_any_payload(ui.ctx()) {
+            egui::DragAndDrop::set_payload(ui.ctx(), crate::ui::call_invite::PersonDrag(id));
+        }
+    }
     if resp.secondary_clicked() && !sel.contains(&id) {
         *sel = vec![id];
         *anchor = Some(id);
@@ -720,6 +803,78 @@ mod tests {
         }
     }
 
+    /// A greyed-out quick action (a poke cooling down) still catches the
+    /// pointer: a quick double click on it never reaches the row under it
+    /// (its double click opens the IM), and it stays out of the click sound
+    /// (it senses drags). An enabled one clicks as before.
+    #[test]
+    fn a_greyed_out_quick_action_keeps_its_clicks_from_the_row() {
+        let p = crate::theme::Theme::default().palette();
+        let buttons = [("user-filled", "Profile"), (crate::ui::poke::ICON, "Just poked")];
+        let slot = Rect::from_min_size(Pos2::new(0.0, 0.0), Vec2::new(300.0, RICH_H));
+        let (_, cells) = action_rects(slot, buttons.len(), BUTTON);
+        #[derive(Default)]
+        struct Seen {
+            buttons: Vec<(bool, bool)>,
+            row_clicks: usize,
+            row_double: bool,
+        }
+        let mut frames = crate::ui::widgets::elide_tests::Frames::new();
+        let mut frame = |events: Vec<egui::Event>, seen: &mut Seen| {
+            frames.run(events, |ui| {
+                // the row first, as in the lists: the strip lies over it
+                let row = ui.interact(slot, ui.scope_id().with("row"), Sense::click_and_drag());
+                seen.row_clicks += usize::from(row.clicked());
+                seen.row_double |= row.double_clicked();
+                seen.buttons = actions_if(ui, &p, slot, &buttons, "test", |i| i == 0)
+                    .iter()
+                    .map(|r| (r.clicked(), r.sense.senses_drag()))
+                    .collect();
+            });
+        };
+        let press = |at: Pos2, pressed: bool| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        // the greyed-out poke, clicked twice quickly
+        let mut seen = Seen::default();
+        let at = cells[1].center();
+        frame(vec![egui::Event::PointerMoved(at)], &mut seen);
+        for _ in 0..2 {
+            frame(vec![press(at, true)], &mut seen);
+            frame(vec![press(at, false)], &mut seen);
+        }
+        assert_eq!(seen.row_clicks, 0, "the row under it gets no click");
+        assert!(!seen.row_double, "nor a double click (the IM)");
+        assert!(seen.buttons[1].1, "it senses drags: no click sound");
+        // the enabled one still clicks, as a click-only button
+        let mut seen = Seen::default();
+        let at = cells[0].center();
+        frame(vec![egui::Event::PointerMoved(at)], &mut seen);
+        frame(vec![press(at, true)], &mut seen);
+        frame(vec![press(at, false)], &mut seen);
+        assert_eq!(seen.buttons[0], (true, false));
+        assert_eq!(seen.row_clicks, 0);
+    }
+
+    #[test]
+    fn the_hold_wash_waits_half_a_second_then_spreads_until_the_sheet_opens() {
+        assert_eq!(hold_spread(0.0), 0.0);
+        assert_eq!(hold_spread(HOLD_DELAY), 0.0, "nothing during the first half second");
+        let mid = hold_spread(HOLD_DELAY + HOLD_SPREAD / 2.0);
+        assert!(mid > 0.5 && mid < 1.0, "eased out: past half way at half time ({mid})");
+        assert_eq!(hold_spread(SHEET_HOLD_SECONDS), 1.0, "it reaches the end as the sheet opens");
+        assert_eq!(hold_spread(5.0), 1.0);
+        let mut last = 0.0;
+        for i in 0..=60 {
+            let t = hold_spread(i as f64 / 50.0);
+            assert!(t >= last, "it never goes back");
+            last = t;
+        }
+    }
+
     #[test]
     fn contact_hold_opens_once_and_consumes_release_and_drag() {
         let mut h = PressHarness::new();
@@ -727,7 +882,10 @@ mod tests {
         h.button(at, egui::PointerButton::Primary, true);
         h.wait(20);
         assert_eq!(h.sheets, 0, "a short press does not open settings");
-        h.wait(15);
+        // past half a second the wash spreads; settings wait for it to end
+        h.wait(25);
+        assert_eq!(h.sheets, 0, "settings open only once the wash has spread");
+        h.wait(25);
         assert_eq!(h.sheets, 1, "settings open while the button is still down");
         assert_eq!(h.sel, vec![Uuid::from_u128(1)]);
         h.wait(60);
@@ -769,6 +927,35 @@ mod tests {
             assert_eq!(h.sheets, 0, "{kind} cannot open settings");
             h.button(at, button, false);
         }
+    }
+
+    #[test]
+    fn a_hand_that_wobbles_a_little_still_opens_the_sheet() {
+        // 52 frames at 60 per second: past egui's still-press drag time
+        // (`max_click_duration`, 0.8 s), before the sheet (1.1 s)
+        const PAUSE: usize = 52;
+        let mut h = PressHarness::new();
+        let at = h.rects[0].center();
+        h.button(at, egui::PointerButton::Primary, true);
+        h.wait(PAUSE);
+        h.frame(vec![egui::Event::PointerMoved(at + Vec2::new(4.0, 2.0))]);
+        h.wait(40);
+        assert_eq!(h.sheets, 1, "a wobble within the slop keeps the hold");
+        assert!(!egui::DragAndDrop::has_any_payload(&h.frames.ctx), "and it is not a drag");
+        h.button(at, egui::PointerButton::Primary, false);
+        // a pause then a move past the slop: the hold gives way to a drag
+        let mut h = PressHarness::new();
+        h.button(at, egui::PointerButton::Primary, true);
+        h.wait(PAUSE);
+        h.frame(vec![egui::Event::PointerMoved(at + Vec2::new(HOLD_SLOP + 1.0, 0.0))]);
+        h.frame(vec![egui::Event::PointerMoved(at + Vec2::new(40.0, 0.0))]);
+        assert!(
+            egui::DragAndDrop::has_payload_of_type::<crate::ui::call_invite::PersonDrag>(&h.frames.ctx),
+            "the resident is carried after a pause"
+        );
+        h.wait(40);
+        assert_eq!(h.sheets, 0, "past the slop the hold is cancelled");
+        h.button(at, egui::PointerButton::Primary, false);
     }
 
     #[test]

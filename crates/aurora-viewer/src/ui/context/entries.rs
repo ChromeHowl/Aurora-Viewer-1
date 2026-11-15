@@ -194,7 +194,7 @@ pub(super) fn draw_list(ui: &mut egui::Ui, p: &crate::theme::Palette, entries: &
 fn object_menu(ui: &mut Builder, f: &Facts, key: ObjKey, id: Uuid, offset: Vec3, point: Vec3) {
     let o = &f.object;
     ui.item_if("click-filled", touch_label(o), o.touch, CtxAction::Touch(key.local_id));
-    ui.item("pencil-filled", aurora_i18n::tr!("common-edit"), CtxAction::Edit(id));
+    ui.item_if("pencil-filled", aurora_i18n::tr!("common-edit"), f.object.edit, CtxAction::Edit(id));
     ui.item_if(
         "paint-filled",
         aurora_i18n::tr!("ui-context-edit-pbr-material"),
@@ -548,6 +548,15 @@ fn attachment_self_menu(ui: &mut Builder, f: &Facts, key: ObjKey) {
         f.object.detach,
         CtxAction::Detach(key),
     );
+    // Inventory's Detach and Delete, offered on the worn object too: it asks
+    // the same confirmation there, which re-checks body parts, RLVa and the
+    // Trash move before anything comes off.
+    ui.item_if(
+        "trash-x-filled",
+        aurora_i18n::tr!("ui-inventory-dialogs-detach-and-delete"),
+        f.object.detach && f.object.attachment_item.is_some_and(|item| !item.is_nil()),
+        CtxAction::DetachDelete(key),
+    );
     save_as_submenu(ui, f.object.id);
     ui.separator();
     sit_stand(ui, f);
@@ -739,7 +748,12 @@ fn avatar_groups(ui: &mut Builder, f: &Facts, id: Uuid, attachment: Option<Uuid>
         aurora_i18n::tr!("common-zoom-2"),
         CtxAction::Zoom(point, Some(id)),
     );
-    ui.item("coin-filled", aurora_i18n::tr!("common-pay"), CtxAction::PayResident(id));
+    ui.item_if(
+        "coin-filled",
+        aurora_i18n::tr!("common-pay"),
+        !f.pay_blocked,
+        CtxAction::PayResident(id),
+    );
     ui.separator();
     if let Some(object) = attachment {
         ui.submenu("box", aurora_i18n::tr!("ui-context-clicked-object"), true, |ui| {
@@ -810,9 +824,23 @@ fn avatar_groups(ui: &mut Builder, f: &Facts, id: Uuid, attachment: Option<Uuid>
         aurora_i18n::tr!("ui-context-information-options"),
         true,
         |ui| {
+            // On a worn object, that object (menu_attachment_other.xml); what
+            // the wearer wears stays a row of its own, so a saved arrangement
+            // keeps its command.
+            if let Some(object) = attachment {
+                ui.item(
+                    "zoom-scan-filled",
+                    aurora_i18n::tr!("ui-context-inspect-2"),
+                    CtxAction::Inspect(object),
+                );
+            }
             ui.item_if(
                 "zoom-scan-filled",
-                aurora_i18n::tr!("ui-context-inspect-2"),
+                if attachment.is_some() {
+                    aurora_i18n::tr!("ui-context-inspect-worn")
+                } else {
+                    aurora_i18n::tr!("ui-context-inspect-2")
+                },
                 f.worn,
                 CtxAction::InspectAvatar(id),
             );
@@ -977,7 +1005,7 @@ fn shadow_realm_item(ui: &mut Builder, f: &Facts, id: Uuid) {
     ui.item(super::SHADOW_REALM_ICON, label, CtxAction::ShadowRealm { id, add });
 }
 
-/// "Save as" (Export Menu) on the prim `id`: Collada and OBJ open the
+/// "Save as" (Export Menu) on the prim `id`: Collada, OBJ and glTF open the
 /// export window, which shows what the rights let through
 /// (Object.EnableExport only asks for a selection). Backup waits for its
 /// own task.
@@ -998,6 +1026,7 @@ fn save_as_submenu(ui: &mut Builder, id: Uuid) {
             CtxAction::SaveAs(id, Format::Collada),
         );
         ui.item("box", aurora_i18n::tr!("ui-context-save-obj"), CtxAction::SaveAs(id, Format::Obj));
+        ui.item("box", aurora_i18n::tr!("ui-context-save-gltf"), CtxAction::SaveAs(id, Format::Gltf));
     });
 }
 
@@ -1257,6 +1286,43 @@ fn land_menu(ui: &mut Builder, f: &Facts, point: Vec3) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn object_edit_entry_follows_edit_permission() {
+        for can_edit in [false, true] {
+            let mut facts = Facts::default();
+            facts.object.edit = can_edit;
+
+            let entries = world_menu(&object_target(), &facts, Vec3::ZERO);
+            let edit = entries
+                .iter()
+                .find(|entry| matches!(&entry.kind, Kind::Action(CtxAction::Edit(_))))
+                .expect("object Edit menu entry");
+
+            assert_eq!(edit.enabled, can_edit);
+        }
+    }
+
+    #[test]
+    fn resident_pay_menu_entry_is_disabled_under_rlva_pay() {
+        let id = Uuid::from_u128(77);
+        let target = Target::Avatar {
+            id,
+            own: false,
+            attachment: None,
+        };
+        let mut facts = Facts {
+            pay_blocked: true,
+            ..Default::default()
+        };
+        facts.voice = false;
+        let entries = rows(world_menu(&target, &facts, Vec3::ZERO));
+        let pay = entries
+            .iter()
+            .find(|entry| entry.label == aurora_i18n::tr!("common-pay"))
+            .expect("Pay entry");
+        assert!(!pay.enabled);
+    }
 
     fn particle_source(object: u128, owner: u128, name: &str, clicked: bool) -> super::super::ParticleMenuSource {
         super::super::ParticleMenuSource {
@@ -1737,6 +1803,46 @@ mod tests {
     }
 
     #[test]
+    fn inspect_on_someone_s_worn_object_inspects_that_object() {
+        let (avatar, worn) = (Uuid::from_u128(7), Uuid::from_u128(8));
+        let wearing = Facts {
+            worn: true,
+            ..Facts::default()
+        };
+        let labelled = |target: &Target, key: &'static str| {
+            rows(world_menu(target, &wearing, Vec3::ZERO))
+                .into_iter()
+                .filter(|e| e.label == aurora_i18n::text(key))
+                .map(|e| e.kind)
+                .collect::<Vec<_>>()
+        };
+        let on_worn = Target::Avatar {
+            id: avatar,
+            own: false,
+            attachment: Some(worn),
+        };
+        // Clicked object › Inspect and Information › Inspect (menu_attachment_other.xml)
+        let inspect = labelled(&on_worn, "ui-context-inspect-2");
+        assert_eq!(inspect.len(), 2);
+        for kind in &inspect {
+            assert!(matches!(kind, Kind::Action(CtxAction::Inspect(id)) if *id == worn));
+        }
+        let everything = labelled(&on_worn, "ui-context-inspect-worn");
+        assert!(matches!(&everything[..], [Kind::Action(CtxAction::InspectAvatar(id))] if *id == avatar));
+        // the body keeps its one Inspect of everything worn
+        let on_body = Target::Avatar {
+            id: avatar,
+            own: false,
+            attachment: None,
+        };
+        assert!(matches!(
+            &labelled(&on_body, "ui-context-inspect-2")[..],
+            [Kind::Action(CtxAction::InspectAvatar(id))] if *id == avatar
+        ));
+        assert!(labelled(&on_body, "ui-context-inspect-worn").is_empty());
+    }
+
+    #[test]
     fn worn_shape_edit_is_available_from_our_avatar_and_attachment_menus() {
         let item = Uuid::from_u128(42);
         let facts = Facts {
@@ -1818,6 +1924,8 @@ mod tests {
             "common-edit",
             "ui-context-edit-pbr-material",
             "common-detach",
+            // ours: Inventory's Detach and Delete, on the worn object too
+            "ui-inventory-dialogs-detach-and-delete",
             "common-save-as>",
             "-",
             "status-sit",
@@ -1899,7 +2007,7 @@ mod tests {
     }
 
     #[test]
-    fn save_as_opens_the_collada_and_obj_export_of_the_prim() {
+    fn save_as_opens_the_collada_obj_and_gltf_export_of_the_prim() {
         use crate::build::export::Format;
         let f = Facts::default();
         let menu = || world_menu(&object_target(), &f, Vec3::ZERO);
@@ -1907,6 +2015,8 @@ mod tests {
         assert!(collada.enabled && matches!(collada.kind, Kind::Action(CtxAction::SaveAs(id, Format::Collada)) if id == ID));
         let obj = row(menu(), "ui-context-save-obj");
         assert!(obj.enabled && matches!(obj.kind, Kind::Action(CtxAction::SaveAs(id, Format::Obj)) if id == ID));
+        let gltf = row(menu(), "ui-context-save-gltf");
+        assert!(gltf.enabled && matches!(gltf.kind, Kind::Action(CtxAction::SaveAs(id, Format::Gltf)) if id == ID));
     }
 
     #[test]
@@ -2047,6 +2157,24 @@ mod tests {
         let entries = menu(&f);
         assert!(!labels(&entries).contains(&aurora_i18n::text("common-add-to-favorites").to_string()));
         row(entries, "common-remove-from-favorites");
+    }
+
+    #[test]
+    fn our_attachment_offers_detach_and_delete_once_detach_and_its_item_allow_it() {
+        let key = ObjKey { region: 1, local_id: 42 };
+        let mut f = Facts::default();
+        let menu = |f: &Facts| world_menu(&Target::Attachment { key }, f, Vec3::ZERO);
+        let label = "ui-inventory-dialogs-detach-and-delete";
+        assert!(!row(menu(&f), label).enabled);
+        // detach allowed but no inventory item to delete: still greyed
+        f.object.detach = true;
+        assert!(!row(menu(&f), label).enabled);
+        f.object.attachment_item = Some(Uuid::from_u128(5));
+        let entry = row(menu(&f), label);
+        assert!(entry.enabled && matches!(entry.kind, Kind::Action(CtxAction::DetachDelete(k)) if k == key));
+        // an RLVa remove lock greys it with Detach
+        f.object.detach = false;
+        assert!(!row(menu(&f), label).enabled);
     }
 
     #[test]

@@ -7,6 +7,12 @@ use crate::world::PlayingAnimation;
 use std::collections::{HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
+/// Longest the last complete selection is kept while its replacement
+/// downloads. A replacement that never loads (a missing or broken asset in
+/// the set, retried every 30 s) would otherwise hold a Swimming Up / Down
+/// pose for as long as the avatar stays in the water.
+const LOADING_HOLD: Duration = Duration::from_secs(3);
+
 pub struct Frame<'a> {
     pub raw: &'a [PlayingAnimation],
     /// Movement enhancer's bounded ground-contact grace; never changes raw signals.
@@ -59,6 +65,32 @@ pub struct Runtime {
     restoring: Option<(State, PlayingAnimation, Instant)>,
     anchor_blend: super::anchor_blend::Blend,
     anchor_signal: Option<PlayingAnimation>,
+    hold_since: Option<Instant>,
+}
+
+/// Whether a replaced signal should be stopped on the simulator. The Legacy
+/// Viewer keeps movement defaults running on the region while masking them
+/// locally (`LLVOAvatar::startMotion`, indra/newview/llvoavatar.cpp). These
+/// special pose owners retain their existing server suppression behavior.
+pub(super) fn stop_region_signal(state: State, frame: &Frame<'_>) -> bool {
+    !matches!(
+        state,
+        State::Walking
+            | State::Running
+            | State::Crouching
+            | State::CrouchWalk
+            | State::Falling
+            | State::FlyingDown
+            | State::FlyingUp
+            | State::Flying
+            | State::FlyingSlow
+            | State::Hovering
+    ) || frame.run_hold.is_some()
+        || frame.native_running
+        || frame.swim_hold.is_some()
+        || frame.water_walk_hold.is_some()
+        || frame.swim_outro
+        || frame.anchor_hold.is_some()
 }
 
 impl Default for Runtime {
@@ -85,6 +117,7 @@ impl Default for Runtime {
             restoring: None,
             anchor_blend: Default::default(),
             anchor_signal: None,
+            hold_since: None,
         }
     }
 }
@@ -578,6 +611,11 @@ impl Runtime {
             && !desired.is_empty()
             && (previous_state == self.current || (water_loop(previous_state) && water_loop(self.current)))
             && desired.iter().any(|id| !ready(id));
+        self.hold_since = holding.then(|| self.hold_since.unwrap_or(now));
+        let holding = holding
+            && self
+                .hold_since
+                .is_some_and(|since| now.saturating_duration_since(since) < LOADING_HOLD);
         if holding {
             // Keep the last complete selection while a cycle/continuous swim
             // replacement downloads. Network and local selection change together.
@@ -717,9 +755,10 @@ impl Runtime {
             })
             .collect();
         pose.extend(loaded);
-        // Suppress replaced standard clips for observers too, rather than
-        // depending on upload priorities. Keep jump/landing control motions
-        // intact (requestStopMotion finish flags), as in the Legacy AO.
+        // Stop replaced non-locomotion clips on the region for observers too,
+        // rather than depending on upload priorities. Ordinary movement
+        // defaults stay active region-side, matching the Legacy Viewer. Keep
+        // jump/landing control motions intact (requestStopMotion finish flags).
         // The stock sit stays to the simulator too, as with the Legacy AO:
         // LLVOAvatar::startMotion (indra/newview/llvoavatar.cpp) only starts
         // the override (AOEngine::override, aoengine.cpp), and the
@@ -755,27 +794,44 @@ impl Runtime {
         let mut suppressed = HashMap::new();
         if let Some((state, signal)) = self.raw_hold {
             if overrides(state) && !self.active.iter().any(|a| a.id == signal.id) {
-                let old = self.suppressed.get(&signal.id).copied().unwrap_or_else(|| {
-                    commands.push((signal.id, false));
-                    signal
-                });
-                suppressed.insert(signal.id, old);
-                self.restoring = None;
+                if stop_region_signal(state, &frame) {
+                    let old = self.suppressed.get(&signal.id).copied().unwrap_or_else(|| {
+                        commands.push((signal.id, false));
+                        signal
+                    });
+                    suppressed.insert(signal.id, old);
+                    self.restoring = None;
+                } else if self.suppressed.remove(&signal.id).is_some() {
+                    // A special pose may have stopped this signal earlier;
+                    // hand it back to the region without restoring it locally
+                    // over the active AO replacement.
+                    commands.push((signal.id, true));
+                    self.restoring = None;
+                }
             } else if self.suppressed.contains_key(&signal.id) {
                 commands.push((signal.id, true));
                 self.restoring = Some((state, signal, now));
             }
         }
         for signal in frame.raw {
-            if State::from_motion(signal.id).is_some_and(overrides) && !self.active.iter().any(|a| a.id == signal.id) {
-                if self
-                    .suppressed
-                    .get(&signal.id)
-                    .is_none_or(|old| old.sequence_start != signal.sequence_start)
-                {
-                    commands.push((signal.id, false));
+            if let Some(state) = State::from_motion(signal.id)
+                && overrides(state)
+                && !self.active.iter().any(|a| a.id == signal.id)
+            {
+                if stop_region_signal(state, &frame) {
+                    if self
+                        .suppressed
+                        .get(&signal.id)
+                        .is_none_or(|old| old.sequence_start != signal.sequence_start)
+                    {
+                        commands.push((signal.id, false));
+                    }
+                    suppressed.insert(signal.id, *signal);
+                } else if self.suppressed.remove(&signal.id).is_some() {
+                    // Return stock movement to the region if an earlier
+                    // special pose stopped it; keep it masked locally.
+                    commands.push((signal.id, true));
                 }
-                suppressed.insert(signal.id, *signal);
             }
         }
         self.suppressed = suppressed;

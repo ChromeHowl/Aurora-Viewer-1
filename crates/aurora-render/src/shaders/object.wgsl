@@ -1626,7 +1626,7 @@ fn shade_material(in: VsOut, m: Material) -> Shaded {
                 + ll_classic_pbr_local(m.color.rgb, m.metallic, m.roughness, m.n, v, in.world_pos, in.clip.xy);
         } else {
             col = ll_classic_sun_ambient(m.color.rgb, m.n, sh, in.clip.xy, a);
-            col = legacy_light(col, m.color.rgb, m.unlit, m.legacy_spec, m.legacy_env, m.n, v, in.world_pos, in.clip.xy, sh, ll_sun_linear(a), 1.0);
+            col = legacy_light(col, m.color.rgb, m.unlit, m.legacy_spec, m.legacy_env, m.n, v, in.world_pos, in.clip.xy, shadow_lift(sh), ll_sun_linear(a), 1.0);
             col = (col + m.emissive) * ll_final_scale() + ll_local_diffuse(m.color.rgb, m.n, in.world_pos, in.clip.xy)
                 + legacy_local_spec(m.legacy_spec, m.legacy_env, m.n, v, in.world_pos, in.clip.xy) * ll_local_scale();
         }
@@ -2801,6 +2801,197 @@ fn fs_blend_glow(@builtin(position) clip: vec4<f32>) -> @location(0) vec4<f32> {
     return vec4<f32>(0.0, 0.0, 0.0, glow);
 }
 
+// ST_BEGIN
+// ---- depth-based stochastic transparency: the passes over the blended
+// faces (oit_stochastic.rs, oit_stochastic.wgsl). Everything from ST_BEGIN
+// to ST_END is left out of the scene module and compiled by itself, the
+// first time the method is on (oit_stochastic.rs `st_source`): Enderton,
+// Sintorn, Shirley, Luebke, "Stochastic Transparency", I3D 2010, section
+// 3.4, the anti-aliased depth-based form.
+//
+// 1. fs_st_alpha: the exact total alpha of every pixel sample, order
+//    independent (the target holds the product of the transparencies,
+//    blended Zero / OneMinusSrcAlpha); alpha-only shading.
+// 2. fs_st_depth_*: each fragment covers a random subset of its samples,
+//    R = floor(alpha S + xi) of them (stratified: one S-choose-R subset from
+//    a table), depth only, into a copy of the opaque depth; alpha-only
+//    shading. `_mask` writes the mask through `@builtin(sample_mask)`;
+//    `_index` runs once per sample (`@builtin(sample_index)`) and discards
+//    the samples off the mask.
+// 3. The accumulation: fs_blend itself, blended additively into the samples
+//    the stochastic depth lets through (GreaterEqual, reverse-Z: the
+//    fragment is at or in front of the sample's winner).
+// The seed of a fragment's mask: its pixel, its face's tie-break and its
+// triangle (paper section 5: one seed per object would make the fragments
+// of a curved object occlude instead of blend), so the noise is a field
+// fixed in screen space while the object moves through it.
+struct StParams {
+    // the passes' samples (the bits of a mask)
+    samples: u32,
+    // bit 0: the seed changes every frame (the temporal blend)
+    flags: u32,
+    // added to every seed when temporal
+    frame_seed: u32,
+    _pad: u32,
+};
+// masks[R * ST_SEEDS + seed]: a random R-subset of the S sample bits
+@group(3) @binding(30) var<storage, read> st_masks: array<u32>;
+@group(3) @binding(31) var<uniform> st: StParams;
+const ST_SEEDS: u32 = 2048u;
+
+fn st_hash(v: u32) -> u32 {
+    var x = v * 747796405u + 2891336453u;
+    x = ((x >> ((x >> 28u) + 4u)) ^ x) * 277803737u;
+    return (x >> 22u) ^ x;
+}
+
+// The whole S-bit mask of a fragment of alpha `a`.
+fn st_mask(px: vec2<u32>, tie: u32, prim: u32, a: f32) -> u32 {
+    // the primitive's own seed (and the frame's when temporal) rotates the
+    // pixel's white-noise value that dithers R
+    var seed = st_hash(st_hash(tie * 0x9e3779b9u + 0x7f4a7c15u) ^ st_hash(prim + 0x632be5abu));
+    if ((st.flags & 1u) != 0u) {
+        seed = st_hash(seed + st.frame_seed);
+    }
+    let h = st_hash(px.x | (px.y << 16u));
+    let pv = vec2<f32>(f32(h >> 8u), f32(st_hash(h) >> 8u)) / 16777216.0;
+    let rot = vec2<f32>(f32(seed >> 8u), f32(st_hash(seed) >> 8u)) / 16777216.0;
+    let dither = fract(pv + rot).x;
+    // the subset is hashed from the layer's seed and the pixel, whatever the
+    // pixel values: two layers whose rotations met on one table index would
+    // otherwise share a subset over their whole overlap and hide the back one
+    let pick = f32(st_hash(seed ^ st_hash(px.x | (px.y << 16u)) ^ 0x5bd1e995u) >> 8u) / 16777216.0;
+    let s = st.samples;
+    let r = min(u32(floor(a * f32(s) + dither)), s);
+    return st_masks[r * ST_SEEDS + min(u32(pick * f32(ST_SEEDS)), ST_SEEDS - 1u)];
+}
+
+// water_clip's decision without the discard (the stochastic passes'
+// alpha-only shading, blend_alpha).
+fn water_clipped(world_pos: vec3<f32>) -> bool {
+    let h = frame.params.y;
+    if (WATER_CLIP == 0u || frame.camera_pos.z < h) {
+        return false;
+    }
+    return (WATER_CLIP == 1u) != (world_pos.z >= h);
+}
+
+// eval_material's `color.a` alone, for the alpha-only passes: the portal
+// clip, then one fetch of the base texture (none for an emissive mask, whose
+// alpha is the face colour's). The normal, specular and emissive maps, the
+// normal perturbation and the specular anti-aliasing are left out: alpha
+// does not read them.
+fn st_material_alpha(rec: DrawRecord, in: VsOut) -> f32 {
+    portal_clip(rec, in.world_pos);
+    if ((rec.flags.x & FLAG_EMISSIVE_MASK) != 0u) {
+        return rec.base_color.a;
+    }
+    // (PBR and legacy alike: the texture alpha times the face colour's)
+    return sample_tex(rec.tex.x, in.uv).a * rec.base_color.a;
+}
+
+// A blended legacy material that can glare (materialF.glsl: al = max(diffuse
+// alpha, glare) x vertex alpha, shade_material), as `legacy_glare` is not
+// zero only with gloss or environment intensity, and not on a fullbright
+// face or an emissive mask: a superset of the faces whose alpha the lighting
+// raises, so that the others keep the alpha-only shortcut. Mirrored by
+// `glare_possible` in oit_stochastic.rs.
+fn glare_possible(rec: DrawRecord) -> bool {
+    return (rec.flags.x & (FLAG_LEGACY_MAT | FLAG_ALPHA_BLEND | FLAG_FULLBRIGHT | FLAG_EMISSIVE_MASK)) == (FLAG_LEGACY_MAT | FLAG_ALPHA_BLEND)
+        && (rec.legacy.z > 0.0 || rec.legacy.w > 0.0);
+}
+
+// A blended fragment's alpha, as fs_blend computes it (the shading's own
+// result for a glaring legacy material: the shells of a body's wet layer are
+// empty texels that glare, and would otherwise drop out of the alpha and
+// depth passes while the accumulation adds their streaks); -1 where
+// fs_blend discards. The diffuse alpha alone for the rest, without the
+// shading (the alpha-only passes).
+fn blend_alpha(in: VsOut, front: bool) -> f32 {
+    if (!front && (records[in.record].flags.x & FLAG_DOUBLE_SIDED) == 0u) {
+        return -1.0;
+    }
+    let portal_aa = max(length(fwidth(in.uv)) * 2.0 * PORTAL_SURFACE_SCALE, 0.001);
+    if ((records[in.record].flags.x & FLAG_PORTAL_EFFECT) != 0u) {
+        let surface = portal_surface(records[in.record], in.uv, portal_aa);
+        if (surface.alpha < 0.004) {
+            return -1.0;
+        }
+        return surface.alpha;
+    }
+    if (water_clipped(in.world_pos)) {
+        return -1.0;
+    }
+    let rec = records[in.record];
+    let base_a = st_material_alpha(rec, in);
+    if ((rec.flags.x & FLAG_ALPHA_MASK) != 0u && base_a < rec.params.w) {
+        return -1.0;
+    }
+    var alpha = base_a;
+    // (the glare only raises the alpha where the texel's is under the face
+    // colour's: its share is the face colour's alpha)
+    if (glare_possible(rec) && base_a < rec.base_color.a) {
+        alpha = shade_material(in, eval_material(in, front)).color.a;
+    }
+    let a = alpha * rez_alpha(rec, in);
+    if (a < 0.004) {
+        return -1.0;
+    }
+    return a;
+}
+
+@fragment
+fn fs_st_alpha(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    let a = blend_alpha(in, front);
+    if (a < 0.0) {
+        discard;
+    }
+    // (the target keeps the product of (1 - alpha): Zero / OneMinusSrcAlpha)
+    return vec4<f32>(0.0, 0.0, 0.0, a);
+}
+
+// The fallback route: one invocation per sample, the samples off the mask
+// discarded (the sample mask route's module cannot always be made).
+@fragment
+fn fs_st_depth_index(in: VsOut, @builtin(front_facing) front: bool, @builtin(sample_index) s: u32, /*ST_PRIM_PARAM*/) {
+    let a = blend_alpha(in, front);
+    if (a < 0.0) {
+        discard;
+    }
+    let prim = /*ST_PRIM*/0u;
+    let m = st_mask(vec2<u32>(in.clip.xy), records[in.record].identity.x & 0xffffffu, prim, a);
+    if ((m & (1u << s)) == 0u) {
+        discard;
+    }
+}
+
+struct StMaskOut {
+    @builtin(sample_mask) mask: u32,
+};
+
+// The default route: the mask written once per fragment (the hardware ands it with
+// the fragment's coverage).
+@fragment
+fn fs_st_depth_mask(in: VsOut, @builtin(front_facing) front: bool, /*ST_PRIM_PARAM*/) -> StMaskOut {
+    let a = blend_alpha(in, front);
+    if (a < 0.0) {
+        discard;
+    }
+    let prim = /*ST_PRIM*/0u;
+    return StMaskOut(st_mask(vec2<u32>(in.clip.xy), records[in.record].identity.x & 0xffffffu, prim, a));
+}
+
+// The glow of a
+// blended face accumulated like its colour, into the samples where it is
+// at or in front of the stochastic depth (red of an R16Float target): on
+// average its glow times the transparency of the layers in front of it,
+// what fs_glow drawn after each face in order leaves in the scene alpha.
+@fragment
+fn fs_st_glow(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    return vec4<f32>(glow_amount(in, front), 0.0, 0.0, 0.0);
+}
+// ST_END
+
 // Glow amount into the scene alpha (additive, alpha channel only), drawn
 // for faces with glow after the scene: emissiveF.glsl (texture alpha x TE
 // glow, the face alpha is ignored: invisible faces still glow) and
@@ -2897,7 +3088,7 @@ fn fs_land_overlay(in: VsOut) -> @location(0) vec4<f32> {
     return vec4<f32>(sample.rgb, 0.9);
 }
 
-// Selection is a separate coverage mask, never an interior grid. Keep
+// Selection coverage is a separate mask (the halo and the pulse). Keep
 // masked texture holes but retain invisible faces for editing their TE.
 @fragment
 fn fs_selection_mask(in: VsOut) -> @location(0) vec4<f32> {
@@ -2908,6 +3099,79 @@ fn fs_selection_mask(in: VsOut) -> @location(0) vec4<f32> {
         if (rec.base_color.a >= 0.004 && alpha < rec.params.w) { discard; }
     }
     return vec4<f32>(1.0, 0.0, 0.0, 1.0);
+}
+
+// ------------------------------------------------- face-select pattern
+// Port of LLPipeline::renderSelectedFaces / LLFace::renderSelected
+// (indra/newview/pipeline.cpp, llface.cpp, originally LGPL 2.1) with the
+// highlight shader (app_settings/shaders/class1/interface/highlightF.glsl):
+// a face picked in Select face mode is drawn again with the face-select
+// texture IMG_FACE_SELECT times (1, 1, 1, 0.5), alpha blended, at the
+// face's own texture coordinates. `in.uv` is what the diffuse map reads
+// (PBR: the base color map): repeats, offset and rotation of the texture
+// entry or the base color's KHR transform, planar mapping and texture
+// animation included, so the pattern is an alignment aid that moves with
+// the Texture tab's values. The whole face is drawn, holes of an alpha
+// mask and invisible faces included, as LL draws the face's triangles.
+//
+// The asset is fetched from the grid; frame.features[FEATURE_FACE_SELECT_SLOT] is its slot once
+// loaded, 0 while it loads and offline. Meanwhile `face_select_standin`
+// draws the pattern LL describes for it ("white squares with the rounded
+// cross at the center", llface.cpp): per texture repeat, a white square
+// frame along the tile's edges and a cross with rounded ends at its
+// center, transparent elsewhere. It is drawn here, the asset is not
+// bundled.
+
+// Distance (tile units) from a capsule from -a to a of radius r.
+fn capsule_distance(p: vec2<f32>, a: vec2<f32>, r: f32) -> f32 {
+    let h = clamp(dot(p + a, 2.0 * a) / dot(2.0 * a, 2.0 * a), 0.0, 1.0);
+    return length(p + a - 2.0 * a * h) - r;
+}
+
+// Coverage of the stand-in pattern at `uv`, one tile per texture repeat;
+// `px` is the size of a pixel in tiles, for anti-aliasing and for fading
+// to the pattern's mean coverage where the tiles shrink to a few pixels
+// (what the texture's mip maps do).
+fn face_select_standin(uv: vec2<f32>, px: f32) -> f32 {
+    let p = fract(uv) - vec2<f32>(0.5);
+    // the frame: a band of 0.035 tile along each edge (two at a seam)
+    let edge = 0.5 - max(abs(p.x), abs(p.y));
+    let frame_d = edge - 0.035;
+    // the cross: two capsules 0.36 tile long, 0.06 thick
+    let cross_d = min(capsule_distance(p, vec2<f32>(0.15, 0.0), 0.03), capsule_distance(p, vec2<f32>(0.0, 0.15), 0.03));
+    let d = min(frame_d, cross_d);
+    let w = max(px, 1e-5);
+    let shape = clamp(0.5 - d / w, 0.0, 1.0);
+    // (frame 4 x 0.035 x 0.93 + cross ~ 2 x 0.36 x 0.06: about 0.17)
+    return mix(shape, 0.17, smoothstep(0.15, 0.5, px));
+}
+
+// The pattern's color and alpha: the loaded texture's sample, or the
+// stand-in's coverage while no texture is loaded.
+fn face_select_color(loaded: bool, texel: vec4<f32>, standin: f32) -> vec4<f32> {
+    // highlight_selected_color (pipeline.cpp renderHighlights) times the
+    // highlight program's diffuse color: white, half alpha
+    let c = select(vec4<f32>(1.0, 1.0, 1.0, standin), texel, loaded);
+    return vec4<f32>(c.rgb, c.a * 0.5);
+}
+
+@fragment
+fn fs_selection_pattern(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    // (sampled and differentiated before any discard)
+    let slot = frame.features[FEATURE_FACE_SELECT_SLOT];
+    let texel = sample_tex(slot, in.uv);
+    let px = max(length(dpdx(in.uv)), length(dpdy(in.uv)));
+    let standin = face_select_standin(in.uv, px);
+    let rec = records[in.record];
+    portal_clip(rec, in.world_pos);
+    // LL draws it with back faces culled (renderGeomPostDeferred's
+    // LLGLEnable cull); a double-sided face shows it on both sides
+    if (!front && (rec.flags.x & FLAG_DOUBLE_SIDED) == 0u) { discard; }
+    let c = face_select_color(slot != 0u, texel, standin);
+    if (c.a <= 0.002) { discard; }
+    var rgb = c.rgb;
+    if (!HUD_SRGB_TARGET) { rgb = ll_linear_to_srgb(rgb); }
+    return vec4<f32>(rgb, c.a);
 }
 
 // The poser's hovered part on the subject's skinned faces (Aurora's own):
@@ -3321,9 +3585,15 @@ fn vs_particle(in: PartIn) -> PartOut {
     return out;
 }
 
-@fragment
-fn fs_particle(in: PartOut) -> @location(0) vec4<f32> {
-    // slot 0 is white: the default particle is a soft round dot
+// Alpha under which a fragment is dropped: about 1/255 (0.004, the Legacy
+// Viewer's MINIMUM_ALPHA) for the particles under the water, whose colour
+// and depth then agree, except where the soft fade drops a fragment the
+// depth pass (below) keeps.
+override PART_MIN_ALPHA: f32 = 0.002;
+
+// The particle's texel: slot 0 is white, the default particle a soft round
+// dot.
+fn particle_texel(in: PartOut) -> vec4<f32> {
     let ts = sample_tex(in.texture, in.uv);
     var tex = vec4<f32>(srgb_to_linear(ts.rgb), ts.a);
     if ((in.flags & PART_LINE) != 0u) {
@@ -3335,6 +3605,15 @@ fn fs_particle(in: PartOut) -> @location(0) vec4<f32> {
         let a = clamp(1.0 - d, 0.0, 1.0);
         tex = vec4<f32>(1.0, 1.0, 1.0, a * a);
     }
+    return tex;
+}
+
+@fragment
+fn fs_particle(in: PartOut) -> @location(0) vec4<f32> {
+    // the water's side of the particle (the interleaved draws, as the
+    // blended faces)
+    water_clip(in.world_pos);
+    let tex = particle_texel(in);
     var col = tex.rgb * in.color.rgb;
     var alpha = tex.a * in.color.a;
     if ((in.flags & PART_EMISSIVE) == 0u) {
@@ -3348,10 +3627,15 @@ fn fs_particle(in: PartOut) -> @location(0) vec4<f32> {
     if (d > 0.0) {
         let sp = world_from_depth(screen_uv(in.clip.xy), d);
         let gap = distance(sp, frame.camera_pos.xyz) - distance(in.world_pos, frame.camera_pos.xyz);
-        alpha *= clamp(gap / max(frame.cam_right.w, 0.01), 0.0, 1.0);
+        let hard_fade = 0.066;
+        let soft_fade = max(frame.cam_right.w, hard_fade);
+        let opacity = clamp(in.color.a, 0.0, 1.0);
+        let hardness = smoothstep(0.97, 1.0, opacity);
+        let fade_distance = mix(soft_fade, hard_fade, hardness);
+        alpha *= clamp(gap / fade_distance, 0.0, 1.0);
     }
     col = apply_fog(col, in.world_pos);
-    if (alpha < 0.002) {
+    if (alpha < PART_MIN_ALPHA) {
         discard;
     }
     if ((in.flags & PART_ADDITIVE) != 0u) {
@@ -3359,6 +3643,19 @@ fn fs_particle(in: PartOut) -> @location(0) vec4<f32> {
         return vec4<f32>(col * alpha, 0.0);
     }
     return vec4<f32>(col * alpha, alpha);
+}
+
+// Depth of the particles under the water from about 1/255 of alpha, into
+// the single-sampled depth the water samples for its refraction and fog
+// (with MSAA the colour pass wrote another): without the soft fade, which
+// would read that depth while it is written. A fragment the fade drops in
+// the colour pass can still write its depth here.
+@fragment
+fn fs_particle_depth(in: PartOut) {
+    water_clip(in.world_pos);
+    if (particle_texel(in).a * in.color.a < PART_MIN_ALPHA) {
+        discard;
+    }
 }
 
 // ------------------------------------------------------------- impostors

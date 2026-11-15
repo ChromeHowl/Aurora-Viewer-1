@@ -7,6 +7,7 @@
 pub mod backup;
 pub mod cameratools;
 pub(crate) mod cx;
+pub mod legacy_lists;
 mod pages;
 /// Aurora's own marked in its gradient, outside Preferences too.
 pub(crate) use pages::aurora::aurora_word;
@@ -472,6 +473,8 @@ pub struct OptionsUi {
     /// The sky in use is tone mapped (not classic); set by the app each
     /// frame: the tone mapper choice is greyed otherwise.
     pub sky_tone_mapped: bool,
+    /// Imported LUTs shared with the photo editor.
+    pub world_lut_files: Vec<String>,
     /// Audio devices (set by the app) and microphone level (0..1).
     pub output_devices: Vec<String>,
     pub input_devices: Vec<String>,
@@ -559,12 +562,19 @@ pub struct OptionsUi {
     pub chat_log_shared: bool,
     /// "Erase this account's history?" confirmation open.
     confirm_erase_logs: bool,
+    /// Entries of the conversation log of the account logged in.
+    pub conversation_log_entries: usize,
+    confirm_clear_conversation_log: bool,
     /// "Reset …?" confirmation open, then the reset it said yes to, done by
     /// the next pass of the window's body.
     confirm_reset: Option<ResetAsk>,
     reset_confirmed: Option<ResetAsk>,
     /// The import of a Legacy Viewer's chat history (set by the app).
     pub chat_import: ChatImportUi,
+    /// The import of a Legacy Viewer's lists (set by the app).
+    pub legacy_lists: legacy_lists::State,
+    /// What the last one did.
+    pub legacy_lists_status: String,
     /// Files done and files to do of the import under way (set by the app).
     pub chat_log_importing: Option<(usize, usize)>,
     pub restart_voice: bool,
@@ -731,10 +741,17 @@ pub struct OptionsResult {
     pub folder: Option<(Folder, FolderChoice)>,
     /// Erase the conversation transcripts of the account (confirmed).
     pub erase_chat_logs: bool,
+    /// Clear the conversation log of the account (confirmed,
+    /// PreferenceChatClearLog).
+    pub clear_conversation_log: bool,
     /// The import window opened: look for the Legacy Viewers' folders.
     pub find_legacy_logs: bool,
     /// Import from these folders.
     pub import_legacy_logs: Option<Vec<std::path::PathBuf>>,
+    /// The lists' import window opened: read the Legacy Viewers' folders.
+    pub find_legacy_lists: bool,
+    /// Import these lists from the folder found at this index.
+    pub import_legacy_lists: Option<(usize, crate::world::legacy_lists::Parts)>,
     /// The content rating chosen (SIM_ACCESS_*), to send to the server.
     pub maturity: Option<u8>,
     /// An account setting of Privacy changed, to send to the server.
@@ -1346,8 +1363,10 @@ pub fn show(ctx: &egui::Context, p: &Palette, icons: &Icons, s: &mut Settings, s
         st.finish_undo(&mut r);
     }
     erase_logs_modal(ctx, p, st, &mut r, *open);
+    clear_conversation_log_modal(ctx, p, st, &mut r, *open);
     reset_modal(ctx, p, st, *open);
     chat_import_modal(ctx, p, st, &mut r, *open);
+    legacy_lists::modal(ctx, p, st, &mut r, *open);
     backup::restore_modal(ctx, p, s, st, &mut r, *open);
     saved_graphics::confirm(ctx, p, s, st, &mut r, *open);
     st.defaults = Some(d);
@@ -1396,6 +1415,52 @@ fn erase_logs_modal(ctx: &egui::Context, p: &Palette, st: &mut OptionsUi, r: &mu
     });
     if modal.should_close() {
         st.confirm_erase_logs = false;
+    }
+}
+
+/// PreferenceChatClearLog: asked before the conversation log is emptied.
+fn clear_conversation_log_modal(ctx: &egui::Context, p: &Palette, st: &mut OptionsUi, r: &mut OptionsResult, open: bool) {
+    if !(st.confirm_clear_conversation_log && open) {
+        return;
+    }
+    let modal = crate::ui::widgets::Modal::new(egui::Id::unique("options_clear_conversation_log")).show(ctx, |ui| {
+        ui.set_width(360.0);
+        ui.label(
+            RichText::new(aurora_i18n::tr!("ui-options-chat-logs-clear-title"))
+                .size(15.0)
+                .strong()
+                .color(p.ink),
+        );
+        ui.add_space(6.0);
+        ui.label(
+            RichText::new(aurora_i18n::tr!("ui-options-chat-logs-clear-text"))
+                .size(12.5)
+                .color(p.muted),
+        );
+        ui.add_space(10.0);
+        ui.horizontal(|ui| {
+            use super::widgets::{ActionKind, action_button};
+            let size = Vec2::new(0.0, 26.0);
+            if action_button(
+                ui,
+                p,
+                "trash-filled",
+                aurora_i18n::tr!("ui-options-chat-logs-clear-confirm"),
+                ActionKind::Danger,
+                size,
+            )
+            .clicked()
+            {
+                r.clear_conversation_log = true;
+                st.confirm_clear_conversation_log = false;
+            }
+            if action_button(ui, p, "x", aurora_i18n::tr!("common-cancel"), ActionKind::Flat, size).clicked() {
+                st.confirm_clear_conversation_log = false;
+            }
+        });
+    });
+    if modal.should_close() {
+        st.confirm_clear_conversation_log = false;
     }
 }
 
@@ -1596,14 +1661,7 @@ fn sidebar(
     ui.add_space(12.0);
     let width = ui.available_width();
     ui.horizontal(|ui| {
-        let clear_w = if st.query.is_empty() { 0.0 } else { 26.0 };
-        let field = super::widgets::search_box(
-            ui,
-            p,
-            &mut st.query,
-            aurora_i18n::tr!("ui-options-search-settings"),
-            width - clear_w,
-        );
+        let field = super::widgets::clearable_search_box(ui, p, &mut st.query, aurora_i18n::tr!("ui-options-search-settings"), width);
         if st.focus_search && !ui.is_sizing_pass() && ui.is_enabled() {
             st.focus_search = false;
             field.request_focus();
@@ -1611,9 +1669,6 @@ fn sidebar(
         if field.changed() {
             st.modified_view = false;
             st.cancel_capture();
-        }
-        if !st.query.is_empty() && super::widgets::icon_button(ui, p, "x", aurora_i18n::tr!("common-clear"), true) {
-            st.query.clear();
         }
         if field.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             st.query.clear();

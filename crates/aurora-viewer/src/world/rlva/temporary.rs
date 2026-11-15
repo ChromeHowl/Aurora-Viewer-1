@@ -16,7 +16,7 @@ impl World {
                             .inventory
                             .items
                             .get(&item)
-                            .is_some_and(|item| !self.rlva_folder_allowed_in(&locks, item.parent, false, Uuid::nil())))
+                            .is_some_and(|it| !self.rlva_item_folders_removable_in(&locks, item, it.parent, Uuid::nil())))
             })
     }
 
@@ -48,19 +48,9 @@ impl World {
 
     /// Resolve only a real linkset worn by this agent, including child prims.
     pub(crate) fn rlva_own_attachment_root(&self, source: Uuid) -> Option<Uuid> {
-        let mut index = self.objects.index_of_uuid(&source)?;
-        for _ in 0..64 {
-            let object = self.objects.get(index)?;
-            let parent = self
-                .objects
-                .parent_of(object)
-                .and_then(|index| self.objects.get(index).map(|parent| (index, parent)))?;
-            if parent.1.is_avatar() {
-                return (parent.1.full_id == self.agent_id && object.attachment_point() != 0).then_some(object.full_id);
-            }
-            index = parent.0;
-        }
-        None
+        self.attachment_wearer(source)
+            .filter(|(wearer, _)| *wearer == self.agent_id)
+            .map(|(_, root)| root)
     }
 
     pub(super) fn rlva_worn_attachment_points(&self) -> std::collections::HashMap<Uuid, u8> {
@@ -137,15 +127,21 @@ impl World {
             .is_some_and(|object| object.attachment_point() != 0 && self.rlva_attachment_remove_at(item, object.attachment_point(), actor))
     }
 
+    /// An attachment with no inventory record yet counts too: an object worn
+    /// from the ground comes back with an item the inventory has not heard
+    /// of, and only its point can be judged. RlvAttachmentLockWatchdog::onAttach
+    /// (rlvlocks.cpp, originally LGPL 2.1) only refuses what a recorded wear
+    /// or a pending reattach refuses, so this is never looser than it.
     pub(super) fn rlva_temporary_addable(&self, item: Uuid, point: u8, _actor: Uuid) -> bool {
-        let Some(key) = self.rlva_temporary_attachment(item) else {
+        let Some(worn) = self
+            .rlva_temporary_attachment(item)
+            .and_then(|key| self.objects.index_of(&key))
+            .or_else(|| self.worn_attachment(&item))
+        else {
             return false;
         };
         let point = if point == 0 {
-            self.objects
-                .index_of(&key)
-                .and_then(|i| self.objects.get(i))
-                .map_or(0, |o| o.attachment_point())
+            self.objects.get(worn).map_or(0, |o| o.attachment_point())
         } else {
             point
         };

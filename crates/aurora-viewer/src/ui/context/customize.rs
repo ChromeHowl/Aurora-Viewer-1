@@ -166,6 +166,12 @@ impl Catalog {
                     layout::Kind::Action(index)
                 }
             };
+            // Detach and Delete sits in the bottom icon bar, beside the lock,
+            // where Inventory's menu puts it (slot 6).
+            let (zone, slot) = match &entry.kind {
+                entries::Kind::Action(CtxAction::DetachDelete(_)) if parent.is_empty() => ("bottom", Some(6)),
+                _ => (zone, None),
+            };
             self.originals.insert(id.clone(), entry.clone());
             self.entries.push(layout::Entry {
                 id,
@@ -175,7 +181,7 @@ impl Catalog {
                 checked: entry.checked,
                 kind,
                 zone: zone.into(),
-                slot: None,
+                slot,
             });
         }
     }
@@ -271,6 +277,7 @@ fn action_key(action: &CtxAction) -> String {
         CtxAction::ObjectProfile(..) => "ObjectProfile",
         CtxAction::SaveAs(_, crate::build::export::Format::Collada) => "SaveCollada",
         CtxAction::SaveAs(_, crate::build::export::Format::Obj) => "SaveObj",
+        CtxAction::SaveAs(_, crate::build::export::Format::Gltf) => "SaveGltf",
         CtxAction::Pathfinding { characters: false, .. } => "RegionObjects",
         CtxAction::Pathfinding { characters: true, .. } => "PathfindingCharacters",
         CtxAction::ResetMeshLod(..) => "ResetMeshLod",
@@ -282,6 +289,7 @@ fn action_key(action: &CtxAction) -> String {
         CtxAction::ForgetHudScale(..) => "ForgetHudScale",
         CtxAction::SetHudMoveLock(..) => "SetHudMoveLock",
         CtxAction::Detach(..) => "Detach",
+        CtxAction::DetachDelete(..) => "DetachDelete",
         CtxAction::AttachmentInventory(..) => "AttachmentInventory",
         CtxAction::EditAttachment(..) => "EditAttachment",
         CtxAction::TouchWorn(..) => "TouchWorn",
@@ -306,6 +314,7 @@ fn action_key(action: &CtxAction) -> String {
         CtxAction::Call(..) => "Call",
         CtxAction::ShowHistory(..) => "ShowHistory",
         CtxAction::OfferTeleport(..) => "OfferTeleport",
+        CtxAction::Poke(..) => "Poke",
         CtxAction::AnswerTeleport { .. } => "AnswerTeleport",
         CtxAction::AnswerInventoryOffer { .. } => "AnswerInventoryOffer",
         CtxAction::Profile(..) => "Profile",
@@ -534,6 +543,32 @@ mod tests {
     }
 
     #[test]
+    fn our_attachments_detach_and_delete_sits_in_the_bottom_icon_bar_like_inventorys() {
+        let target = Target::Attachment {
+            key: crate::world::objects::ObjKey { region: 1, local_id: 3 },
+        };
+        let mut facts = Facts::default();
+        facts.object.detach = true;
+        facts.object.attachment_item = Some(Uuid::from_u128(5));
+        let catalog = Catalog::new(&entries::world_menu(&target, &facts, Vec3::ZERO));
+        let entry = catalog
+            .entries
+            .iter()
+            .find(|e| matches!(e.kind, layout::Kind::Action(i) if matches!(catalog.commands[i].kind, entries::Kind::Action(CtxAction::DetachDelete(_)))))
+            .expect("Detach and Delete");
+        assert_eq!(
+            (entry.zone.as_str(), entry.slot, entry.icon.as_str()),
+            ("bottom", Some(6), "trash-x-filled")
+        );
+        let layout = layout::Layout::default();
+        let resolved = layout.resolve(&catalog.entries);
+        let slots = layout.icon_slots("bottom", &resolved["bottom"]);
+        assert_eq!(slots[6].as_ref(), Some(&entry.id), "beside the lock, in Inventory's place");
+        assert_eq!(slots[7].as_deref(), Some(layout::LOCK));
+        assert!(resolved[layout::TEXT].iter().all(|e| e.id != entry.id), "not also a text row");
+    }
+
+    #[test]
     fn scene_menu_saved_orders_use_current_identity_and_current_permissions() {
         let facts = Facts {
             object: super::super::ObjectFacts {
@@ -609,6 +644,56 @@ mod tests {
         assert!(
             rows.iter()
                 .any(|row| matches!(row.kind, entries::Kind::Action(CtxAction::CustomizeMenu(_))))
+        );
+    }
+
+    #[test]
+    fn scene_menu_saved_inspect_everything_worn_keeps_its_command_on_a_worn_object() {
+        let (avatar, worn) = (Uuid::from_u128(7), Uuid::from_u128(8));
+        let m = ContextMenu {
+            target: Target::Avatar {
+                id: avatar,
+                own: false,
+                attachment: Some(worn),
+            },
+            ..menu(1)
+        };
+        let facts = Facts {
+            worn: true,
+            ..Default::default()
+        };
+        let entries = entries::world_menu(&m.target, &facts, Vec3::ZERO);
+        // the id arrangements saved for Information › Inspect before it inspected the worn object
+        let saved = "/group:info-circle-filled:0/InspectAvatar:0";
+        let catalog = Catalog::new(&entries);
+        let row = catalog.entries.iter().find(|e| e.id == saved).expect("saved row");
+        let layout::Kind::Action(index) = row.kind else {
+            panic!("action row")
+        };
+        assert!(matches!(catalog.commands[index].kind, entries::Kind::Action(CtxAction::InspectAvatar(id)) if id == avatar));
+        assert_eq!(row.label, aurora_i18n::tr!("ui-context-inspect-worn"));
+        let mut prefs = Preferences::default();
+        profile(&mut prefs, scope(&m.target, &facts))
+            .layout
+            .placements
+            .insert(saved.into(), layout::HIDDEN.into());
+        let (rows, _) = radial_entries(&m, &facts, &entries, &prefs);
+        let information = rows
+            .iter()
+            .find_map(|row| match &row.kind {
+                entries::Kind::Submenu(children) if row.label == aurora_i18n::tr!("ui-context-information-options") => Some(children),
+                _ => None,
+            })
+            .expect("Information");
+        assert!(
+            information
+                .iter()
+                .any(|row| matches!(row.kind, entries::Kind::Action(CtxAction::Inspect(id)) if id == worn))
+        );
+        assert!(
+            !information
+                .iter()
+                .any(|row| matches!(row.kind, entries::Kind::Action(CtxAction::InspectAvatar(_))))
         );
     }
 

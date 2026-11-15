@@ -329,6 +329,31 @@ pub struct DrawRecord {
     /// Finite portal cut: center.xyz and encoded horizontal entry direction.
     /// Only active with PORTAL_CLIP; zero is also a valid opening at the origin.
     pub portal_clip: [f32; 4],
+    /// x: the face's identity for the order-independent transparency
+    /// ([`oit_tie`]: the object's full id and the face's index hashed, the
+    /// same on every launch; the stochastic masks are seeded by it and the
+    /// triangle, oit_stochastic.rs). y, z, w: spare.
+    pub identity: [u32; 4],
+}
+
+/// The identity of a face for the order-independent transparency
+/// (`DrawRecord::identity[0]`): a hash of the object's full id (its UUID,
+/// not the region's local id) and of the face's index, the same on every
+/// frame and every launch, whatever the order the objects were loaded in or
+/// where their geometry sits (the stochastic masks are seeded by it; the
+/// shader keeps the low 24 bits).
+pub fn oit_tie(id: [u8; 16], face: u32) -> u32 {
+    // FNV-1a over the id and the face, then a final mix so that every byte
+    // reaches the low 24 bits
+    let mut h: u32 = 0x811c_9dc5;
+    for b in id.into_iter().chain(face.to_le_bytes()) {
+        h = (h ^ u32::from(b)).wrapping_mul(0x0100_0193);
+    }
+    h ^= h >> 16;
+    h = h.wrapping_mul(0x7feb_352d);
+    h ^= h >> 15;
+    h = h.wrapping_mul(0x846c_a68b);
+    h ^ (h >> 16)
 }
 
 /// Modes of `DrawRecord::rez` (`rez_apply` in object.wgsl).
@@ -367,6 +392,7 @@ impl Default for DrawRecord {
             spec_uv: [1.0, 1.0, 0.0, 0.0],
             legacy: [0.0; 4],
             spec_color: [1.0, 1.0, 1.0, 0.0],
+            identity: [0; 4],
             anim: [0; 4],
             anim_xf: [0.0; 4],
             rez: [0; 4],
@@ -699,6 +725,23 @@ pub struct DrawLists {
     pub reflection_terrain_pbr: Vec<DrawCmd>,
     /// Particles, sorted back to front.
     pub particles: Vec<ParticleInstance>,
+    /// Where `particles` come among the non-rigged blended faces
+    /// (`ParticleRun`), in drawing order: the particles up to each run's
+    /// `end` are drawn just before blended face `before`. The particles
+    /// past the last run's `end` are drawn after the last blended face.
+    /// Empty: one draw of all of them after the faces (the interleave is
+    /// off, or nothing to interleave).
+    pub particle_runs: Vec<ParticleRun>,
+    /// The particles on the far side of the water surface while the camera
+    /// is above it (a particle crossing the surface is in both lists),
+    /// back to front: drawn with the blended faces under the water, before
+    /// the water, clipped to their side and writing depth.
+    pub particles_under: Vec<ParticleInstance>,
+    /// `particle_runs` of `particles_under` against `blend_under_water`.
+    pub particle_under_runs: Vec<ParticleRun>,
+    /// How many particles are in both `particles` and `particles_under`
+    /// (crossing the water surface): counted once in the statistics.
+    pub particle_crossing: u32,
     /// Non-blended faces with glow (LL PASS_GLOW): drawn again to
     /// accumulate the glow amount in the scene alpha, before the blended
     /// faces (which dim the glow behind them).
@@ -728,6 +771,11 @@ pub struct DrawLists {
     /// Selected texture faces (LLPipeline::renderSelectedFaces).
     pub select_faces: Vec<DrawCmd>,
     pub hud_select_faces: Vec<DrawCmd>,
+    /// The faces of `select_faces` / `hud_select_faces` picked with the
+    /// build tool's Select face mode: they also get the face-select
+    /// pattern laid along their texture mapping (LLFace::renderSelected).
+    pub select_pattern: Vec<DrawCmd>,
+    pub hud_select_pattern: Vec<DrawCmd>,
     /// The poser subject's skinned faces, while a part is hovered: the part
     /// is kept on them by its joints (`FrameParams::part_joints`).
     pub part_faces: Vec<DrawCmd>,
@@ -803,6 +851,8 @@ impl DrawLists {
         self.select_child.clear();
         self.select_faces.clear();
         self.hud_select_faces.clear();
+        self.select_pattern.clear();
+        self.hud_select_pattern.clear();
         self.part_faces.clear();
     }
     /// Make `self` a copy of `src`, keeping the memory `self` already has:
@@ -845,6 +895,10 @@ impl DrawLists {
         self.reflection_terrain.clone_from(&src.reflection_terrain);
         self.reflection_terrain_pbr.clone_from(&src.reflection_terrain_pbr);
         self.particles.clone_from(&src.particles);
+        self.particle_runs.clone_from(&src.particle_runs);
+        self.particles_under.clone_from(&src.particles_under);
+        self.particle_under_runs.clone_from(&src.particle_under_runs);
+        self.particle_crossing = src.particle_crossing;
         self.water_events.clone_from(&src.water_events);
         self.water_contacts.clone_from(&src.water_contacts);
         self.water_ground.clone_from(&src.water_ground);
@@ -860,6 +914,8 @@ impl DrawLists {
         self.select_child.clone_from(&src.select_child);
         self.select_faces.clone_from(&src.select_faces);
         self.hud_select_faces.clone_from(&src.hud_select_faces);
+        self.select_pattern.clone_from(&src.select_pattern);
+        self.hud_select_pattern.clone_from(&src.hud_select_pattern);
         self.part_faces.clone_from(&src.part_faces);
         self.impostor_captures.clone_from(&src.impostor_captures);
         self.impostor_sprites.clone_from(&src.impostor_sprites);
@@ -901,6 +957,10 @@ impl DrawLists {
         self.reflection_terrain.clear();
         self.reflection_terrain_pbr.clear();
         self.particles.clear();
+        self.particle_runs.clear();
+        self.particles_under.clear();
+        self.particle_under_runs.clear();
+        self.particle_crossing = 0;
         self.water_events.clear();
         self.water_contacts.clear();
         self.water_ground = Default::default();
@@ -919,6 +979,8 @@ impl DrawLists {
         self.select_child.clear();
         self.select_faces.clear();
         self.hud_select_faces.clear();
+        self.select_pattern.clear();
+        self.hud_select_pattern.clear();
         self.part_faces.clear();
         self.impostor_captures.clear();
         self.impostor_sprites.clear();
@@ -961,6 +1023,84 @@ pub struct ParticleInstance {
     /// Orientation axis for ribbons / velocity-aligned particles.
     pub axis: [f32; 3],
     pub glow: f32,
+}
+
+/// A stretch of particles drawn between two blended faces: the particles
+/// from the end of the previous run (0 for the first) up to `end` come just
+/// before blended face `before` (an index in the list the runs belong to;
+/// its length: after the last face). Runs are in drawing order, with
+/// `before` and `end` increasing. Made by `scene::particle_order`.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Pod, Zeroable)]
+pub struct ParticleRun {
+    pub before: u32,
+    pub end: u32,
+}
+
+/// One step of drawing the blended faces with the particles between them
+/// (`walk_runs`): the faces `from..to` of the list, or the particles
+/// `from..to` of the list the runs belong to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunStep {
+    Faces { from: u32, to: u32 },
+    Particles { from: u32, to: u32 },
+}
+
+/// The steps that draw the faces `first_face..end_face` and the particles
+/// `0..n_particles` in the order of `runs`: every index is clamped to what
+/// is really there (faces uploaded, particles uploaded), a run before the
+/// first face or past the last one is moved onto it, and what the runs leave
+/// out comes last (the faces, then the particles). Empty steps are not
+/// produced. A run whose particles were all drawn already makes none.
+pub fn walk_runs(runs: &[ParticleRun], first_face: u32, end_face: u32, n_particles: u32, mut step: impl FnMut(RunStep)) {
+    let mut face_from = first_face.min(end_face);
+    let mut part_from = 0u32;
+    for run in runs {
+        let before = run.before.clamp(face_from, end_face);
+        let end = run.end.min(n_particles).max(part_from);
+        if before > face_from {
+            step(RunStep::Faces {
+                from: face_from,
+                to: before,
+            });
+            face_from = before;
+        }
+        if end > part_from {
+            step(RunStep::Particles { from: part_from, to: end });
+            part_from = end;
+        }
+    }
+    if end_face > face_from {
+        step(RunStep::Faces {
+            from: face_from,
+            to: end_face,
+        });
+    }
+    if n_particles > part_from {
+        step(RunStep::Particles {
+            from: part_from,
+            to: n_particles,
+        });
+    }
+}
+
+/// How many particle draws `walk_runs` makes.
+pub fn drawn_runs(runs: &[ParticleRun], first_face: u32, end_face: u32, n_particles: u32) -> u32 {
+    let mut n = 0;
+    walk_runs(runs, first_face, end_face, n_particles, |step| {
+        if matches!(step, RunStep::Particles { .. }) {
+            n += 1;
+        }
+    });
+    n
+}
+
+/// `AURORA_PARTICLE_INTERLEAVE=0` draws the particles as before this
+/// feature: all after the blended faces and the overlays, sorted by radial
+/// distance, not clipped at the water. Read once.
+pub fn particle_interleave() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("AURORA_PARTICLE_INTERLEAVE").as_deref() != Ok("0"))
 }
 
 pub mod particle_flags {
@@ -1136,6 +1276,11 @@ pub struct SnapshotSpec {
     /// tiles of different sizes, at full and half resolution side by
     /// side, would differ along their border.
     pub photo: (u32, u32),
+    /// A face of a 360° capture: the capture camera's step
+    /// (`CAPTURE_CAMERAS`). The frame is copied into the capture's cube on
+    /// the GPU and answers nothing; the main thread does not wait for it, and
+    /// the faces share one set of render targets (equirect.rs).
+    pub cube: Option<u8>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1218,6 +1363,11 @@ pub struct RenderSettings {
     /// Screen-space contact shadows of the sun or the moon (contact_shadows.rs),
     /// with the sun shadows only.
     pub contact_shadows: bool,
+    /// Soft sun shadows (soft_shadows.rs, experimental): the penumbra of the
+    /// sun's shadows widens with the distance of the caster, from a
+    /// screen-space mask drawn once per frame. Off: the shadows are exactly
+    /// the ones of before (nothing is created or drawn).
+    pub soft_shadows: bool,
     /// Geometric specular anti-aliasing of the objects' highlights
     /// (common.wgsl `specular_aa_roughness`, AURORA_SPECULAR_AA).
     pub specular_aa: bool,
@@ -1247,6 +1397,12 @@ pub struct RenderSettings {
     pub probe_slots: u32,
     /// GPU occlusion culling (UseOcclusion).
     pub occlusion: bool,
+    /// Order-independent transparency (oit_stochastic.rs): the blended
+    /// faces drawn with depth-based stochastic transparency rather than in
+    /// the per-face sorted order (`scene/blend_order.rs`, #3060), in every
+    /// anti-aliasing mode. Off (the default: an opt-in), they are blended
+    /// in that order and nothing of the method is made, or kept.
+    pub oit: bool,
 }
 
 impl RenderSettings {
@@ -1277,6 +1433,7 @@ impl Default for RenderSettings {
             screen_indirect: false,
             screen_indirect_intensity: 1.0,
             contact_shadows: false,
+            soft_shadows: false,
             specular_aa: true,
             water_reflection_scale: 0.25,
             mirror_scale: 0.25,
@@ -1287,6 +1444,7 @@ impl Default for RenderSettings {
             anisotropy: 8,
             probe_slots: 32,
             occlusion: true,
+            oit: false,
         }
     }
 }
@@ -1595,6 +1753,10 @@ pub struct FrameParams {
     pub selection_pulse: f32,
     /// Logical halo width scaled to display pixels.
     pub selection_scale: f32,
+    /// Texture slot of the face-select pattern (the grid asset
+    /// IMG_FACE_SELECT) once it is loaded; 0 while it loads and offline,
+    /// where the shader draws its procedural stand-in.
+    pub face_select_texture: u32,
     /// The poser's hovered part (Aurora's own): bit j for the skeleton's
     /// palette joint j, drawn on `part_faces` in `part_color` (linear RGBA)
     /// as a selection's halo with a light tint inside.
@@ -1661,10 +1823,30 @@ pub struct FrameParams {
     /// Aurora's bloom (bloom.rs): the share of the light over the
     /// threshold spread around the bright parts, 0 = off.
     pub bloom: f32,
+    /// Light shafts from the sun through the bright parts of the image
+    /// (0 = off, up to 2).
+    pub god_rays: f32,
+    /// How thick the air of the sun rays is (1 = the default haze).
+    pub god_rays_haze: f32,
+    /// How tightly their glow gathers around the sun (0 to 0.9).
+    pub god_rays_glow: f32,
+    /// The resolution the sun rays draw at, a share of the image's size
+    /// (0.25 to 1).
+    pub god_rays_res: f32,
+    /// How bright the beams are away from the sun, from the side and
+    /// behind (0 only toward the sun).
+    pub god_rays_side: f32,
     pub water_height: f32,
     pub shadows: bool,
     /// Distance covered by the shadow cascades.
     pub shadow_distance: f32,
+    /// With soft shadows: the size of the light, 1 = 2.3 degrees across (the
+    /// real sun, 0.53 degrees, is a softness of 0.23), 0 = a light with no size, the shadows
+    /// of before (the Preferences' value, or the photo's own).
+    pub shadow_softness: f32,
+    /// How dark the sun's shadows are, 1 = as before, 0 = no shadow (the
+    /// Preferences' value, or the photo's own).
+    pub shadow_intensity: f32,
     pub lights: Vec<PointLight>,
     /// The projectors of `lights` that cast shadows (drawn with `shadows`).
     pub spot_shadows: [Option<SpotShadow>; crate::projector_shadows::MAX_PROJECTOR_SHADOWS],
@@ -1724,6 +1906,24 @@ pub struct FrameParams {
     /// place of what lies under it, as waterF.glsl draws it without
     /// TRANSPARENT_WATER (common.wgsl FEATURE_OPAQUE_WATER).
     pub opaque_water: bool,
+    /// Volumetric clouds in the place of the Legacy Viewer's flat layer
+    /// (clouds.rs); None: the Legacy layer, with nothing else running.
+    pub clouds: Option<CloudsFrame>,
+}
+
+/// The volumetric clouds' inputs that are not in the sky: where the camera
+/// is on the grid, which the pattern is anchored to.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct CloudsFrame {
+    /// The south-west corner of the region the camera's position is relative
+    /// to (metres on the grid): positions stay continuous across regions.
+    pub region_origin: [f64; 2],
+    /// Size of the cloud texture as loaded so far (it grows while it loads;
+    /// the weather map is drawn again for it).
+    pub texture_size: (u32, u32),
+    /// Revision of the cloud texture's texels (`Textures::revision_of`):
+    /// a reload of the same size changes it, and the weather map follows.
+    pub texture_revision: u64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1894,6 +2094,8 @@ pub struct RenderStats {
     /// the footprints' map and the snow cover read it.
     pub snow_lying: bool,
     pub draws: u32,
+    /// Draws of particles between the blended faces (`ParticleRun`s drawn).
+    pub particle_runs: u32,
     pub shadow_draws: u32,
     pub shadow: ShadowStats,
     pub triangles: u64,
@@ -1955,6 +2157,12 @@ pub struct RenderStats {
     /// GPU time of the contact shadows alone (ms), part of
     /// [`GpuElement::Effects`].
     pub gpu_contact: Option<f32>,
+    /// GPU time of the volumetric clouds' compute passes and weather map
+    /// (ms), part of [`GpuElement::TerrainSky`]; None while off.
+    pub gpu_clouds: Option<f32>,
+    /// GPU time of the soft sun shadows alone (ms), part of
+    /// [`GpuElement::Effects`] (0 while off).
+    pub gpu_soft: Option<f32>,
     /// GPU time of the bloom levels alone (ms), part of
     /// [`GpuElement::Post`] (0 while off).
     pub gpu_bloom: Option<f32>,
@@ -2248,7 +2456,12 @@ mod tests {
         scene.select_root.push(cmd(5));
         scene.select_faces.push(cmd(6));
         scene.hud_select_faces.push(cmd(22));
+        scene.select_pattern.push(cmd(30));
+        scene.hud_select_pattern.push(cmd(31));
         scene.particles.push(ParticleInstance::default());
+        scene.particle_runs.push(ParticleRun { before: 1, end: 1 });
+        scene.particles_under.push(ParticleInstance::default());
+        scene.particle_under_runs.push(ParticleRun { before: 0, end: 1 });
         scene.impostor_sprites.push(ImpostorSprite {
             center: [1.0, 2.0, 3.0],
             tile: 3,
@@ -2300,7 +2513,11 @@ mod tests {
         assert_eq!(packet.terrain_pbr[0].record, 28);
         assert_eq!(packet.select_faces[0].record, 6);
         assert_eq!(packet.hud_select_faces[0].record, 22);
+        assert_eq!(packet.select_pattern[0].record, 30);
+        assert_eq!(packet.hud_select_pattern[0].record, 31);
         assert_eq!((packet.particles.len(), packet.impostor_sprites.len()), (1, 1));
+        assert_eq!(packet.particle_runs, [ParticleRun { before: 1, end: 1 }]);
+        assert_eq!((packet.particles_under.len(), packet.particle_under_runs.len()), (1, 1));
         assert_eq!(packet.impostor_captures[0].blend[0].record, 12);
         assert_eq!(packet.gpu.map(|g| g.draw_distance), Some(128.0));
         // what the earlier frame held is gone, its memory is reused
@@ -2313,6 +2530,7 @@ mod tests {
         assert!(scene.hud_view.is_none());
         assert!(scene.blend_under_water.is_empty());
         assert!(scene.blend_under_double_sided.is_empty());
+        assert!(scene.particle_runs.is_empty() && scene.particles_under.is_empty() && scene.particle_under_runs.is_empty());
         assert!(scene.hud_opaque.is_empty());
         assert!(scene.hud_debug_red.is_empty());
         assert!(scene.creation_preview.is_empty());
@@ -2322,6 +2540,8 @@ mod tests {
         assert!(scene.hud_debug_blue.is_empty());
         assert!(scene.select_faces.is_empty());
         assert!(scene.hud_select_faces.is_empty());
+        assert!(scene.select_pattern.is_empty());
+        assert!(scene.hud_select_pattern.is_empty());
         assert!(packet.hud_view.is_some());
         assert_eq!(packet.hud_opaque[0].record, 20);
         assert!(packet.gpu.is_some());
@@ -2340,11 +2560,12 @@ mod tests {
     /// matrix, then one 16-byte vector per field).
     #[test]
     fn draw_record_layout_matches_wgsl() {
-        assert_eq!(std::mem::size_of::<DrawRecord>(), 64 + 14 * 16);
+        assert_eq!(std::mem::size_of::<DrawRecord>(), 64 + 15 * 16);
         assert_eq!(std::mem::offset_of!(DrawRecord, anim), 64 + 10 * 16);
         assert_eq!(std::mem::offset_of!(DrawRecord, anim_xf), 64 + 11 * 16);
         assert_eq!(std::mem::offset_of!(DrawRecord, rez), 64 + 12 * 16);
         assert_eq!(std::mem::offset_of!(DrawRecord, portal_clip), 64 + 13 * 16);
+        assert_eq!(std::mem::offset_of!(DrawRecord, identity), 64 + 14 * 16);
         let wgsl = include_str!("shaders/common.wgsl");
         let start = wgsl.find("struct DrawRecord {").expect("DrawRecord in common.wgsl");
         let body = &wgsl[start..start + wgsl[start..].find("};").expect("end of DrawRecord")];
@@ -2371,9 +2592,28 @@ mod tests {
                 "anim",
                 "anim_xf",
                 "rez",
-                "portal_clip"
+                "portal_clip",
+                "identity"
             ]
         );
+    }
+
+    /// The OIT tie-break depends on the object's id and the face's index
+    /// only: the same value whenever they are the same, another one when
+    /// either differs, nothing else in it (no slot, no offset, no order).
+    #[test]
+    fn oit_tie_depends_on_the_id_and_the_face_only() {
+        let a = [0x11; 16];
+        let b = [0x22; 16];
+        assert_eq!(oit_tie(a, 3), oit_tie(a, 3));
+        assert_ne!(oit_tie(a, 3), oit_tie(a, 4));
+        assert_ne!(oit_tie(a, 3), oit_tie(b, 3));
+        // the shader keeps 24 bits: distinct there too for these
+        let low = |v: u32| v & 0xff_ffff;
+        assert_ne!(low(oit_tie(a, 3)), low(oit_tie(a, 4)));
+        assert_ne!(low(oit_tie(a, 3)), low(oit_tie(b, 3)));
+        // a face of a system avatar part: its own namespace of indices
+        assert_ne!(low(oit_tie(a, 0)), low(oit_tie(a, 0x8000)));
     }
 
     #[test]
@@ -2557,6 +2797,56 @@ mod tests {
         for src in [object, include_str!("shaders/env.wgsl")] {
             assert!(!src.contains("out.clip = frame.eye_view_proj * ep;"));
         }
+    }
+
+    fn steps(runs: &[ParticleRun], first: u32, end: u32, n: u32) -> Vec<RunStep> {
+        let mut v = Vec::new();
+        walk_runs(runs, first, end, n, |s| v.push(s));
+        v
+    }
+
+    #[test]
+    fn walk_runs_alternates_faces_and_particles_in_order() {
+        use RunStep::*;
+        let runs = [ParticleRun { before: 3, end: 2 }, ParticleRun { before: 5, end: 4 }];
+        assert_eq!(
+            steps(&runs, 2, 8, 6),
+            [
+                Faces { from: 2, to: 3 },
+                Particles { from: 0, to: 2 },
+                Faces { from: 3, to: 5 },
+                Particles { from: 2, to: 4 },
+                Faces { from: 5, to: 8 },
+                Particles { from: 4, to: 6 },
+            ]
+        );
+        assert_eq!(drawn_runs(&runs, 2, 8, 6), 3);
+    }
+
+    #[test]
+    fn walk_runs_without_runs_draws_the_faces_then_all_the_particles() {
+        use RunStep::*;
+        assert_eq!(steps(&[], 0, 4, 3), [Faces { from: 0, to: 4 }, Particles { from: 0, to: 3 }]);
+        assert!(steps(&[], 0, 0, 0).is_empty());
+    }
+
+    #[test]
+    fn walk_runs_clamps_to_what_was_uploaded() {
+        use RunStep::*;
+        // a run before the first face, one past the last, and ends beyond
+        // the uploaded particles or going back
+        let runs = [
+            ParticleRun { before: 0, end: 2 },
+            ParticleRun { before: 99, end: 50 },
+            ParticleRun { before: 100, end: 1 },
+        ];
+        assert_eq!(
+            steps(&runs, 3, 6, 4),
+            [Particles { from: 0, to: 2 }, Faces { from: 3, to: 6 }, Particles { from: 2, to: 4 },]
+        );
+        // fewer faces drawn than the run's `before` expects: nothing out of range
+        assert_eq!(steps(&runs, 3, 3, 4), [Particles { from: 0, to: 2 }, Particles { from: 2, to: 4 }]);
+        assert_eq!(drawn_runs(&runs, 3, 6, 0), 0);
     }
 
     #[test]

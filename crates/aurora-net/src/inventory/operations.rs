@@ -480,6 +480,21 @@ where
     let mut moved = false;
     let resolve = |ids: &HashMap<Uuid, Uuid>, id: Uuid| ids.get(&id).copied().unwrap_or(id);
     for (index, op) in change.operations.iter().enumerate() {
+        let kind = match op {
+            Operation::Folder { .. } => "Folder",
+            Operation::Patch { .. } => "Patch",
+            Operation::Links { .. } => "Links",
+            Operation::Delete { .. } => "Delete",
+            Operation::Purge(_) => "Purge",
+        };
+        macro_rules! log_operation_error {
+            ($result:expr) => {
+                $result.map_err(|error: String| {
+                    log::warn!("Inventory operation {index} ({kind}) failed: {error}");
+                    error
+                })?
+            };
+        }
         progress(Progress {
             phase: Phase::Updating,
             completed: index,
@@ -499,19 +514,21 @@ where
                     unreachable!("remap keeps the kind")
                 };
                 let name = folder_name(name);
-                let made = create_folder_without_ais(
-                    http,
-                    create_cap,
-                    fetch_cap,
-                    owner,
-                    *id,
-                    *parent,
-                    &name,
-                    *type_default as i8,
-                    send_edit,
-                    announce,
-                )
-                .await?;
+                let made = log_operation_error!(
+                    create_folder_without_ais(
+                        http,
+                        create_cap,
+                        fetch_cap,
+                        owner,
+                        *id,
+                        *parent,
+                        &name,
+                        *type_default as i8,
+                        send_edit,
+                        announce,
+                    )
+                    .await
+                );
                 let Some(actual) = made else {
                     return Err(aurora_i18n::tr!("inventory-operations-the-server-did-not-confirm-the-new-folder-reload").into());
                 };
@@ -527,7 +544,7 @@ where
                 continue;
             }
             for edit in udp_edits(op, &change.known)? {
-                send_edit(edit).await?;
+                log_operation_error!(send_edit(edit).await);
             }
             // a new folder went its own way above
             match op {
@@ -536,12 +553,14 @@ where
                     if id.is_nil() || parent.is_nil() {
                         return Err(aurora_i18n::tr!("inventory-move-invalid-target").into());
                     }
-                    send_move(InventoryMove {
-                        id: *id,
-                        parent,
-                        folder: *folder,
-                    })
-                    .await?;
+                    log_operation_error!(
+                        send_move(InventoryMove {
+                            id: *id,
+                            parent,
+                            folder: *folder,
+                        })
+                        .await
+                    );
                     moved = true;
                 }
                 _ => {}
@@ -585,12 +604,14 @@ where
                     if id.is_nil() || parent.is_nil() {
                         return Err(aurora_i18n::tr!("inventory-move-invalid-target").into());
                     }
-                    send_move(InventoryMove {
-                        id,
-                        parent,
-                        folder: *folder,
-                    })
-                    .await?;
+                    log_operation_error!(
+                        send_move(InventoryMove {
+                            id,
+                            parent,
+                            folder: *folder,
+                        })
+                        .await
+                    );
                     moved = true;
                 }
                 if !fields.is_empty() {

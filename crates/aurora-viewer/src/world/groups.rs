@@ -369,6 +369,7 @@ impl World {
             },
             session,
             new_session,
+            poke: false,
         });
     }
 
@@ -425,7 +426,9 @@ impl World {
     }
 
     /// Open (or focus) the chat of one of our groups (LLGroupActions::startIM).
-    pub fn start_group_chat(&mut self, group: Uuid) {
+    /// `to_type`: the user opened it, so its field takes the keyboard
+    /// (FSFloaterIM::show → setFocus); a call starts the session without it.
+    pub fn start_group_chat(&mut self, group: Uuid, to_type: bool) {
         let Some(g) = self.groups.group(&group).cloned() else {
             return;
         };
@@ -439,7 +442,7 @@ impl World {
             self.set_group_chat_blocked(group, false);
         }
         self.groups.unsnooze(&group);
-        self.social.focus_im = Some(group);
+        self.focus_conversation(group, to_type);
         let known = self.groups.sessions.get(&group).is_some_and(|s| s.active && !s.closed);
         self.info_mut(group, &g.name);
         self.session_lines(group);
@@ -457,7 +460,7 @@ impl World {
         // Sending is an explicit request to open the displayed conversation,
         // just like its call button; do not send into an unjoined preview.
         if self.groups.restoring.contains(&session) {
-            self.start_group_chat(session);
+            self.start_group_chat(session, false);
             if self.groups.restoring.contains(&session) {
                 return;
             }
@@ -614,6 +617,7 @@ impl World {
                 kind: crate::ui_sound::ImKind::Group,
                 session: group,
                 new_session: true,
+                poke: false,
             });
         }
     }
@@ -722,6 +726,9 @@ impl World {
                     if let Some(s) = self.social.ims.iter_mut().find(|s| s.other == temp_session) {
                         s.other = session;
                     }
+                    // the conversation log's entry (and the poll's memory of the
+                    // open conversation) follows, or the conference is logged twice
+                    self.chat_log.conversations.rekey(temp_session, session);
                 }
                 self.groups.restoring.remove(&session);
                 let info = self.info_mut(session, "");
@@ -839,6 +846,10 @@ impl World {
         if inv.from == self.agent_id || session.is_nil() {
             return;
         }
+        // LLIMMgr::addMessage, IM_SESSION_INVITE
+        if !self.omnifilter_session_invite(&mut inv) {
+            return;
+        }
         let in_group = self.groups.is_member(&session);
         if in_group && !self.rlva_allows_im("recvim", session) {
             return;
@@ -887,6 +898,7 @@ impl World {
                 return;
             }
         }
+        let mut opener = None;
         if !self.mutes.text_muted(&inv.from, &inv.from_name) {
             let new = !self.groups.sessions.contains_key(&session);
             // an invitation opens the chat even when snoozed, as in the
@@ -898,15 +910,25 @@ impl World {
                 self.social.names.entry(inv.from).or_insert_with(|| inv.from_name.clone());
             }
             let text = saved_prefix(inv.offline, inv.timestamp) + &inv.message;
-            let l = line(inv.from_name.clone(), text, ChatKind::Im, inv.from, SystemTime::now());
+            let now = SystemTime::now();
+            let l = line(inv.from_name.clone(), text, ChatKind::Im, inv.from, now);
             self.session_push(session, l, true);
+            // sessionAdded with has_offline_msg
+            if inv.offline && new {
+                self.log_conversation(session, true);
+            }
+            // the time the server's history knows it by (the timestamp of
+            // the invitation, else its arrival)
+            let arrival = now.duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_secs() as u32).unwrap_or(0);
+            opener = Some(if inv.timestamp != 0 { inv.timestamp } else { arrival });
         }
         self.groups.restoring.remove(&session);
         self.groups.out.push(NetCommand::ChatSession {
             method: SessionMethod::AcceptInvitation,
             session,
         });
-        // recent messages of a session we did not have yet (FetchGroupChatHistory)
+        // recent messages of a session we did not have yet (FetchGroupChatHistory),
+        // merged up to the message that opened it
         if let Some(s) = self.groups.sessions.get_mut(&session)
             && !s.history_fetched
         {
@@ -915,6 +937,9 @@ impl World {
                 method: SessionMethod::FetchHistory,
                 session,
             });
+            if let Some(time) = opener {
+                self.session_lines(session).log.opened_by(time);
+            }
         }
     }
 
@@ -1058,6 +1083,32 @@ mod tests {
                 list_in_profile: false,
             }] if group == Uuid::from_u128(2)
         ));
+    }
+
+    /// A group chat the user opens takes the keyboard (LLGroupActions::startIM
+    /// → FSFloaterIM::show → setFocus); a call only starts its session.
+    #[test]
+    fn a_group_chat_the_user_opens_takes_the_keyboard_a_call_does_not() {
+        let group = Uuid::from_u128(2);
+        let membership = || aurora_net::GroupMembership {
+            id: group,
+            name: "Group".into(),
+            insignia: Uuid::nil(),
+            powers: 0,
+            accept_notices: true,
+            list_in_profile: true,
+            contribution: 0,
+        };
+        let mut w = World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
+        w.groups.groups.push(membership());
+        w.start_group_chat(group, true);
+        assert_eq!(w.social.focus_im, Some(group));
+        assert!(w.social.focus_im_to_type, "the user opened it, ready to type");
+        let mut w = World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
+        w.groups.groups.push(membership());
+        w.start_group_chat(group, false);
+        assert_eq!(w.social.focus_im, Some(group));
+        assert!(!w.social.focus_im_to_type, "a call leaves the keyboard where it was");
     }
 
     /// Online status › Ad hoc conferences (LLIMMgr::addMessage, FSIgnoreAdHocSessions):

@@ -36,6 +36,49 @@ pub(super) fn step(set: &Set, state: State, index: usize) -> Uuid {
 }
 
 #[test]
+fn movement_defaults_stay_running_on_region_except_for_special_pose_owners() {
+    let now = Instant::now();
+    let movement = [
+        State::Walking,
+        State::Running,
+        State::Crouching,
+        State::CrouchWalk,
+        State::Falling,
+        State::FlyingDown,
+        State::FlyingUp,
+        State::Flying,
+        State::FlyingSlow,
+        State::Hovering,
+    ];
+    let raw = [];
+    let ordinary = frame(&raw);
+    for state in movement {
+        assert!(!runtime::stop_region_signal(state, &ordinary), "{state:?}");
+    }
+    for state in [
+        State::Standing,
+        State::Sitting,
+        State::GroundSit,
+        State::Jumping,
+        State::TurningLeft,
+    ] {
+        assert!(runtime::stop_region_signal(state, &ordinary), "{state:?}");
+    }
+
+    let hold = signal(State::Walking, now);
+    let mut special = frame(&raw);
+    special.run_hold = Some(hold);
+    special.native_running = true;
+    special.swim_hold = Some((State::Walking, hold));
+    special.water_walk_hold = Some((State::Walking, hold));
+    special.swim_outro = true;
+    special.anchor_hold = Some(hold);
+    for state in movement {
+        assert!(runtime::stop_region_signal(state, &special), "{state:?}");
+    }
+}
+
+#[test]
 fn ao_choices_survive_settings_restart_reordering_groups_tracks_and_inactive_states() {
     let (_, mut set) = fixture();
     let config = set.states.get_mut(&State::Standing).expect("standing");
@@ -73,6 +116,7 @@ fn ao_choices_survive_settings_restart_reordering_groups_tracks_and_inactive_sta
         Account {
             enabled: true,
             selected: set.id,
+            mini_open: true,
             animations: runtime.take_choices(Some(&set)).expect("new selection"),
         },
     );
@@ -86,6 +130,7 @@ fn ao_choices_survive_settings_restart_reordering_groups_tracks_and_inactive_sta
     assert_eq!(account.animations[&standing_folder], group);
     assert_eq!(account.animations[&track_id], track_link);
     assert_eq!(account.animations[&walking_folder], walk);
+    assert!(account.mini_open, "the mini window preference survives a restart");
     let standing = set.states.get_mut(&State::Standing).expect("standing");
     standing.steps.swap(0, 1);
     standing.tracks[0].members.swap(0, 1);
@@ -669,6 +714,144 @@ fn enhanced_run_uses_stock_fallback_until_the_ao_asset_loads_and_reasserts_only_
     assert!(commands.contains(&(asset, true)));
 }
 
+fn fetched_folder(inv: &mut Inventory, parent: Uuid, id: Uuid, name: &str) {
+    use crate::world::inventory::{FetchState, Folder};
+    inv.folders.insert(
+        id,
+        Folder {
+            info: aurora_net::inventory::InvFolder {
+                id,
+                parent,
+                name: name.into(),
+                type_default: if parent.is_nil() { 8 } else { -1 },
+                version: 1,
+                ..Default::default()
+            },
+            children: Vec::new(),
+            items: Vec::new(),
+            state: FetchState::Fetched,
+            library: false,
+        },
+    );
+    if let Some(parent) = inv.folders.get_mut(&parent) {
+        parent.children.push(id);
+    }
+}
+
+/// `#Aurora/Aurora AO`, `#Firestorm/#AO`, or Alchemy's root, plus one Walking link.
+fn ao_tree(inv: &mut Inventory, source: inventory::Source) -> (Uuid, Uuid) {
+    let root = Uuid::from_u128(0xa0_0000_0000_0001);
+    inv.root = root;
+    fetched_folder(inv, Uuid::nil(), root, "Inventory");
+    let (brand, ao_name) = match source {
+        inventory::Source::Native => (Uuid::from_u128(0xa0_0000_0000_0002), inventory::FOLDER),
+        inventory::Source::Legacy => (Uuid::from_u128(0xa0_0000_0000_0003), "#AO"),
+        inventory::Source::Alchemy => (Uuid::from_u128(0xa0_0000_0000_0004), inventory::ALCHEMY_FOLDER),
+    };
+    let brand_name = match source {
+        inventory::Source::Native => "#Aurora",
+        inventory::Source::Legacy => "#Firestorm",
+        inventory::Source::Alchemy => inventory::ALCHEMY_FOLDER,
+    };
+    let ao = if source == inventory::Source::Alchemy {
+        fetched_folder(inv, root, brand, brand_name);
+        brand
+    } else {
+        fetched_folder(inv, root, brand, brand_name);
+        let ao = Uuid::from_u128(0xa0_0000_0000_0010);
+        fetched_folder(inv, brand, ao, ao_name);
+        ao
+    };
+    let set = Uuid::from_u128(0xa0_0000_0000_0011);
+    let walking = Uuid::from_u128(0xa0_0000_0000_0012);
+    fetched_folder(inv, ao, set, "Day");
+    fetched_folder(inv, set, walking, "Walking");
+    let anim = Uuid::from_u128(0xa0_0000_0000_0020);
+    let link = Uuid::from_u128(0xa0_0000_0000_0021);
+    inv.add_items(vec![
+        aurora_net::inventory::InvItem {
+            id: anim,
+            parent: root,
+            name: "Walk".into(),
+            asset_type: 20,
+            inv_type: 19,
+            asset_id: Uuid::from_u128(0xa0_0000_0000_0099),
+            ..Default::default()
+        },
+        aurora_net::inventory::InvItem {
+            id: link,
+            parent: walking,
+            name: "Walk".into(),
+            desc: "0".into(),
+            asset_type: 24,
+            inv_type: 19,
+            asset_id: anim,
+            ..Default::default()
+        },
+    ]);
+    (brand, set)
+}
+
+fn rename_server(inv: &mut Inventory, id: Uuid, name: &str) {
+    let mut info = inv.folders.get(&id).expect("folder").info.clone();
+    info.name = name.into();
+    info.version = -1;
+    inv.server_updated(vec![info], Vec::new());
+}
+
+#[test]
+fn a_renamed_brand_folder_keeps_the_ao_sets() {
+    for source in [inventory::Source::Native, inventory::Source::Legacy, inventory::Source::Alchemy] {
+        let mut inv = Inventory::default();
+        let (brand, set) = ao_tree(&mut inv, source);
+        let mut catalog = inventory::Catalog::default();
+        catalog.refresh_source(&mut inv, source);
+        assert_eq!(catalog.sets.len(), 1, "{source:?} loaded");
+        assert_eq!(catalog.selected(set).map(|s| s.id), Some(set), "{source:?} selected");
+
+        let original = inv.folders[&brand].info.name.clone();
+        rename_server(&mut inv, brand, &format!("{original} (Unavailable)"));
+        assert!(
+            inv.folders[&brand].info.name.ends_with("(Unavailable)"),
+            "{source:?} rename applied"
+        );
+        catalog.refresh_source(&mut inv, source);
+        assert!(!catalog.loading, "{source:?} still fetched");
+        assert_eq!(catalog.sets.len(), 1, "{source:?} renamed");
+        assert_eq!(catalog.selected(set).map(|s| s.id), Some(set), "{source:?} selection kept");
+
+        rename_server(&mut inv, brand, &original);
+        catalog.refresh_source(&mut inv, source);
+        assert_eq!(catalog.sets.len(), 1, "{source:?} restored");
+
+        catalog.reload(&mut inv);
+        catalog.refresh_source(&mut inv, source);
+        assert_eq!(catalog.sets.len(), 1, "{source:?} reload by name");
+        assert_eq!(catalog.selected(set).map(|s| s.id), Some(set));
+
+        rename_server(&mut inv, brand, &format!("{original} (Unavailable)"));
+        catalog.reload(&mut inv);
+        catalog.refresh_source(&mut inv, source);
+        assert!(catalog.sets.is_empty(), "{source:?} reload while renamed");
+    }
+}
+
+#[test]
+fn a_renamed_ao_root_keeps_the_set() {
+    for source in [inventory::Source::Native, inventory::Source::Legacy] {
+        let mut inv = Inventory::default();
+        let (_brand, set) = ao_tree(&mut inv, source);
+        let mut catalog = inventory::Catalog::default();
+        catalog.refresh_source(&mut inv, source);
+        let root = catalog.root.expect("ao root");
+        let original = inv.folders[&root].info.name.clone();
+        rename_server(&mut inv, root, &format!("{original} (Unavailable)"));
+        catalog.refresh_source(&mut inv, source);
+        assert_eq!(catalog.sets.len(), 1, "{source:?}");
+        assert_eq!(catalog.selected(set).map(|s| s.id), Some(set), "{source:?}");
+    }
+}
+
 #[test]
 fn inventory_round_trip_preserves_firestorm_options_and_originals() {
     let (mut inv, mut set) = fixture();
@@ -776,18 +959,54 @@ fn locomotion_changes_stop_owned_and_replaced_system_animations_and_preserve_ges
     );
     let raw = [signal(State::Walking, now + Duration::from_secs(2)), gesture];
     let (_, cmd) = runtime.update(Some(&set), frame(&raw), now + Duration::from_secs(2), |_| true, |_| 0);
-    assert_eq!(
-        cmd,
-        vec![
-            (old.id, false),
-            (State::Walking.motion(), false),
-            (step(&set, State::Walking, 0), true)
-        ]
-    );
+    assert_eq!(cmd, vec![(old.id, false), (step(&set, State::Walking, 0), true)]);
     runtime.paused = true;
     let (pose, cmd) = runtime.update(Some(&set), frame(&raw), now + Duration::from_secs(3), |_| true, |_| 0);
     assert_eq!(pose, raw);
-    assert_eq!(cmd, vec![(step(&set, State::Walking, 0), false), (State::Walking.motion(), true)]);
+    assert_eq!(cmd, vec![(step(&set, State::Walking, 0), false)]);
+}
+
+#[test]
+fn ordinary_walk_and_run_overrides_leave_region_movement_running() {
+    let (_, set) = fixture();
+    let now = Instant::now();
+    for state in [State::Walking, State::Running] {
+        let mut runtime = Runtime::default();
+        let mut raw = vec![signal(state, now)];
+        let (pose, commands) = runtime.update(Some(&set), frame(&raw), now, |_| true, |_| 0);
+        assert!(pose.iter().any(|animation| animation.id == step(&set, state, 0)));
+        let mut stopped_default = commands.contains(&(state.motion(), false));
+        echo_simulator_commands(&mut raw, &commands, state, now);
+
+        // OpenSimulator changes a default animation to STAND when it receives
+        // STOP. Since ordinary walk/run must never be stopped, repeated
+        // simulator echoes leave the selected locomotion state intact.
+        for elapsed in [100, 1_000, 3_000] {
+            let at = now + Duration::from_millis(elapsed);
+            let (pose, commands) = runtime.update(Some(&set), frame(&raw), at, |_| true, |_| 0);
+            assert_eq!(runtime.current, Some(state));
+            assert!(pose.iter().any(|animation| animation.id == step(&set, state, 0)));
+            stopped_default |= commands.contains(&(state.motion(), false));
+            echo_simulator_commands(&mut raw, &commands, state, at);
+        }
+        assert!(!stopped_default);
+    }
+}
+
+fn echo_simulator_commands(raw: &mut Vec<PlayingAnimation>, commands: &[(Uuid, bool)], state: State, now: Instant) {
+    for (id, start) in commands {
+        if *start {
+            if *id != state.motion() && !raw.iter().any(|animation| animation.id == *id) {
+                raw.push(PlayingAnimation::from_signal(*id, 2, now, None));
+            }
+        } else if *id == state.motion() {
+            // OpenSimulator resets a stopped default movement animation to STAND.
+            raw.retain(|animation| animation.id != state.motion() && animation.id != State::Standing.motion());
+            raw.push(signal(State::Standing, now));
+        } else {
+            raw.retain(|animation| animation.id != *id);
+        }
+    }
 }
 
 #[test]
@@ -870,7 +1089,7 @@ fn typing_is_concurrent_and_completed_nonloops_do_not_restart() {
     r.finished(walk);
     let raw = [raw[0], signal(State::Typing, now + Duration::from_secs(1))];
     let (_, cmd) = r.update(Some(&set), frame(&raw), now + Duration::from_secs(1), |_| true, |_| 0);
-    assert_eq!(cmd, vec![(step(&set, State::Typing, 0), true), (State::Walking.motion(), true)]);
+    assert_eq!(cmd, vec![(step(&set, State::Typing, 0), true)]);
     let (pose, cmd) = r.update(Some(&set), frame(&raw), now + Duration::from_secs(2), |_| true, |_| 0);
     assert!(cmd.is_empty());
     assert!(!pose.iter().any(|a| a.id == walk));
@@ -954,7 +1173,7 @@ fn animation_groups_and_tracks_cycle_independently_of_locomotion() {
     let raw = [signal(State::Walking, now)];
     let (pose, cmd) = r.update(Some(&set), frame(&raw), now, |_| true, |_| 0);
     assert_eq!(cmd.iter().filter(|(_, start)| *start).count(), 4);
-    assert!(cmd.contains(&(State::Walking.motion(), false)));
+    assert!(!cmd.contains(&(State::Walking.motion(), false)));
     assert!(pose.iter().any(|p| p.id == a));
     assert!(pose.iter().any(|p| p.id == b));
     let (_, cmd) = r.update(Some(&set), frame(&raw), now + Duration::from_secs(1), |_| true, |_| 0);

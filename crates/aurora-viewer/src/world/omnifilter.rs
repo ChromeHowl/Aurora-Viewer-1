@@ -1,905 +1,358 @@
-//! The Omnifilter: the user's own rules over the messages that arrive, each
-//! one hiding, rewriting, highlighting or setting aside the nearby chat
-//! lines, objects' lines and instant messages it matches. Port of the
-//! matching of OmnifilterEngine::match (indra/newview/omnifilterengine.cpp,
-//! originally LGPL 2.1, Copyright (C) 2025, Zi Ree @ Second Life) and of its
-//! calls in process_chat_from_simulator (llviewermessage.cpp) and
-//! LLIMProcessing::processNewMessage (llimprocessing.cpp).
+//! Where the Omnifilter (`crate::omnifilter`) meets what arrives, as the
+//! Legacy Viewer's callers fill its haystack and act on a match:
+//! - nearby chat (process_chat_from_simulator, llviewermessage.cpp):
+//!   said, whispered, shouted, debug, region, owner and direct lines; a
+//!   resident's is NearbyChat, an object's ObjectChat; the sender is the
+//!   name the simulator sends, the owner key the speaker's id; a match
+//!   also ends the speaker's "is typing";
+//! - instant messages (LLIMProcessing::processNewMessage,
+//!   llimprocessing.cpp), each dialog as its kind (group chat, object IM,
+//!   offers, invitations, notices…), the others as no kind; and the first
+//!   message of a group or conference chat (LLIMMgr::addMessage,
+//!   IM_SESSION_INVITE, llimview.cpp);
+//! - a matched line or IM is dropped, or its text replaced by
+//!   "Omnifilter Replacement: <text>" when the rule has one;
+//! - script dialogs and text boxes (LLScriptFloaterManager::
+//!   onAddNotification, llscriptfloater.cpp) and llLoadURL (LoadWebPage):
+//!   a matched one is never shown and is answered as if the button named
+//!   by the rule had been clicked (callback_script_dialog,
+//!   callback_load_url): a script's button sends its ScriptDialogReply,
+//!   `Client_Side_Mute` blocks the object, `Gotopage` opens the link, any
+//!   other name answers nothing; a text box always sends the rule's reply,
+//!   empty or not. The answer waits the rule's delay (up to 3 s,
+//!   FIRE-36590).
 //!
-//! As in the Legacy Viewer: the rules are tried in their order and the first
-//! enabled one that matches decides; an empty field matches anything; the
-//! sender's name must match as a whole ("match full text", a regular
-//! expression over the whole name), the text only somewhere in it; a rule
-//! with a replacement shows "Omnifilter Replacement: …" in place of the
-//! message, one without hides it. The filter is off by default.
-//!
-//! It generalises the fixed rule of `object_im_filter.rs` ("Block object
-//! messages from elsewhere"), which stays as it is, applied first.
-//!
-//! Differences, for the user:
-//! - the rules are kept per account (`omnifilter.json` of the account's
-//!   folder) where the Legacy Viewer has one file for every account;
-//! - besides hiding and replacing, a rule may highlight the message in a
-//!   colour of its own, or set it aside in the filter's list of the session
-//!   (Preferences › Chat › Translation and filter) instead of the chat;
-//! - a rule may also name the volume or channel of a nearby line (whisper,
-//!   say, shout, owner say, said to us alone, script errors);
-//! - the regular expressions are linear-time (no backtracking) and bounded
-//!   in size, so a pattern can never stall the viewer on a message; a
-//!   pattern that does not compile disables its rule, shown as such;
-//! - group notices, group invitations, inventory, friendship and teleport
-//!   offers, teleport requests and script dialogs are filtered too: a rule
-//!   that matches one hides it (no answer is sent, as in the Legacy Viewer),
-//!   or replaces its text; a script dialog's text holds its buttons
-//!   ("button_name=…", FIRE-36647). The Legacy automatic dialog replies and
-//!   web page requests are not ported;
-//! - the rules are kept in named rule sets, one in use, as the Legacy
-//!   Viewer's (the first, Default, never removed);
-//! - a rule set can be read from and written to a Legacy Omnifilter
-//!   notecard, in the inventory or saved as a file (`legacy.rs`); one read
-//!   becomes a new rule set, as in the Legacy Viewer.
+//! Nothing is sent unless the user wrote a rule that answers: the filter is
+//! off by default and a new rule is disabled.
 
 use super::World;
-use crate::settings::Rgba;
-use aurora_net::{ChatMessage, ChatSourceType, ChatType, InstantMessage};
-use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
-use std::path::PathBuf;
-use std::sync::RwLock;
-use std::time::{Duration, Instant, SystemTime};
+use crate::omnifilter::{Haystack, Source};
+use aurora_net::{ChatMessage, ChatSourceType, ChatType, InstantMessage, NetCommand};
+use std::time::{Duration, Instant};
 use uuid::Uuid;
 
-/// The account's file.
-pub const FILE: &str = "omnifilter.json";
-/// Most rules kept: beyond, a file written by hand is cut.
-pub const MAX_RULES: usize = 200;
-/// Longest pattern, in bytes.
-pub const MAX_PATTERN: usize = 1024;
-/// Most memory a compiled regular expression may take (its program and its
-/// lazy automaton each): a pattern over it does not compile.
-const REGEX_SIZE: usize = 256 * 1024;
-/// Entries of the filter's list of the session.
-pub const MAX_LOG: usize = 200;
-/// Lines remembered as highlighted.
-const MAX_MARKS: usize = 4096;
-/// The file's format.
-const VERSION: u32 = 1;
-/// How long the rules rest after an edit before they are saved.
-const SAVE_DELAY: Duration = Duration::from_secs(1);
+/// The script dialog form's own buttons, before the script's
+/// (notifications.xml, ScriptDialog), with the names a rule's button reply
+/// uses.
+const MUTE_BUTTON: &str = "Client_Side_Mute";
+const IGNORE_BUTTON: &str = "Client_Side_Ignore";
+/// LoadWebPage's "Go to page" button.
+const GO_TO_PAGE: &str = "Gotopage";
+/// The only button of an llTextBox (TEXTBOX_MAGIC_TOKEN).
+const TEXTBOX: &str = "!!llTextBox!!";
 
-/// How a field is compared (OmnifilterEngine::eMatchType).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum MatchMode {
-    /// The whole field.
-    Exact,
-    /// Somewhere in the field (the Legacy default of a new rule).
-    #[default]
-    Substring,
-    Regex,
+/// An answer to a matched dialog, waiting for its delay.
+#[derive(Debug, Clone)]
+pub enum Reply {
+    Send(NetCommand),
+    /// LLMuteList::add of the dialog's object.
+    Block {
+        object: Uuid,
+        name: String,
+    },
+    OpenUrl(String),
 }
 
-/// One field of a rule: empty matches anything.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Pattern {
-    pub text: String,
-    pub mode: MatchMode,
-    /// Off by default, as a new Legacy rule.
-    pub case_sensitive: bool,
+/// The kind of an IM dialog (processNewMessage's switch).
+fn im_source(dialog: u8) -> Option<Source> {
+    use super::groups::dialog as g;
+    use super::notifications::im;
+    match dialog {
+        0 => Some(Source::InstantMessage),
+        g::SESSION_SEND | g::SESSION_INVITE | 20 => Some(Source::GroupChat),
+        19 => Some(Source::ObjectInstantMessage),
+        im::GROUP_INVITATION => Some(Source::GroupInvite),
+        im::INVENTORY_OFFERED => Some(Source::InventoryOffer),
+        im::FRIENDSHIP_OFFERED => Some(Source::FriendshipOffer),
+        im::LURE_USER => Some(Source::Lure),
+        im::TELEPORT_REQUEST => Some(Source::TeleportRequest),
+        im::GROUP_NOTICE => Some(Source::GroupNotice),
+        _ => None,
+    }
 }
 
-/// Where a message comes from (the message types of OmnifilterEngine::eType
-/// this filter covers).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum Source {
-    /// A resident in nearby chat.
-    NearbyChat,
-    /// An object in nearby chat (said, owner say, said to us alone, errors).
-    ObjectChat,
-    /// A resident's instant message.
-    Im,
-    /// A group chat or a conference.
-    GroupChat,
-    /// An object's instant message (llInstantMessage).
-    ObjectIm,
-    /// A group notice (IM_GROUP_NOTICE): its sender and its subject and text.
-    GroupNotice,
-    /// An invitation to join a group (IM_GROUP_INVITATION).
-    GroupInvite,
-    /// Items offered by a resident or an object (IM_INVENTORY_OFFERED,
-    /// IM_TASK_INVENTORY_OFFERED): the text is the item's name.
-    InventoryOffer,
-    /// A friendship offered (IM_FRIENDSHIP_OFFERED).
-    FriendshipOffer,
-    /// A teleport offered (IM_LURE_USER).
-    Lure,
-    /// A teleport asked of us (IM_TELEPORT_REQUEST).
-    TeleportRequest,
-    /// An object's dialog or text box (llDialog, llTextBox).
-    ScriptDialog,
+/// The kind of a chat line, or None for a line the filter does not see
+/// (typing starts and stops).
+fn chat_source(c: &ChatMessage) -> Option<Option<Source>> {
+    let filtered = matches!(
+        c.chat_type,
+        ChatType::Whisper
+            | ChatType::Normal
+            | ChatType::Shout
+            | ChatType::Debug
+            | ChatType::Region
+            | ChatType::OwnerSay
+            | ChatType::Other(9)
+    );
+    filtered.then_some(match c.source_type {
+        ChatSourceType::Agent => Some(Source::NearbyChat),
+        ChatSourceType::Object => Some(Source::ObjectChat),
+        _ => None,
+    })
 }
 
-impl Source {
-    pub const ALL: [Source; 12] = [
-        Source::NearbyChat,
-        Source::ObjectChat,
-        Source::Im,
-        Source::GroupChat,
-        Source::ObjectIm,
-        Source::GroupNotice,
-        Source::GroupInvite,
-        Source::InventoryOffer,
-        Source::FriendshipOffer,
-        Source::Lure,
-        Source::TeleportRequest,
-        Source::ScriptDialog,
-    ];
+/// OmnifilterReplacement.
+fn replacement(text: &str) -> String {
+    aurora_i18n::tr!("omnifilter-replacement", replacement = text.to_owned()).to_string()
+}
 
-    /// The kind of an instant message by its dialog
-    /// (LLIMProcessing::processNewMessage); None for those never filtered.
-    pub fn of_im(dialog: u8, from_resident: bool) -> Option<Source> {
-        use super::groups::dialog as d;
-        Some(match dialog {
-            0 if from_resident => Source::Im,
-            d::SESSION_SEND | d::SESSION_INVITE => Source::GroupChat,
-            19 => Source::ObjectIm,
-            3 => Source::GroupInvite,
-            4 | 9 => Source::InventoryOffer,
-            22 => Source::Lure,
-            26 => Source::TeleportRequest,
-            32 => Source::GroupNotice,
-            38 => Source::FriendshipOffer,
-            _ => return None,
+/// What a script dialog's notification says (the English ScriptDialog
+/// template, "[NAME]'s '<nolink>[TITLE]</nolink>'\n[MESSAGE]"), with the
+/// name of each button of its form (FIRE-36647), the Block and Ignore
+/// buttons first.
+pub fn dialog_content(owner: &str, object: &str, message: &str, buttons: &[String]) -> String {
+    let mut content = format!("{owner}'s '<nolink>{object}</nolink>'\n{message}");
+    for b in [MUTE_BUTTON, IGNORE_BUTTON].into_iter().chain(buttons.iter().map(String::as_str)) {
+        content.push_str("\nbutton_name=");
+        content.push_str(b);
+    }
+    content
+}
+
+/// What a LoadWebPage notification says (its English template).
+pub fn load_url_content(url: &str, message: &str, object: &str, owner: Uuid, owner_is_group: bool) -> String {
+    let kind = if owner_is_group { "group" } else { "agent" };
+    format!("Load web page {url} ?\n\n{message}\n\nFrom object: <nolink>{object}</nolink>, owner: secondlife:///app/{kind}/{owner}/about")
+}
+
+/// The answer of a matched script dialog (callback_script_dialog), if any.
+pub fn dialog_reply(
+    m: &crate::omnifilter::Match,
+    sender: std::net::SocketAddr,
+    object: Uuid,
+    object_name: &str,
+    channel: i32,
+    buttons: &[String],
+) -> Option<Reply> {
+    let reply = |index: usize, label: String| {
+        Reply::Send(NetCommand::ScriptDialogReply {
+            sender: Some(sender),
+            object_id: object,
+            channel,
+            index: index as i32,
+            label,
         })
-    }
-}
-
-/// How a nearby line was said (its chat type).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum Channel {
-    Whisper,
-    Say,
-    Shout,
-    /// llOwnerSay.
-    OwnerSay,
-    /// llRegionSayTo: said to us alone.
-    Direct,
-    /// The debug channel: script errors.
-    ScriptError,
-}
-
-impl Channel {
-    pub const ALL: [Channel; 6] = [
-        Channel::Whisper,
-        Channel::Say,
-        Channel::Shout,
-        Channel::OwnerSay,
-        Channel::Direct,
-        Channel::ScriptError,
-    ];
-
-    /// The channel of a chat type; None for those no rule names (region
-    /// messages, typing).
-    pub fn of(t: ChatType) -> Option<Channel> {
-        match t {
-            ChatType::Whisper => Some(Channel::Whisper),
-            ChatType::Normal => Some(Channel::Say),
-            ChatType::Shout => Some(Channel::Shout),
-            ChatType::OwnerSay => Some(Channel::OwnerSay),
-            ChatType::Other(9) => Some(Channel::Direct),
-            ChatType::Debug => Some(Channel::ScriptError),
-            _ => None,
-        }
-    }
-}
-
-/// What a matching rule does.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Action {
-    /// The message is not shown (a Legacy rule without replacement).
-    #[default]
-    Hide,
-    /// "Omnifilter Replacement: …" in place of the text (mChatReplace); an
-    /// empty replacement hides it, as in the Legacy Viewer.
-    Replace,
-    /// Shown in the rule's colour.
-    Highlight,
-    /// Kept in the filter's list of the session instead of the chat.
-    SetAside,
-}
-
-/// A rule (OmnifilterEngine::Needle).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Rule {
-    pub name: String,
-    /// A new rule starts disabled, as in the Legacy Viewer.
-    pub enabled: bool,
-    /// The kinds of message it applies to; none: all of them.
-    pub sources: Vec<Source>,
-    /// The volumes or channels of a nearby line it applies to; none: all.
-    /// Instant messages have none, so a rule naming one never matches them.
-    pub channels: Vec<Channel>,
-    pub sender: Pattern,
-    pub content: Pattern,
-    pub action: Action,
-    pub replacement: String,
-    pub color: Rgba,
-}
-
-impl Default for Rule {
-    fn default() -> Self {
-        Rule {
-            name: String::new(),
-            enabled: false,
-            sources: Vec::new(),
-            channels: Vec::new(),
-            sender: Pattern::default(),
-            content: Pattern::default(),
-            action: Action::Hide,
-            replacement: String::new(),
-            // the keyword alerts' orange (FSKeywordColor)
-            color: [255, 153, 0, 255],
-        }
-    }
-}
-
-/// A named list of rules (OmnifilterEngine's rule sets, FIRE-36763).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct NamedRules {
-    pub name: String,
-    pub rules: Vec<Rule>,
-}
-
-/// The name of the first rule set, which is never removed (the Legacy
-/// Viewer's "Default").
-pub const DEFAULT_SET: &str = "Default";
-/// Most rule sets kept.
-pub const MAX_SETS: usize = 50;
-/// Longest rule set name, in characters (an inventory name's 63 bytes,
-/// less "[Omnifilter] ").
-pub const MAX_SET_NAME: usize = 50;
-
-/// Why a rule set was not added.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SetError {
-    /// No name (OmnifilterEngine::addNewRuleSet's empty name).
-    NoName,
-    /// The name is taken (its "already exists").
-    Taken,
-    /// `MAX_SETS` reached.
-    Full,
-}
-
-/// The account's rules and the filter's switch (OmnifilterEnabled, off),
-/// in rule sets: one is in use (OmnifilterRuleSetID), its rules in `rules`
-/// (matched and edited), the others kept by name in `sets`.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
-pub struct RuleSet {
-    pub version: u32,
-    pub on: bool,
-    /// The rules of the set in use.
-    pub rules: Vec<Rule>,
-    /// Every rule set, in its order, the first the Default one; the entry of
-    /// the set in use has its rules in `rules`, its own list left empty.
-    /// Empty: only the Default set, in use (`normalize` fills it).
-    pub sets: Vec<NamedRules>,
-    /// The index in `sets` of the set in use.
-    pub current: usize,
-}
-
-fn parse_rules(value: Option<&serde_json::Value>, skipped: &mut usize) -> Vec<Rule> {
-    value
-        .and_then(serde_json::Value::as_array)
-        .map(|list| {
-            list.iter()
-                .filter_map(|r| match serde_json::from_value::<Rule>(r.clone()) {
-                    Ok(rule) => Some(rule),
-                    Err(_) => {
-                        *skipped += 1;
-                        None
-                    }
-                })
-                .take(MAX_RULES)
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-impl RuleSet {
-    /// A file as written by any version: a rule that cannot be read is left
-    /// out alone, the others kept; an unreadable file gives no rules. A file
-    /// written before the rule sets holds the Default set alone.
-    pub fn parse(bytes: &[u8]) -> (RuleSet, usize) {
-        let Ok(value) = serde_json::from_slice::<serde_json::Value>(bytes) else {
-            let mut set = RuleSet::default();
-            set.normalize();
-            return (set, 0);
-        };
-        let mut skipped = 0;
-        let rules = parse_rules(value.get("rules"), &mut skipped);
-        let on = value.get("on").and_then(serde_json::Value::as_bool).unwrap_or(false);
-        let sets = value
-            .get("sets")
-            .and_then(serde_json::Value::as_array)
-            .map(|list| {
-                list.iter()
-                    .take(MAX_SETS)
-                    .map(|s| NamedRules {
-                        name: s.get("name").and_then(serde_json::Value::as_str).unwrap_or_default().to_owned(),
-                        rules: parse_rules(s.get("rules"), &mut skipped),
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        let current = value
-            .get("current")
-            .and_then(serde_json::Value::as_u64)
-            .map_or(0, |c| usize::try_from(c).unwrap_or(usize::MAX));
-        let mut set = RuleSet {
-            version: VERSION,
-            on,
-            rules,
-            sets,
-            current,
-        };
-        set.normalize();
-        (set, skipped)
-    }
-
-    fn to_bytes(&self) -> Vec<u8> {
-        let mut copy = self.clone();
-        copy.version = VERSION;
-        serde_json::to_vec_pretty(&copy).unwrap_or_default()
-    }
-
-    /// The sets within their bounds: the Default one first, names given and
-    /// distinct, the set in use existing and its rules in `rules` alone.
-    pub fn normalize(&mut self) {
-        self.rules.truncate(MAX_RULES);
-        self.sets.truncate(MAX_SETS);
-        if self.sets.is_empty() {
-            self.sets.push(NamedRules {
-                name: DEFAULT_SET.to_owned(),
-                rules: Vec::new(),
-            });
-        }
-        if self.current >= self.sets.len() {
-            self.current = 0;
-        }
-        let mut seen: Vec<String> = Vec::new();
-        for (i, set) in self.sets.iter_mut().enumerate() {
-            set.rules.truncate(MAX_RULES);
-            let mut name: String = set.name.trim().chars().take(MAX_SET_NAME).collect();
-            if i == 0 && name.is_empty() {
-                name = DEFAULT_SET.to_owned();
-            } else if name.is_empty() {
-                name = format!("{}", i + 1);
-            }
-            let base = name.clone();
-            let mut n = 2;
-            while seen.contains(&name) {
-                name = format!("{base} ({n})");
-                n += 1;
-            }
-            seen.push(name.clone());
-            set.name = name;
-        }
-        // a file written by hand may hold the rules in use in both places
-        let stored = std::mem::take(&mut self.sets[self.current].rules);
-        if self.rules.is_empty() {
-            self.rules = stored;
-        }
-    }
-
-    /// The rule sets' names, in their order.
-    pub fn set_names(&self) -> Vec<&str> {
-        self.sets.iter().map(|s| s.name.as_str()).collect()
-    }
-
-    /// The name of the set in use.
-    pub fn current_name(&self) -> &str {
-        self.sets.get(self.current).map_or(DEFAULT_SET, |s| s.name.as_str())
-    }
-
-    /// Use the set `index` (OmnifilterEngine::setCurrentRuleSet): the rules
-    /// in use go back to their set.
-    pub fn select(&mut self, index: usize) {
-        if index == self.current || index >= self.sets.len() || self.current >= self.sets.len() {
-            return;
-        }
-        self.sets[self.current].rules = std::mem::take(&mut self.rules);
-        self.rules = std::mem::take(&mut self.sets[index].rules);
-        self.current = index;
-    }
-
-    /// A name for a set not taken yet: `name`, or it numbered.
-    pub fn free_name(&self, name: &str) -> String {
-        let base: String = name.trim().chars().take(MAX_SET_NAME).collect();
-        let base = if base.is_empty() { DEFAULT_SET.to_owned() } else { base };
-        let mut candidate = base.clone();
-        let mut n = 2;
-        while self.sets.iter().any(|s| s.name == candidate) {
-            candidate = format!("{base} ({n})");
-            n += 1;
-        }
-        candidate
-    }
-
-    /// A new set holding `rules`, put in use (addNewRuleSet with no rules,
-    /// addClonedRuleSet with a copy of those in use, a notecard's import).
-    pub fn add(&mut self, name: &str, mut rules: Vec<Rule>) -> Result<(), SetError> {
-        let name: String = name.trim().chars().take(MAX_SET_NAME).collect();
-        if name.is_empty() {
-            return Err(SetError::NoName);
-        }
-        if self.sets.iter().any(|s| s.name == name) {
-            return Err(SetError::Taken);
-        }
-        if self.sets.len() >= MAX_SETS {
-            return Err(SetError::Full);
-        }
-        rules.truncate(MAX_RULES);
-        self.sets.push(NamedRules { name, rules });
-        self.select(self.sets.len() - 1);
-        Ok(())
-    }
-
-    /// Remove the set in use, never the Default one, which is used next
-    /// (removeCurrentRuleSet).
-    pub fn remove_current(&mut self) -> bool {
-        if self.current == 0 || self.current >= self.sets.len() {
-            return false;
-        }
-        self.sets.remove(self.current);
-        self.current = 0;
-        self.rules = std::mem::take(&mut self.sets[0].rules);
-        true
-    }
-}
-
-/// A field ready to compare.
-#[derive(Debug)]
-enum Matcher {
-    Any,
-    /// Lower-cased unless case-sensitive.
-    Exact(String, bool),
-    Substring(String, bool),
-    Regex(regex::Regex),
-    /// A pattern that did not compile: the rule never matches.
-    Broken,
-}
-
-impl Matcher {
-    /// `whole`: the pattern must cover the whole field (the sender's name,
-    /// matchStrings); otherwise anywhere in it (the text, searchStrings).
-    fn new(p: &Pattern, whole: bool) -> Matcher {
-        if p.text.is_empty() {
-            return Matcher::Any;
-        }
-        if p.text.len() > MAX_PATTERN {
-            return Matcher::Broken;
-        }
-        let folded = if p.case_sensitive { p.text.clone() } else { p.text.to_lowercase() };
-        match p.mode {
-            MatchMode::Exact => Matcher::Exact(folded, p.case_sensitive),
-            MatchMode::Substring => Matcher::Substring(folded, p.case_sensitive),
-            MatchMode::Regex => {
-                let source = if whole { format!("^(?:{})$", p.text) } else { p.text.clone() };
-                regex::RegexBuilder::new(&source)
-                    .case_insensitive(!p.case_sensitive)
-                    .size_limit(REGEX_SIZE)
-                    .dfa_size_limit(REGEX_SIZE)
-                    .build()
-                    .map_or(Matcher::Broken, Matcher::Regex)
-            }
-        }
-    }
-
-    fn matches(&self, field: &str) -> bool {
-        match self {
-            Matcher::Any => true,
-            Matcher::Broken => false,
-            Matcher::Regex(re) => re.is_match(field),
-            Matcher::Exact(p, cs) => {
-                if *cs {
-                    field == p
-                } else {
-                    field.to_lowercase() == *p
-                }
-            }
-            Matcher::Substring(p, cs) => {
-                if *cs {
-                    field.contains(p.as_str())
-                } else {
-                    field.to_lowercase().contains(p.as_str())
-                }
-            }
-        }
-    }
-
-    fn broken(&self) -> bool {
-        matches!(self, Matcher::Broken)
-    }
-}
-
-#[derive(Debug)]
-struct Compiled {
-    index: usize,
-    sender: Matcher,
-    content: Matcher,
-}
-
-/// What a message is matched on (OmnifilterEngine::Haystack).
-#[derive(Debug, Clone, Copy)]
-pub struct Haystack<'a> {
-    pub source: Source,
-    /// Nearby lines only.
-    pub channel: Option<Channel>,
-    pub sender: &'a str,
-    pub text: &'a str,
-}
-
-/// What becomes of a message.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Outcome {
-    Hide,
-    /// Shown with this text.
-    Replace(String),
-    Highlight(Rgba),
-    SetAside,
-}
-
-/// An entry of the filter's list of the session: the rule that matched and,
-/// for a message set aside, the message itself. Kept in memory only.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LogEntry {
-    pub time: SystemTime,
-    pub rule: String,
-    pub source: Source,
-    /// Sender and text of a message set aside; empty otherwise.
-    pub from: String,
-    pub text: String,
-}
-
-/// The rules of the account logged in, compiled.
-#[derive(Debug, Default)]
-pub struct Omnifilter {
-    set: RuleSet,
-    compiled: Vec<Compiled>,
-    /// Indices of the rules whose pattern does not compile.
-    broken: Vec<usize>,
-    path: Option<PathBuf>,
-    /// Edited and not saved yet, since then: saved once the typing pauses.
-    dirty: Option<Instant>,
-    pub log: VecDeque<LogEntry>,
-    /// Bumped by every change of the rules and of the list.
-    pub revision: u64,
-}
-
-impl Omnifilter {
-    /// The account's rules (none before the first save).
-    pub fn load(path: PathBuf) -> Omnifilter {
-        let set = match std::fs::read(&path) {
-            Ok(bytes) => {
-                let (set, skipped) = RuleSet::parse(&bytes);
-                if skipped > 0 {
-                    log::warn!("omnifilter: {skipped} unreadable rule(s) left out");
-                }
-                set
-            }
-            Err(e) => {
-                if e.kind() != std::io::ErrorKind::NotFound {
-                    log::warn!("omnifilter: rules not read: {e}");
-                }
-                RuleSet::default()
-            }
-        };
-        let mut filter = Omnifilter::default();
-        filter.path = Some(path);
-        filter.install(set);
-        filter
-    }
-
-    pub fn rules(&self) -> &RuleSet {
-        &self.set
-    }
-
-    /// Rules whose pattern does not compile (their index).
-    pub fn broken(&self) -> &[usize] {
-        &self.broken
-    }
-
-    fn install(&mut self, mut set: RuleSet) {
-        set.normalize();
-        self.compiled.clear();
-        self.broken.clear();
-        for (index, rule) in set.rules.iter().enumerate() {
-            let c = Compiled {
-                index,
-                sender: Matcher::new(&rule.sender, true),
-                content: Matcher::new(&rule.content, false),
-            };
-            if c.sender.broken() || c.content.broken() {
-                self.broken.push(index);
-            }
-            self.compiled.push(c);
-        }
-        self.set = set;
-        self.revision += 1;
-    }
-
-    /// The rules edited in Preferences: in use at once, saved a moment later
-    /// (`flush`).
-    pub fn replace(&mut self, set: RuleSet) {
-        if set == self.set {
-            return;
-        }
-        self.install(set);
-        if self.path.is_some() {
-            self.dirty = Some(Instant::now());
-        }
-    }
-
-    /// Every frame: the rules saved off the frame thread once the edits
-    /// pause.
-    pub fn flush(&mut self, now: Instant) {
-        if self.dirty.is_some_and(|since| now.duration_since(since) >= SAVE_DELAY) {
-            self.dirty = None;
-            self.save(true);
-        }
-    }
-
-    fn save(&self, in_background: bool) {
-        let Some(path) = self.path.clone() else {
-            return;
-        };
-        let bytes = self.set.to_bytes();
-        let write = move || {
-            if let Some(dir) = path.parent() {
-                let _ = std::fs::create_dir_all(dir);
-            }
-            if let Err(e) = crate::atomic_file::write(&path, &bytes) {
-                log::warn!("omnifilter: rules not saved: {e}");
-            }
-        };
-        if !in_background {
-            write();
-            return;
-        }
-        if let Err(e) = std::thread::Builder::new().name("omnifilter-save".into()).spawn(write) {
-            log::warn!("omnifilter: rules not saved: {e}");
-        }
-    }
-
-    /// The first enabled rule that matches (OmnifilterEngine::match), with
-    /// what it does.
-    pub fn check(&self, h: &Haystack) -> Option<(&Rule, Outcome)> {
-        if !self.set.on {
-            return None;
-        }
-        self.compiled.iter().find_map(|c| {
-            let rule = self.set.rules.get(c.index)?;
-            let applies = rule.enabled
-                && (rule.sources.is_empty() || rule.sources.contains(&h.source))
-                && (rule.channels.is_empty() || h.channel.is_some_and(|ch| rule.channels.contains(&ch)))
-                && c.sender.matches(h.sender)
-                && c.content.matches(h.text);
-            applies.then(|| (rule, outcome(rule)))
-        })
-    }
-
-    fn note(&mut self, rule: &str, source: Source, aside: Option<(&str, &str)>) {
-        let (from, text) = aside.unwrap_or_default();
-        self.log.push_back(LogEntry {
-            time: SystemTime::now(),
-            rule: rule.to_owned(),
-            source,
-            from: from.to_owned(),
-            text: text.to_owned(),
-        });
-        while self.log.len() > MAX_LOG {
-            self.log.pop_front();
-        }
-        self.revision += 1;
-    }
-
-    /// Applies the rules to a message: its text rewritten in place when a
-    /// rule replaces it; None when it is not shown; else the highlight.
-    pub fn apply(&mut self, h: Haystack, text: &mut String) -> Option<Option<Rgba>> {
-        let (name, outcome) = match self.check(&h) {
-            Some((rule, outcome)) => (rule.name.clone(), outcome),
-            None => return Some(None),
-        };
-        match outcome {
-            Outcome::Highlight(color) => Some(Some(color)),
-            Outcome::Replace(with) => {
-                self.note(&name, h.source, None);
-                *text = with;
-                Some(None)
-            }
-            Outcome::Hide => {
-                self.note(&name, h.source, None);
-                None
-            }
-            Outcome::SetAside => {
-                self.note(&name, h.source, Some((h.sender, h.text)));
-                None
-            }
-        }
-    }
-
-    /// Empties the list of the session.
-    pub fn clear_log(&mut self) {
-        self.log.clear();
-        self.revision += 1;
-    }
-}
-
-impl Drop for Omnifilter {
-    /// An edit not saved yet (the session ends right after it).
-    fn drop(&mut self) {
-        if self.dirty.take().is_some() {
-            self.save(false);
-        }
-    }
-}
-
-/// What a rule does with what it matched.
-fn outcome(rule: &Rule) -> Outcome {
-    match rule.action {
-        Action::Hide => Outcome::Hide,
-        Action::Replace if rule.replacement.trim().is_empty() => Outcome::Hide,
-        Action::Replace => Outcome::Replace(aurora_i18n::tr!(
-            "chatxl-omnifilter-replacement",
-            replacement = rule.replacement.clone()
-        )),
-        Action::Highlight => Outcome::Highlight(rule.color),
-        Action::SetAside => Outcome::SetAside,
-    }
-}
-
-/// The lines a rule highlights, by their time and sender, for the chat's
-/// colours (`ui::colors::keyword_color`), which have no access to the
-/// world, like the keyword alerts' matcher (`keywords.rs`).
-#[derive(Default)]
-struct Marks {
-    colors: HashMap<(SystemTime, Uuid), Rgba>,
-    order: VecDeque<(SystemTime, Uuid)>,
-}
-
-static MARKS: RwLock<Option<Marks>> = RwLock::new(None);
-
-fn mark(time: SystemTime, source: Uuid, color: Rgba) {
-    let Ok(mut guard) = MARKS.write() else {
-        return;
     };
-    let marks = guard.get_or_insert_with(Marks::default);
-    if marks.colors.insert((time, source), color).is_none() {
-        marks.order.push_back((time, source));
+    if buttons.first().is_some_and(|b| b == TEXTBOX) {
+        // the answer goes through the same clean-up and cut as one typed
+        // in the prompt (a rule from a file may hold CRs or be too long)
+        let mut text = m.textbox_reply.clone();
+        super::notifications::clamp_text_box_reply(&mut text);
+        return Some(reply(0, text));
     }
-    while marks.order.len() > MAX_MARKS {
-        if let Some(old) = marks.order.pop_front() {
-            marks.colors.remove(&old);
-        }
+    if m.button_reply == MUTE_BUTTON {
+        return Some(Reply::Block {
+            object,
+            name: object_name.to_owned(),
+        });
     }
-}
-
-/// The highlight of a line, when a rule gave it one.
-pub fn highlight(time: SystemTime, source: Uuid) -> Option<Rgba> {
-    MARKS.read().ok()?.as_ref()?.colors.get(&(time, source)).copied()
+    if m.button_reply.is_empty() {
+        return None;
+    }
+    buttons
+        .iter()
+        .position(|b| *b == m.button_reply)
+        .map(|i| reply(i, m.button_reply.clone()))
 }
 
 impl World {
-    /// A nearby line, after the block list: None when a rule hides it or
-    /// sets it aside, else its highlight (the text may be replaced). Our own
-    /// lines and the system's are never filtered.
-    pub(super) fn omnifilter_chat(&mut self, c: &mut ChatMessage) -> Option<Option<Rgba>> {
-        let source = match c.source_type {
-            ChatSourceType::Agent if c.source_id != self.agent_id => Source::NearbyChat,
-            ChatSourceType::Object => Source::ObjectChat,
-            _ => return Some(None),
+    /// A line of nearby chat: false when the filter drops it; its text may
+    /// be replaced.
+    pub(super) fn omnifilter_chat(&mut self, c: &mut ChatMessage) -> bool {
+        if !self.omnifilter.enabled {
+            return true;
+        }
+        let Some(source) = chat_source(c) else {
+            return true;
         };
         let h = Haystack {
             source,
-            channel: Channel::of(c.chat_type),
-            sender: &c.from_name,
-            text: &c.message,
+            sender_name: &c.from_name,
+            content: &c.message,
+            region_name: "",
+            owner_id: c.source_id,
         };
-        let mut text = c.message.clone();
-        let result = self.omnifilter.apply(h, &mut text);
-        c.message = text;
-        if result.is_none() {
-            // their line is over: no more "is typing" (as the Legacy Viewer)
+        let Some(m) = self.omnifilter.matches(&h) else {
+            return true;
+        };
+        // the speaker stops typing (LLVOAvatar::stopTyping)
+        if c.source_type == ChatSourceType::Agent {
             self.nearby_typing.remove(&c.source_id);
         }
-        result
+        if m.chat_replace.is_empty() {
+            return false;
+        }
+        c.message = replacement(&m.chat_replace);
+        true
     }
 
-    /// A resident's, a group's or an object's instant message, after RLVa
-    /// and the block list: true when a rule hides it or sets it aside (its
-    /// text may be replaced). Notices, offers and our own are left alone.
+    /// An instant message of any dialog: false when the filter drops it;
+    /// its text may be replaced.
     pub(super) fn omnifilter_im(&mut self, im: &mut InstantMessage) -> bool {
-        if im.from_agent_id == self.agent_id {
-            return false;
-        }
-        let Some(source) = Source::of_im(im.dialog, !im.from_agent_id.is_nil()) else {
-            return false;
-        };
-        // a message needs a text; an offer or an invitation is matched on
-        // its sender alone when it has none
-        let message = matches!(source, Source::Im | Source::GroupChat | Source::ObjectIm);
-        if message && im.message.is_empty() {
-            return false;
+        if !self.omnifilter.enabled {
+            return true;
         }
         let h = Haystack {
-            source,
-            channel: None,
-            sender: &im.from_name,
-            text: &im.message,
+            source: im_source(im.dialog),
+            sender_name: &im.from_name,
+            content: &im.message,
+            region_name: "",
+            owner_id: im.from_agent_id,
         };
-        let mut text = im.message.clone();
-        let shown = self.omnifilter.apply(h, &mut text).is_some();
-        im.message = text;
-        if !shown && source == Source::Im {
-            self.social.set_typing(im.from_agent_id, false);
+        let Some(m) = self.omnifilter.matches(&h) else {
+            return true;
+        };
+        if m.chat_replace.is_empty() {
+            return false;
         }
-        !shown
+        im.message = replacement(&m.chat_replace);
+        true
     }
 
-    /// A script dialog or text box: true when a rule hides it or sets it
-    /// aside (LLScriptFloaterManager::onAddNotification). Its text holds
-    /// its buttons; a rule replacing it rewrites the dialog's message.
-    pub(super) fn omnifilter_dialog(&mut self, object_name: &str, message: &mut String, buttons: &[String]) -> bool {
-        let mut content = message.clone();
-        for b in buttons {
-            content.push_str("\nbutton_name=");
-            content.push_str(b);
+    /// The first message of a group or conference chat
+    /// (ChatterBoxInvitation): false when the filter drops it.
+    pub(super) fn omnifilter_session_invite(&mut self, inv: &mut aurora_net::SessionInvite) -> bool {
+        if !self.omnifilter.enabled {
+            return true;
         }
         let h = Haystack {
-            source: Source::ScriptDialog,
-            channel: None,
-            sender: object_name,
-            text: &content,
+            source: Some(Source::GroupChat),
+            sender_name: &inv.from_name,
+            content: &inv.message,
+            region_name: "",
+            owner_id: inv.from,
         };
-        let mut text = message.clone();
-        let shown = self.omnifilter.apply(h, &mut text).is_some();
-        *message = text;
-        !shown
+        let Some(m) = self.omnifilter.matches(&h) else {
+            return true;
+        };
+        if m.chat_replace.is_empty() {
+            return false;
+        }
+        inv.message = replacement(&m.chat_replace);
+        true
     }
 
-    /// A line just added, highlighted when a rule asks for it.
-    pub(super) fn omnifilter_mark(&self, time: SystemTime, source: Uuid, color: Option<Rgba>) {
-        if let Some(color) = color {
-            mark(time, source, color);
+    /// A script dialog or text box: true when a rule took it (it is not
+    /// shown; its answer, if any, is on its way).
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn omnifilter_script_dialog(
+        &mut self,
+        sender: std::net::SocketAddr,
+        object: Uuid,
+        object_name: &str,
+        owner_name: &str,
+        owner_id: Uuid,
+        message: &str,
+        channel: i32,
+        buttons: &[String],
+    ) -> bool {
+        if !self.omnifilter.enabled {
+            return false;
+        }
+        // [NAME]: LLCacheName::buildFullName, "Resident" left out as set
+        let owner = if self.social.avatar_names.options.trim_resident {
+            owner_name.strip_suffix(" Resident").unwrap_or(owner_name)
+        } else {
+            owner_name
+        };
+        let content = dialog_content(owner, object_name, message, buttons);
+        let h = Haystack {
+            source: Some(Source::ScriptDialog),
+            sender_name: object_name,
+            content: &content,
+            region_name: "",
+            owner_id,
+        };
+        let Some(m) = self.omnifilter.matches(&h) else {
+            return false;
+        };
+        if let Some(reply) = dialog_reply(&m, sender, object, object_name, channel, buttons) {
+            self.omnifilter_answer(reply, m.reply_delay);
+        }
+        true
+    }
+
+    /// llLoadURL: true when a rule took it.
+    pub(super) fn omnifilter_load_url(
+        &mut self,
+        object_name: &str,
+        owner_id: Uuid,
+        owner_is_group: bool,
+        message: &str,
+        url: &str,
+    ) -> bool {
+        if !self.omnifilter.enabled {
+            return false;
+        }
+        let content = load_url_content(url, message, object_name, owner_id, owner_is_group);
+        let h = Haystack {
+            source: Some(Source::UrlRequest),
+            sender_name: object_name,
+            content: &content,
+            region_name: "",
+            owner_id,
+        };
+        let Some(m) = self.omnifilter.matches(&h) else {
+            return false;
+        };
+        if m.button_reply == GO_TO_PAGE {
+            self.omnifilter_answer(Reply::OpenUrl(url.to_owned()), m.reply_delay);
+        }
+        true
+    }
+
+    /// Now, or after the rule's delay (createDelayedResponse).
+    fn omnifilter_answer(&mut self, reply: Reply, delay: f32) {
+        if delay > 0.0 {
+            let due = Instant::now() + Duration::from_secs_f32(delay);
+            self.omnifilter_replies.push((due, reply));
+        } else {
+            self.omnifilter_send(reply);
         }
     }
 
-    /// A message just added to its conversation (`im_messages`): highlighted
-    /// when a rule asks for it (hiding and replacing happened on arrival).
-    pub fn omnifilter_message(&self, m: &crate::ui_sound::ImMessage) {
-        let Some(line) = self.resident_line(m) else {
+    fn omnifilter_send(&mut self, reply: Reply) {
+        match reply {
+            Reply::Send(cmd) => {
+                log::info!("omnifilter: script dialog answered");
+                self.groups.out.push(cmd);
+            }
+            Reply::Block { object, name } => {
+                if let Err(error) = self.block(object, &name, super::mutes::MuteType::Object) {
+                    self.system_message(error);
+                }
+            }
+            Reply::OpenUrl(url) => self.omnifilter_urls.push(url),
+        }
+    }
+
+    /// Once a frame: the rules' file and settings, and the answers whose
+    /// delay is over (sendDelayedResponse).
+    pub fn omnifilter_frame(&mut self, settings: crate::omnifilter::Settings, now: Instant) {
+        self.omnifilter.enabled = settings.enabled;
+        self.omnifilter.select(settings.rule_set);
+        self.omnifilter.update(now);
+        self.omnifilter_flush(now);
+    }
+
+    fn omnifilter_flush(&mut self, now: Instant) {
+        if self.omnifilter_replies.is_empty() {
             return;
-        };
-        let source = match m.kind {
-            crate::ui_sound::ImKind::Private => Source::Im,
-            _ => Source::GroupChat,
-        };
-        // the legacy name, as on arrival (`omnifilter_im`)
-        let sender = self.social.names.get(&line.source).unwrap_or(&line.from);
-        let h = Haystack {
-            source,
-            channel: None,
-            sender,
-            text: &line.text,
-        };
-        if let Some((_, Outcome::Highlight(color))) = self.omnifilter.check(&h) {
-            mark(line.time, line.source, color);
         }
+        let (due, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.omnifilter_replies)
+            .into_iter()
+            .partition(|(at, _)| *at <= now);
+        self.omnifilter_replies = waiting;
+        for (_, reply) in due {
+            self.omnifilter_send(reply);
+        }
+    }
+
+    /// Links a rule asked to open ("Go to page"), for the app.
+    pub fn take_omnifilter_urls(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.omnifilter_urls)
     }
 }
-
-pub mod legacy;
 
 #[cfg(test)]
 mod tests;

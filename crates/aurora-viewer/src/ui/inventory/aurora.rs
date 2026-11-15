@@ -115,6 +115,9 @@ pub fn demo_place(ctx: &egui::Context, frame: u64) {
             | "aurora-worn-wide"
             | "aurora-sidebar-wide"
             | "aurora-smart-wide"
+            | "aurora-favorite-folders"
+            | "aurora-favorite-folders-many"
+            | "aurora-favorite-folders-off"
             | "aurora-keyboard-wide"
             | "aurora-delete-confirm-wide"
             | "aurora-rights"
@@ -169,8 +172,11 @@ pub fn item_count(inv: &Inventory, layout: Layout) -> String {
 /// being fetched.
 pub fn sync_state(p: &Palette, inv: &Inventory, st: &InventoryUi) -> (egui::Color32, String) {
     let fetching = !inv.queue.is_empty() || st.fetch_all || inv.folders.values().any(|f| f.state == FetchState::Fetching);
+    let failed = inv.folders.values().any(|f| f.state == FetchState::Failed);
     if fetching {
         (p.muted_dim, aurora_i18n::tr!("inventory-syncing").to_owned())
+    } else if failed {
+        (p.amber, aurora_i18n::tr!("inventory-sync-incomplete").to_owned())
     } else {
         (p.teal, aurora_i18n::tr!("inventory-synced").to_owned())
     }
@@ -531,6 +537,19 @@ fn explorer_list(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_status_line_reports_folders_that_could_not_be_loaded() {
+        let mut h = Harness::new(800.0);
+        let p = crate::theme::Theme::default().palette();
+        let (_, text) = sync_state(&p, &h.inv, &h.st);
+        assert_eq!(text, aurora_i18n::tr!("inventory-synced"));
+        let root = h.inv.root;
+        h.inv.folders.get_mut(&root).expect("root").state = FetchState::Failed;
+        let (color, text) = sync_state(&p, &h.inv, &h.st);
+        assert_eq!(text, aurora_i18n::tr!("inventory-sync-incomplete"));
+        assert_eq!(color, p.amber, "an incomplete load is a warning, not a success");
+    }
 
     #[test]
     fn inventory_total_is_shared_by_every_title_width() {

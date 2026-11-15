@@ -131,6 +131,7 @@ impl Edit {
 struct PickEdit {
     /// Nil for a pick being created.
     id: Uuid,
+    parcel: Uuid,
     name: String,
     desc: String,
     snapshot: Uuid,
@@ -945,6 +946,7 @@ fn classified_of(e: &ClassifiedEdit) -> aurora_net::ClassifiedInfo {
 fn pick_of(e: &PickEdit) -> PickInfo {
     PickInfo {
         id: if e.id.is_nil() { Uuid::new_v4() } else { e.id },
+        parcel: e.parcel,
         name: e.name.clone(),
         desc: e.desc.clone(),
         snapshot: e.snapshot,
@@ -1523,7 +1525,13 @@ fn action_buttons(ui: &mut egui::Ui, p: &Palette, world: &World, w: &Window, is_
             {
                 super::context::request(ui.ctx(), super::context::CtxAction::ShowOnMap(id));
             }
-            if ui.add(egui::Button::new(aurora_i18n::tr!("common-pay")).min_size(size)).clicked() {
+            if ui
+                .add_enabled(
+                    world.rlva_can_pay(),
+                    egui::Button::new(aurora_i18n::tr!("common-pay")).min_size(size),
+                )
+                .clicked()
+            {
                 crate::ui::context::request(ui.ctx(), crate::ui::context::CtxAction::PayResident(id));
             }
         });
@@ -1577,7 +1585,7 @@ fn overflow_menu(ui: &mut egui::Ui, p: &Palette, world: &World, id: Uuid, blocke
         if menu::item_if(ui, p, "map", aurora_i18n::tr!("common-map"), world.can_locate_avatar(id)) {
             super::context::request(ui.ctx(), super::context::CtxAction::ShowOnMap(id));
         }
-        if menu::item(ui, p, "coin-filled", aurora_i18n::tr!("common-pay")) {
+        if menu::item_if(ui, p, "coin-filled", aurora_i18n::tr!("common-pay"), world.rlva_can_pay()) {
             crate::ui::context::request(ui.ctx(), crate::ui::context::CtxAction::PayResident(id));
         }
         if menu::item(ui, p, "share", aurora_i18n::tr!("common-share")) {
@@ -1592,6 +1600,13 @@ fn overflow_menu(ui: &mut egui::Ui, p: &Palette, world: &World, id: Uuid, blocke
             world.calls.voice_enabled,
         ) {
             crate::ui::context::request(ui.ctx(), crate::ui::context::CtxAction::Call(id));
+        }
+        // Aurora's poke (`ui/poke.rs`): in this menu, the Legacy Viewer's
+        // button stack keeping its six buttons
+        if let Some(b) = crate::ui::poke::button(ui.ctx(), world, &id)
+            && menu::item_if(ui, p, crate::ui::poke::ICON, aurora_i18n::tr!("ui-poke"), b.enabled)
+        {
+            crate::ui::context::request(ui.ctx(), crate::ui::context::CtxAction::Poke(id));
         }
         let block = if blocked {
             aurora_i18n::tr!("common-unblock")
@@ -1928,6 +1943,7 @@ fn new_pick(world: &World) -> PickEdit {
     };
     PickEdit {
         id: Uuid::nil(),
+        parcel: Uuid::nil(),
         name,
         desc,
         snapshot,
@@ -1960,6 +1976,7 @@ fn pick_detail(
     if own && let Some(i) = info {
         let server = PickEdit {
             id: i.id,
+            parcel: i.parcel,
             name: i.name.clone(),
             desc: i.desc.clone(),
             snapshot: i.snapshot,
@@ -2081,6 +2098,7 @@ fn pick_detail(
             let here = new_pick(world);
             if let Some((e, _)) = w.pick_edit.as_mut() {
                 e.pos = here.pos;
+                e.parcel = here.parcel;
                 e.location = here.location;
             }
         }
@@ -2589,6 +2607,24 @@ mod tests {
         e.text = "a".into();
         e.sync("c");
         assert_eq!(e.text, "c");
+    }
+
+    #[test]
+    fn editing_pick_contents_preserves_the_saved_parcel_and_position() {
+        let mut edit = PickEdit {
+            id: Uuid::from_u128(41),
+            parcel: Uuid::from_u128(42),
+            pos: DVec3::new(300_001.0, 300_002.0, 30.0),
+            ..Default::default()
+        };
+        edit.name = "Changed name".into();
+        edit.desc = "Changed description".into();
+        edit.snapshot = Uuid::from_u128(43);
+        let saved = pick_of(&edit);
+        assert_eq!(saved.parcel, Uuid::from_u128(42));
+        assert_eq!(saved.pos_global, edit.pos);
+        assert_eq!(saved.id, edit.id);
+        assert_eq!(saved.snapshot, edit.snapshot);
     }
 
     #[test]

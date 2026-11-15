@@ -223,6 +223,8 @@ pub struct Renderer {
     /// The device can draw the GPU lists (and AURORA_CPU_CULL is not set).
     gpu_cull: bool,
     size: (u32, u32),
+    /// The window is 0 x 0 (minimised): `size` keeps the last real size.
+    minimised: bool,
     vsync: bool,
     settings: RenderSettings,
     msaa_supported: Vec<u32>,
@@ -280,11 +282,20 @@ pub struct Renderer {
     /// Last captured frame (width, height, RGBA8).
     pub captured: Option<(u32, u32, Vec<u8>)>,
     /// A photo for the next frame: it is drawn offscreen at its own size
-    /// (see `frame_size`), waited for, and its image put in `snapshot`.
+    /// (see `frame_size`), waited for, and its image put in `snapshot`. A
+    /// face of a 360° capture (`SnapshotSpec::cube`) is not waited for: it is
+    /// taken out of this slot when the frame carrying it is sent, and stays
+    /// on the GPU.
     pub snapshot_request: Option<crate::SnapshotSpec>,
     /// The answer to the last photo: its image (width, height, RGBA8), or
     /// None when it could not be drawn.
     pub snapshot: Option<Option<(u32, u32, Vec<u8>)>>,
+    /// The panorama to project from the six faces the cube holds, with the
+    /// next frame (equirect.rs); it comes in `equirect` a few frames later.
+    pub equirect_request: Option<Box<crate::EquirectJob>>,
+    /// The answer to the last panorama asked (width, height, RGBA8), or
+    /// None when it could not be made.
+    pub equirect: Option<crate::EquirectAnswer>,
     /// The photo asked left with a frame the GPU had not finished within
     /// `CAPTURE_WAIT`: its answer comes with a later frame, which does not
     /// draw it again (a second answer would be taken for the next part).
@@ -690,6 +701,8 @@ impl Renderer {
             adapter_specific,
             gpu_cull,
             tex_layout: textures.layout.clone(),
+            tex_layout_entries: textures.layout_entries.clone(),
+            instance_flags: desc().flags,
             scene: scene_gpu(
                 &records,
                 &cull,
@@ -747,6 +760,7 @@ impl Renderer {
             bind_generation: 0,
             gpu_cull,
             size: (width.max(1), height.max(1)),
+            minimised: width == 0 || height == 0,
             vsync,
             settings: RenderSettings::default(),
             msaa_supported,
@@ -781,6 +795,8 @@ impl Renderer {
             captured: None,
             snapshot_request: None,
             snapshot: None,
+            equirect_request: None,
+            equirect: None,
             snapshot_sent: false,
             snapshot_dropped: false,
             histogram_request: None,
@@ -1031,12 +1047,10 @@ impl Renderer {
     }
 
     /// The window was resized: the swapchain and the render targets follow
-    /// with the next frame.
+    /// with the next frame. Minimised (0 x 0), the last real size stays and
+    /// the frames stop asking the swapchain for an image until it is back.
     pub fn resize(&mut self, width: u32, height: u32) {
-        if width == 0 || height == 0 {
-            return;
-        }
-        self.size = (width, height);
+        (self.size, self.minimised) = follow_window(self.size, width, height);
     }
 
     /// The draw lists can be culled on the GPU (`DrawLists::gpu`).
@@ -1285,6 +1299,9 @@ impl Renderer {
             self.drawn_answers.drain(..self.drawn_answers.len() - KEPT);
         }
         self.cull.last = r.cull;
+        if let Some(e) = r.equirect.take() {
+            self.equirect = Some(e);
+        }
         if r.snapshot && std::mem::take(&mut self.snapshot_dropped) {
             // the answer of a photo given up: a photo asked since is drawn
             // with the next frame
@@ -1478,6 +1495,12 @@ impl Renderer {
         // for the answer of a photo still on the GPU)
         let capture = match self.snapshot_request {
             Some(_) if self.snapshot_sent => None,
+            // a face of a 360° capture is sent and forgotten: nothing comes
+            // back for it, the next face can be asked at once
+            Some(s) if s.cube.is_some() => {
+                self.snapshot_request = None;
+                Some(crate::packet::Capture::Snapshot(s))
+            }
             Some(s) => Some(crate::packet::Capture::Snapshot(s)),
             None => capture_for(self.capture_scene, self.capture_request, self.can_capture),
         };
@@ -1497,12 +1520,14 @@ impl Renderer {
                 width: self.size.0,
                 height: self.size.1,
                 vsync: self.vsync,
+                minimised: self.minimised,
             },
             settings: self.settings,
             hover: self.hover_request.take(),
             picks: std::mem::take(&mut self.pick_requests),
             drawn: std::mem::take(&mut self.drawn_requests),
             capture,
+            equirect: self.equirect_request.take(),
             histogram: self.histogram_request.take(),
             motion_cut: std::mem::take(&mut self.motion_cut),
             input_at: self.input_at.take(),
@@ -1528,7 +1553,8 @@ impl Renderer {
                     }
                     Err(_) => gone = true,
                 }
-                if capture.is_some() && !gone {
+                let cube_face = matches!(capture, Some(crate::packet::Capture::Snapshot(s)) if s.cube.is_some());
+                if capture.is_some() && !cube_face && !gone {
                     // the capture is read right after this call; a GPU that
                     // stops answering in it leaves it for a later frame
                     let t = Instant::now();
@@ -1579,6 +1605,8 @@ impl Renderer {
                 gpu_depth: self.last_stats.gpu_depth,
                 gpu_ssao: self.last_stats.gpu_ssao,
                 gpu_contact: self.last_stats.gpu_contact,
+                gpu_clouds: self.last_stats.gpu_clouds,
+                gpu_soft: self.last_stats.gpu_soft,
                 gpu_bloom: self.last_stats.gpu_bloom,
                 gpu_effects: self.last_stats.gpu_effects,
                 gpu_weather: self.last_stats.gpu_weather,
@@ -1953,6 +1981,11 @@ fn open_device(
     if afeat.contains(wgpu::Features::TEXTURE_COMPRESSION_BC) {
         features |= wgpu::Features::TEXTURE_COMPRESSION_BC;
     }
+    // depth-based stochastic transparency (oit_stochastic.rs): the triangle
+    // in the seed of a fragment's mask
+    if afeat.contains(wgpu::Features::PRIMITIVE_INDEX) {
+        features |= wgpu::Features::PRIMITIVE_INDEX;
+    }
     // GPU draw lists (gpu_cull.rs): draw counts written by the GPU
     if afeat.contains(wgpu::Features::MULTI_DRAW_INDIRECT_COUNT) {
         features |= wgpu::Features::MULTI_DRAW_INDIRECT_COUNT;
@@ -1966,6 +1999,8 @@ fn open_device(
     features |= afeat & crate::blend_exact::WIDE_RANGE;
     // Aurora's own pipeline cache on disk (pipeline_cache.rs)
     features |= crate::pipeline_cache::feature(afeat);
+    // naga's SampleMask built-in fixed on Vulkan (spirv_fix.rs)
+    features |= crate::spirv_fix::feature(afeat);
     let in_all_pools = descriptors_in_all_pools(adapter);
     let max_textures = texture_page_limit(&alim, in_all_pools);
     if max_textures < texture_page_limit(&alim, None) {
@@ -2190,6 +2225,16 @@ fn gpu_instance_flags(validation: bool) -> wgpu::InstanceFlags {
     }
 }
 
+/// The size to draw at and whether the window is minimised, for a window
+/// now `width` x `height`: 0 x 0 (minimised) keeps the last real size.
+fn follow_window(size: (u32, u32), width: u32, height: u32) -> ((u32, u32), bool) {
+    if width == 0 || height == 0 {
+        (size, true)
+    } else {
+        ((width, height), false)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2247,6 +2292,18 @@ mod tests {
         assert_eq!(gpu_memory_label(Some(8192), None, false, Some(8192)), "8192 MB dedicated");
         assert_eq!(gpu_memory_label(Some(16_000), None, true, Some(16_000)), "16000 MB video memory");
         assert_eq!(gpu_memory_label(None, None, false, None), "memory unknown");
+    }
+
+    /// Minimised (0 x 0), the window keeps its last real size and is marked
+    /// minimised, so frames stop asking for a swapchain image; restored, it
+    /// takes its size back and the mark goes.
+    #[test]
+    fn a_minimised_window_keeps_its_size_and_is_marked() {
+        let size = (1920, 1009);
+        assert_eq!(follow_window(size, 0, 0), (size, true));
+        assert_eq!(follow_window(size, 0, 600), (size, true));
+        assert_eq!(follow_window(size, 1920, 1009), (size, false));
+        assert_eq!(follow_window(size, 1280, 720), ((1280, 720), false));
     }
 
     #[test]

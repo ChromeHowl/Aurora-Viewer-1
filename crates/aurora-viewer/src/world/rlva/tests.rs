@@ -63,9 +63,11 @@ fn rlva_vendor_payments_follow_buy_while_resident_payments_follow_pay() {
         message: String::new(),
     };
     command(&mut world.rlva, A, "@pay=n");
+    assert!(!world.rlva_can_pay());
     assert!(world.rlva_allows_command(&object, Uuid::nil()));
     assert!(!world.rlva_allows_command(&resident, Uuid::nil()));
     command(&mut world.rlva, A, "@pay=y,buy=n");
+    assert!(world.rlva_can_pay());
     assert!(!world.rlva_allows_command(&object, Uuid::nil()));
     assert!(world.rlva_allows_command(&resident, Uuid::nil()));
 }
@@ -789,11 +791,12 @@ fn rlva_maturity_deferred_teleports_keep_the_actor_recheck_locks_and_cancel_on_d
     let mut maturity = MaturityPreference::default();
     maturity.request(SIM_ACCESS_MATURE, SIM_ACCESS_PG);
     maturity.take_commands();
-    maturity.hold(NetCommand::TeleportHome, A);
+    maturity.hold(NetCommand::TeleportHome, A, false);
     // home is locked only by @tplm and @tploc together (teleportViaLandmark)
     command(&mut world.rlva, A, "@tplm=n,tploc=n");
     assert_eq!(maturity.answer(Some(SIM_ACCESS_MATURE)), Outcome::Synced);
-    let (actor, teleport) = maturity.take_commands().pop().unwrap();
+    let (actor, teleport, portal) = maturity.take_commands().pop().unwrap();
+    assert!(!portal);
     assert_eq!(actor, A);
     assert!(
         world.rlva_allows_command(&teleport, actor),
@@ -808,7 +811,7 @@ fn rlva_maturity_deferred_teleports_keep_the_actor_recheck_locks_and_cancel_on_d
         let mut maturity = MaturityPreference::default();
         maturity.request(SIM_ACCESS_MATURE, SIM_ACCESS_PG);
         maturity.take_commands();
-        maturity.hold(NetCommand::TeleportHome, A);
+        maturity.hold(NetCommand::TeleportHome, A, false);
         if release_first {
             maturity.answer(Some(SIM_ACCESS_MATURE));
         }
@@ -817,7 +820,7 @@ fn rlva_maturity_deferred_teleports_keep_the_actor_recheck_locks_and_cancel_on_d
             maturity.answer(Some(SIM_ACCESS_MATURE));
         }
         assert!(maturity.take_commands().is_empty());
-        maturity.hold(NetCommand::TeleportHome, Uuid::nil());
+        maturity.hold(NetCommand::TeleportHome, Uuid::nil(), false);
         maturity.cancel_script_teleports();
         assert!(
             maturity.holds_teleport(),
@@ -1718,6 +1721,21 @@ fn rlva_im_ranges_and_nametag_distances_follow_exclusions_and_strict_exceptions(
 }
 
 #[test]
+fn run_restrictions_each_leave_the_other_kind_of_run() {
+    let mut world = crate::world::World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
+    world.rlva.configure(true);
+    let run = NetCommand::SetAlwaysRun(true);
+    let walk = NetCommand::SetAlwaysRun(false);
+    command(&mut world.rlva, A, "@alwaysrun=n");
+    assert!(world.rlva_allows_command(&run, Uuid::nil()), "@alwaysrun leaves the double tap");
+    command(&mut world.rlva, A, "@alwaysrun=y,temprun=n");
+    assert!(world.rlva_allows_command(&run, Uuid::nil()), "@temprun leaves Always run");
+    command(&mut world.rlva, A, "@alwaysrun=n");
+    assert!(!world.rlva_allows_command(&run, Uuid::nil()), "both leave nothing that may run");
+    assert!(world.rlva_allows_command(&walk, Uuid::nil()));
+}
+
+#[test]
 fn rlva_stand_return_waits_for_a_successful_sit_and_is_cancelled_by_disabling() {
     let mut w = crate::world::World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
     w.rlva.configure(true);
@@ -1726,9 +1744,9 @@ fn rlva_stand_return_waits_for_a_successful_sit_and_is_cancelled_by_disabling() 
     w.rlva.stand_origin = Some(origin);
     w.rlva_update_stand();
     assert!(w.rlva.stand_return.is_none(), "an unanswered sit is not a stand");
-    w.agent.ground_sit = true;
+    w.agent.seated = true;
     w.rlva_update_stand();
-    w.agent.ground_sit = false;
+    w.agent.seated = false;
     w.rlva_update_stand();
     assert_eq!(w.rlva.stand_return, Some(origin));
     let c = NetCommand::TeleportTo {
@@ -1824,7 +1842,14 @@ fn rlva_teleport_home_landmarks_and_bare_tplocal_follow_the_legacy_rules() {
 fn rlva_render_aliases_release_without_mutating_saved_settings_and_touch_measures_the_surface() {
     let mut r = enabled();
     command(&mut r, A, "@camtextures=n,camavdist:4=n,showselfhead=n");
-    assert_eq!(r.camera_texture(), Some(aurora_prim::te::DEFAULT_TEXTURE));
+    // Empty @camtextures / @setcam_textures is IMG_DEFAULT, the flat grey
+    // (rlvhelper.cpp), not the plywood texture.
+    assert_eq!(r.camera_texture(), Some(aurora_prim::te::IMG_DEFAULT));
+    let expected = aurora_prim::te::IMG_DEFAULT.to_string();
+    assert_eq!(
+        r.camera_reply(&Command::parse("getcam_textures=123").unwrap(), 1.0, 1.0).as_deref(),
+        Some(expected.as_str())
+    );
     assert_eq!(r.silhouette_distance(), Some(4.0));
     command(&mut r, A, "@camtextures=y,camavdist:4=y");
     assert_eq!(r.camera_texture(), None);
@@ -1914,11 +1939,14 @@ fn rlva_watchdog_folder_locks_resolved_once_match_single_checks() {
     item(&mut world, 0xC001, collar, Some(collar_item));
     let cuff = item(&mut world, 0xC002, cuffs, None);
     let shirt = item(&mut world, 0xC003, other, None);
+    // the shirt lives outside #RLV too, worn through its link in #RLV/Cuffs
+    item(&mut world, 0xC004, cuffs, Some(shirt));
+    let free = item(&mut world, 0xC005, other, None);
     for n in 0..2000 {
         item(&mut world, 0xD000 + n, other, None);
     }
     let handle = world.main_region.unwrap();
-    for (n, worn) in [collar_item, cuff, shirt].into_iter().enumerate() {
+    for (n, worn) in [collar_item, cuff, shirt, free].into_iter().enumerate() {
         world.objects.upsert(
             handle,
             crate::demo::outfit_attachment(&aurora_net::AttachRequest {
@@ -1959,9 +1987,28 @@ fn rlva_watchdog_folder_locks_resolved_once_match_single_checks() {
         world.rlva_folder_allowed_in(&locks, other, false, Uuid::nil()),
         "outside #RLV stays free"
     );
+    // RlvFolderLocks::getLockedItems: a worn item is locked by the folder of
+    // any of its links under #RLV, not only by its own folder (issue #2677)
+    assert!(
+        !world.rlva_can_remove(collar_item, Uuid::nil()),
+        "worn through a link in the issuer's folder"
+    );
+    assert!(!world.rlva_can_remove(cuff, Uuid::nil()), "worn from the named folder");
+    assert!(
+        !world.rlva_can_remove(shirt, Uuid::nil()),
+        "worn through a link in the named folder"
+    );
+    assert!(world.rlva_can_remove(free, Uuid::nil()), "no link in a locked folder");
     world.rlva_watchdog_tick(std::time::Instant::now());
     world.rlva_watchdog_tick(std::time::Instant::now());
     assert!(world.rlva.watchdog.rejected.is_empty(), "nothing worn is rejected");
+    assert_eq!(
+        world.rlva.watchdog.checked.as_ref().expect("checked").locked,
+        BTreeSet::from([collar_item, cuff, shirt]),
+        "the watchdog holds the linked items too"
+    );
+    command(&mut world.rlva, cuff, "@detachthis:Cuffs=y");
+    assert!(world.rlva_can_remove(shirt, Uuid::nil()), "released with the rule");
 }
 
 /// The watchdog keeps its lock checks, and the folder locks their inventory
@@ -2609,6 +2656,203 @@ fn empty_trash_ignores_rlva_locks_without_exempting_other_purges() {
     assert!(!world.rlva_inventory_mutation_allowed(&purge(Uuid::from_u128(92)), Uuid::nil()));
 }
 
+/// #2718: an object worn from the ground while something else is @detach
+/// locked: its item is not in the inventory yet.
+#[test]
+fn rlva_detach_lock_keeps_an_object_worn_from_the_ground() {
+    use aurora_net::AttachRequest;
+    let mut world = crate::world::World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
+    for event in crate::demo::events() {
+        world.apply(event);
+    }
+    world.rlva.configure(true);
+    let handle = world.main_region.expect("demo region");
+    let attachment = |world: &crate::world::World, item_id: Uuid, point: u8| {
+        crate::demo::outfit_attachment(&AttachRequest {
+            item_id,
+            owner_id: world.agent_id,
+            point,
+            add: true,
+            flags: 0,
+            group_mask: 0,
+            everyone_mask: 0,
+            next_owner_mask: 0,
+            name: String::new(),
+            desc: String::new(),
+        })
+    };
+    let (locked, ground) = (Uuid::from_u128(0xE001), Uuid::from_u128(0xE002));
+    let object = attachment(&world, locked, 2);
+    world.objects.upsert(handle, object);
+    let source = world
+        .worn_attachment(&locked)
+        .map(|i| world.objects.get(i).unwrap().full_id)
+        .expect("worn");
+    world.movement_complete = true;
+    let tick = |world: &mut crate::world::World| {
+        world.rlva_watchdog_tick(std::time::Instant::now());
+        world.rlva_watchdog_tick(std::time::Instant::now());
+    };
+    tick(&mut world);
+    command(&mut world.rlva, source, "@detach=n");
+    tick(&mut world);
+
+    // the object keeps its own id: only its item is new
+    let mut object = attachment(&world, ground, 3);
+    object.full_id = Uuid::from_u128(0xE102);
+    world.objects.upsert(handle, object);
+    assert!(!world.inventory.items.contains_key(&ground));
+    tick(&mut world);
+    assert!(
+        world.rlva.watchdog.rejected.is_empty(),
+        "the wearer's other lock does not refuse it"
+    );
+    assert!(world.worn_attachment(&ground).is_some());
+
+    // a lock on the point itself still does
+    let (held, refused) = (Uuid::from_u128(0xE003), 4);
+    command(&mut world.rlva, source, "@detach:chest=n,addattach=n");
+    let mut object = attachment(&world, held, refused);
+    object.full_id = Uuid::from_u128(0xE103);
+    world.objects.upsert(handle, object);
+    tick(&mut world);
+    assert!(world.rlva.watchdog.rejected.contains(&held), "@addattach still refuses it");
+    assert!(
+        !world.rlva_can_add(Uuid::from_u128(0xE00F), 3, Uuid::nil()),
+        "an item neither known nor worn stays refused"
+    );
+}
+
+/// #2749, #2750: what @interact and @fartouch keep from a right click, the
+/// build tools, the Create tool and a drag from the inventory.
+#[test]
+fn rlva_interact_and_fartouch_gate_what_a_click_can_designate() {
+    use glam::Vec3;
+    let mut world = crate::world::World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
+    for event in crate::demo::events().into_iter().chain(crate::demo::hud::events()) {
+        world.apply(event);
+    }
+    world.rlva.configure(true);
+    let hud = world
+        .objects
+        .index_of_uuid(&crate::demo::hud::object(31, false).full_id)
+        .expect("a HUD");
+    assert!(world.rlva_is_hud(hud));
+    let far = world
+        .objects
+        .iter()
+        .find(|(i, o)| {
+            !o.is_avatar()
+                && o.parent_id == 0
+                && crate::scene::Scene::object_transform_unshifted(&world, *i, std::time::Instant::now())
+                    .is_some_and(|(p, _, _)| p.distance(world.agent.position) > 10.0)
+        })
+        .map(|(i, _)| i)
+        .expect("an object in the distance");
+    let me = world.objects.index_of_uuid(&world.agent_id).expect("our avatar");
+    let at = world.agent.position;
+    let beyond = at + Vec3::X * 10.0;
+    let free = |world: &crate::world::World| {
+        assert!(world.rlva_can_designate(far, Some(beyond)));
+        assert!(world.rlva_can_interact(far, Some(beyond)));
+        assert!(world.rlva_can_designate_land());
+        assert!(world.rlva_can_rez_drop(None, false));
+        assert!(world.rlva_can_place_at(beyond));
+    };
+    free(&world);
+
+    command(&mut world.rlva, A, "@fartouch=n");
+    assert!(!world.rlva_can_designate(far, Some(beyond)), "out of reach, surface included");
+    assert!(
+        world.rlva_can_designate(far, Some(at + Vec3::X)),
+        "a surface within 1.5 m stays pickable"
+    );
+    assert!(!world.rlva_can_designate(far, None));
+    assert!(world.rlva_can_designate(me, None), "our own avatar");
+    assert!(world.rlva_can_designate(hud, None), "what we wear");
+    assert!(world.rlva_can_interact(hud, None));
+    assert!(world.rlva_can_designate_land(), "@fartouch leaves the land menu");
+    assert!(!world.rlva_can_interact(far, Some(beyond)));
+    assert!(world.rlva_can_interact(far, Some(at + Vec3::X)));
+    assert!(
+        world.rlva_can_rez_drop(None, false),
+        "a drag from the inventory is not limited by @fartouch"
+    );
+    assert!(!world.rlva_can_place_at(beyond), "the Create tool is");
+    assert!(world.rlva_can_place_at(at + Vec3::X));
+    command(&mut world.rlva, A, "@fartouch=y");
+    free(&world);
+
+    command(&mut world.rlva, A, "@interact=n");
+    assert!(!world.rlva_can_designate(far, Some(at + Vec3::X)), "at any distance");
+    assert!(world.rlva_can_designate(me, None), "the avatar's own menu stays");
+    assert!(!world.rlva_can_designate(hud, None), "cursorIntersect drops a HUD too");
+    assert!(!world.rlva_can_interact(hud, None));
+    assert!(!world.rlva_can_designate_land());
+    assert!(!world.rlva_can_interact(far, Some(at + Vec3::X)));
+    assert!(!world.rlva_can_rez_drop(None, false));
+    assert!(!world.rlva_can_rez_drop(Some(far), false));
+    assert!(!world.rlva_can_rez_drop(Some(far), true), "a drop into contents only on a HUD");
+    let add = aurora_net::NetCommand::Build(aurora_net::build::BuildCmd::Duplicate {
+        handle: world.main_region.expect("demo region"),
+        local_ids: Vec::new(),
+        offset: Vec3::ZERO,
+        group_id: Uuid::nil(),
+        flags: 0,
+    });
+    assert!(!world.rlva_allows_command(&add, Uuid::nil()));
+    let sit = aurora_net::NetCommand::RequestSit {
+        target: world.objects.get(far).unwrap().full_id,
+        offset: Vec3::ZERO,
+        handle: world.main_region.expect("demo region"),
+    };
+    assert!(!world.rlva_allows_command(&sit, Uuid::nil()), "a clicked seat is an interaction");
+    command(&mut world.rlva, A, "@interact=y");
+
+    command(&mut world.rlva, A, "@rez=n");
+    assert!(!world.rlva_can_rez_drop(None, true), "@rez keeps the land");
+    assert!(world.rlva_can_rez_drop(Some(far), true), "@rez lets a drop into contents pass");
+    assert!(!world.rlva_can_rez_drop(Some(far), false));
+}
+
+/// LLSelectMgr::deselectAllIfTooFar measures the selection's centre, and
+/// leaves attachments alone, ours or someone else's.
+#[test]
+fn rlva_fartouch_lets_go_of_a_selection_by_its_centre_and_never_of_an_attachment() {
+    use glam::Vec3;
+    let mut world = crate::world::World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
+    for event in crate::demo::events().into_iter().chain(crate::demo::hud::events()) {
+        world.apply(event);
+    }
+    world.rlva.configure(true);
+    let find = |wanted: fn(Option<Uuid>, Uuid) -> bool| {
+        world
+            .objects
+            .iter()
+            .find(|(i, o)| {
+                !o.is_avatar()
+                    && world
+                        .rlva_root_and_wearer(*i)
+                        .is_some_and(|(_, wearer)| wanted(wearer, world.agent_id))
+            })
+            .map(|(i, _)| i)
+    };
+    let prim = find(|wearer, _| wearer.is_none()).expect("a world object");
+    let mine = find(|wearer, me| wearer == Some(me)).expect("something we wear");
+    let theirs = find(|wearer, me| wearer.is_some_and(|w| w != me)).expect("something another avatar wears");
+    let at = world.agent.position;
+    let beyond = at + Vec3::X * 10.0;
+    assert!(!world.rlva_selection_too_far(prim, beyond), "no restriction");
+    command(&mut world.rlva, A, "@fartouch=n");
+    assert!(world.rlva_selection_too_far(prim, beyond));
+    assert!(
+        !world.rlva_selection_too_far(prim, at + Vec3::X),
+        "only the centre counts, wherever the object itself is"
+    );
+    assert!(!world.rlva_selection_too_far(mine, beyond));
+    assert!(!world.rlva_selection_too_far(theirs, beyond));
+}
+
 #[test]
 fn rlva_linking_refuses_the_locked_seat_like_can_stand_but_sittp_alone_does_not() {
     use crate::world::World;
@@ -2640,4 +2884,36 @@ fn rlva_linking_refuses_the_locked_seat_like_can_stand_but_sittp_alone_does_not(
     assert!(world.rlva_can_link(&[seat, other]));
     command(&mut world.rlva, A, "@editworld=n");
     assert!(!world.rlva_can_link(&[seat, other]));
+}
+
+/// #3154: `@setenv_daytime:-1=force` and `@setenv_reset=force` go back to the
+/// shared environment, unless `@setenv=n` came before them.
+#[test]
+fn rlva_environment_reset_returns_to_the_shared_environment_unless_locked() {
+    use crate::world::{World, eep::SkyFrame, eep_env::SourceRights};
+    for reset in ["setenv_daytime:-1=force", "setenv_reset=force"] {
+        for (lines, shared) in [
+            (vec![format!("@{reset}")], true),
+            (vec![format!("@{reset},setenv=n")], true),
+            (vec![format!("@setenv=n,{reset}")], false),
+            (vec!["@setenv=n".to_owned(), format!("@{reset}")], false),
+            (vec!["@setenv=n".to_owned(), "@setenv=y".to_owned(), format!("@{reset}")], true),
+        ] {
+            let mut world = World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
+            world.rlva.configure(true);
+            // a sky the user picked, then an RLVa sky over it
+            world.eep.apply_local_sky(SkyFrame::default(), SourceRights::Flags(0));
+            world.on_chat(chat("@setenv_ambient:0.2/0.4/0.6=force"));
+            world.rlva_pending();
+            assert!(world.rlva.environment.is_some());
+            for line in &lines {
+                world.on_chat(chat(line));
+                world.rlva_pending();
+            }
+            assert_eq!(world.eep.has_local(), !shared, "{lines:?}: the user's local sky");
+            assert!(world.rlva.environment.is_none(), "{lines:?}: RLVa's sky stays");
+        }
+    }
+    assert!(environment::supports("setenv_reset", true));
+    assert!(!environment::supports("getenv_reset", false));
 }

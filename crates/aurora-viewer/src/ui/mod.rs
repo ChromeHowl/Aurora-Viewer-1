@@ -10,13 +10,13 @@ pub mod aurora_bg;
 pub mod avatar_align;
 pub mod avatar_picker;
 pub mod avatar_render_settings;
+pub mod avatar_welcome;
 pub mod backdrop;
 pub mod balance_gains;
 pub mod bars;
 pub mod bidi;
 pub mod blacklist;
 pub mod bumps;
-pub mod pose_stand;
 pub mod sound_explorer;
 pub mod voice_controls;
 pub mod window_size;
@@ -39,6 +39,7 @@ pub mod contact_markers;
 pub mod contacts;
 pub mod context;
 pub mod controls;
+pub mod conversation_log;
 pub mod crosshair;
 pub mod debug_overlay;
 pub mod debug_settings;
@@ -98,9 +99,10 @@ pub mod notification_center;
 pub mod notifications;
 pub(crate) mod numeric_drag;
 pub mod object_actions;
-pub mod omnifilter_notecards;
+pub mod omnifilter;
 pub mod options;
 pub mod owned_land;
+pub mod panorama;
 pub mod parcel_icons;
 pub mod pay;
 pub mod people;
@@ -111,7 +113,9 @@ pub mod physics;
 pub mod place_card;
 pub mod place_details;
 pub mod places;
+pub mod poke;
 pub mod portals;
+pub mod pose_stand;
 pub mod presence;
 pub mod profile;
 pub mod quick_prefs;
@@ -161,7 +165,6 @@ pub mod widgets;
 
 #[cfg(test)]
 mod uri_restore_tests;
-pub mod wearable_favorites;
 pub mod worldmap;
 
 /// Which floating panels are open.
@@ -179,8 +182,13 @@ pub struct Panels {
     pub group_titles: bool,
     /// The Conversation Log (the toolbar's `conversation_log` command).
     pub conversation_log: bool,
+    /// The Favorite Wearables window (`ui/appearance/wearable_favorites.rs`).
+    pub wearable_favorites: bool,
     /// The photo window (Firestorm's snapshot floater).
     pub snapshot: bool,
+    /// The photo window is in its 360° format (`SnapshotUi::pano`, which the
+    /// app copies here for the toolbar's button).
+    pub snapshot_pano: bool,
     pub people: bool,
     pub minimap: bool,
     /// World map (Ctrl+M).
@@ -206,6 +214,7 @@ pub struct Panels {
     pub appearance: bool,
     pub avatar_studio: bool,
     pub ao: bool,
+    pub ao_mini: bool,
     pub people_tab: u8,
     /// The torn-off Contacts window (ContactsTornOff).
     pub contacts: bool,
@@ -232,10 +241,6 @@ pub struct Panels {
     pub experiences: bool,
     /// "Bumps, pushes & hits" (Help menu): who bumped, pushed or hit us.
     pub bumps: bool,
-    /// Avatar › Pose stand (`ui/pose_stand.rs`).
-    pub pose_stand: bool,
-    /// Me › Favorite wearables (`ui/wearable_favorites.rs`).
-    pub wearable_favorites: bool,
     /// "Grid status" (Help menu, toolbar): the grid's incidents.
     pub grid_status: bool,
     /// The Compass (toolbar `avatar_align`, Me › Avatar alignment), in its
@@ -244,12 +249,21 @@ pub struct Panels {
     pub avatar_align_mini: bool,
     /// The built-in web browser (toolbar `webbrowser`).
     pub web_browser: bool,
+    /// The Avatar Welcome Pack (toolbar `avatar`, Me › Avatar Welcome Pack…).
+    pub avatar_welcome: bool,
     /// The Destination Guide (toolbar `destinations`, World › Destinations).
     pub destinations: bool,
     /// "Quick preferences" (toolbar `quickprefs`).
     pub quick_prefs: bool,
     /// "Voice controls" (toolbar): who is in the voice channel and who speaks.
     pub voice_controls: bool,
+    /// The conversation log (toolbar `conversation_log`, Communicate ›
+    /// Conversation log…).
+    pub conversation_log: bool,
+    /// The Omnifilter Rules Editor (Communicate menu, toolbar `omnifilter`).
+    pub omnifilter: bool,
+    /// The pose stand (toolbar `pose_stand`).
+    pub pose_stand: bool,
     /// "About Aurora Viewer" (Help menu): the version, the system
     /// information and the licences.
     pub about: bool,
@@ -281,7 +295,9 @@ impl Panels {
             sim_console: false,
             group_titles: false,
             conversation_log: false,
+            wearable_favorites: false,
             snapshot: false,
+            snapshot_pano: false,
             people: settings.show_people,
             minimap: settings.show_minimap,
             world_map: false,
@@ -301,6 +317,7 @@ impl Panels {
             appearance: settings.show_appearance,
             avatar_studio: false,
             ao: settings.show_ao,
+            ao_mini: false,
             people_tab: settings.people_tab.min(1),
             contacts: false,
             about_land: false,
@@ -316,15 +333,17 @@ impl Panels {
             money_tracker: false,
             experiences: false,
             bumps: false,
-            pose_stand: false,
-            wearable_favorites: false,
             grid_status: false,
             avatar_align: false,
             avatar_align_mini: settings.avatar_align_mini,
             web_browser: false,
+            avatar_welcome: false,
             destinations: false,
             quick_prefs: false,
             voice_controls: false,
+            conversation_log: false,
+            omnifilter: false,
+            pose_stand: false,
             about: false,
             stream_title: settings.audio.stream_title_window,
             stream_title_history: false,
@@ -532,3 +551,5 @@ mod tests {
         assert!(settings.show_minimap && !settings.show_chat);
     }
 }
+
+pub(crate) mod preview_tabs;

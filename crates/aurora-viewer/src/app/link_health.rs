@@ -77,11 +77,14 @@ impl App {
             log::info!("link lost: \"Reconnect\" goes back to {}", place.to_login_string());
         }
         // YouHaveBeenLoggedOut for the system, while the session still counts
-        self.tell_system(crate::world::attention::Notice {
-            title: aurora_i18n::tr!("world-attention-logged-out").to_owned(),
-            body: message.clone(),
-            open: crate::world::attention::Open::Window,
-        });
+        self.tell_system(
+            crate::world::attention::Cause::Notice,
+            crate::world::attention::Notice {
+                title: aurora_i18n::tr!("world-attention-logged-out").to_owned(),
+                body: message.clone(),
+                open: crate::world::attention::Open::Window,
+            },
+        );
         let kept = place.clone();
         self.reconnect_place = place.map(|place| (self.settings.login_uri(), self.settings.username.trim().to_lowercase(), place));
         let message = match stopped {

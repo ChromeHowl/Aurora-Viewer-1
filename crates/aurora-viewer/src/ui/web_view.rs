@@ -6,6 +6,9 @@
 //! and forward in its history. The search tab's browser is a private one
 //! (`WebView::private`): its cache, history and log go to a profile of its
 //! own that is deleted with the browser (`media/private_profile.rs`).
+//! A trusted browser (`WebView::trust`, LLMediaCtrl's `trusted_content`,
+//! the Avatar Welcome Pack's) may also wear folders: the folder commands its
+//! own page sends are handed to its window (`folder_commands`).
 
 use crate::media::pack::PackState;
 use crate::media::private_profile::PrivateProfile;
@@ -133,6 +136,15 @@ pub struct WebView {
     pub status: String,
     /// Load progress, 0 to 100 (MEDIA_EVENT_PROGRESS_UPDATED).
     pub progress: i32,
+    /// The origin (scheme, host, port) of the trusted page, if any.
+    trusted: Option<String>,
+    /// The origin of the document the browser has committed (NavigateComplete
+    /// or LocationChanged), cleared while a navigation to another origin is
+    /// under way: a command is trusted by the page that sends it, not by the
+    /// address that was asked.
+    document: Option<String>,
+    /// The folder commands the trusted page sent, for its window to take.
+    pub folder_commands: Vec<crate::slapp::FolderCommand>,
 }
 
 impl WebView {
@@ -147,6 +159,20 @@ impl WebView {
         WebView {
             private_root: Some(root),
             ..Default::default()
+        }
+    }
+
+    /// LLMediaCtrl `trusted_content`: the pages of `page`'s site may send
+    /// the folder commands an untrusted page cannot (UNTRUSTED_BLOCK), clicked
+    /// or not (LLViewerMediaImpl::handleMediaEvent dispatches them with the
+    /// browser's trust and any nav type). Their other links follow the
+    /// usual rules.
+    pub fn trust(&mut self, page: &str) {
+        let trusted = origin(page);
+        if trusted != self.trusted {
+            // commands of the previous trust must not outlive it
+            self.folder_commands.clear();
+            self.trusted = trusted;
         }
     }
 
@@ -165,6 +191,8 @@ impl WebView {
         self.texture = None;
         self.focused = false;
         self.cookie_set = false;
+        self.document = None;
+        self.folder_commands.clear();
     }
 
     pub fn plugin_mut(&mut self) -> Option<&mut MediaPlugin> {
@@ -338,9 +366,15 @@ impl WebView {
             self.load_secs = None;
             self.location = self.url.clone();
             self.loading = true;
+            // the old document is going away: nothing is trusted until the new one commits
+            self.document = None;
         }
         p.idle();
         for ev in p.take_events() {
+            if let Some(command) = trusted_folder_command(&ev, self.trusted.as_deref(), self.document.as_deref()) {
+                self.folder_commands.push(command);
+                continue;
+            }
             if let Some(url) = clicked_url(&ev) {
                 super::context::request(ui.ctx(), clicked_link_action(url));
                 continue;
@@ -352,17 +386,27 @@ impl WebView {
                         self.load_secs = Some(t.elapsed().as_secs_f32());
                     }
                     if !uri.is_empty() {
+                        self.document = origin(&uri);
                         self.location = uri;
                     }
                     self.loading = false;
                 }
                 MediaEvent::NavigateBegin(uri) => {
                     if !uri.is_empty() {
+                        // a navigation to another origin: the page that is
+                        // leaving no longer speaks for the browser
+                        if origin(&uri) != self.document {
+                            self.document = None;
+                        }
                         self.location = uri;
                     }
                     self.loading = true;
                 }
-                MediaEvent::LocationChanged(uri) if !uri.is_empty() => self.location = uri,
+                MediaEvent::LocationChanged(uri) if !uri.is_empty() => {
+                    // reported when the navigation commits
+                    self.document = origin(&uri);
+                    self.location = uri;
+                }
                 MediaEvent::CursorChanged(c) => self.cursor = c,
                 MediaEvent::NameChanged(name) => self.title = name,
                 MediaEvent::StatusText(text) => self.status = text,
@@ -427,25 +471,13 @@ impl WebView {
             command: i.modifiers.mac_cmd,
         });
         let to_px = |pos: egui::Pos2| (((pos.x - rect.left()) * ppp) as i32, ((pos.y - rect.top()) * ppp) as i32);
-        if let Some(pos) = resp.hover_pos() {
+        // press, release, focus and wheel only when this view is the one under the pointer
+        let pointer = read_web_pointer(ui, &resp, rect);
+        if let Some(pos) = pointer.hover {
             let (x, y) = to_px(pos);
             p.mouse_event(MouseEvent::Move, 0, x, y, mods);
-            // wheel clicks (LL: down = positive)
-            let clicks: f32 = ui.input(|i| {
-                i.events
-                    .iter()
-                    .map(|e| match e {
-                        egui::Event::MouseWheel { unit, delta, .. } => match unit {
-                            egui::MouseWheelUnit::Line => delta.y,
-                            egui::MouseWheelUnit::Page => delta.y * 3.0,
-                            egui::MouseWheelUnit::Point => delta.y / 40.0,
-                        },
-                        _ => 0.0,
-                    })
-                    .sum()
-            });
-            if clicks != 0.0 {
-                p.scroll_event(x, y, 0, (-clicks).round() as i32, mods);
+            if let Some(clicks) = pointer.wheel {
+                p.scroll_event(x, y, 0, clicks, mods);
             }
             if self.cursor.contains("hand") {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -454,20 +486,18 @@ impl WebView {
             }
         }
         if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
-            let (pressed, released) = ui.input(|i| (i.pointer.primary_pressed(), i.pointer.primary_released()));
-            let inside = rect.contains(pos);
-            if pressed {
-                self.focused = inside;
-                p.focus(inside);
-            }
             let (x, y) = to_px(pos);
-            if pressed && inside {
+            if let Some(focused) = pointer.focus {
+                self.focused = focused;
+                p.focus(focused);
+            }
+            if pointer.press {
                 p.mouse_event(MouseEvent::Down, 0, x, y, mods);
             }
-            if released && (inside || resp.dragged()) {
+            if pointer.release {
                 p.mouse_event(MouseEvent::Up, 0, x, y, mods);
             }
-            if resp.double_clicked() {
+            if resp.double_clicked() && pointer.on_view {
                 p.mouse_event(MouseEvent::DoubleClick, 0, x, y, mods);
             }
         }
@@ -480,6 +510,73 @@ impl WebView {
     }
 }
 
+/// What this frame's pointer does to the page. `WebView::show` sends it to
+/// the plugin; the tests drive the same decision.
+struct WebPointer {
+    /// Pointer over this view: move, the cursor and the wheel.
+    hover: Option<egui::Pos2>,
+    /// Primary press on this view (`MouseEvent::Down`).
+    press: bool,
+    /// Primary release on this view, or the end of a drag that started on it.
+    release: bool,
+    /// Keyboard focus to take or give up, on a primary press.
+    focus: Option<bool>,
+    /// The click position is on this view (a double-click too).
+    on_view: bool,
+    /// Wheel clicks while the pointer is on this view (down positive).
+    /// `None` when there is no wheel event, or the pointer is not on this view.
+    wheel: Option<i32>,
+}
+
+/// Pointer events for one frame of a web view.
+fn read_web_pointer(ui: &egui::Ui, resp: &egui::Response, rect: egui::Rect) -> WebPointer {
+    let hit = |pos: egui::Pos2| pointer_hits_web_view(ui, resp, rect, pos);
+    let hover = resp.hover_pos().filter(|&pos| hit(pos));
+    let (interact, pressed, released) = ui.input(|i| (i.pointer.interact_pos(), i.pointer.primary_pressed(), i.pointer.primary_released()));
+    let on_view = interact.is_some_and(hit);
+    WebPointer {
+        hover,
+        press: pressed && on_view,
+        release: released && (on_view || resp.dragged()),
+        focus: pressed.then_some(on_view),
+        on_view,
+        wheel: hover.and_then(|_| wheel_clicks(ui)),
+    }
+}
+
+/// Whether `pos` is on this web view, and this view is the one that gets it.
+///
+/// Legacy Viewer: only the topmost view under the pointer gets the click.
+/// `LLMediaCtrl::handleMouseDown` (indra/newview/llmediactrl.cpp) is reached
+/// through `LLView::childrenHandleMouseEvent` (indra/llui/llview.cpp), which
+/// walks children front-first and stops at the first one that contains the
+/// point. The drawn rect and its clip are not enough: the pointer must also
+/// be on this response, and this layer must be the topmost one there. A
+/// window that only partly covers the page can leave `contains_pointer` set
+/// on the page, so the layer check is what refuses that click.
+fn pointer_hits_web_view(ui: &egui::Ui, resp: &egui::Response, rect: egui::Rect, pos: egui::Pos2) -> bool {
+    rect.intersect(ui.clip_rect()).contains(pos) && resp.contains_pointer() && ui.ctx().layer_id_at(pos) == Some(ui.layer_id())
+}
+
+/// Wheel clicks for the plugin (down positive, as `LLMediaCtrl::handleScrollWheel`
+/// passes them). `None` when this frame did not scroll.
+fn wheel_clicks(ui: &egui::Ui) -> Option<i32> {
+    let clicks: f32 = ui.input(|i| {
+        i.events
+            .iter()
+            .map(|e| match e {
+                egui::Event::MouseWheel { unit, delta, .. } => match unit {
+                    egui::MouseWheelUnit::Line => delta.y,
+                    egui::MouseWheelUnit::Page => delta.y * 3.0,
+                    egui::MouseWheelUnit::Point => delta.y / 40.0,
+                },
+                _ => 0.0,
+            })
+            .sum()
+    });
+    (clicks != 0.0).then_some((-clicks).round() as i32)
+}
+
 /// Links from the browser are actionable only after a user click. CEF sends
 /// custom schemes separately and records whether navigation had a gesture;
 /// a redirect or script navigation must never trigger a SLURL action.
@@ -490,8 +587,29 @@ fn clicked_url(event: &MediaEvent) -> Option<&str> {
     }
 }
 
-/// Follow the same SLURL and app-link rules as a clicked link in chat.
-fn clicked_link_action(url: &str) -> super::context::CtxAction {
+/// `scheme://host:port` of a web address.
+fn origin(url: &str) -> Option<String> {
+    reqwest::Url::parse(url)
+        .ok()
+        .filter(|u| matches!(u.scheme(), "http" | "https"))
+        .map(|u| u.origin().ascii_serialization())
+}
+
+/// A folder command sent by the trusted page (the committed document's
+/// origin is the trusted one, `document`), with or without a click: the welcome pack's script wears the
+/// body, then adds the clothing a moment later, without a gesture.
+fn trusted_folder_command(event: &MediaEvent, trusted: Option<&str>, document: Option<&str>) -> Option<crate::slapp::FolderCommand> {
+    let MediaEvent::ClickLinkNoFollow { url, .. } = event else {
+        return None;
+    };
+    let trusted = trusted?;
+    let command = crate::slapp::folder_command(url)?;
+    (document == Some(trusted)).then_some(command)
+}
+
+/// Follow the same SLURL and app-link rules as a clicked link in chat
+/// (also used for a link clicked in a page shown on a prim, `media/update.rs`).
+pub(crate) fn clicked_link_action(url: &str) -> super::context::CtxAction {
     use super::context::CtxAction;
     if let Some(place) = crate::slurl::place_link(url) {
         let location = place.location;
@@ -537,6 +655,42 @@ mod tests {
     }
 
     #[test]
+    fn only_the_trusted_page_sends_folder_commands() {
+        let wear = |nav: &str| MediaEvent::ClickLinkNoFollow {
+            url: "secondlife://app/wear_folder/?folder_name=Female%20body%20-%20A".into(),
+            nav_type: nav.into(),
+        };
+        let page = "https://pages.example/v3.0/agni/vawp/index.html";
+        let trusted = origin(page);
+        let trusted = trusted.as_deref();
+        let doc = |url: &str| origin(url);
+        // clicked or run by the page's script, from the trusted site
+        for nav in ["clicked", "navigated"] {
+            let command = trusted_folder_command(&wear(nav), trusted, doc(page).as_deref()).expect("trusted page");
+            assert_eq!(command.name.as_deref(), Some("Female body - A"));
+        }
+        // another site, or an untrusted browser: nothing worn
+        assert_eq!(
+            trusted_folder_command(&wear("clicked"), trusted, doc("https://other.example/").as_deref()),
+            None
+        );
+        assert_eq!(
+            trusted_folder_command(&wear("clicked"), trusted, doc("http://pages.example/").as_deref()),
+            None
+        );
+        assert_eq!(trusted_folder_command(&wear("clicked"), None, doc(page).as_deref()), None);
+        // no committed document (navigation under way): nothing is trusted
+        assert_eq!(trusted_folder_command(&wear("navigated"), trusted, None), None);
+        // any other link takes the usual path
+        let teleport = MediaEvent::ClickLinkNoFollow {
+            url: "secondlife:///app/teleport/Aurora/12/34/56".into(),
+            nav_type: "clicked".into(),
+        };
+        assert_eq!(trusted_folder_command(&teleport, trusted, doc(page).as_deref()), None);
+        assert_eq!(origin("file:///c:/page.html"), None);
+    }
+
+    #[test]
     fn clicked_teleport_slurl_uses_the_viewers_teleport_flow() {
         let action = clicked_link_action("secondlife:///app/teleport/Aurora%20Plaza/12/34/56");
         assert!(matches!(action, super::super::context::CtxAction::TeleportToPlace(region, pos)
@@ -554,5 +708,211 @@ mod tests {
     fn clicked_http_links_keep_the_external_link_policy() {
         let action = clicked_link_action("https://example.org/");
         assert!(matches!(action, super::super::context::CtxAction::OpenUrl(url) if url == "https://example.org/"));
+    }
+
+    /// One frame of a page with a window over part of it. The page uses the
+    /// same `read_web_pointer` that `WebView::show` sends to the plugin.
+    struct PageFrame {
+        page: egui::Rect,
+        cover: egui::Rect,
+        press: bool,
+        release: bool,
+        focus: Option<bool>,
+        wheel: Option<i32>,
+        contains_pointer: bool,
+        layer_ok: bool,
+    }
+
+    fn show_page_and_cover(ui: &mut egui::Ui, cover_pos: egui::Pos2) -> PageFrame {
+        let mut frame = PageFrame {
+            page: egui::Rect::NOTHING,
+            cover: egui::Rect::NOTHING,
+            press: false,
+            release: false,
+            focus: None,
+            wheel: None,
+            contains_pointer: false,
+            layer_ok: false,
+        };
+        let page = egui::Window::new("Chat")
+            .id(egui::Id::unique("covered-web-view-page"))
+            .fixed_pos(egui::pos2(24.0, 24.0))
+            .collapsible(false)
+            .show(ui.ctx(), |ui| {
+                let (rect, resp) = ui.allocate_exact_size(egui::vec2(360.0, 220.0), egui::Sense::click_and_drag());
+                let pointer = read_web_pointer(ui, &resp, rect);
+                let (contains_pointer, layer_ok) = ui.input(|i| i.pointer.interact_pos()).map_or((false, false), |pos| {
+                    (resp.contains_pointer(), ui.ctx().layer_id_at(pos) == Some(ui.layer_id()))
+                });
+                (rect, pointer, contains_pointer, layer_ok)
+            });
+        if let Some((rect, pointer, contains_pointer, layer_ok)) = page.and_then(|page| page.inner) {
+            frame.page = rect;
+            frame.press = pointer.press;
+            frame.release = pointer.release;
+            frame.focus = pointer.focus;
+            frame.wheel = pointer.wheel;
+            frame.contains_pointer = contains_pointer;
+            frame.layer_ok = layer_ok;
+        }
+        if let Some(cover) = egui::Window::new("Inventory")
+            .id(egui::Id::unique("covered-web-view-window"))
+            .fixed_pos(cover_pos)
+            .fixed_size(egui::vec2(180.0, 120.0))
+            .collapsible(false)
+            .resizable(false)
+            .show(ui.ctx(), |ui| {
+                ui.label("Inventory");
+            })
+        {
+            frame.cover = cover.response.rect;
+        }
+        frame
+    }
+
+    fn page_frame(frames: &mut crate::ui::widgets::elide_tests::Frames, events: Vec<egui::Event>, cover_pos: egui::Pos2) -> PageFrame {
+        let mut shown = None;
+        frames.run(events, |ui| {
+            shown = Some(show_page_and_cover(ui, cover_pos));
+        });
+        shown.expect("the frame ran")
+    }
+
+    fn wheel_event() -> egui::Event {
+        egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Line,
+            delta: egui::vec2(0.0, 1.0),
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Unknown,
+            modifiers: egui::Modifiers::default(),
+        }
+    }
+
+    fn pointer_button(pos: egui::Pos2, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::default(),
+        }
+    }
+
+    /// A point of `page` that `cover` does not contain.
+    fn uncovered_point(page: egui::Rect, cover: egui::Rect) -> Option<egui::Pos2> {
+        let xs = [page.left() + 8.0, page.center().x, page.right() - 8.0];
+        let ys = [page.top() + 8.0, page.center().y, page.bottom() - 8.0];
+        ys.into_iter()
+            .flat_map(|y| xs.map(|x| egui::pos2(x, y)))
+            .find(|pos| page.contains(*pos) && !cover.contains(*pos))
+    }
+
+    #[test]
+    fn covered_web_view_ignores_a_click_on_the_window_above() {
+        let mut frames = crate::ui::widgets::elide_tests::Frames::new();
+        crate::theme::Theme::default().apply(&frames.ctx, 1.0);
+        let mut cover_pos = egui::pos2(900.0, 640.0);
+        let mut laid = page_frame(&mut frames, Vec::new(), cover_pos);
+        assert!(laid.page.is_positive(), "the web view is drawn, got {:?}", laid.page);
+        // Lay Inventory over the middle of the page and let that rect settle.
+        cover_pos = laid.page.center() - egui::vec2(30.0, 24.0);
+        for _ in 0..3 {
+            laid = page_frame(&mut frames, Vec::new(), cover_pos);
+        }
+        let covered = laid.page.center();
+        assert!(
+            laid.page.contains(covered) && laid.cover.contains(covered),
+            "Inventory must cover the page: page {:?} cover {:?} at {covered:?}",
+            laid.page,
+            laid.cover
+        );
+        let Some(open) = uncovered_point(laid.page, laid.cover) else {
+            panic!(
+                "the page must keep a point Inventory does not cover: page {:?} cover {:?}",
+                laid.page, laid.cover
+            );
+        };
+
+        page_frame(&mut frames, vec![egui::Event::PointerMoved(covered)], cover_pos);
+        let press = page_frame(
+            &mut frames,
+            vec![egui::Event::PointerMoved(covered), pointer_button(covered, true)],
+            cover_pos,
+        );
+        let release = page_frame(
+            &mut frames,
+            vec![egui::Event::PointerMoved(covered), pointer_button(covered, false)],
+            cover_pos,
+        );
+        assert!(
+            !press.press && !release.release && press.focus != Some(true),
+            "a click on the window over the web view sent Down={down} Up={up} focus={focus:?} (contains_pointer={contains_pointer} layer_ok={layer_ok} page {page:?} cover {cover:?})",
+            down = press.press,
+            up = release.release,
+            focus = press.focus,
+            contains_pointer = press.contains_pointer,
+            layer_ok = press.layer_ok,
+            page = press.page,
+            cover = press.cover,
+        );
+        let wheeled = page_frame(&mut frames, vec![egui::Event::PointerMoved(covered), wheel_event()], cover_pos);
+        assert!(
+            wheeled.wheel.is_none(),
+            "a wheel over the covering window scrolled the page by {:?}",
+            wheeled.wheel
+        );
+
+        page_frame(&mut frames, vec![egui::Event::PointerMoved(open)], cover_pos);
+        let press = page_frame(
+            &mut frames,
+            vec![egui::Event::PointerMoved(open), pointer_button(open, true)],
+            cover_pos,
+        );
+        let release = page_frame(
+            &mut frames,
+            vec![egui::Event::PointerMoved(open), pointer_button(open, false)],
+            cover_pos,
+        );
+        assert!(
+            press.press && release.release && press.focus == Some(true),
+            "a click on the uncovered web view must send Down and Up and take focus, got Down={down} Up={up} focus={focus:?} (contains_pointer={contains_pointer} layer_ok={layer_ok})",
+            down = press.press,
+            up = release.release,
+            focus = press.focus,
+            contains_pointer = press.contains_pointer,
+            layer_ok = press.layer_ok,
+        );
+        page_frame(&mut frames, vec![egui::Event::PointerMoved(open)], cover_pos);
+        let wheeled = page_frame(&mut frames, vec![egui::Event::PointerMoved(open), wheel_event()], cover_pos);
+        assert_eq!(
+            wheeled.wheel,
+            Some(-1),
+            "a wheel on the uncovered web view must reach the page (contains_pointer={contains_pointer} layer_ok={layer_ok})",
+            contains_pointer = wheeled.contains_pointer,
+            layer_ok = wheeled.layer_ok,
+        );
+    }
+
+    #[test]
+    fn covered_web_view_ignores_a_click_outside_its_clip() {
+        let mut frames = crate::ui::widgets::elide_tests::Frames::new();
+        crate::theme::Theme::default().apply(&frames.ctx, 1.0);
+        let mut inside_rect = false;
+        let mut hit = true;
+        frames.run(Vec::new(), |ui| {
+            egui::Window::new("Chat")
+                .id(egui::Id::unique("clipped-web-view"))
+                .fixed_pos(egui::pos2(24.0, 24.0))
+                .collapsible(false)
+                .show(ui.ctx(), |ui| {
+                    let (rect, resp) = ui.allocate_exact_size(egui::vec2(360.0, 220.0), egui::Sense::click_and_drag());
+                    let below = egui::pos2(rect.center().x, rect.center().y + rect.height() * 0.25);
+                    inside_rect = rect.contains(below);
+                    // The lower half of the page is scrolled out of view.
+                    ui.set_clip_rect(egui::Rect::from_min_max(rect.min, egui::pos2(rect.right(), rect.center().y)));
+                    hit = pointer_hits_web_view(ui, &resp, rect, below);
+                });
+        });
+        assert!(inside_rect, "the point has to sit in the page rect");
+        assert!(!hit, "a click in the clipped-away part of a web view must not reach the page");
     }
 }

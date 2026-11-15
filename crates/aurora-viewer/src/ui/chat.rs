@@ -36,7 +36,7 @@ pub mod previews;
 mod reorder;
 pub use reorder::Demo as ReorderDemo;
 pub(crate) mod select;
-mod sidebar;
+pub(crate) mod sidebar;
 pub(crate) use sidebar::group_insignia;
 pub mod snooze;
 mod stage;
@@ -56,6 +56,8 @@ mod chat_lines_tests;
 #[cfg(test)]
 mod contact_visual_tests;
 #[cfg(test)]
+mod earshot_tests;
+#[cfg(test)]
 mod volume_tests;
 
 use super::context::CtxAction;
@@ -68,6 +70,18 @@ use egui::{Color32, RichText};
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
+/// Where a message was last sent from, for "Enter returns to the last chat
+/// field used".
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum ChatField {
+    /// The chat bar at the bottom.
+    #[default]
+    Bar,
+    /// A conversation's field: `None` the nearby chat, `Some` an IM or a
+    /// group chat.
+    Conversation(Option<uuid::Uuid>),
+}
+
 #[derive(Default)]
 pub struct ChatUi {
     pub input: String,
@@ -77,12 +91,23 @@ pub struct ChatUi {
     /// The slash press reserved for `start_gesture`, until its release.
     gesture_key_down: Option<winit::keyboard::KeyCode>,
     pub has_focus: bool,
-    /// The local chat field keeps the keyboard after a message is sent
-    /// (Preferences › Chat; the Legacy Viewer's CloseChatOnReturn off).
+    /// The local chat field keeps the keyboard after a message is sent,
+    /// and an empty Enter leaves it there (Preferences › Chat; the Legacy
+    /// Viewer's CloseChatOnReturn off, FSNearbyChatControl::autohide).
     pub keep_focus: bool,
-    /// The chat bar shows only while it is used (Preferences › Chat; the
-    /// Legacy Viewer's AutohideChatBar, #1009): `bar_shown`.
-    pub autohide: bool,
+    /// Enter on an empty field gives the keyboard back in every
+    /// conversation, not only the nearby chat (Preferences › Chat, Aurora's).
+    pub enter_toggles: bool,
+    /// Enter from the world goes back to `last_field` (Preferences › Chat,
+    /// Aurora's): `start_chat`.
+    pub enter_last_field: bool,
+    /// The chat field a message was last sent from.
+    last_field: ChatField,
+    /// When the chat bar shows (Preferences › Chat, given every frame by
+    /// the app): always, only while it is used (the Legacy Viewer's
+    /// AutohideChatBar, #1009), or never (#2696): `bar_shown`,
+    /// `follow_bar_mode`.
+    pub bar_mode: crate::settings::ChatBar,
     /// The toolbar's Chat bar put the bar away for this session (the Legacy
     /// Viewer's MainChatbarVisible off, not saved): `toggle_bar`. Enter or
     /// a letter key brings it back with the keyboard.
@@ -220,6 +245,9 @@ pub struct ChatUi {
     /// A conversation's notices too (its sub-option, off), given every
     /// frame by the app.
     pub compact_im_notices: bool,
+    /// Emotes join their sender's group in the Aurora style
+    /// (Preferences › Chat, off), given every frame by the app.
+    pub group_emotes: bool,
     /// The nearby chat's field shows its channel selector (Preferences ›
     /// Chat, off by default), given every frame by the app.
     pub show_channel: bool,
@@ -343,6 +371,38 @@ impl ChatUi {
             ""
         } else {
             self.side_filter.trim()
+        }
+    }
+
+    /// How far residents can hear the selected nearby chat volume.
+    pub(crate) fn earshot_range(&self, ranges: crate::world::radar::ChatRanges) -> f32 {
+        match self.volume {
+            compose::Volume::Whisper => ranges.whisper,
+            compose::Volume::Say => ranges.say,
+            compose::Volume::Shout => ranges.shout,
+        }
+    }
+
+    /// Route text started from the world to the Nearby field that will
+    /// actually receive keyboard focus (LLViewerWindow::handleKey).
+    pub fn start_nearby_with(&mut self, ctx: &egui::Context, main_open: bool, text: &str) {
+        let target = nearby_typing_target(
+            popout::in_sight(ctx, &self.popped).any(|conversation| conversation.is_none()),
+            main_open && !self.contacts && self.selected.is_none() && !crate::ui::widgets::floater_minimized(ctx, "conversations"),
+        );
+        match target {
+            NearbyTypingTarget::Detached => {
+                self.draft_mut(None).push_str(text);
+                self.popped.raise(None, true);
+            }
+            NearbyTypingTarget::Main => {
+                self.draft_mut(None).push_str(text);
+                self.conv_focus_request = true;
+            }
+            NearbyTypingTarget::ChatBar => {
+                self.input.push_str(text);
+                self.focus_request = true;
+            }
         }
     }
 
@@ -475,18 +535,22 @@ impl ChatUi {
         self.show_channel.then_some(self.chat_channel)
     }
 
-    /// The chat bar is drawn this frame: always, or with `autohide` while it
-    /// is used. As the Legacy Viewer's autohidden bar (FSNearbyChat::
+    /// The chat bar is drawn this frame: always, never with "Conversations
+    /// window only", or with "Shown when typing" while it is used. As the Legacy Viewer's autohidden bar (FSNearbyChat::
     /// showDefaultChatBar, FSNearbyChatControl::autohide), Enter or a letter
     /// key brings it with the keyboard, and Escape or a message sent with
     /// "Keep the chat bar active" off puts it away; a click elsewhere on an
     /// empty bar puts it away too, where the Legacy Viewer waited for
     /// Escape. A draft keeps it.
     pub fn bar_shown(&self) -> bool {
+        use crate::settings::ChatBar;
+        if self.bar_mode == ChatBar::ConversationsOnly {
+            return false;
+        }
         if self.bar_hidden {
             return self.focus_request;
         }
-        !self.autohide
+        self.bar_mode == ChatBar::Always
             || self.has_focus
             || self.focus_request
             || !self.input.trim().is_empty()
@@ -524,7 +588,84 @@ impl ChatUi {
     /// the interface hidden: a draft put away with the Chat bar button does
     /// not count, a keyboard request does.
     pub fn in_use(&self) -> bool {
+        if self.bar_mode == crate::settings::ChatBar::ConversationsOnly {
+            return false;
+        }
         self.focus_request || (!self.bar_hidden && (self.has_focus || !self.input.trim().is_empty()))
+    }
+
+    /// Enter from the world (start_chat, indra/newview/llviewerinput.cpp):
+    /// the chat bar takes the keyboard. With "Enter returns to the last chat
+    /// field used", the conversation last talked in takes it instead while
+    /// its window is open: its own window, or the Conversations window
+    /// (`conversations_open`, expanded) on its tab. `exists`: the IM or
+    /// group conversation is still there.
+    pub fn start_chat(&mut self, ctx: &egui::Context, conversations_open: bool, exists: impl Fn(&uuid::Uuid) -> bool) {
+        if self.enter_last_field
+            && let ChatField::Conversation(to) = self.last_field
+            && to.as_ref().is_none_or(exists)
+        {
+            if self.popped.contains(to) {
+                // a conversation in its own window is only there
+                if self.popped.shown(to) {
+                    self.popped.raise(to, true);
+                    return;
+                }
+            } else if conversations_open && !super::widgets::floater_minimized(ctx, "conversations") {
+                self.selected = to;
+                self.contacts = false;
+                self.show_profile = false;
+                self.conv_focus_request = true;
+                super::widgets::bring_floater_front(ctx, "conversations");
+                return;
+            }
+        }
+        self.focus_request = true;
+    }
+
+    /// "Conversations window only" (#2696), once a frame before the bars
+    /// are drawn: what asked the chat bar for the keyboard (Enter, a letter
+    /// key, the gesture key, the toolbar's Chat bar) gets the nearby chat's
+    /// field instead, with what was typed for the bar. That field is the
+    /// nearby chat's own window when it is torn off (#910), else the Nearby
+    /// tab of the Conversations window: opened if closed (where it was
+    /// left), expanded if minimized, brought to the front.
+    pub fn follow_bar_mode(&mut self, ctx: &egui::Context, conversations_open: &mut bool) {
+        if self.bar_mode != crate::settings::ChatBar::ConversationsOnly {
+            return;
+        }
+        self.has_focus = false;
+        self.bar_emoji_open = false;
+        self.bar_channel_open = false;
+        if !std::mem::take(&mut self.focus_request) {
+            return;
+        }
+        self.gesture_keep_cursor = false;
+        let typed = std::mem::take(&mut self.input);
+        self.draft_mut(None).push_str(&typed);
+        if self.popped.raise(None, true) {
+            return;
+        }
+        self.selected = None;
+        self.contacts = false;
+        self.show_profile = false;
+        self.conv_focus_request = true;
+        super::notifications::open_conversations(ctx, conversations_open);
+        super::widgets::bring_floater_front(ctx, "conversations");
+    }
+
+    /// Enter on an empty conversation field gives the keyboard back
+    /// (`compose::returns_to_world`): "Enter toggles typing in
+    /// conversations", and the nearby chat's field with "Conversations
+    /// window only", which takes the chat bar's place and so its rule.
+    fn enter_toggles_in(&self, local: bool) -> bool {
+        self.enter_toggles || (local && self.bar_mode == crate::settings::ChatBar::ConversationsOnly)
+    }
+
+    /// A conversation's field (`None`: nearby chat) was used: clicked or
+    /// focused, or a message sent from it.
+    pub(crate) fn used_conversation(&mut self, to: Option<uuid::Uuid>) {
+        self.last_field = ChatField::Conversation(to);
     }
 
     /// The keyboard taken from every field (mouselook begun or ended,
@@ -540,6 +681,12 @@ impl ChatUi {
     /// button shows and hides that window.
     pub fn nearby_apart(&self) -> bool {
         self.popped.contains(None)
+    }
+
+    /// `conversation` is in a window of its own (`popout.rs`): showing it
+    /// does not need the Conversations window.
+    pub fn in_own_window(&self, conversation: uuid::Uuid) -> bool {
+        self.popped.contains(Some(conversation))
     }
 
     /// The nearby chat's own window is on screen, expanded.
@@ -596,6 +743,12 @@ impl ChatUi {
             }
             NearbyChatShortcut::CloseDocked => *conversations_open = false,
         }
+    }
+
+    /// `AURORA_DEMO_BARS=window…`: the nearby chat back in the
+    /// Conversations window, whatever the profile saved.
+    pub fn demo_dock_nearby(&mut self) {
+        self.popped.remove(None);
     }
 
     /// `AURORA_DEMO_CONV_POPOUT`: `conversation` in its own window, at `pos`.
@@ -683,6 +836,28 @@ impl ChatUi {
     }
 }
 
+/// Count residents whose known range is within the selected nearby chat range.
+pub(crate) fn earshot_count(entries: impl IntoIterator<Item = Option<f32>>, range: f32) -> usize {
+    entries.into_iter().filter(|distance| distance.is_some_and(|d| d <= range)).count()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NearbyTypingTarget {
+    Detached,
+    Main,
+    ChatBar,
+}
+
+fn nearby_typing_target(detached_visible: bool, main_visible: bool) -> NearbyTypingTarget {
+    if detached_visible {
+        NearbyTypingTarget::Detached
+    } else if main_visible {
+        NearbyTypingTarget::Main
+    } else {
+        NearbyTypingTarget::ChatBar
+    }
+}
+
 pub struct OutgoingChat {
     pub message: String,
     pub channel: i32,
@@ -745,31 +920,73 @@ impl SendKey {
     }
 }
 
-/// Classify the Enter event once: releasing a modifier later in the same
-/// frame must change neither permission to send, OOC wrapping nor volume.
+/// Classify one Enter. Releasing a modifier later in the same frame must
+/// change neither permission to send, OOC wrapping nor volume.
 /// FSNearbyChatControl / FSFloaterIM::handleKeyHere (indra/newview) read
 /// the event's mask; Alt alone is OOC, other Alt chords stay unclaimed.
+fn classify_enter(modifiers: &egui::Modifiers) -> Option<SendKey> {
+    if modifiers.alt {
+        ooc_key(modifiers).then_some(SendKey::Ooc)
+    } else if modifiers.ctrl {
+        Some(SendKey::Shout)
+    } else if modifiers.shift {
+        Some(SendKey::Whisper)
+    } else {
+        Some(SendKey::Normal)
+    }
+}
+
+/// The first Enter of the pass. Conversations send once per frame.
 fn send_enter(i: &egui::InputState) -> Option<SendKey> {
-    i.events.iter().find_map(|event| {
-        let egui::Event::Key {
-            key: egui::Key::Enter,
-            pressed: true,
-            modifiers,
-            ..
-        } = event
-        else {
-            return None;
-        };
-        if modifiers.alt {
-            ooc_key(modifiers).then_some(SendKey::Ooc)
-        } else if modifiers.ctrl {
-            Some(SendKey::Shout)
-        } else if modifiers.shift {
-            Some(SendKey::Whisper)
-        } else {
-            Some(SendKey::Normal)
+    enter_pass(i).keys.into_iter().next()
+}
+
+/// Every Enter of this pass, in order, and the characters inserted after
+/// the first one. The editor has already applied the whole pass
+/// (`return_key(None)` leaves Enter in the queue). Return is one key at a
+/// time (LLViewerWindow::handleUnicodeChar); a second Enter, and letters
+/// after the first, belong to the next line.
+struct EnterPass {
+    keys: Vec<SendKey>,
+    after: String,
+}
+
+fn enter_pass(i: &egui::InputState) -> EnterPass {
+    let mut keys = Vec::new();
+    let mut after = String::new();
+    let mut seen = false;
+    for event in &i.events {
+        match event {
+            egui::Event::Key {
+                key: egui::Key::Enter,
+                pressed: true,
+                modifiers,
+                ..
+            } => {
+                if let Some(key) = classify_enter(modifiers) {
+                    keys.push(key);
+                    seen = true;
+                }
+            }
+            egui::Event::Text(text) if seen => after.push_str(text),
+            egui::Event::Paste(text) if seen => after.push_str(text),
+            _ => {}
         }
-    })
+    }
+    EnterPass { keys, after }
+}
+
+/// The field split around the first Enter: the line to send, and what was
+/// typed after it. The caret is at the end of the chat bar, so those
+/// characters are a suffix.
+fn split_on_enter(field: &str, after: &str) -> (String, String) {
+    if !after.is_empty()
+        && let Some(head) = field.strip_suffix(after)
+    {
+        (head.to_owned(), after.to_owned())
+    } else {
+        (field.to_owned(), String::new())
+    }
 }
 
 /// Alt+Enter alone sends ((OOC)) chat (FSUseAltOOC, on by default).
@@ -951,10 +1168,16 @@ fn message_color_near(line: &crate::world::ChatLine, p: &Palette, world: &World)
 
 /// Time of a chat line, in Second Life time as the Legacy Viewer shows it
 /// and as the transcripts have it ("hour,datetime,slt"), in 12 or 24 hours
-/// as the bars' clock (`clock::chat_twelve_hours`). Empty for a line whose
-/// time is unknown (history without a timestamp).
+/// as the bars' clock (`clock::chat_twelve_hours`), with the seconds when
+/// Preferences › Chat asks for them (`clock::chat_seconds`). Empty for a
+/// line whose time is unknown (history without a timestamp).
 pub(crate) fn hhmm(t: std::time::SystemTime) -> String {
-    hhmm_in(t, super::bars::clock::chat_twelve_hours(), true)
+    hhmm_in(t, super::bars::clock::chat_twelve_hours(), super::bars::clock::chat_seconds())
+}
+
+/// `hhmm` without the seconds of the chat: the notifications' times.
+pub(crate) fn hhmm_minutes(t: std::time::SystemTime) -> String {
+    hhmm_in(t, super::bars::clock::chat_twelve_hours(), false)
 }
 
 /// `hhmm` in 24 hours whatever the clock, where the Legacy Viewer keeps 24
@@ -968,8 +1191,14 @@ fn hhmm_in(t: std::time::SystemTime, twelve: bool, seconds: bool) -> String {
     if t == std::time::UNIX_EPOCH {
         return String::new();
     }
-    // FSSecondsinChatTimestamps: "14:05:09" in the chat's times
-    let secs = if seconds { display::seconds_suffix(t) } else { String::new() };
+    // Second Life time is a whole number of hours from UTC: the seconds are
+    // those of the Unix time
+    let secs = if seconds {
+        let s = t.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() % 60);
+        format!(":{s:02}")
+    } else {
+        String::new()
+    };
     let t = Slt::of(t);
     super::bars::clock::hour_text(t.hour, t.minute, &secs, twelve)
 }
@@ -1203,6 +1432,27 @@ pub(crate) fn text_with_links(
 /// (`CtxAction::OpenUrl`).
 pub(crate) fn open_web_link(ctx: &egui::Context, url: &str) {
     super::context::request(ctx, CtxAction::OpenUrl(web_target(url).into_owned()));
+}
+
+/// The web addresses of a text and their byte ranges, in order, for the
+/// places that draw a one-line text with clickable links (the location
+/// field of the bars, `bars::place`): the Legacy Viewer linkifies the URLs
+/// an owner typed in a parcel name (LLUrlRegistry, LLURLLineEditor). Place
+/// and agent links stay text there.
+pub(crate) fn web_links(text: &str) -> Vec<(std::ops::Range<usize>, &str)> {
+    let mut out = Vec::new();
+    for (start, len, seg) in link_spans(text) {
+        if len == 0 {
+            break;
+        }
+        // a labelled link shows its label, not the address: leave it text
+        if let Seg::Url(url) = seg
+            && text.get(start..start + len) == Some(url)
+        {
+            out.push((start..start + len, url));
+        }
+    }
+    out
 }
 
 /// Who wrote a bubble line, drawn before the name.
@@ -2498,10 +2748,10 @@ impl Copied<'_> {
     }
 }
 
-/// The selection of the lines (`select.rs`), as in Firestorm's transcript:
+/// The selection of the lines (`select.rs`), as in the Legacy Viewer's transcript:
 /// a drag selects across them (never moving the window), a double click
-/// selects a word, a click without a drag clears it; a press gives them the
-/// keyboard, then Ctrl+A selects the
+/// selects a word, a triple click selects a paragraph, a click without a drag
+/// clears it; a press gives them the keyboard, then Ctrl+A selects the
 /// whole conversation, Ctrl+C (Ctrl+Insert) copies the selection, Escape
 /// clears it, and what is typed goes to the conversation's field.
 fn select_lines(
@@ -2552,10 +2802,16 @@ fn select_lines(
         sel.clear();
     }
     // a double click selects the word under the pointer (its second click
-    // cleared the selection just above)
+    // cleared the selection just above); a triple click selects the paragraph
     if content.double_clicked()
         && let Some(pos) = content.interact_pointer_pos().filter(|p| area.contains(*p))
         && let Some((seq, range, text)) = select::word_at(drawn, pos)
+    {
+        sel.select_in_row(seq, range, text);
+    }
+    if content.triple_clicked()
+        && let Some(pos) = content.interact_pointer_pos().filter(|p| area.contains(*p))
+        && let Some((seq, range, text)) = select::paragraph_at(drawn, pos)
     {
         sel.select_in_row(seq, range, text);
     }
@@ -2743,6 +2999,7 @@ fn conversation_lines(ui: &mut egui::Ui, p: &Palette, l: Lines, st: &mut ChatUi,
             };
             let width = (ui.available_width() * 2.0).round() / 2.0;
             let clearing_filter = view.is_filtered() && filter.is_empty();
+            view.set_group_emotes(st.group_emotes);
             let changed = view.sync(
                 &view::Source {
                     lines,
@@ -2834,7 +3091,7 @@ fn conversation_lines(ui: &mut egui::Ui, p: &Palette, l: Lines, st: &mut ChatUi,
         })
     });
     let latest_id = ui.scope_id().with(("latest", st.selected));
-    if resume || (!ui.is_sizing_pass() && latest::show(ui, p, latest_id, out.inner_rect, view.below(), arrived)) {
+    if resume || (!ui.is_sizing_pass() && latest::show(ui, p, latest_id, out.inner_rect, arrived)) {
         // past the end: the scroll area stops there and sticks to it again
         offset.y = out.content_size.y;
         store = true;
@@ -2843,8 +3100,8 @@ fn conversation_lines(ui: &mut egui::Ui, p: &Palette, l: Lines, st: &mut ChatUi,
         super::widgets::scroll_offset::set(ui.ctx(), out.id, offset);
     }
     line_menu::show(ui, menu, p, |ui, target| {
-        if let Some(avatar) = target.sender {
-            super::context::chat_sender_menu(ui, p, w, avatar, &target.line);
+        if let Some(sender) = target.sender {
+            sender_menu(ui, p, w, sender, &target.line);
         } else if let Rows::Thread(th) = &mut rows {
             thread::message_menu(ui, &env, th, target);
         }
@@ -2987,9 +3244,12 @@ pub(crate) fn draw_line(ui: &mut egui::Ui, env: &mut LineEnv, line: &crate::worl
                 ui.set_width(w - 8.0);
                 ui.horizontal(|ui| {
                     if object {
-                        let (rect, _) = ui.allocate_exact_size(egui::vec2(20.0, 20.0), egui::Sense::hover());
+                        let (rect, cube) = ui.allocate_exact_size(egui::vec2(20.0, 20.0), egui::Sense::click());
+                        line_object_sender(cube, p, world, line, env.menu);
                         let (glyph, tint) = object_row::object_glyph(line, p, super::colors::sender_color(line));
-                        if let Some(t) = env.icons.get(glyph) {
+                        if !object_row::paint_wearer(ui.painter(), world, line, env.pics, env.wanted, rect, 1.0)
+                            && let Some(t) = env.icons.get(glyph)
+                        {
                             ui.painter().image(
                                 t.id(),
                                 rect.shrink(2.0),
@@ -3015,8 +3275,8 @@ pub(crate) fn draw_line(ui: &mut egui::Ui, env: &mut LineEnv, line: &crate::worl
                         (false, true) => world.agent_id,
                         _ => line.source,
                     };
-                    if object && !line.source.is_nil() {
-                        object_sender(&r.clone().on_hover_cursor(egui::CursorIcon::PointingHand), p, world, line);
+                    if object {
+                        line_object_sender(r.clone(), p, world, line, env.menu);
                     } else if !avatar.is_nil() {
                         line_name_menu(&r, p, world, avatar, line, env.menu);
                     }
@@ -3325,18 +3585,31 @@ pub fn show(
     let mut friends = friends;
     let default = default_rect(super::layout::work_area(ctx));
     let opening_conversation = world.social.focus_im.is_some();
-    if let Some(f) = world.social.focus_im.take() {
+    if let Some(f) = world.social.focus_im {
         let conversation = (!f.is_nil()).then_some(f);
-        if popout::opens_in_own_window(&st.popped, conversation, st.own_windows) {
-            // the keyboard asked of the Conversations window goes to its own
-            let focus = std::mem::take(&mut st.conv_focus_request);
-            st.popped.pop_out(conversation, st.members_open, st.stage_mini, focus);
-            // and the Conversations window, opened for it, stays closed
-            if !st.main_open {
-                *open = false;
+        let own_window = popout::opens_in_own_window(&st.popped, conversation, st.own_windows);
+        // a request for the Conversations window waits while it is closed:
+        // the app may open it next (a new call opens it), and consuming the
+        // request now would let the "window opened" rule below take the
+        // keyboard for a conversation a call only asked to show
+        if own_window || *open {
+            // a conversation the user opened asks for the keyboard too
+            // (World::focus_conversation; FSFloaterIM::show → setFocus(true)
+            // → focusFirstItem); a call shows it alone
+            let take_keyboard = std::mem::take(&mut world.social.focus_im_to_type);
+            world.social.focus_im = None;
+            if own_window {
+                // the keyboard asked of the Conversations window goes to its own
+                let focus = std::mem::take(&mut st.conv_focus_request) || take_keyboard;
+                st.popped.pop_out(conversation, st.members_open, st.stage_mini, focus);
+                // and the Conversations window, opened for it, stays closed
+                if !st.main_open {
+                    *open = false;
+                }
+            } else {
+                st.open(f);
+                st.conv_focus_request |= take_keyboard;
             }
-        } else {
-            st.open(f);
         }
     }
     let docked = !contacts_settings.torn_off;
@@ -3854,10 +4127,13 @@ fn classic_pane(
             }
             let has_text = !draft.trim().is_empty();
             send_clicked = send_shown && send_button(ui, p, icons, has_text).clicked() && has_text;
-            output
-                .response
-                .response
-                .on_hover_text(aurora_i18n::tr!("ui-chat-compose-shortcuts"))
+            let field = output.response.response;
+            // the hint of the keys hides the last line while typing (#3211)
+            if has_text && field.has_focus() {
+                field
+            } else {
+                field.on_hover_text(aurora_i18n::tr!("ui-chat-compose-shortcuts"))
+            }
         })
         .inner;
     if !st.recent_emojis.above {
@@ -3895,6 +4171,8 @@ fn classic_pane(
                     }
                     if let Some(c) = picked.chosen {
                         draft.push(c);
+                        // the caret after the emoji, not left before it
+                        cursor_to_end(ui.ctx(), conv_input, &draft);
                         close = !ui.input(|i| i.modifiers.shift);
                     }
                     close |= picked.escape;
@@ -3907,15 +4185,21 @@ fn classic_pane(
     }
     let anchor = emoji_btn.unwrap_or(resp.rect).left_top();
     gif_picker::popup(ui.ctx(), p, icons, st, anchor, 4.0, conv_input, ChatType::Normal, actions);
-    if st.conv_focus_request {
-        st.conv_focus_request = false;
+    // the Enter that asked for the keyboard (start_chat) is not one typed in
+    // the field (compose.rs, Aurora's style, does the same)
+    let focusing = std::mem::take(&mut st.conv_focus_request);
+    if focusing {
         resp.request_focus();
         cursor_to_end(ui.ctx(), conv_input, &draft);
+    }
+    // clicked into, or given the keyboard: the field last used
+    if resp.gained_focus() {
+        st.used_conversation(st.selected);
     }
     let mut sent = false;
     let send = if send_clicked {
         Some(SendKey::Normal)
-    } else if resp.has_focus() || resp.lost_focus() {
+    } else if !focusing && (resp.has_focus() || resp.lost_focus()) {
         ui.input(send_enter)
     } else {
         None
@@ -3936,9 +4220,22 @@ fn classic_pane(
                 }
                 Some(to) => actions.push(ConvAction::Im { to, text }),
             }
+            st.used_conversation(st.selected);
         }
         draft.clear();
-        focus_after_send(&resp, st.selected.is_none(), st.keep_focus);
+        let local = st.selected.is_none();
+        let toggles = st.enter_toggles_in(local);
+        let mut back = compose::returns_to_world(local, toggles, st.keep_focus, sent, send_clicked);
+        // FSUnfocusChatHistoryOnReturn off: the nearby chat's field keeps the
+        // keyboard after a message (the chat bar letting go does not take it)
+        if back && sent && local && !toggles && !display::get().more.unfocus_nearby_on_send {
+            back = false;
+        }
+        if back {
+            resp.surrender_focus();
+        } else {
+            resp.request_focus();
+        }
     }
     st.typing_field = Some(typing::Field {
         to: st.selected.filter(|id| !world.is_group_session(id) && (resp.has_focus() || sent)),
@@ -4015,11 +4312,24 @@ pub fn conversations_waiting(world: &World) -> bool {
 /// Firestorm's nearby chat toasts are while the nearby chat panel is visible
 /// (LLFloaterIMNearbyChatHandler::processChat, nearby_chat->getVisible());
 /// on the Contacts or an IM tab the bubbles come back.
+#[cfg(test)]
 pub fn local_chat_shown(ctx: &egui::Context, st: &ChatUi) -> bool {
     let minimized = ctx
         .data_mut(|d| d.get_persisted::<bool>(egui::Id::unique(("conversations", "minimized"))))
         .unwrap_or(false);
     (!st.contacts && st.selected.is_none() && !minimized) || popout::in_sight(ctx, &st.popped).any(|c| c.is_none())
+}
+
+/// Whether the Nearby chat window itself is visible, as in the Legacy Viewer's
+/// `LLFloaterIMNearbyChatHandler::processChat`. Keep the decision pure so the
+/// Conversations and detached-window cases share the same rule.
+pub fn nearby_chat_in_sight(main_open: bool, main_shows_nearby: bool, popped_nearby_in_sight: bool) -> bool {
+    (main_open && main_shows_nearby) || popped_nearby_in_sight
+}
+
+/// Whether a detached Nearby chat window is currently visible.
+pub fn nearby_chat_popout_in_sight(ctx: &egui::Context, st: &ChatUi) -> bool {
+    popout::in_sight(ctx, &st.popped).any(|conversation| conversation.is_none())
 }
 
 /// A demo's window of its own for `conversation`, at `pos` (whatever the
@@ -4044,6 +4354,7 @@ pub fn conversations_in_sight(ctx: &egui::Context, st: &ChatUi, main_open: bool)
 fn bubble_sender(
     painter: &egui::Painter,
     p: &Palette,
+    world: &World,
     pics: &HashMap<uuid::Uuid, egui::TextureHandle>,
     wanted_pics: &mut HashSet<uuid::Uuid>,
     r: egui::Rect,
@@ -4055,7 +4366,9 @@ fn bubble_sender(
     match who {
         Sender::Object => {
             let (glyph, tint) = object_row::object_glyph(line, p, super::colors::sender_color(line));
-            if let Some(t) = super::icons::global(glyph) {
+            if !object_row::paint_wearer(painter, world, line, pics, wanted_pics, r, alpha)
+                && let Some(t) = super::icons::global(glyph)
+            {
                 painter.image(t.id(), r.shrink(1.0), uv, tint.gamma_multiply(alpha));
             }
         }
@@ -4314,7 +4627,7 @@ pub fn toasts(
                             let c = visual.left_edge(name.clone().unwrap_or(at..at)).translate(rect.min.to_vec2());
                             let r =
                                 egui::Rect::from_center_size(egui::pos2(c.min.x - 2.0 - side * 0.5, c.center().y), egui::vec2(side, side));
-                            bubble_sender(painter, p, pics, wanted_pics, r, &who, line, alpha);
+                            bubble_sender(painter, p, world, pics, wanted_pics, r, &who, line, alpha);
                         }
                         // the islands' pills: the sender's name acts like the
                         // conversations' (Firestorm's toast links it)
@@ -4519,43 +4832,83 @@ fn bubble_sender_link(ctx: &egui::Context, p: &Palette, world: &World, k: usize,
         });
 }
 
+/// The object a line can be inspected or blocked by: what it said, not its
+/// IMs, which carry their owner's id.
+pub(super) fn line_object(line: &crate::world::ChatLine) -> Option<uuid::Uuid> {
+    (matches!(line.kind, ChatKind::Object(_)) && !line.source.is_nil()).then_some(line.source)
+}
+
+/// The rows of an object's menu: inspect, ignore (the Block of
+/// menu_object_icon.xml and menu_url_objectim.xml).
+fn object_menu(ui: &mut egui::Ui, p: &Palette, world: &World, line: &crate::world::ChatLine) {
+    let id = line.source;
+    if super::menu::item(ui, p, "zoom-scan-filled", aurora_i18n::tr!("ui-context-inspect-2")) {
+        super::context::request(ui.ctx(), line_inspect(world, line));
+    }
+    let (icon, label) = if world.object_block_entry(&id).is_some() {
+        ("circle-check-filled", aurora_i18n::tr!("common-stop-ignoring"))
+    } else {
+        ("ban", aurora_i18n::tr!("common-ignore"))
+    };
+    if super::menu::item(ui, p, icon, label) {
+        super::context::request(
+            ui.ctx(),
+            CtxAction::ToggleBlockObject {
+                id,
+                name: line.from.clone(),
+            },
+        );
+    }
+}
+
+/// What inspecting an object named in a line does: the objectim link of the
+/// line's own object, with the owner and place its message carried when the
+/// object is not in the scene (LLViewerChat::getObjectImSLURL).
+fn line_inspect(world: &World, line: &crate::world::ChatLine) -> CtxAction {
+    let id = line.source;
+    CtxAction::AppLink(crate::slapp::AppLink::ObjectIm(world.chat_object(line).cloned().unwrap_or_else(
+        || crate::slapp::RemoteObject {
+            id,
+            name: line.from.clone(),
+            owner: uuid::Uuid::nil(),
+            group_owned: false,
+            slurl: String::new(),
+        },
+    )))
+}
+
+/// The menu of a line's sender, a resident's or an object's.
+pub(super) fn sender_menu(ui: &mut egui::Ui, p: &Palette, world: &World, id: uuid::Uuid, line: &crate::world::ChatLine) {
+    if line_object(line) == Some(id) {
+        object_menu(ui, p, world, line);
+    } else {
+        super::context::chat_sender_menu(ui, p, world, id, line);
+    }
+}
+
 /// An object's name in a line: a click inspects it, a right click offers
 /// to inspect or to ignore it (the Legacy Viewer's objectim link of the name,
 /// LLViewerChat::getSenderSLURL).
 fn object_sender(resp: &egui::Response, p: &Palette, world: &World, line: &crate::world::ChatLine) {
-    let id = line.source;
-    let inspect = || {
-        CtxAction::AppLink(crate::slapp::AppLink::ObjectIm(world.chat_object(line).cloned().unwrap_or_else(
-            || crate::slapp::RemoteObject {
-                id,
-                name: line.from.clone(),
-                owner: uuid::Uuid::nil(),
-                group_owned: false,
-                slurl: String::new(),
-            },
-        )))
-    };
-    super::menu::context_menu(resp, p, |ui| {
-        if super::menu::item(ui, p, "zoom-scan-filled", aurora_i18n::tr!("ui-context-inspect-2")) {
-            super::context::request(ui.ctx(), inspect());
-        }
-        let (icon, label) = if world.mutes.is_muted_id(&id) {
-            ("circle-check-filled", aurora_i18n::tr!("common-stop-ignoring"))
-        } else {
-            ("ban", aurora_i18n::tr!("common-ignore"))
-        };
-        if super::menu::item(ui, p, icon, label) {
-            super::context::request(
-                ui.ctx(),
-                CtxAction::ToggleBlockObject {
-                    id,
-                    name: line.from.clone(),
-                },
-            );
-        }
-    });
+    super::menu::context_menu(resp, p, |ui| object_menu(ui, p, world, line));
     if resp.clicked() {
-        super::context::request(&resp.ctx, inspect());
+        super::context::request(&resp.ctx, line_inspect(world, line));
+    }
+}
+
+/// The name or the cube of a full-size line from an object: `object_sender`,
+/// in the transcript's own menu where it has one.
+pub(super) fn line_object_sender(r: egui::Response, p: &Palette, world: &World, line: &crate::world::ChatLine, menu: Option<egui::Id>) {
+    let Some(id) = line_object(line) else { return };
+    line_menu::demo_mark_object(&r);
+    let r = r.on_hover_cursor(egui::CursorIcon::PointingHand);
+    if let Some(menu) = menu {
+        line_menu::sender(&r, menu, id, line);
+        if r.clicked() {
+            super::context::request(&r.ctx, line_inspect(world, line));
+        }
+    } else {
+        object_sender(&r, p, world, line);
     }
 }
 
@@ -4673,9 +5026,12 @@ pub(crate) fn cursor_to_end(ctx: &egui::Context, id: egui::Id, text: &str) {
 
 /// The local chat's field, the Legacy Viewer's chat bar (LLFloaterIMNearbyChat):
 /// Enter says, Ctrl+Enter shouts, Shift+Enter whispers, Alt+Enter sends ((OOC)), `/channel` and the
-/// gestures' completion; Enter on an empty field returns to movement. Shared
-/// by the full-width bar and the chat island (`bars/dock.rs`), which draws
-/// its own frame (`build` dresses the field) and shows emoji pictures.
+/// gestures' completion. With `keep_focus` (CloseChatOnReturn off,
+/// FSNearbyChatControl::autohide), Enter on an empty field leaves the
+/// keyboard there; without it, that Enter returns to movement. A second
+/// Enter in the same pass takes the bar back. Shared by the full-width bar
+/// and the chat island (`bars/dock.rs`), which draws its own frame (`build`
+/// dresses the field) and shows emoji pictures.
 pub(crate) fn bar_input(
     ui: &mut egui::Ui,
     p: &Palette,
@@ -4739,43 +5095,73 @@ pub(crate) fn bar_input(
         }
     }
     st.has_focus = resp.has_focus();
-    // The editor leaves ordinary Enter to this send path.
-    let send = if !focusing && (resp.has_focus() || resp.lost_focus()) {
-        ui.input(send_enter)
+    if resp.gained_focus() {
+        st.last_field = ChatField::Bar;
+    }
+    // The editor leaves ordinary Enter to this send path. The Enter that
+    // asked for the keyboard is not one of them (`focusing`).
+    let pass = if !focusing && (resp.has_focus() || resp.lost_focus()) {
+        ui.input(enter_pass)
     } else {
-        None
+        EnterPass {
+            keys: Vec::new(),
+            after: String::new(),
+        }
     };
-    let enter = send.is_some();
+    let enter = !pass.keys.is_empty();
     // Enter, even on an empty bar, ends the typing (sendChat → stopTyping)
     let said = typing::says_aloud(&st.input, st.type_during_emote, st.colon_emote) && st.selector_channel().unwrap_or(0) == 0;
     st.local_field(&resp, said, enter);
-    if enter {
-        resp.surrender_focus();
-    }
-    if let Some(send) = send
-        && !st.input.trim().is_empty()
-    {
-        st.input_history.entry(None).or_default().record(bar_input_id(), &st.input);
-        let text = typed_line(&st.suggest.expand(None, st.input.trim()), send == SendKey::Ooc);
-        let (channel, message) = channel::resolve(&text, st.selector_channel());
-        out = Some(OutgoingChat {
-            message,
-            channel,
-            chat_type: send.chat_type(ChatType::Normal),
-        });
-        st.input.clear();
-        if st.keep_focus {
-            // ready for the next message; only Enter on the empty bar or a
-            // click elsewhere gives the keyboard back to the world
-            st.focus_request = true;
+    if let Some(send) = pass.keys.first().copied() {
+        let another = pass.keys.len() > 1;
+        let (body, remainder) = split_on_enter(&st.input, &pass.after);
+        if !body.trim().is_empty() {
+            st.last_field = ChatField::Bar;
+            st.input_history.entry(None).or_default().record(bar_input_id(), &body);
+            let text = typed_line(&st.suggest.expand(None, body.trim()), send == SendKey::Ooc);
+            let (channel, message) = channel::resolve(&text, st.selector_channel());
+            out = Some(OutgoingChat {
+                message,
+                channel,
+                chat_type: send.chat_type(ChatType::Normal),
+            });
+            st.input = remainder;
+            cursor_to_end(ui.ctx(), resp.id, &st.input);
+            // CloseChatOnReturn off keeps the keyboard. A second Enter in
+            // this pass is start-chat even when that preference is off
+            // (the bar was let go by the first Enter).
+            if st.keep_focus || another {
+                st.focus_request = true;
+            } else {
+                resp.surrender_focus();
+            }
+        } else if st.keep_focus {
+            // FSNearbyChatControl::autohide(true) calls setFocus(false)
+            // only when CloseChatOnReturn is on. Escape and a click in
+            // the world still leave.
+        } else {
+            resp.surrender_focus();
+            if another {
+                st.focus_request = true;
+            }
         }
     }
-    // Enter on an empty bar returns to movement (like the Legacy Viewer).
     out
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn chat_times_with_and_without_their_seconds() {
+        // 2026-01-15 22:05:09 UTC, 14:05:09 in Second Life time (PST)
+        let t = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_768_514_709);
+        assert_eq!(super::hhmm_in(t, false, false), "14:05");
+        assert_eq!(super::hhmm_in(t, false, true), "14:05:09");
+        assert_eq!(super::hhmm_in(t, true, true), "2:05:09 PM");
+        // a line without a time stays without one
+        assert_eq!(super::hhmm_in(std::time::UNIX_EPOCH, false, true), "");
+    }
+
     #[test]
     fn alt_enter_alone_sends_ooc_before_the_channel_is_read() {
         let alt = egui::Modifiers::ALT;
@@ -4813,7 +5199,117 @@ mod tests {
         assert_eq!(super::auto_close_ooc("hello"), "hello");
     }
 
+    #[test]
+    fn nearby_world_typing_targets_the_field_that_will_be_drawn() {
+        assert_eq!(nearby_typing_target(true, false), NearbyTypingTarget::Detached);
+        assert_eq!(nearby_typing_target(true, true), NearbyTypingTarget::Detached);
+        assert_eq!(nearby_typing_target(false, true), NearbyTypingTarget::Main);
+        assert_eq!(nearby_typing_target(false, false), NearbyTypingTarget::ChatBar);
+    }
+
+    #[test]
+    fn world_typing_focuses_detached_nearby_without_changing_main_im() {
+        let ctx = egui::Context::default();
+        let mut chat = ChatUi::default();
+        let im = uuid::Uuid::from_u128(0x2753);
+        chat.selected = Some(im);
+        chat.draft_mut(Some(im)).push_str("untouched");
+        chat.popped.pop_out(None, false, false, false);
+        chat.start_nearby_with(&ctx, true, "x");
+        assert_eq!(chat.draft_mut(None), "x");
+        assert_eq!(chat.draft_mut(Some(im)), "untouched");
+        assert!(!chat.conv_focus_request, "main IM must not receive focus");
+        assert!(chat.popped.focus_requested(None));
+        chat.start_nearby_with(&ctx, false, "y");
+        assert_eq!(chat.draft_mut(None), "xy", "later frame keeps typing in Nearby");
+        assert_eq!(chat.draft_mut(Some(im)), "untouched");
+    }
+
     use super::*;
+
+    /// Enter from the world: the chat bar, unless "Enter returns to the
+    /// last chat field used" sends it back to the conversation last talked
+    /// in while its window is open and the conversation still exists.
+    #[test]
+    fn enter_returns_to_the_last_chat_field_used_only_when_asked_and_open() {
+        let ctx = egui::Context::default();
+        let group = uuid::Uuid::from_u128(7);
+        let gone = uuid::Uuid::from_u128(8);
+        let exists = |id: &uuid::Uuid| *id == group;
+        let fresh = |last: ChatField, on: bool| ChatUi {
+            last_field: last,
+            enter_last_field: on,
+            ..ChatUi::default()
+        };
+        // off: always the chat bar
+        let mut st = fresh(ChatField::Conversation(Some(group)), false);
+        st.start_chat(&ctx, true, exists);
+        assert!(st.focus_request && !st.conv_focus_request);
+        // on, last talked in the group, Conversations open: its tab
+        let mut st = fresh(ChatField::Conversation(Some(group)), true);
+        st.start_chat(&ctx, true, exists);
+        assert!(!st.focus_request && st.conv_focus_request && st.selected == Some(group));
+        // the nearby chat in Conversations
+        let mut st = fresh(ChatField::Conversation(None), true);
+        st.selected = Some(group);
+        st.start_chat(&ctx, true, exists);
+        assert!(st.conv_focus_request && st.selected.is_none());
+        // Conversations closed, the conversation gone, or the bar last: the bar
+        for (last, open) in [
+            (ChatField::Conversation(Some(group)), false),
+            (ChatField::Conversation(Some(gone)), true),
+            (ChatField::Bar, true),
+        ] {
+            let mut st = fresh(last, true);
+            st.start_chat(&ctx, open, exists);
+            assert!(st.focus_request && !st.conv_focus_request, "{last:?} open {open}");
+        }
+        // a conversation in its own window: raised there while shown, the
+        // bar once it is put away
+        let mut st = fresh(ChatField::Conversation(Some(group)), true);
+        st.popped.pop_out(Some(group), false, false, false);
+        st.start_chat(&ctx, true, exists);
+        assert!(!st.focus_request && !st.conv_focus_request && st.selected.is_none());
+        st.popped.set_hidden(Some(group), true);
+        st.start_chat(&ctx, true, exists);
+        assert!(st.focus_request);
+    }
+
+    /// Sending from a conversation's field is remembered, the chat bar too.
+    #[test]
+    fn the_last_field_follows_where_a_message_was_sent() {
+        let mut st = ChatUi::default();
+        assert_eq!(st.last_field, ChatField::Bar);
+        st.used_conversation(Some(uuid::Uuid::from_u128(3)));
+        assert_eq!(st.last_field, ChatField::Conversation(Some(uuid::Uuid::from_u128(3))));
+        st.used_conversation(None);
+        assert_eq!(st.last_field, ChatField::Conversation(None));
+    }
+
+    /// Enter in a conversation's field. By default, like the Legacy
+    /// Viewer's nearby chat window: an empty Enter keeps the keyboard, a
+    /// message lets it go in the nearby chat only without "Keep the chat bar
+    /// active". "Enter toggles typing" gives every conversation the chat
+    /// bar's rule. The Send button always keeps it.
+    #[test]
+    fn enter_in_a_conversation_returns_to_the_world_by_its_rule() {
+        use super::compose::returns_to_world;
+        // (local, toggles, keep_focus, sent, send_clicked) -> back to the world
+        for local in [true, false] {
+            for keep in [true, false] {
+                assert!(
+                    !returns_to_world(local, false, keep, false, false),
+                    "an empty Enter keeps it by default"
+                );
+                assert!(returns_to_world(local, true, keep, false, false), "an empty Enter toggles it back");
+                assert!(!returns_to_world(local, true, keep, true, true), "the Send button keeps it");
+            }
+            assert!(!returns_to_world(local, true, true, true, false), "kept after sending");
+            assert!(returns_to_world(local, true, false, true, false), "let go after sending");
+        }
+        assert!(returns_to_world(true, false, false, true, false), "nearby: CloseChatOnReturn");
+        assert!(!returns_to_world(false, false, false, true, false), "an IM keeps it by default");
+    }
 
     fn nearby(apart: bool, shown: bool, minimized: bool, front: bool, focused: bool, tab_visible: bool) -> NearbyChatView {
         NearbyChatView {
@@ -4828,9 +5324,11 @@ mod tests {
 
     #[test]
     fn the_chat_bar_button_puts_the_bar_away_and_brings_it_back_with_the_keyboard() {
-        for autohide in [false, true] {
+        use crate::settings::ChatBar;
+        for bar_mode in [ChatBar::Always, ChatBar::WhenTyping] {
+            let autohide = bar_mode.hides();
             let mut st = ChatUi {
-                autohide,
+                bar_mode,
                 ..Default::default()
             };
             st.input = "draft".into();
@@ -4848,10 +5346,166 @@ mod tests {
         }
     }
 
+    /// "Conversations window only" (#2696): the bar never shows, whatever
+    /// asks for it, and the bars kept in mouselook do not count it in use.
+    #[test]
+    fn the_chat_bar_never_shows_in_conversations_window_only() {
+        let mut st = ChatUi {
+            bar_mode: crate::settings::ChatBar::ConversationsOnly,
+            ..Default::default()
+        };
+        st.input = "draft".into();
+        st.has_focus = true;
+        st.focus_request = true;
+        st.bar_hovered = true;
+        st.bar_emoji_open = true;
+        assert!(!st.bar_shown() && !st.in_use());
+        st.toggle_bar();
+        assert!(!st.bar_shown());
+    }
+
+    /// "Conversations window only": Enter, a letter key, the gesture key
+    /// and the toolbar's Chat bar ask for the bar, and the nearby chat's
+    /// field answers: the Conversations window opened (closed), expanded
+    /// (minimized) or brought forward on the Nearby tab, or the nearby
+    /// chat's own window when torn off. The other modes leave the request
+    /// to the bar.
+    #[test]
+    fn enter_opens_the_nearby_tab_of_the_conversations_window_in_conversations_window_only() {
+        use crate::settings::ChatBar;
+        let group = uuid::Uuid::from_u128(7);
+        let exists = |id: &uuid::Uuid| *id == group;
+        let window_only = || ChatUi {
+            bar_mode: ChatBar::ConversationsOnly,
+            ..ChatUi::default()
+        };
+        let on_nearby = |st: &ChatUi, what: &str| {
+            assert!(!st.focus_request, "{what}: not the bar");
+            assert!(
+                st.conv_focus_request && st.selected.is_none() && !st.contacts && !st.show_profile,
+                "{what}"
+            );
+        };
+        // closed, on another tab: opened on Nearby
+        let ctx = egui::Context::default();
+        let mut st = window_only();
+        st.selected = Some(group);
+        st.contacts = true;
+        st.show_profile = true;
+        let mut open = false;
+        st.start_chat(&ctx, open, exists);
+        st.follow_bar_mode(&ctx, &mut open);
+        assert!(open, "closed: opened");
+        on_nearby(&st, "closed");
+        // minimized: expanded
+        let ctx = egui::Context::default();
+        let mut st = window_only();
+        let mut open = true;
+        super::super::widgets::minimize_floater(&ctx, "conversations");
+        st.start_chat(&ctx, open, exists);
+        st.follow_bar_mode(&ctx, &mut open);
+        let expand = egui::Id::unique("conversations").with(super::super::widgets::EXPAND);
+        assert!(
+            open && ctx.data(|d| d.get_temp::<bool>(expand)) == Some(true),
+            "minimized: expanded"
+        );
+        on_nearby(&st, "minimized");
+        // a letter key and the gesture key: what was typed goes along
+        let ctx = egui::Context::default();
+        let mut st = window_only();
+        st.draft_mut(None).push_str("Hi ");
+        st.input.push('t');
+        st.focus_request = true;
+        let mut open = true;
+        st.follow_bar_mode(&ctx, &mut open);
+        assert_eq!(st.draft_mut(None).as_str(), "Hi t");
+        assert!(st.input.is_empty());
+        on_nearby(&st, "letter key");
+        let mut st = window_only();
+        let mods = crate::keybinds::Mods::default();
+        let slash = winit::keyboard::Key::Character("/".into());
+        let code = winit::keyboard::KeyCode::Slash;
+        assert!(st.gesture_key(&ctx, &slash, code, true, mods));
+        assert!(st.gesture_key(&ctx, &slash, code, false, mods));
+        st.follow_bar_mode(&ctx, &mut open);
+        assert_eq!(st.draft_mut(None).as_str(), "/");
+        on_nearby(&st, "gesture key");
+        // the toolbar's Chat bar
+        let mut st = window_only();
+        st.toggle_bar();
+        st.follow_bar_mode(&ctx, &mut open);
+        on_nearby(&st, "Chat bar button");
+        // the nearby chat torn off: its own window, the Conversations
+        // window left closed
+        let mut st = window_only();
+        st.popped.pop_out(None, false, false, false);
+        st.popped.set_hidden(None, true);
+        let mut open = false;
+        st.start_chat(&ctx, open, exists);
+        st.follow_bar_mode(&ctx, &mut open);
+        assert!(!open && !st.focus_request && st.popped.shown(None), "torn off: its window");
+        // "Enter returns to the last chat field used" still goes to the group
+        let mut st = window_only();
+        st.enter_last_field = true;
+        st.last_field = ChatField::Conversation(Some(group));
+        let mut open = true;
+        st.start_chat(&ctx, open, exists);
+        st.follow_bar_mode(&ctx, &mut open);
+        assert_eq!(st.selected, Some(group), "the last field used");
+        // ... but not in a minimized Conversations window (#2436's rule):
+        // the window expands on Nearby chat
+        let ctx = egui::Context::default();
+        let mut st = window_only();
+        st.enter_last_field = true;
+        st.last_field = ChatField::Conversation(Some(group));
+        st.selected = Some(group);
+        let mut open = true;
+        super::super::widgets::minimize_floater(&ctx, "conversations");
+        st.start_chat(&ctx, open, exists);
+        st.follow_bar_mode(&ctx, &mut open);
+        on_nearby(&st, "last field used, window minimized");
+        // the other modes: the bar takes it
+        for bar_mode in [ChatBar::Always, ChatBar::WhenTyping] {
+            let mut st = ChatUi {
+                bar_mode,
+                ..ChatUi::default()
+            };
+            let mut open = false;
+            st.start_chat(&ctx, open, exists);
+            st.input.push('t');
+            st.follow_bar_mode(&ctx, &mut open);
+            assert!(
+                st.focus_request && st.bar_shown() && !open && !st.conv_focus_request,
+                "{bar_mode:?}"
+            );
+            assert_eq!(st.input, "t");
+        }
+    }
+
+    /// An empty Enter gives the keyboard back in the nearby field with
+    /// "Conversations window only", which takes the chat bar's place;
+    /// elsewhere "Enter toggles typing in conversations" decides.
+    #[test]
+    fn the_nearby_field_toggles_like_the_chat_bar_in_conversations_window_only() {
+        use crate::settings::ChatBar;
+        for bar_mode in [ChatBar::Always, ChatBar::WhenTyping, ChatBar::ConversationsOnly] {
+            for enter_toggles in [false, true] {
+                let st = ChatUi {
+                    bar_mode,
+                    enter_toggles,
+                    ..ChatUi::default()
+                };
+                let window_only = bar_mode == ChatBar::ConversationsOnly;
+                assert_eq!(st.enter_toggles_in(true), enter_toggles || window_only, "{bar_mode:?} nearby");
+                assert_eq!(st.enter_toggles_in(false), enter_toggles, "{bar_mode:?} IM");
+            }
+        }
+    }
+
     #[test]
     fn a_click_on_the_chat_bar_button_hides_an_autohidden_bar_that_lost_the_keyboard_to_it() {
         let mut st = ChatUi {
-            autohide: true,
+            bar_mode: crate::settings::ChatBar::WhenTyping,
             ..Default::default()
         };
         st.has_focus = true;
@@ -4916,6 +5570,24 @@ mod tests {
             nearby_chat_shortcut(nearby(true, true, false, true, true, false)),
             NearbyChatShortcut::HideDetached
         ));
+    }
+
+    #[test]
+    fn nearby_chat_visibility_controls_toast_suppression() {
+        for (main_open, main_shows_nearby, popped_nearby_in_sight, expected) in [
+            (true, true, false, true),    // Nearby tab selected in Conversations
+            (false, false, true, true),   // detached Nearby window, Conversations closed
+            (false, false, false, false), // detached window minimized or otherwise out of sight
+            (false, false, false, false), // neither window is visible
+            (true, false, false, false),  // Conversations shows a different tab
+            (false, true, false, false),  // closed Conversations cannot suppress toasts
+        ] {
+            assert_eq!(
+                nearby_chat_in_sight(main_open, main_shows_nearby, popped_nearby_in_sight),
+                expected,
+                "main_open={main_open}, main_shows_nearby={main_shows_nearby}, popped_nearby_in_sight={popped_nearby_in_sight}"
+            );
+        }
     }
 
     #[test]
@@ -6080,14 +6752,13 @@ mod tests {
         };
         let field = |c: uuid::Uuid| egui::Id::unique(("conv_input", Some(c)));
         // opened by a call: shown, the keyboard stays nowhere
-        world.social.focus_im = Some(a);
+        world.focus_conversation(a, false);
         frame(&mut st, &mut world, &mut open);
         frame(&mut st, &mut world, &mut open);
         assert_eq!(st.selected, Some(a));
         assert!(ctx.memory(|m| m.focused()).is_none());
         // opened by the user: shown and ready to type in
-        world.social.focus_im = Some(b);
-        st.conv_focus_request = true;
+        world.focus_conversation(b, true);
         frame(&mut st, &mut world, &mut open);
         frame(&mut st, &mut world, &mut open);
         assert_eq!(st.selected, Some(b));
@@ -6098,8 +6769,7 @@ mod tests {
         frame(&mut st, &mut world, &mut open);
         frame(&mut st, &mut world, &mut open);
         assert!(crate::ui::widgets::floater_minimized(&ctx, "conversations"));
-        world.social.focus_im = Some(a);
-        st.conv_focus_request = true;
+        world.focus_conversation(a, true);
         crate::ui::notifications::open_conversations(&ctx, &mut open);
         for _ in 0..4 {
             frame(&mut st, &mut world, &mut open);

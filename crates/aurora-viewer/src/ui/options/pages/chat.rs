@@ -77,10 +77,29 @@ pub fn page(cx: &mut Cx, tab: usize) {
                         &field!(compact_im_system_lines),
                     );
                 });
+                // emotes in their sender's group in the Aurora style,
+                // off (not in the Legacy Viewer, whose lines have no header)
+                cx.conditional(cx.s.chat_style == crate::settings::ChatStyle::Aurora, |cx| {
+                    cx.toggle(
+                        tr!("ui-options-group-emotes"),
+                        tr!("ui-options-group-emotes-hint"),
+                        &field!(group_emotes),
+                    );
+                });
                 cx.toggle(
                     tr!("ui-options-chat-keep-focus"),
                     tr!("ui-options-chat-keep-focus-hint"),
                     &field!(chat_keep_focus),
+                );
+                cx.toggle(
+                    tr!("ui-options-chat-enter-toggles"),
+                    tr!("ui-options-chat-enter-toggles-hint"),
+                    &field!(chat_enter_toggles),
+                );
+                cx.toggle(
+                    tr!("ui-options-chat-enter-last-field"),
+                    tr!("ui-options-chat-enter-last-field-hint"),
+                    &field!(chat_enter_last_field),
                 );
                 // #980: FSChatbarGestureAutoCompleteEnable (on),
                 // FSChatbarNamePrediction (on, the human's choice; off in the Legacy
@@ -107,11 +126,18 @@ pub fn page(cx: &mut Cx, tab: usize) {
                     tr!("ui-options-mention-autocomplete-hint"),
                     &field!(chat_mention_autocomplete),
                 );
-                // AutohideChatBar (Chat › Typing), off (#1009)
-                cx.toggle(
-                    tr!("ui-options-autohide-chat-bar"),
-                    tr!("ui-options-autohide-chat-bar-hint"),
-                    &field!(autohide_chat_bar),
+                // AutohideChatBar (Chat › Typing), off (#1009), and
+                // Aurora's Conversations window only (#2696)
+                use crate::settings::ChatBar;
+                cx.combo(
+                    tr!("ui-options-chat-bar"),
+                    tr!("ui-options-chat-bar-hint"),
+                    &field!(chat_bar),
+                    &[
+                        (ChatBar::Always, tr!("ui-options-chat-bar-always")),
+                        (ChatBar::WhenTyping, tr!("ui-options-chat-bar-typing")),
+                        (ChatBar::ConversationsOnly, tr!("ui-options-chat-bar-window")),
+                    ],
                 );
                 cx.slider(
                     tr!("ui-options-chat-bubble-duration"),
@@ -128,6 +154,14 @@ pub fn page(cx: &mut Cx, tab: usize) {
                     &field!(chat_console_max_lines),
                     0..=50,
                     "",
+                );
+                // FSSecondsinChatTimestamps (off): the seconds of the nearby
+                // chat's and the conversations' times, apart from the clock's
+                // (#502)
+                cx.toggle(
+                    tr!("ui-options-chat-time-seconds"),
+                    tr!("ui-options-chat-time-seconds-hint"),
+                    &field!(chat_time_seconds),
                 );
                 // the Legacy Viewer's Chat › Visuals (UseChatBubbles and what
                 // depends on it; ChatBubbleOpacity is in Appearance › Skin,
@@ -195,6 +229,8 @@ pub fn page(cx: &mut Cx, tab: usize) {
                     &field!(payment_sent_opens),
                     &opens,
                 );
+                // Aurora's own: pokes (`world/pokes.rs`), on by default
+                cx.toggle(tr!("ui-options-pokes"), tr!("ui-options-pokes-hint"), &field!(pokes));
                 // the tab of a conversation with news flashes
                 // (FSFloaterIMContainer::startFlashingTab), in violet and softly
                 cx.toggle(
@@ -993,6 +1029,13 @@ fn keyword_alerts(cx: &mut Cx) {
 fn history(cx: &mut Cx) {
     use aurora_i18n::tr;
     cx.group(tr!("ui-options-recording"), |cx| {
+        // KeepConversationLogTranscripts > 0 (Legacy Viewer › Privacy, Save:
+        // Log only / Log and transcripts), apart from the transcripts here
+        cx.toggle(
+            tr!("ui-options-chat-logs-conversations"),
+            tr!("ui-options-chat-logs-conversations-help"),
+            &field!(log_conversations),
+        );
         cx.toggle(tr!("ui-options-chat-logs-im"), tr!("ui-options-chat-logs-im-help"), &field!(log_im));
         cx.toggle(
             tr!("ui-options-chat-logs-nearby"),
@@ -1081,6 +1124,21 @@ fn history(cx: &mut Cx) {
                         .clicked()
                         {
                             st.confirm_erase_logs = true;
+                        }
+                        // Clear log… (Pref.ClearLog), enabled while the log
+                        // has entries
+                        if action_button_if(
+                            ui,
+                            &p,
+                            "trash-filled",
+                            tr!("ui-options-chat-logs-clear"),
+                            ActionKind::FlatDanger,
+                            size,
+                            st.conversation_log_entries > 0,
+                        )
+                        .clicked()
+                        {
+                            st.confirm_clear_conversation_log = true;
                         }
                     });
                     if crate::ui::widgets::action_button_if(

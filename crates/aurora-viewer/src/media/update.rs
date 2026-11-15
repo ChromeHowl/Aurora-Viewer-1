@@ -71,6 +71,19 @@ fn apply_entry_to_plugin(plugin: &mut impl MediaConfigTarget, old: (i32, i32, bo
     }
 }
 
+/// A custom-scheme link clicked in a page shown on a prim or a HUD: CEF
+/// reports it as `click_nofollow` with its navigation type
+/// (LLViewerMediaImpl::handleMediaEvent, MEDIA_EVENT_CLICK_LINK_NOFOLLOW,
+/// indra/newview/llviewermedia.cpp). As in the viewer's web windows
+/// (`ui/web_view.rs`, #2014), only a user click acts: a redirect or a script
+/// navigation must never trigger a SLURL action.
+fn clicked_media_link(event: &MediaEvent) -> Option<&str> {
+    match event {
+        MediaEvent::ClickLinkNoFollow { url, nav_type } if nav_type == "clicked" && !url.is_empty() => Some(url),
+        _ => None,
+    }
+}
+
 impl MediaManager {
     /// Update running plugins immediately, including while the native window
     /// is minimized and media frames may no longer be drawn.
@@ -644,6 +657,11 @@ impl MediaManager {
                 if !f.window_focused && p > Priority::Low {
                     p = Priority::Low;
                 }
+                // gaming mode: loaded but not drawn, the sound going on
+                // (app/gaming_mode.rs; not in the Legacy Viewer)
+                if f.gaming_mode && p > Priority::Hidden {
+                    p = Priority::Hidden;
+                }
             }
             m.priority = p;
         }
@@ -654,6 +672,7 @@ impl MediaManager {
     fn drive_plugins(&mut self, f: &MediaFrame, now: Instant) -> Vec<(Uuid, u8, String)> {
         let mut navs = Vec::new();
         let mut messages = Vec::new();
+        let mut links = Vec::new();
         let paths = self.paths.clone();
         let browser = browser_settings(f.cache_dir, f.language);
         for m in &mut self.impls {
@@ -742,6 +761,10 @@ impl MediaManager {
             p.idle();
             let mut close = false;
             for ev in p.take_events() {
+                if let Some(url) = clicked_media_link(&ev) {
+                    log::info!("media: link clicked: {}", sanitize(url));
+                    links.push(url.to_owned());
+                }
                 let complete = matches!(ev, MediaEvent::NavigateComplete { .. });
                 match ev {
                     MediaEvent::StatusChanged(s) => m.status = s,
@@ -809,6 +832,7 @@ impl MediaManager {
             }
         }
         self.messages.extend(messages);
+        self.links.extend(links);
         navs
     }
 
@@ -1163,6 +1187,24 @@ mod tests {
     }
 
     #[test]
+    fn custom_scheme_links_in_media_act_only_on_a_click() {
+        let link = |nav_type: &str| MediaEvent::ClickLinkNoFollow {
+            url: "secondlife:///app/chat/824619/hello".into(),
+            nav_type: nav_type.into(),
+        };
+        assert_eq!(clicked_media_link(&link("clicked")), Some("secondlife:///app/chat/824619/hello"));
+        assert_eq!(clicked_media_link(&link("navigated")), None);
+        assert_eq!(
+            clicked_media_link(&MediaEvent::ClickLinkNoFollow {
+                url: String::new(),
+                nav_type: "clicked".into()
+            }),
+            None
+        );
+        assert_eq!(clicked_media_link(&MediaEvent::CloseRequest), None);
+    }
+
+    #[test]
     fn minimized_mute_restores_media_source_volume_and_rolloff() {
         for key in [
             MediaKey::Parcel,
@@ -1221,6 +1263,7 @@ mod tests {
                 channel_volume: 1.0,
                 agent_speed: 0.0,
                 window_focused: true,
+                gaming_mode: false,
                 net: None,
                 cache_dir: std::path::Path::new(""),
                 language: "en",

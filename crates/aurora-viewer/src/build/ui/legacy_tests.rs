@@ -488,8 +488,15 @@ fn legacy_pbr_keeps_all_maps_left_of_live_inline_factors() {
 
 fn scroll_shape(inspector: &mut Inspector, delta: f32) {
     let (window, _) = inspector.show(vec![]);
+    // A wheel over a number field steps that field. The reserved scrollbar
+    // strip is beside the columns, and it stays clear while the content moves.
+    let at = inspector
+        .ctx
+        .data(|d| d.get_temp::<egui::Rect>(egui::Id::unique("legacy-build-scroll")))
+        .map(|content| egui::pos2(content.right() + 4.0, content.center().y))
+        .unwrap_or(egui::pos2(window.right() - 16.0, window.bottom() - 80.0));
     inspector.show(vec![
-        egui::Event::PointerMoved(egui::pos2(window.center().x, window.bottom() - 80.0)),
+        egui::Event::PointerMoved(at),
         egui::Event::MouseWheel {
             phase: egui::TouchPhase::Move,
             source: egui::MouseWheelSource::Wheel,
@@ -624,5 +631,84 @@ fn legacy_shape_restored_fields_commit_typed_values_for_extended_prims() {
             actual.revolutions
         };
         assert!((got - value.parse::<f32>().unwrap()).abs() < 0.001, "{label}: {got}");
+    }
+}
+
+fn hover_at(inspector: &mut Inspector, pos: egui::Pos2, frames: u32) {
+    for _ in 0..frames {
+        inspector.show(vec![egui::Event::PointerMoved(pos)]);
+    }
+}
+
+fn section_point(inspector: &Inspector, texts: &[(String, egui::Rect)], item: crate::build::layout::Item, label: &str) -> egui::Pos2 {
+    if let Some((_, _, rect)) = inspector
+        .tool
+        .ui
+        .layout
+        .targets
+        .iter()
+        .find(|(candidate, panel, _)| *panel == crate::build::layout::Panel::Navigation && *candidate == item)
+    {
+        return rect.center();
+    }
+    texts
+        .iter()
+        .filter(|(text, _)| text == label)
+        .min_by(|left, right| left.1.top().total_cmp(&right.1.top()))
+        .unwrap_or_else(|| panic!("missing tab {label}"))
+        .1
+        .center()
+}
+
+/// LLTabContainer::handleDragAndDrop with open_tabs_on_drag_and_drop: a rest
+/// on a hidden tab opens it; a pass, a rest that leaves, and a hover with no
+/// drag do not. Both presentations.
+#[test]
+fn an_inventory_drag_resting_on_a_build_tab_opens_it() {
+    for legacy_window in [false, true] {
+        let mut inspector = if legacy_window {
+            legacy()
+        } else {
+            let mut inspector = Inspector::new();
+            inspector.tool.tab = 6;
+            inspector.screen.y = 1400.0;
+            resize_inspector(&mut inspector, vec2(400.0, 1100.0));
+            inspector
+        };
+        let (window, texts) = inspector.show(vec![]);
+        let contents = section_point(
+            &inspector,
+            &texts,
+            crate::build::layout::Item::Contents,
+            aurora_i18n::tr!("build-compact-contents"),
+        );
+        let elsewhere = window.center();
+        hover_at(&mut inspector, contents, 40);
+        assert_eq!(inspector.tool.tab, 6, "legacy={legacy_window}: no drag");
+
+        crate::ui::inventory::drag::demo_carry(&inspector.ctx, vec![uuid::Uuid::from_u128(1)]);
+        if !legacy_window {
+            let camera = section_point(
+                &inspector,
+                &texts,
+                crate::build::layout::Item::Camera,
+                aurora_i18n::tr!("build-compact-camera"),
+            );
+            hover_at(&mut inspector, camera, 40);
+            assert_eq!(inspector.tool.tool, Tool::Edit, "a tool button is not a tab");
+            assert_eq!(inspector.tool.tab, 6, "a tool button is not a tab");
+        }
+        hover_at(&mut inspector, contents, 20);
+        assert_eq!(inspector.tool.tab, 6, "legacy={legacy_window}: a passing drag");
+        hover_at(&mut inspector, elsewhere, 40);
+        hover_at(&mut inspector, contents, 20);
+        assert_eq!(inspector.tool.tab, 6, "legacy={legacy_window}: leaving restarts the wait");
+        hover_at(&mut inspector, contents, 20);
+        assert_eq!(inspector.tool.tab, 4, "legacy={legacy_window}: a rest opens Contents");
+        let (_, texts) = inspector.show(vec![egui::Event::PointerMoved(contents)]);
+        assert!(
+            texts.iter().any(|(text, _)| text == aurora_i18n::tr!("common-new-script")),
+            "legacy={legacy_window}: Contents is showing"
+        );
     }
 }

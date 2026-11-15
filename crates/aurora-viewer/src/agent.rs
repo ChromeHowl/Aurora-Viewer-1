@@ -78,6 +78,16 @@ impl MoveInput {
     }
 }
 
+/// The avatar's pitch within the Legacy Viewer's limits (LLAgent::pitch,
+/// indra/newview/llagent.cpp): down to 179° from straight up, 89° below the
+/// horizon, and up to 5° from it, 85° above. Positive looks up.
+pub const PITCH_DOWN_LIMIT: f32 = 89.0 * std::f32::consts::PI / 180.0;
+pub const PITCH_UP_LIMIT: f32 = 85.0 * std::f32::consts::PI / 180.0;
+
+pub fn clamp_pitch(pitch: f32) -> f32 {
+    pitch.clamp(-PITCH_DOWN_LIMIT, PITCH_UP_LIMIT)
+}
+
 #[derive(Debug, Clone)]
 pub struct AgentState {
     /// Render-space position (main-region local).
@@ -233,6 +243,13 @@ impl AgentState {
     }
 
     /// LLAgent::isSitting: on an object or on the ground.
+    /// Flying in mouselook, not seated: the region moves the avatar along
+    /// the camera's pitch, which the body rotation carries (LLToolGun calls
+    /// gAgent.pitch); walking, the region keeps it on the ground.
+    pub fn follows_camera_pitch(&self, mouselook: bool) -> bool {
+        mouselook && self.flying && !self.is_sitting()
+    }
+
     pub fn is_sitting(&self) -> bool {
         self.seated || self.ground_sit
     }
@@ -604,8 +621,14 @@ impl AgentState {
             return;
         }
         let dt = dt.min(0.1);
-        let fwd = self.forward();
-        let left = Vec3::new(-fwd.y, fwd.x, 0.0);
+        let use_mouselook_pitch = self.follows_camera_pitch(mouselook);
+        let fwd = if use_mouselook_pitch {
+            (self.body_rotation() * Quat::from_rotation_y(-self.pitch)) * Vec3::X
+        } else {
+            self.forward()
+        };
+        // from the heading alone: a pitch about this axis leaves it whole
+        let left = Vec3::new(-self.yaw.sin(), self.yaw.cos(), 0.0);
         let mut dir = Vec3::ZERO;
         if input.forward {
             dir += fwd;
@@ -637,6 +660,8 @@ impl AgentState {
         // see in the demo (not its measured deceleration)
         let brake = if input.stop { 0.25 } else { 1.0 };
         let mut horiz = dir.normalize_or_zero() * speed * nudge * brake;
+        let pitched_flight = if use_mouselook_pitch { horiz.z } else { 0.0 };
+        horiz = horiz.with_z(0.0);
         let floor = ground.map(|g| g + STAND);
         let mut pos = self.server_pos;
         let mut vz = self.server_vel.z;
@@ -649,7 +674,7 @@ impl AgentState {
             } else {
                 0.0
             };
-            vz = climb * brake;
+            vz = climb * brake + pitched_flight;
         } else if grounded {
             vz = if input.up { 5.0 } else { 0.0 };
         } else {
@@ -681,11 +706,18 @@ impl AgentState {
         self.has_server = true;
     }
 
-    /// Advance smoothing and turning.
-    pub fn update(&mut self, input: &MoveInput, mouselook: bool, dt: f32, camera_distance: f32) {
-        self.yaw += input.joystick_yaw * dt.clamp(0.0, 0.2);
-        self.pitch = (self.pitch + input.joystick_pitch * dt.clamp(0.0, 0.2)).clamp(-1.55, 1.55);
-        if !mouselook {
+    /// Advance smoothing and turning. `rotate_grabbed` is
+    /// LLAgent::rotateGrabbed (indra/newview/llagent.cpp): a script took
+    /// yaw outright, so LLAgent::yaw does not turn the agent frame. The
+    /// yaw flags are still sent.
+    pub fn update(&mut self, input: &MoveInput, mouselook: bool, dt: f32, camera_distance: f32, rotate_grabbed: bool) {
+        // LLAgent::yaw turns the agent frame only while rotateGrabbed is
+        // false. Mouselook mouse turning uses rotate, not yaw, and stays.
+        if !rotate_grabbed {
+            self.yaw += input.joystick_yaw * dt.clamp(0.0, 0.2);
+        }
+        self.pitch = clamp_pitch(self.pitch + input.joystick_pitch * dt.clamp(0.0, 0.2));
+        if !mouselook && !rotate_grabbed {
             self.yaw += input.keyboard_yaw() * dt;
         }
         self.yaw = (self.yaw + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
@@ -838,9 +870,15 @@ impl AgentState {
         let at = cam.forward();
         let left = cam.view_up().cross(at).normalize_or(Vec3::Y);
         let cam_up = at.cross(left).normalize_or(Vec3::Z);
+        // The Legacy Viewer sends the pitched frame rotation in mouselook; the drawn body stays yaw-only.
+        let body_rotation = if cam.mouselook() && !self.is_sitting() {
+            Quat::from_rotation_z(self.yaw) * Quat::from_rotation_y(-self.pitch)
+        } else {
+            self.body_rotation()
+        };
         AgentControls {
             control_flags: self.control_flags(input, cam.mouselook()),
-            body_rotation: self.body_rotation(),
+            body_rotation,
             head_rotation: cam.head_rotation(self),
             camera_center: cam.position,
             camera_at: at,
@@ -903,6 +941,29 @@ mod tests {
         keys.vr_lateral_keys(true);
         assert!(!keys.turn_left && keys.strafe_left && keys.up);
         assert_eq!(keys.keyboard_yaw(), 0.0);
+    }
+
+    /// A script that took yaw outright leaves the heading where it is.
+    /// The yaw flag is still set (LLAgent::moveYaw keeps sending it).
+    #[test]
+    fn a_grabbed_turn_leaves_the_heading_and_still_sends_the_flag() {
+        let input = MoveInput {
+            turn_left: true,
+            turn_held: 1.0,
+            joystick_yaw: 0.4,
+            ..MoveInput::default()
+        };
+        let mut agent = AgentState::default();
+        let before = agent.yaw;
+        agent.update(&input, false, 0.1, 5.0, true);
+        assert_eq!(agent.yaw, before, "rotateGrabbed: the agent frame stays");
+        assert_ne!(
+            agent.control_flags(&input, false) & control::YAW_POS,
+            0,
+            "the script still sees the key"
+        );
+        agent.update(&input, false, 0.1, 5.0, false);
+        assert_ne!(agent.yaw, before, "not grabbed: left still turns");
     }
 
     use std::time::Duration;
@@ -1027,7 +1088,7 @@ mod tests {
             ..Default::default()
         };
         agent.predict_at(at(now, 1.0), 1.0, 0.0);
-        agent.update(&input, false, 0.1, 5.0);
+        agent.update(&input, false, 0.1, 5.0, false);
         near(agent.position, Vec3::ZERO);
         near(agent.velocity, Vec3::ZERO);
         let flags = agent.control_flags(&input, false);
@@ -1035,6 +1096,81 @@ mod tests {
         assert_ne!(flags & control::LEFT_POS, 0);
         assert_ne!(flags & control::UP_POS, 0);
         assert_ne!(flags & control::FLY, 0);
+    }
+
+    #[test]
+    fn local_mouselook_flight_follows_pitch_while_walking_stays_level() {
+        let input = MoveInput {
+            forward: true,
+            ..Default::default()
+        };
+        // high above the ground, so that a dive is not held at the floor
+        for (pitch, rises) in [(0.55, true), (-0.55, false)] {
+            let mut flyer = AgentState {
+                flying: true,
+                pitch,
+                server_pos: Vec3::Z * 10.0,
+                ..Default::default()
+            };
+            flyer.simulate_locally(&input, true, Some(0.0), 0.1, false);
+            assert_eq!(flyer.server_pos.z > 10.0, rises, "pitch {pitch}");
+            assert!((flyer.server_pos.z - 10.0).abs() > 0.1, "pitch {pitch} moves height");
+        }
+
+        let mut walker = AgentState {
+            pitch: 0.55,
+            server_pos: Vec3::Z * 0.84,
+            ..Default::default()
+        };
+        walker.simulate_locally(&input, true, Some(0.0), 0.1, false);
+        assert_eq!(walker.server_pos.z, 0.84, "walking stays level in mouselook");
+    }
+
+    #[test]
+    fn pitch_stops_where_the_legacy_viewer_stops() {
+        assert!((clamp_pitch(-2.0).to_degrees() + 89.0).abs() < 1e-3, "89° down");
+        assert!((clamp_pitch(2.0).to_degrees() - 85.0).abs() < 1e-3, "85° up");
+        assert_eq!(clamp_pitch(-0.2), -0.2);
+    }
+
+    #[test]
+    fn pitched_flight_strafes_at_full_weight() {
+        // W + A at 70°: the region turns a unit left axis by the body
+        // rotation, so the sideways share is 1/√2 of the speed, not cos(70°)
+        let input = MoveInput {
+            forward: true,
+            strafe_left: true,
+            ..Default::default()
+        };
+        let mut flyer = AgentState {
+            flying: true,
+            pitch: 70f32.to_radians(),
+            server_pos: Vec3::Z * 50.0,
+            ..Default::default()
+        };
+        flyer.simulate_locally(&input, true, Some(0.0), 0.1, false);
+        let sideways = flyer.server_pos.y / (10.0 * 0.1);
+        assert!(
+            (sideways - std::f32::consts::FRAC_1_SQRT_2).abs() < 0.02,
+            "sideways share {sideways}"
+        );
+    }
+
+    #[test]
+    fn only_flight_in_mouselook_follows_the_camera_pitch() {
+        let flyer = AgentState {
+            flying: true,
+            ..Default::default()
+        };
+        assert!(flyer.follows_camera_pitch(true));
+        assert!(!flyer.follows_camera_pitch(false), "third person");
+        assert!(!AgentState::default().follows_camera_pitch(true), "walking");
+        let seated = AgentState {
+            flying: true,
+            seated: true,
+            ..Default::default()
+        };
+        assert!(!seated.follows_camera_pitch(true), "seated");
     }
 
     #[test]
@@ -1086,12 +1222,12 @@ mod tests {
         agent.predict_at(at(now, 0.5), 1.0, 0.0);
         near(agent.predicted_position(), Vec3::X);
         near(agent.velocity, Vec3::ZERO);
-        agent.update(&MoveInput::default(), false, 0.06, 5.0);
+        agent.update(&MoveInput::default(), false, 0.06, 5.0, false);
         near(agent.position, Vec3::X * 0.5);
-        agent.update(&MoveInput::default(), false, 0.06, 5.0);
+        agent.update(&MoveInput::default(), false, 0.06, 5.0, false);
         near(agent.position, Vec3::X * 0.75);
         for _ in 0..10 {
-            agent.update(&MoveInput::default(), false, 0.06, 5.0);
+            agent.update(&MoveInput::default(), false, 0.06, 5.0, false);
         }
         near(agent.position, Vec3::X);
     }
@@ -1127,7 +1263,7 @@ mod tests {
         let (mut agent, now) = moving(Vec3::X, Vec3::Z);
         let destination = Vec3::new(10.0, 10.0, 1000.0);
         agent.on_server_update_at(destination, Vec3::ZERO, Vec3::ZERO, false, true, now);
-        agent.update(&MoveInput::default(), false, 0.06, 5.0);
+        agent.update(&MoveInput::default(), false, 0.06, 5.0, false);
         near(agent.position, destination);
         agent.seated = true;
         agent.position = destination + Vec3::X;
@@ -1181,7 +1317,7 @@ mod tests {
             ..MoveInput::default()
         };
         agent.simulate_locally(&forward, false, Some(0.0), 0.1, true);
-        agent.update(&forward, false, 0.1, 5.0);
+        agent.update(&forward, false, 0.1, 5.0, false);
         near(agent.position, carried);
         agent.on_server_update_at(carried + Vec3::X, Vec3::ZERO, Vec3::ZERO, false, true, at(now, 1.0));
         near(agent.position, carried + Vec3::X);
@@ -1210,7 +1346,7 @@ mod tests {
         agent.set_predicting(true);
         for n in 1..=10 {
             agent.step_prediction(walk(), 0.2, 0.01, at(now, n as f32 * 0.01));
-            agent.update(&MoveInput::default(), false, 0.01, 5.0);
+            agent.update(&MoveInput::default(), false, 0.01, 5.0, false);
         }
         near(agent.predicted_position(), Vec3::ZERO);
         let ahead = agent.position.x;
@@ -1218,10 +1354,10 @@ mod tests {
         assert!(agent.drawn_velocity().x > 1.0, "{:?}", agent.drawn_velocity());
         // turned off: back to the simulator's position, smoothly
         agent.set_predicting(false);
-        agent.update(&MoveInput::default(), false, 0.06, 5.0);
+        agent.update(&MoveInput::default(), false, 0.06, 5.0, false);
         assert!(agent.position.x > 0.0 && agent.position.x < ahead, "{:?}", agent.position);
         for _ in 0..20 {
-            agent.update(&MoveInput::default(), false, 0.06, 5.0);
+            agent.update(&MoveInput::default(), false, 0.06, 5.0, false);
         }
         near(agent.position, Vec3::ZERO);
     }
@@ -1256,6 +1392,7 @@ mod tests {
                 false,
                 0.25,
                 5.0,
+                false,
             );
             near(agent.position, seat);
             assert_eq!(agent.wanted_lead(), Vec3::ZERO);
@@ -1277,7 +1414,7 @@ mod tests {
         agent.set_predicting(true);
         agent.ground_sit = true;
         agent.step_prediction(walk(), 0.2, 0.1, at(now, 0.1));
-        agent.update(&MoveInput::default(), false, 0.1, 5.0);
+        agent.update(&MoveInput::default(), false, 0.1, 5.0, false);
         assert_eq!(agent.wanted_lead(), Vec3::ZERO);
         near(agent.position, Vec3::ZERO);
     }
@@ -1294,7 +1431,7 @@ mod tests {
         agent.on_server_update_at(stood, Vec3::ZERO, Vec3::ZERO, false, true, at(now, 1.0));
         near(agent.position, stood);
         agent.step_prediction(walk(), 0.2, 0.01, at(now, 1.01));
-        agent.update(&MoveInput::default(), false, 0.01, 5.0);
+        agent.update(&MoveInput::default(), false, 0.01, 5.0, false);
         // one frame of the key's motion from there, not a fade from the seat
         assert!(agent.position.distance(stood) < 0.05, "{:?}", agent.position);
         assert_eq!(agent.take_corrections(), Corrections::default());
@@ -1336,7 +1473,7 @@ mod tests {
             let flags = if keys(t) { control::AT_POS | control::FAST_AT } else { 0 };
             agent.step_prediction(Intent::from_flags(flags, 0.0, false), 0.2, dt, at(t));
             agent.set_lead(agent.wanted_lead());
-            agent.update(&MoveInput::default(), false, dt, 5.0);
+            agent.update(&MoveInput::default(), false, dt, 5.0, false);
             drawn.push((t, agent.position.x));
         }
         (drawn, server)
@@ -1434,7 +1571,7 @@ mod tests {
                 agent.predict_at(at(t), 1.0, 0.0);
                 agent.step_prediction(None, 0.2, dt, at(t));
                 agent.set_lead(agent.wanted_lead());
-                agent.update(&MoveInput::default(), false, dt, 5.0);
+                agent.update(&MoveInput::default(), false, dt, 5.0, false);
                 lag = lag.max(agent.position.z - agent.predicted_pos.z);
             }
             // (the glide trails a fall at 10 m/s by about 0.8 m, as
@@ -1486,7 +1623,7 @@ mod tests {
                 forward: t < 1.0,
                 ..Default::default()
             };
-            agent.update(&input, false, dt, 5.0);
+            agent.update(&input, false, dt, 5.0, false);
             assert_eq!(agent.drawn_velocity(), agent.velocity);
             if n % 6 == 0 {
                 drawn.push(agent.position.x);
@@ -1510,7 +1647,7 @@ mod tests {
             let (mut agent, now) = moving(Vec3::ZERO, Vec3::ZERO);
             agent.set_predicting(predicting);
             agent.on_server_update_at(Vec3::X * 2.0, Vec3::ZERO, Vec3::ZERO, false, true, at(now, 0.1));
-            agent.update(&MoveInput::default(), false, half_life, 5.0);
+            agent.update(&MoveInput::default(), false, half_life, 5.0, false);
             if predicting {
                 // (the drawn avatar glides after it)
                 near(agent.drawn_offsets().0, -Vec3::X);

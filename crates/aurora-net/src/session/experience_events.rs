@@ -4,16 +4,28 @@
 //! `PushExpEnvironment` messages of experience environment controllers.
 use super::*;
 
-/// The LLSD document of a generic message parameter (notation, XML or binary,
-/// as LLSDSerialize::deserialize reads it).
+/// The LLSD document of a generic message parameter.
+///
+/// `LLDispatcher::unpackMessage` strips one trailing NUL from the packed
+/// string before `LLSDSerialize::deserialize`. The simulator writes the
+/// C++ header (`<? llsd/notation ?>`), which is not the compact
+/// `<?llsd/notation?>` prefix.
 fn document(bytes: &[u8]) -> Option<aurora_llsd::Llsd> {
-    if bytes.len() > 1024 * 1024 {
+    if bytes.len() > 1024 * 1024 || bytes.is_empty() {
         return None;
     }
-    let bytes = bytes.strip_prefix(b"<?llsd/notation?>").unwrap_or(bytes);
-    aurora_llsd::from_notation(bytes)
-        .or_else(|_| aurora_llsd::from_xml(bytes))
-        .or_else(|_| aurora_llsd::from_binary(bytes).map(|(document, _)| document))
+    let stripped = match bytes.split_last() {
+        Some((0, rest)) if !rest.is_empty() => rest,
+        _ => bytes,
+    };
+    aurora_llsd::deserialize(stripped)
+        .or_else(|_| {
+            if stripped.len() == bytes.len() {
+                Err(aurora_llsd::LlsdError::Invalid("no trailing nul"))
+            } else {
+                aurora_llsd::deserialize(bytes)
+            }
+        })
         .ok()
 }
 
@@ -82,6 +94,10 @@ impl Session<'_> {
             "PushExpEnvironment" => {
                 if let Some(event) = environment(agent, self.agent_id(), invoice, parameters) {
                     emit(self.sh, event);
+                } else {
+                    // Keep controller payloads and parcel/object names out of
+                    // diagnostics; an invalid document must not fail silently.
+                    log::warn!("PushExpEnvironment ignored: invalid recipient, experience, action or serialized document");
                 }
             }
             _ => {}
@@ -162,6 +178,64 @@ mod tests {
         assert!(environment(agent, agent, Uuid::nil(), &[push]).is_none());
         assert!(environment(agent, agent, experience, &[b"{'action':'Explode'}"]).is_none());
         assert!(environment(agent, agent, experience, &[b"broken"]).is_none());
+    }
+
+    #[test]
+    fn experience_environment_push_accepts_standard_serialized_documents() {
+        let agent = Uuid::from_u128(1);
+        let experience = Uuid::from_u128(2);
+        let message = aurora_llsd::llsd_map! {
+            "action" => "PushPartialEnvironment",
+            "action_data" => aurora_llsd::llsd_map! {
+                "transition_time" => 0.5,
+                "settings" => aurora_llsd::llsd_map! {
+                    "sky" => aurora_llsd::llsd_map! { "gamma" => 2.0 },
+                },
+            },
+        };
+        let notation = aurora_llsd::to_notation(&message);
+        let binary = aurora_llsd::to_binary(&message);
+        let xml = aurora_llsd::to_xml(&message);
+        for bytes in [
+            format!("<? llsd/notation ?>\n{notation}\0").into_bytes(),
+            format!("  \n<? LLSD/Notation ?>\r\n{notation}").into_bytes(),
+            format!("<?llsd/notation?>\n{notation}").into_bytes(),
+            notation.into_bytes(),
+            xml.clone(),
+            [b"<? LLSD/XML ?>\n".as_slice(), &xml].concat(),
+            binary.clone(),
+            [b"<?llsd/binary?>\n".as_slice(), &binary].concat(),
+        ] {
+            let decoded = environment(agent, agent, experience, &[&bytes]);
+            assert!(
+                matches!(decoded, Some(NetEvent::ExperienceEnvironment { experience: id, message: ref value }) if id == experience && value == &message),
+                "serializer document was dropped"
+            );
+        }
+    }
+
+    #[test]
+    fn a_full_environment_push_keeps_the_serialize_header_and_the_packed_nul() {
+        let agent = Uuid::from_u128(1);
+        let experience = Uuid::parse_str("340191e2-a7e7-11ed-9ef6-0242ac110003").unwrap();
+        let asset = Uuid::parse_str("03189ca5-3838-0912-86ad-dfb434e8ed69").unwrap();
+        let mut push = b"<? llsd/notation ?>\n{'action':'PushFullEnvironment','action_data':{'asset_id':u03189ca5-3838-0912-86ad-dfb434e8ed69,'transition_time':r3},'Permission':i17,'OwnerID':u607763b1-9b52-4649-bf2f-57d2dc2f219c}".to_vec();
+        push.push(0);
+        match environment(
+            agent,
+            agent,
+            experience,
+            &[&push, b"Continental EEP control - LOBBY\0", b"The Continental Club\0"],
+        ) {
+            Some(NetEvent::ExperienceEnvironment { experience: id, message }) => {
+                assert_eq!(id, experience);
+                assert_eq!(message["action"].as_str(), "PushFullEnvironment");
+                assert_eq!(message["action_data"]["asset_id"].as_uuid(), asset);
+                assert_eq!(message["action_data"]["transition_time"].as_f32(), 3.0);
+                assert_eq!(message["Permission"].as_i32(), 17);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
     }
 
     #[test]

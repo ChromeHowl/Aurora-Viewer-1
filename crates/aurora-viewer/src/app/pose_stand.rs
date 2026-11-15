@@ -1,76 +1,121 @@
-//! The pose stand (`ui/pose_stand.rs`, `ik_edit::poser::stand`): while its
-//! window is open, our avatar holds the chosen pose through the poser's
-//! local layer (`Scene::poser`), seen by this viewer only.
-//!
-//! The Legacy Viewer (FSFloaterPoseStand::onOpen / onClose,
-//! indra/newview/fsfloaterposestand.cpp, originally LGPL 2.1) pauses the AO,
-//! stops our animations and plays the pose on the simulator, and may sit us
-//! down to lock the avatar in place (FSPoseStandLock). Being local, this one
-//! touches none of that: the pose replaces what is drawn, nothing is sent,
-//! and closing the window gives the animations back at once.
-//!
-//! The poser and IK Edit come first: while their window is open, or while
-//! the poser holds our avatar, the stand waits.
-use super::App;
-use std::sync::Arc;
-
-/// Whether the stand shows its pose on our avatar this frame.
-pub fn holds(open: bool, editor_open: bool, posed_by_poser: bool) -> bool {
-    open && !editor_open && !posed_by_poser
-}
+//! The toolbar's pose stand: its window opened and closed in any way (the
+//! button, the cross, Ctrl+W) runs FSFloaterPoseStand's onOpen / onClose
+//! (rules in `pose_stand.rs`), and its effects go to the simulator here.
+use super::*;
+use crate::pose_stand::{Effect, Facts};
 
 impl App {
+    /// Each frame, with the other windows.
     pub(super) fn pose_stand_window(&mut self, ctx: &egui::Context, p: &crate::theme::Palette) {
-        if !self.panels.pose_stand {
-            return;
+        if self.demo {
+            self.demo_pose_stand();
         }
-        let held = self.pose_stand_held;
-        let mut pose = self.settings.avatar_motion.pose_stand;
-        if self.pose_stand_ui.show(ctx, p, &mut pose, held, &mut self.panels.pose_stand) {
-            self.settings.avatar_motion.pose_stand = pose;
-            self.settings.save();
+        self.sync_pose_stand();
+        let action = ui::pose_stand::show(
+            ctx,
+            p,
+            &mut self.panels.pose_stand,
+            self.pose_stand.current(),
+            self.settings.pose_stand.lock,
+        );
+        match action {
+            Some(ui::pose_stand::Action::Pose(id)) => self.choose_pose(id),
+            Some(ui::pose_stand::Action::Lock(on)) => {
+                self.settings.pose_stand.lock = on;
+                let effects = self.pose_stand.lock_changed(on);
+                self.apply_pose_stand(effects);
+            }
+            None => {}
+        }
+        self.sync_pose_stand();
+        // stood up from outside (the appearance editor, a script, a teleport):
+        // the checkbox follows the avatar, as the saved setting does
+        if self.pose_stand.lock_lost(self.world.agent.is_sitting()) {
+            log::info!("pose stand: the ground lock was lost, lock turned off");
+            self.settings.pose_stand.lock = false;
+        }
+        let effects = self
+            .pose_stand
+            .late_release(self.world.agent.is_sitting(), std::time::Instant::now());
+        self.apply_pose_stand(effects);
+    }
+
+    /// onCommitCombo: the pose kept for the next opening, then played.
+    fn choose_pose(&mut self, id: uuid::Uuid) {
+        self.settings.pose_stand.last_pose = id.to_string();
+        let effects = self.pose_stand.select(id);
+        self.apply_pose_stand(effects);
+    }
+
+    /// The window opened or closed since the stand last looked.
+    fn sync_pose_stand(&mut self) {
+        let open = self.panels.pose_stand && self.in_world();
+        if open && !self.pose_stand.open {
+            let facts = Facts {
+                ao_on: self.ao_enabled(),
+                sitting: self.world.agent.is_sitting(),
+                rlv_sit: self.world.rlva.has("sit"),
+            };
+            let effects = self.pose_stand.open(facts, &self.settings.pose_stand);
+            log::info!("pose stand: opened");
+            self.apply_pose_stand(effects);
+        } else if !open && self.pose_stand.open {
+            self.close_pose_stand();
+            self.panels.pose_stand = false;
         }
     }
 
-    /// After the poser's layers: add ours for our avatar. The shaped
-    /// skeleton is captured once when the stand starts holding, and again
-    /// when our avatar or its rig changed.
-    pub(super) fn apply_pose_stand(&mut self) {
-        let me = self.world.agent_id;
-        let hold = holds(self.panels.pose_stand, self.ik_editor.open, self.scene.poser.contains_key(&me));
-        self.pose_stand_held = hold;
-        if !hold {
-            self.pose_stand_capture = None;
+    /// onClose, also when the viewer quits with the stand open (its
+    /// app_quitting closing).
+    pub(super) fn close_pose_stand(&mut self) {
+        if !self.pose_stand.open {
             return;
         }
-        let rig = &self.world.avatar_lib.rig;
-        let stale = self
-            .pose_stand_capture
-            .as_ref()
-            .is_none_or(|(id, pose)| *id != me || !pose.valid(rig));
-        if stale {
-            self.pose_stand_capture = crate::ik_edit::Frame::new(&self.world)
-                .and_then(|frame| crate::ik_edit::poser::SubjectPose::capture(rig, &frame))
-                .map(|pose| (me, pose));
-        }
-        if let Some((_, captured)) = &self.pose_stand_capture {
-            let pose = self.settings.avatar_motion.pose_stand.pose(rig, captured);
-            if pose.valid(rig) {
-                self.scene.poser.insert(me, Arc::new(pose));
+        let effects = self.pose_stand.close(self.world.agent.is_sitting(), self.ao_enabled());
+        log::info!("pose stand: closed");
+        self.apply_pose_stand(effects);
+    }
+
+    /// UseAO for our account.
+    fn ao_enabled(&self) -> bool {
+        self.settings.ao.accounts.get(&self.world.agent_id).is_some_and(|a| a.enabled)
+    }
+
+    fn apply_pose_stand(&mut self, effects: Vec<Effect>) {
+        for effect in effects {
+            match effect {
+                Effect::PauseAo | Effect::ResumeAo => {
+                    if let Some(account) = self.settings.ao.accounts.get_mut(&self.world.agent_id) {
+                        account.enabled = effect == Effect::ResumeAo;
+                    }
+                }
+                // RLVa's canGroundSit / canStand are checked by the send
+                Effect::SitOnGround => self.send(NetCommand::OneShotControl(control::SIT_ON_GROUND)),
+                Effect::StandUp => self.send(NetCommand::OneShotControl(control::STAND_UP)),
+                Effect::StopAnimations => self.stop_animations(false),
+                Effect::Start(anim) | Effect::Stop(anim) => {
+                    let start = matches!(effect, Effect::Start(_));
+                    log::info!("pose stand: {} {anim}", if start { "start" } else { "stop" });
+                    self.send(NetCommand::AgentAnimation { anim, start });
+                }
             }
         }
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::holds;
-
-    #[test]
-    fn the_stand_holds_only_when_nothing_else_poses_us() {
-        assert!(holds(true, false, false));
-        assert!(!holds(false, false, false));
-        assert!(!holds(true, true, false), "the poser's or IK Edit's window is open");
-        assert!(!holds(true, false, true), "the poser holds our avatar");
+    /// AURORA_DEMO_POSE_STAND (`demo_pose_stand.rs`).
+    fn demo_pose_stand(&mut self) {
+        use crate::demo::pose_stand::{self as demo, Step};
+        let Some(mode) = demo::mode() else { return };
+        match demo::step(mode, self.frame_count) {
+            Some(Step::Open) => ui::widgets::open_floater(&self.egui_ctx, ui::pose_stand::WINDOW, &mut self.panels.pose_stand),
+            Some(Step::Pose(id)) => {
+                if self.scene.anims.peek(&id).is_none() {
+                    log::info!("pose stand demo: {id} has no stand-in here: the avatar keeps its stand");
+                }
+                self.choose_pose(id);
+            }
+            Some(Step::Close) => ui::widgets::close_floater(&self.egui_ctx, ui::pose_stand::WINDOW),
+            None => {}
+        }
     }
 }

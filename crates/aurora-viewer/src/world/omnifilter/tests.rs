@@ -1,402 +1,308 @@
 use super::*;
+use crate::omnifilter::{DEFAULT_SET, Engine, MatchType, Rule, RuleSet};
+use crate::scene::avatar::AvatarLibrary;
+use aurora_net::NetEvent;
+use std::sync::Arc;
 
-fn pattern(text: &str, mode: MatchMode) -> Pattern {
-    Pattern {
-        text: text.into(),
-        mode,
-        case_sensitive: false,
-    }
+const SENDER: ([u8; 4], u16) = ([127, 0, 0, 1], 13000);
+
+fn id(n: u128) -> Uuid {
+    Uuid::from_u128(n)
 }
 
-fn rule(name: &str, action: Action) -> Rule {
-    Rule {
-        name: name.into(),
-        enabled: true,
-        action,
-        ..Rule::default()
-    }
-}
-
-fn filter(rules: Vec<Rule>) -> Omnifilter {
-    let mut f = Omnifilter::default();
-    f.install(RuleSet {
-        version: VERSION,
-        on: true,
+fn world(rules: Vec<Rule>) -> World {
+    let mut w = World::new(Arc::new(AvatarLibrary::load()));
+    w.agent_id = id(9);
+    w.mutes.reset(w.agent_id);
+    w.omnifilter = Engine::with_sets(vec![RuleSet {
+        name: DEFAULT_SET.into(),
         rules,
-        ..RuleSet::default()
-    });
-    f
+    }]);
+    w.omnifilter.enabled = true;
+    w
 }
 
-fn nearby<'a>(sender: &'a str, text: &'a str) -> Haystack<'a> {
-    Haystack {
-        source: Source::NearbyChat,
-        channel: Some(Channel::Say),
-        sender,
-        text,
+fn rule(f: impl FnOnce(&mut Rule)) -> Rule {
+    let mut r = Rule::new("rule");
+    r.enabled = true;
+    f(&mut r);
+    r
+}
+
+fn chat(from: &str, source: ChatSourceType, text: &str) -> NetEvent {
+    NetEvent::Chat(ChatMessage {
+        from_name: from.into(),
+        source_id: id(1),
+        owner_id: id(1),
+        source_type: source,
+        chat_type: ChatType::Normal,
+        region: None,
+        position: glam::Vec3::new(128.0, 128.0, 20.0),
+        message: text.into(),
+    })
+}
+
+fn im(dialog: u8, from: &str, text: &str) -> NetEvent {
+    NetEvent::InstantMessage(InstantMessage {
+        from_agent_id: id(2),
+        from_name: from.into(),
+        to_agent_id: id(9),
+        dialog,
+        session_id: id(2),
+        message: text.into(),
+        offline: false,
+        from_group: false,
+        binary_bucket: Vec::new(),
+        timestamp: 0,
+    })
+}
+
+fn dialog(buttons: &[&str]) -> NetEvent {
+    NetEvent::ScriptDialog {
+        sender: SENDER.into(),
+        object_id: id(5),
+        object_name: "Greeter".into(),
+        owner_name: "Jane Resident".into(),
+        owner_id: id(6),
+        message: "Welcome!".into(),
+        channel: -77,
+        buttons: buttons.iter().map(|b| (*b).to_owned()).collect(),
     }
 }
 
-fn result(f: &Omnifilter, h: Haystack) -> Option<Outcome> {
-    f.check(&h).map(|(_, o)| o)
+fn texts(w: &World) -> Vec<String> {
+    w.chat.iter().map(|l| l.text.clone()).collect()
+}
+
+fn sent(w: &mut World) -> Vec<NetCommand> {
+    w.groups.take_commands()
 }
 
 #[test]
-fn off_or_disabled_rules_match_nothing() {
-    let mut f = filter(vec![rule("all", Action::Hide)]);
-    assert_eq!(result(&f, nearby("Jane", "hi")), Some(Outcome::Hide), "empty fields match anything");
-    let mut set = f.rules().clone();
-    set.on = false;
-    f.install(set.clone());
-    assert_eq!(result(&f, nearby("Jane", "hi")), None, "the filter is off");
-    set.on = true;
-    set.rules[0].enabled = false;
-    f.install(set);
-    assert_eq!(result(&f, nearby("Jane", "hi")), None, "the rule is disabled");
-    assert!(!RuleSet::default().on, "off by default");
-    assert!(!Rule::default().enabled, "a new rule starts disabled");
-}
-
-#[test]
-fn the_sender_matches_as_a_whole_the_text_anywhere() {
-    let mut r = rule("spam", Action::Hide);
-    r.sender = pattern("jane", MatchMode::Substring);
-    r.content = pattern("BUY", MatchMode::Substring);
-    let f = filter(vec![r]);
-    assert!(
-        result(&f, nearby("Jane Doe", "please buy now")).is_some(),
-        "case-insensitive substring"
-    );
-    assert!(result(&f, nearby("John Doe", "please buy now")).is_none());
-    let mut r = rule("exact", Action::Hide);
-    r.sender = pattern("Jane Doe", MatchMode::Exact);
-    let f = filter(vec![r]);
-    assert!(result(&f, nearby("jane doe", "x")).is_some());
-    assert!(result(&f, nearby("Jane Doe2", "x")).is_none());
-    let mut r = rule("regex", Action::Hide);
-    r.sender = pattern("jane.*", MatchMode::Regex);
-    r.content = pattern(r"\bsale\b", MatchMode::Regex);
-    let f = filter(vec![r]);
-    assert!(result(&f, nearby("Jane Doe", "big SALE today")).is_some());
-    assert!(
-        result(&f, nearby("Mary Jane", "big sale today")).is_none(),
-        "the name regex covers the whole name"
-    );
-    assert!(result(&f, nearby("Jane", "wholesale")).is_none());
-}
-
-#[test]
-fn case_sensitive_fields() {
-    let mut r = rule("cs", Action::Hide);
-    r.content = Pattern {
-        text: "Hello".into(),
-        mode: MatchMode::Substring,
-        case_sensitive: true,
-    };
-    let f = filter(vec![r]);
-    assert!(result(&f, nearby("a", "Hello there")).is_some());
-    assert!(result(&f, nearby("a", "hello there")).is_none());
-}
-
-#[test]
-fn the_first_matching_rule_decides() {
-    let mut keep = rule("friend", Action::Highlight);
-    keep.sender = pattern("Jane Doe", MatchMode::Exact);
-    let hide = rule("everyone", Action::Hide);
-    let f = filter(vec![keep, hide]);
-    assert!(matches!(result(&f, nearby("Jane Doe", "hi")), Some(Outcome::Highlight(_))));
-    assert_eq!(result(&f, nearby("John", "hi")), Some(Outcome::Hide));
-}
-
-#[test]
-fn sources_and_channels_narrow_a_rule() {
-    let mut r = rule("objects", Action::Hide);
-    r.sources = vec![Source::ObjectChat];
-    r.channels = vec![Channel::OwnerSay];
-    let f = filter(vec![r]);
-    let object = |channel| Haystack {
-        source: Source::ObjectChat,
-        channel,
-        sender: "HUD",
-        text: "ping",
-    };
-    assert!(result(&f, object(Some(Channel::OwnerSay))).is_some());
-    assert!(result(&f, object(Some(Channel::Say))).is_none());
-    assert!(result(&f, nearby("HUD", "ping")).is_none(), "another source");
-    let im = Haystack {
-        source: Source::ObjectChat,
-        channel: None,
-        sender: "HUD",
-        text: "ping",
-    };
-    assert!(
-        result(&f, im).is_none(),
-        "a message without channel never matches a rule naming one"
-    );
-    assert_eq!(Channel::of(ChatType::Other(9)), Some(Channel::Direct));
-    assert_eq!(Channel::of(ChatType::Debug), Some(Channel::ScriptError));
-    assert_eq!(Channel::of(ChatType::StartTyping), None);
-}
-
-#[test]
-fn actions_hide_replace_highlight_and_set_aside() {
-    let mut replace = rule("rewrite", Action::Replace);
-    replace.content = pattern("darn", MatchMode::Substring);
-    replace.replacement = "[filtered]".into();
-    let mut empty = rule("empty replacement", Action::Replace);
-    empty.content = pattern("heck", MatchMode::Substring);
-    let mut aside = rule("aside", Action::SetAside);
-    aside.content = pattern("lag", MatchMode::Substring);
-    let mut bright = rule("bright", Action::Highlight);
-    bright.content = pattern("party", MatchMode::Substring);
-    bright.color = [1, 2, 3, 255];
-    let mut f = filter(vec![replace, empty, aside, bright]);
-
-    let mut text = "darn it".to_owned();
-    assert_eq!(f.apply(nearby("A", "darn it"), &mut text), Some(None));
-    assert_ne!(text, "darn it");
-    assert!(text.contains("[filtered]"), "{text}");
-
-    let mut text = "oh heck".to_owned();
-    assert_eq!(f.apply(nearby("A", "oh heck"), &mut text), None, "an empty replacement hides");
-
-    let mut text = "so much lag".to_owned();
-    assert_eq!(f.apply(nearby("Bob", "so much lag"), &mut text), None);
-    let last = f.log.back().expect("set aside");
+fn nearby_chat_is_hidden_replaced_or_passes() {
+    let mut w = world(vec![
+        rule(|r| {
+            r.sender_name = "Shouter".into();
+            r.set_source(Source::NearbyChat, true);
+        }),
+        rule(|r| {
+            r.content = "sale".into();
+            r.chat_replace = "ad".into();
+        }),
+    ]);
+    w.apply(chat("Shouter", ChatSourceType::Agent, "LOUD"));
+    w.apply(chat("Shop", ChatSourceType::Object, "Big SALE today"));
+    w.apply(chat("Friend", ChatSourceType::Agent, "hello"));
+    // the shouter's rule is for residents' chat only
+    w.apply(chat("Shouter", ChatSourceType::Object, "an object named so"));
     assert_eq!(
-        (last.from.as_str(), last.text.as_str(), last.rule.as_str()),
-        ("Bob", "so much lag", "aside")
-    );
-
-    let mut text = "party time".to_owned();
-    assert_eq!(f.apply(nearby("A", "party time"), &mut text), Some(Some([1, 2, 3, 255])));
-    assert_eq!(text, "party time");
-
-    let mut text = "nothing".to_owned();
-    assert_eq!(f.apply(nearby("A", "nothing"), &mut text), Some(None));
-    // hidden and replaced messages leave only the rule's name
-    assert!(
-        f.log
-            .iter()
-            .filter(|e| e.rule != "aside")
-            .all(|e| e.text.is_empty() && e.from.is_empty())
-    );
-}
-
-#[test]
-fn the_log_is_bounded() {
-    let mut f = filter(vec![rule("all", Action::Hide)]);
-    for _ in 0..MAX_LOG + 20 {
-        let mut text = "x".to_owned();
-        f.apply(nearby("A", "x"), &mut text);
-    }
-    assert_eq!(f.log.len(), MAX_LOG);
-    f.clear_log();
-    assert!(f.log.is_empty());
-}
-
-#[test]
-fn broken_or_oversized_patterns_disable_their_rule() {
-    let mut bad = rule("bad", Action::Hide);
-    bad.content = pattern("(unclosed", MatchMode::Regex);
-    let mut huge = rule("huge", Action::Hide);
-    // compiles to far more than the size limit
-    huge.content = pattern(r"\w{1000}\w{1000}\w{1000}", MatchMode::Regex);
-    let mut long = rule("long", Action::Hide);
-    long.content = pattern(&"a".repeat(MAX_PATTERN + 1), MatchMode::Substring);
-    let fine = rule("fine", Action::Highlight);
-    let f = filter(vec![bad, huge, long, fine]);
-    assert_eq!(f.broken(), &[0, 1, 2]);
-    assert!(matches!(result(&f, nearby("A", "(unclosed")), Some(Outcome::Highlight(_))));
-}
-
-#[test]
-fn backtracking_patterns_stay_linear() {
-    let mut r = rule("evil", Action::Hide);
-    r.content = pattern("(a+)+$", MatchMode::Regex);
-    let f = filter(vec![r]);
-    let text = format!("{}!", "a".repeat(5000));
-    let started = std::time::Instant::now();
-    assert!(result(&f, nearby("A", &text)).is_none());
-    assert!(started.elapsed() < std::time::Duration::from_secs(1));
-}
-
-#[test]
-fn a_file_loads_tolerantly() {
-    let json = br#"{
-        "on": true,
-        "future_field": 1,
-        "rules": [
-            {"name": "ok", "enabled": true, "content": {"text": "hi"}},
-            {"name": "unknown source", "sources": ["Teleports"]},
-            "not a rule",
-            {"name": "partial"}
+        texts(&w),
+        [
+            aurora_i18n::tr!("omnifilter-replacement", replacement = "ad".to_owned()).to_string(),
+            "hello".to_owned(),
+            "an object named so".to_owned()
         ]
-    }"#;
-    let (set, skipped) = RuleSet::parse(json);
-    assert!(set.on);
-    assert_eq!(skipped, 2);
-    let names: Vec<&str> = set.rules.iter().map(|r| r.name.as_str()).collect();
-    assert_eq!(names, ["ok", "partial"]);
-    assert_eq!(
-        set.rules[1],
-        Rule {
-            name: "partial".into(),
-            ..Rule::default()
-        }
     );
-    // an unreadable file holds the Default set alone
-    let mut empty = RuleSet::default();
-    empty.normalize();
-    assert_eq!(RuleSet::parse(b"garbage"), (empty, 0));
-    // what is written reads back the same
-    let (again, skipped) = RuleSet::parse(&set.to_bytes());
-    assert_eq!((again, skipped), (set, 0));
+    let logged: Vec<_> = w.omnifilter.log.iter().map(|(_, n)| n.clone()).collect();
+    assert_eq!(logged.len(), 2);
 }
 
 #[test]
-fn rules_over_the_limit_are_cut() {
-    let rules: Vec<serde_json::Value> = (0..MAX_RULES + 5).map(|i| serde_json::json!({"name": i.to_string()})).collect();
-    let bytes = serde_json::to_vec(&serde_json::json!({"rules": rules})).expect("json");
-    assert_eq!(RuleSet::parse(&bytes).0.rules.len(), MAX_RULES);
+fn the_filter_off_lets_everything_through() {
+    let mut w = world(vec![rule(|_| {})]);
+    w.omnifilter.enabled = false;
+    w.apply(chat("Anyone", ChatSourceType::Agent, "hi"));
+    w.apply(dialog(&["Yes"]));
+    assert_eq!(texts(&w), ["hi"]);
+    assert_eq!(w.notifications.list.len(), 1);
 }
 
 #[test]
-fn highlights_are_remembered_by_line() {
-    let time = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_234_567);
-    let source = Uuid::from_u128(0x0f11_7e57);
-    assert_eq!(highlight(time, source), None);
-    mark(time, source, [9, 9, 9, 255]);
-    assert_eq!(highlight(time, source), Some([9, 9, 9, 255]));
-    // another line a microsecond later (Windows keeps a SystemTime in steps
-    // of 100 ns: a nanosecond later would be the same time there)
-    assert_eq!(highlight(time + std::time::Duration::from_micros(1), source), None);
+fn an_instant_message_is_dropped_before_its_conversation_opens() {
+    let mut w = world(vec![rule(|r| {
+        r.content = r"free\s+L\$".into();
+        r.content_match = MatchType::Regex;
+        r.set_source(Source::InstantMessage, true);
+    })]);
+    w.apply(im(0, "Spammer", "free  L$ here"));
+    assert!(!w.social.has_session(&id(2)));
+    w.apply(im(0, "Spammer", "a plain hello"));
+    assert!(w.social.has_session(&id(2)));
 }
 
 #[test]
-fn notices_invitations_offers_and_dialogs_have_their_kind() {
-    assert_eq!(Source::of_im(0, true), Some(Source::Im));
-    assert_eq!(Source::of_im(0, false), None, "the system's lines");
-    assert_eq!(Source::of_im(32, true), Some(Source::GroupNotice));
-    assert_eq!(Source::of_im(3, true), Some(Source::GroupInvite));
-    assert_eq!(Source::of_im(4, true), Some(Source::InventoryOffer));
-    assert_eq!(Source::of_im(9, false), Some(Source::InventoryOffer), "an object's offer");
-    assert_eq!(Source::of_im(38, true), Some(Source::FriendshipOffer));
-    assert_eq!(Source::of_im(22, true), Some(Source::Lure));
-    assert_eq!(Source::of_im(26, true), Some(Source::TeleportRequest));
-    assert_eq!(Source::of_im(41, true), None, "typing");
+fn an_object_im_is_replaced() {
+    let mut w = world(vec![rule(|r| {
+        r.set_source(Source::ObjectInstantMessage, true);
+        r.chat_replace = "quiet".into();
+    })]);
+    w.apply(im(19, "Box", "buy me"));
+    assert_eq!(
+        texts(&w),
+        [aurora_i18n::tr!("omnifilter-replacement", replacement = "quiet".to_owned()).to_string()]
+    );
 }
 
 #[test]
-fn a_dialog_is_matched_on_its_buttons_too() {
-    let mut world = crate::world::World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
-    let mut r = rule("vendor", Action::Hide);
-    r.sources = vec![Source::ScriptDialog];
-    r.content = pattern("button_name=Buy", MatchMode::Substring);
-    world.omnifilter = filter(vec![r]);
-    let mut message = "Choose".to_owned();
-    assert!(world.omnifilter_dialog("Vendor", &mut message, &["Buy".into(), "Cancel".into()]));
-    assert!(!world.omnifilter_dialog("Vendor", &mut message, &["Cancel".into()]));
-    assert_eq!(message, "Choose", "left as it was");
-    // a group notice: hidden by a rule on its kind
-    let mut n = rule("notices", Action::Hide);
-    n.sources = vec![Source::GroupNotice];
-    let f = filter(vec![n]);
-    let h = Haystack {
-        source: Source::GroupNotice,
-        channel: None,
-        sender: "Jane Doe",
-        text: "Party|Tonight",
-    };
-    assert_eq!(result(&f, h), Some(Outcome::Hide));
-    assert_eq!(result(&f, nearby("Jane", "Party")), None);
+fn a_group_chat_invitation_is_dropped() {
+    let mut w = world(vec![rule(|r| r.set_source(Source::GroupChat, true))]);
+    w.apply(NetEvent::SessionInvite(aurora_net::SessionInvite {
+        session: id(40),
+        from: id(2),
+        from_name: "Someone".into(),
+        message: "hi all".into(),
+        session_name: "Club".into(),
+        offline: false,
+        timestamp: 0,
+    }));
+    assert!(!w.groups.sessions.contains_key(&id(40)));
+    assert_eq!(w.omnifilter.log.len(), 1);
 }
 
 #[test]
-fn a_file_from_before_the_rule_sets_holds_the_default_set_alone() {
-    let (set, skipped) = RuleSet::parse(br#"{"version":1,"on":true,"rules":[{"name":"spam","enabled":true}]}"#);
-    assert_eq!(skipped, 0);
-    assert_eq!(set.set_names(), [DEFAULT_SET]);
-    assert_eq!((set.current, set.current_name()), (0, DEFAULT_SET));
-    assert_eq!(set.rules.len(), 1);
-    assert!(set.sets[0].rules.is_empty(), "the rules in use live in `rules` alone");
-    let (none, _) = RuleSet::parse(b"not json");
-    assert_eq!(none.set_names(), [DEFAULT_SET]);
+fn a_matched_dialog_is_not_shown_and_clicks_the_rules_button() {
+    let mut w = world(vec![rule(|r| {
+        r.sender_name = "Greeter".into();
+        r.content = "button_name=Yes".into();
+        r.set_source(Source::ScriptDialog, true);
+        r.button_reply = "Yes".into();
+    })]);
+    w.apply(dialog(&["No", "Yes"]));
+    assert!(w.notifications.list.is_empty());
+    let cmds = sent(&mut w);
+    assert!(
+        matches!(&cmds[..], [NetCommand::ScriptDialogReply { sender: Some(s), object_id, channel: -77, index: 1, label }]
+            if *s == std::net::SocketAddr::from(SENDER) && *object_id == id(5) && label == "Yes"),
+        "{cmds:?}"
+    );
+    // without that button the rule does not match (its content)
+    w.apply(dialog(&["Maybe"]));
+    assert_eq!(w.notifications.list.len(), 1);
 }
 
 #[test]
-fn rule_sets_are_added_switched_and_removed_keeping_their_rules() {
-    let mut set = RuleSet {
-        on: true,
-        rules: vec![rule("a", Action::Hide)],
-        ..RuleSet::default()
-    };
-    set.normalize();
-    assert_eq!(set.add(" ", Vec::new()), Err(SetError::NoName));
-    assert_eq!(set.add(DEFAULT_SET, Vec::new()), Err(SetError::Taken));
-    // a new set, empty, in use
-    assert_eq!(set.add("Club", Vec::new()), Ok(()));
-    assert_eq!((set.current, set.rules.len()), (1, 0));
-    // a copy of the rules in use
-    set.rules.push(rule("b", Action::Replace));
-    let copy = set.rules.clone();
-    assert_eq!(set.add("Club copy", copy), Ok(()));
-    assert_eq!(set.set_names(), [DEFAULT_SET, "Club", "Club copy"]);
-    assert_eq!(set.rules[0].name, "b");
-    set.select(0);
-    assert_eq!(set.rules[0].name, "a");
-    set.select(1);
-    assert_eq!(set.rules[0].name, "b");
-    assert!(set.sets[1].rules.is_empty());
-    // the Default set is never removed; another falls back to it
-    assert!(set.remove_current());
-    assert_eq!(set.set_names(), [DEFAULT_SET, "Club copy"]);
-    assert_eq!((set.current, set.rules[0].name.as_str()), (0, "a"));
-    assert!(!set.remove_current());
-    assert_eq!(set.free_name("Club copy"), "Club copy (2)");
-    assert_eq!(set.free_name("New"), "New");
-    // the bound
-    for n in set.sets.len()..MAX_SETS {
-        assert_eq!(set.add(&format!("s{n}"), Vec::new()), Ok(()));
+fn a_button_the_dialog_does_not_have_answers_nothing() {
+    // "Ignore" and Client_Side_Ignore answer nothing (index -1)
+    for reply in ["Ignore", "Client_Side_Ignore", ""] {
+        let mut w = world(vec![rule(|r| r.button_reply = reply.into())]);
+        w.apply(dialog(&["Yes"]));
+        assert!(w.notifications.list.is_empty(), "{reply:?}: taken");
+        assert!(sent(&mut w).is_empty(), "{reply:?}: nothing sent");
     }
-    assert_eq!(set.add("one more", Vec::new()), Err(SetError::Full));
 }
 
 #[test]
-fn rule_sets_survive_the_file_and_hand_edits_are_bounded() {
-    let mut set = RuleSet {
-        on: true,
-        rules: vec![rule("a", Action::Hide)],
-        ..RuleSet::default()
-    };
-    set.normalize();
-    set.add("Second", vec![rule("b", Action::Hide)]).expect("added");
-    // the file carries the current format version
-    set.version = VERSION;
-    let (read, skipped) = RuleSet::parse(&set.to_bytes());
-    assert_eq!(skipped, 0);
-    assert_eq!(read, set);
-    // names repeated or missing, the set in use out of range
-    let (odd, _) =
-        RuleSet::parse(br#"{"on":false,"current":9,"sets":[{"name":"","rules":[{"name":"x"}]},{"name":"Same"},{"name":"Same"}]}"#);
-    assert_eq!(odd.set_names(), [DEFAULT_SET, "Same", "Same (2)"]);
-    assert_eq!(odd.current, 0);
-    assert_eq!(odd.rules.len(), 1, "the set in use takes its rules");
+fn client_side_mute_blocks_the_object() {
+    let mut w = world(vec![rule(|r| r.button_reply = "Client_Side_Mute".into())]);
+    w.apply(dialog(&["Yes"]));
+    assert!(w.mutes.is_muted_id(&id(5)));
+    assert!(sent(&mut w).iter().all(|c| !matches!(c, NetCommand::ScriptDialogReply { .. })));
 }
 
 #[test]
-fn the_filter_matches_the_set_in_use_only() {
-    let mut set = RuleSet {
-        on: true,
-        rules: vec![rule("all", Action::Hide)],
-        ..RuleSet::default()
+fn a_text_box_always_sends_the_rules_reply() {
+    for text in ["my answer", ""] {
+        let mut w = world(vec![rule(|r| {
+            r.textbox_reply = text.into();
+            r.button_reply = "ignored for a text box".into();
+        })]);
+        w.apply(dialog(&["!!llTextBox!!"]));
+        let cmds = sent(&mut w);
+        assert!(
+            matches!(&cmds[..], [NetCommand::ScriptDialogReply { sender: Some(s), object_id, channel: -77, index: 0, label }]
+                if *s == std::net::SocketAddr::from(SENDER) && *object_id == id(5) && label == text),
+            "{cmds:?}"
+        );
+    }
+}
+
+#[test]
+fn an_automatic_text_box_reply_is_cleaned_and_cut_like_a_typed_one() {
+    // CRs become line feeds, and the cut never splits a character
+    let long = format!("a\r\nb\r{}", "é".repeat(200));
+    let mut w = world(vec![rule(|r| r.textbox_reply = long.clone())]);
+    w.apply(dialog(&["!!llTextBox!!"]));
+    let cmds = sent(&mut w);
+    let [NetCommand::ScriptDialogReply { label, .. }] = &cmds[..] else {
+        panic!("{cmds:?}");
     };
-    set.normalize();
-    set.add("Quiet", Vec::new()).expect("added");
-    let mut f = Omnifilter::default();
-    f.replace(set.clone());
-    assert_eq!(result(&f, nearby("Jane", "hello")), None);
-    set.select(0);
-    f.replace(set);
-    assert_eq!(result(&f, nearby("Jane", "hello")), Some(Outcome::Hide));
+    assert!(label.starts_with("a\nb\n"));
+    assert!(!label.contains('\r'));
+    assert!(label.len() <= crate::world::notifications::TEXT_BOX_MAX_BYTES);
+    assert!(label.ends_with('é'), "cut on a character boundary");
+}
+
+#[test]
+fn the_answer_waits_for_the_rules_delay() {
+    let mut w = world(vec![rule(|r| {
+        r.button_reply = "Yes".into();
+        r.reply_delay = 1.5;
+    })]);
+    w.apply(dialog(&["Yes"]));
+    assert!(sent(&mut w).is_empty());
+    let now = Instant::now();
+    w.omnifilter_flush(now + Duration::from_millis(500));
+    assert!(sent(&mut w).is_empty());
+    w.omnifilter_flush(now + Duration::from_secs(2));
+    assert_eq!(sent(&mut w).len(), 1);
+}
+
+#[test]
+fn a_load_url_opens_only_with_go_to_page() {
+    let url = |w: &mut World| {
+        w.apply(NetEvent::LoadUrl {
+            object_name: "Shop".into(),
+            object_id: id(7),
+            owner_id: id(6),
+            owner_is_group: false,
+            message: "Our store".into(),
+            url: "https://example.invalid/".into(),
+        })
+    };
+    let mut w = world(vec![rule(|r| {
+        r.set_source(Source::UrlRequest, true);
+        r.content = "example.invalid".into();
+        r.button_reply = "Gotopage".into();
+    })]);
+    url(&mut w);
+    assert!(w.notifications.list.is_empty());
+    assert_eq!(w.take_omnifilter_urls(), ["https://example.invalid/"]);
+    let mut w = world(vec![rule(|r| r.set_source(Source::UrlRequest, true))]);
+    url(&mut w);
+    assert!(w.notifications.list.is_empty(), "taken, answered Cancel");
+    assert!(w.take_omnifilter_urls().is_empty());
+}
+
+#[test]
+fn the_dialogs_content_is_its_notification_text_with_its_buttons() {
+    assert_eq!(
+        dialog_content("Jane", "Box", "Pick", &["A".into(), "!!llTextBox!!".into()]),
+        "Jane's '<nolink>Box</nolink>'\nPick\nbutton_name=Client_Side_Mute\nbutton_name=Client_Side_Ignore\nbutton_name=A\nbutton_name=!!llTextBox!!"
+    );
+    assert_eq!(
+        load_url_content("https://a.invalid/", "Hi", "Box", id(3), true),
+        format!(
+            "Load web page https://a.invalid/ ?\n\nHi\n\nFrom object: <nolink>Box</nolink>, owner: secondlife:///app/group/{}/about",
+            id(3)
+        )
+    );
+}
+
+#[test]
+fn typing_starts_and_stops_are_not_filtered() {
+    let mut w = world(vec![rule(|_| {})]);
+    let mut c = ChatMessage {
+        from_name: "X".into(),
+        source_id: id(1),
+        owner_id: id(1),
+        source_type: ChatSourceType::Agent,
+        chat_type: ChatType::StartTyping,
+        region: None,
+        position: glam::Vec3::ZERO,
+        message: String::new(),
+    };
+    assert!(w.omnifilter_chat(&mut c));
+    assert!(w.omnifilter.log.is_empty());
+    c.chat_type = ChatType::Whisper;
+    assert!(!w.omnifilter_chat(&mut c));
 }

@@ -50,8 +50,8 @@ pub use copy_on_click::copy_on_click;
 pub(crate) use modal_keys::{default_button, enter_pressed};
 pub use pills::{
     clearable_search_box, dot_pill, dot_pill_width, filter_field, filter_pill, filter_pill_at, filter_pill_width, pill_tab, pill_tab_wide,
-    reveal_search_selection, search_box, search_cleared, search_list_item, search_scroll_to_column, search_scroll_to_row, search_text_edit,
-    search_text_edit_with_margin,
+    reveal_search_selection, search_cleared, search_list_item, search_scroll_to_column, search_scroll_to_row, search_text_edit,
+    search_text_edit_with_margin, select_on_focus,
 };
 pub use text_field::text_field;
 pub use tracks::{
@@ -60,14 +60,14 @@ pub use tracks::{
 };
 pub use unread::{CountSize, UnreadCount, unread_count};
 pub use volume::{VolumeScale, perceptual_override, set_perceptual_volume, volume_slider, volume_slider_with};
+pub(crate) use workspace::{
+    INVENTORY_LABEL_PADDING, finish_bar_glass, inventory_item_label, inventory_item_label_tagged, inventory_spacing, island, island_shape,
+    organization_drag_preview, organization_drop_target, organization_header, organization_section, organization_source,
+    organization_typography, overlay, overlay_frame, paint_world_label,
+};
 pub use workspace::{
     Modal, ModalGround, caret_room, collapsing, collapsing_forced, disclosure_caret, experimental_mark, glyph, navigation,
     navigation_beside, navigation_wrapped, paint_glyph, section_header, sort_caret, stat, surface,
-};
-pub(crate) use workspace::{
-    finish_bar_glass, inventory_item_label, inventory_item_label_tagged, inventory_spacing, island, island_shape,
-    organization_drag_preview, organization_drop_target, organization_header, organization_section, organization_source,
-    organization_typography, overlay, overlay_frame, paint_world_label,
 };
 
 /// Whether UI owns a world-pointer event at `pos` (logical points). Resize
@@ -75,6 +75,11 @@ pub(crate) use workspace::{
 /// LLResizeBar::handleMouseDown do, and egui retains the subsequent drag.
 pub(crate) fn pointer_over_ui(ctx: &egui::Context, pos: egui::Pos2) -> bool {
     ctx.is_pointer_over_egui() || ctx.egui_wants_pointer_input() || resize::contains_pointer(ctx, pos)
+}
+
+/// A floater edge or corner grip contains `pos` (LLResizeBar / LLResizeHandle).
+pub(crate) fn pointer_on_floater_edge(ctx: &egui::Context, pos: egui::Pos2) -> bool {
+    resize::contains_pointer(ctx, pos)
 }
 
 /// Any floater/bare window is moving or resizing, independently of drawing
@@ -276,18 +281,168 @@ fn title_in_reach(
     (asked.is_some() || kept != pos).then_some(kept)
 }
 
+/// LLSpinCtrl::onUpBtn / onDownBtn (indra/llui/llspinctrl.cpp): Alt ×10,
+/// else Ctrl ×0.1, else Shift ×0.01.
+pub(crate) fn spin_key_scale(modifiers: egui::Modifiers) -> f32 {
+    if modifiers.alt {
+        10.0
+    } else if modifiers.ctrl {
+        0.1
+    } else if modifiers.shift {
+        0.01
+    } else {
+        1.0
+    }
+}
+
+/// Points of a trackpad flick that make one notch. Same grain as the shape
+/// editor's category wheel.
+const WHEEL_POINTS_PER_NOTCH: f32 = 55.0;
+
+#[derive(Clone, Copy)]
+struct WheelRemainder(f32);
+
+pub(crate) struct WheelSteps {
+    /// Modifier-scaled notches. Positive raises.
+    pub scaled: f32,
+    /// The same notches, each rounded to an integer. Ctrl and Shift become
+    /// no step on an integer field.
+    pub integer: i32,
+}
+
+impl WheelSteps {
+    fn none() -> Self {
+        Self { scaled: 0.0, integer: 0 }
+    }
+}
+
+/// Notches of the wheel over `rect`. Positive raises. Shared by the
+/// build spinners and the colour picker's number fields (both LLSpinCtrl).
+///
+/// LLSpinCtrl::handleScrollWheel (indra/llui/llspinctrl.cpp) calls onDownBtn
+/// for a positive click count and onUpBtn for a negative one, and returns
+/// true so the panel does not also scroll. The Legacy Viewer negates the
+/// platform wheel (llwindowsdl2.cpp), so rolling it up raises the value.
+/// winit reports that roll as a positive delta.y. Each whole notch is scaled
+/// like onUpBtn. While the pointer stays on an enabled field the smoothed
+/// scroll is eaten, including the frames after the notch, so the build panel
+/// does not creep. A disabled field leaves the wheel to the panel. `apply`
+/// is false while a typed draft or a drag owns the value: the wheel is still
+/// eaten, and it does not change the number.
+pub(crate) fn spin_wheel(ui: &mut egui::Ui, rect: egui::Rect, id: egui::Id, apply: bool) -> WheelSteps {
+    let key = id.with("spinner_wheel_remainder");
+    let hovered = ui.is_enabled() && ui.rect_contains_pointer(rect);
+    if !hovered {
+        ui.data_mut(|d| d.remove::<WheelRemainder>(key));
+        return WheelSteps::none();
+    }
+    ui.input_mut(|input| input.smooth_scroll_delta = egui::Vec2::ZERO);
+    if !apply {
+        ui.data_mut(|d| d.remove::<WheelRemainder>(key));
+        return WheelSteps::none();
+    }
+    let mut remainder = ui.data(|d| d.get_temp::<WheelRemainder>(key)).map(|kept| kept.0).unwrap_or(0.0);
+    let mut scaled = 0.0f32;
+    let mut integer = 0i32;
+    ui.input(|input| {
+        for event in &input.events {
+            let egui::Event::MouseWheel {
+                unit, delta, modifiers, ..
+            } = event
+            else {
+                continue;
+            };
+            if delta.y == 0.0 || !delta.y.is_finite() {
+                continue;
+            }
+            let notches = delta.y
+                / match unit {
+                    egui::MouseWheelUnit::Point => WHEEL_POINTS_PER_NOTCH,
+                    egui::MouseWheelUnit::Line | egui::MouseWheelUnit::Page => 1.0,
+                };
+            if !notches.is_finite() {
+                continue;
+            }
+            remainder += notches;
+            let whole = remainder.trunc().clamp(-100.0, 100.0);
+            remainder -= whole;
+            if whole != 0.0 {
+                let scale = spin_key_scale(*modifiers);
+                scaled += whole * scale;
+                integer = integer.saturating_add((whole as i32).saturating_mul(scale.round() as i32));
+            }
+        }
+    });
+    if remainder == 0.0 {
+        ui.data_mut(|d| d.remove::<WheelRemainder>(key));
+    } else {
+        ui.data_mut(|d| d.insert_temp(key, WheelRemainder(remainder)));
+    }
+    WheelSteps { scaled, integer }
+}
+
+/// LLButton held_down_delay (widgets/button.xml), in seconds.
+const ARROW_HOLD_DELAY: f64 = 0.5;
+/// Repeats after the delay. LLButton::handleHover fires every frame; a
+/// fixed interval is the same pace at any refresh rate.
+const ARROW_HOLD_EVERY: f64 = 0.05;
+/// A stalled frame must not dump a long hold as one jump.
+const ARROW_HOLD_BURST: u32 = 20;
+
+/// How many repeats a hold has earned. The first is at half a second, then
+/// one more every 50 ms.
+pub(crate) fn arrow_hold_repeats(held_for: f64) -> u32 {
+    if !held_for.is_finite() || held_for < ARROW_HOLD_DELAY {
+        return 0;
+    }
+    // Count in whole milliseconds. `(t - 0.5) / 0.05` is not exact in f64:
+    // `0.10 / 0.05` is 1.999…, and floor would skip the repeat that just came due.
+    let elapsed_ms = ((held_for - ARROW_HOLD_DELAY) * 1000.0).round();
+    if !elapsed_ms.is_finite() || elapsed_ms < 0.0 {
+        return 1;
+    }
+    let steps = (elapsed_ms / (ARROW_HOLD_EVERY * 1000.0)).floor();
+    let steps = if steps >= u32::MAX as f64 { u32::MAX } else { steps as u32 };
+    steps.saturating_add(1)
+}
+
+#[derive(Clone, Copy)]
+struct ArrowHold {
+    since: f64,
+    emitted: u32,
+}
+
 /// Two compact increment buttons beside numeric fields (LLSpinCtrl).
 /// Uses theme faces and Tabler glyphs, and inherits disabled state.
-pub(crate) fn step_buttons(ui: &mut egui::Ui, height: f32) -> i8 {
-    let mut step = 0;
+///
+/// widgets/spinner.xml sets tab_stop="false" on both buttons. `Sense::CLICK`
+/// is clickable and not focusable, so Tab moves from the field to the next
+/// field. A hold repeats onUpBtn/onDownBtn: LLButton::handleHover
+/// (indra/llui/llbutton.cpp) fires the held callback every frame after
+/// held_down_delay, and handleMouseUp steps once more on release. Repeating
+/// every frame is one step per rendered frame, so a high refresh rate runs
+/// away with the value. The repeat here is every 50 ms: the same pace on
+/// every machine, and still a quick walk. The first step stays the release,
+/// so a short click is one step. Dragging off the button ends the repeat.
+/// The release counts only when the press and the release are both on the
+/// button. egui forgets a click-only widget after 0.8 s or 6 px of travel
+/// (`is_pointer_button_down_on` and `clicked()` both go false while the
+/// button is still held). A held arrow outlasts that window, so the repeat
+/// is our own timer and the release step is the button coming up with the
+/// pointer still on it, the same moment as handleMouseUp.
+pub(crate) fn step_buttons(ui: &mut egui::Ui, height: f32) -> i32 {
+    let mut step = 0i32;
+    let now = ui.input(|i| i.time);
+    let enabled = ui.is_enabled();
     ui.allocate_ui_with_layout(Vec2::new(13.0, height), egui::Layout::top_down(egui::Align::Center), |ui| {
         ui.set_max_width(13.0);
         ui.spacing_mut().item_spacing.y = 0.0;
         for (direction, name, label) in [
-            (1, "caret-up-filled", aurora_i18n::tr!("numeric-increase")),
+            (1i32, "caret-up-filled", aurora_i18n::tr!("numeric-increase")),
             (-1, "caret-down-filled", aurora_i18n::tr!("numeric-decrease")),
         ] {
-            let (rect, response) = ui.allocate_exact_size(Vec2::new(13.0, height * 0.5), Sense::click());
+            // Not focusable: see the function comment and widgets/spinner.xml.
+            let (rect, response) = ui.allocate_exact_size(Vec2::new(13.0, height * 0.5), Sense::CLICK);
             let visuals = ui.style().interact(&response);
             ui.painter().rect_filled(rect, visuals.corner_radius, visuals.bg_fill);
             if let Some(icon) = super::icons::global(name) {
@@ -298,10 +453,54 @@ pub(crate) fn step_buttons(ui: &mut egui::Ui, height: f32) -> i8 {
                     visuals.fg_stroke.color,
                 );
             }
-            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
-            if response.on_hover_text(label).clicked() {
-                step = direction;
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, label));
+            let response = response.on_hover_text(label);
+            if !enabled {
+                continue;
             }
+            let id = response.id.with("spin_arrow_hold");
+            let pointer_here = ui.input(|i| i.pointer.interact_pos()).is_some_and(|at| rect.contains(at));
+            let primary_down = ui.input(|i| i.pointer.button_down(egui::PointerButton::Primary));
+            let tracked = ui.data(|d| d.get_temp::<ArrowHold>(id));
+            // is_pointer_button_down_on stays true while a fresh press is
+            // dragged outside the widget, and it goes false once egui's click
+            // window ends. The hold stops when the pointer leaves. One we
+            // already started keeps going for as long as the button is down.
+            let holding = primary_down && pointer_here && (response.is_pointer_button_down_on() || tracked.is_some());
+            let mut repeats = 0u32;
+            let mut release_step = false;
+            if holding {
+                let mut hold = tracked.unwrap_or(ArrowHold { since: now, emitted: 0 });
+                let due = arrow_hold_repeats(now - hold.since);
+                repeats = due.saturating_sub(hold.emitted).min(ARROW_HOLD_BURST);
+                // Drop repeats a stalled frame would have piled up, so the
+                // value does not fast-forward when the window wakes.
+                hold.emitted = due;
+                let until = if due == 0 {
+                    ARROW_HOLD_DELAY - (now - hold.since)
+                } else {
+                    let into = (now - hold.since - ARROW_HOLD_DELAY).rem_euclid(ARROW_HOLD_EVERY);
+                    ARROW_HOLD_EVERY - into
+                };
+                ui.ctx().request_repaint_after_secs(until.max(0.0) as f32);
+                ui.data_mut(|d| d.insert_temp(id, hold));
+            } else if let Some(hold) = tracked {
+                // Released on the button: the repeat that came due, then one
+                // more step. Leaving while the button is still down just stops.
+                if pointer_here && !primary_down {
+                    let due = arrow_hold_repeats(now - hold.since);
+                    repeats = due.saturating_sub(hold.emitted).min(ARROW_HOLD_BURST);
+                    release_step = true;
+                }
+                ui.data_mut(|d| d.remove::<ArrowHold>(id));
+            } else if response.clicked() {
+                // Press and release in the same frame, before a hold existed.
+                release_step = true;
+            }
+            if release_step {
+                step += direction;
+            }
+            step += direction * repeats as i32;
         }
     });
     step
@@ -528,8 +727,64 @@ impl<'a> Floater<'a> {
 
     /// Show the floater; `open` is cleared by the close button.
     pub fn show<R>(mut self, ctx: &egui::Context, p: &Palette, open: &mut bool, body: impl FnOnce(&mut egui::Ui) -> R) -> Option<R> {
+        let window_id = egui::Id::unique(self.id);
+        let viewport_id = crate::native_viewports::floater_viewport_id(self.id);
+        let native_key = window_id.with("native_viewport");
+        let restore_key = window_id.with("native_restore_area");
+        let detached = ctx.data(|data| data.get_temp::<bool>(native_key)).unwrap_or(false);
+        if detached && ctx.viewport_id() != viewport_id {
+            if !*open {
+                ctx.data_mut(|data| data.remove_temp::<bool>(native_key));
+                restore_floater_area(ctx, window_id, self.order, restore_key);
+                return None;
+            }
+            let area = egui::AreaState::load(ctx, window_id).unwrap_or_default();
+            let root_origin = ctx.input(|input| input.viewport().inner_rect.map_or(egui::Pos2::ZERO, |rect| rect.min));
+            let outer_position = root_origin + area.left_top_pos().to_vec2();
+            let size = area.size.unwrap_or(self.default_size);
+            let builder = egui::ViewportBuilder::default()
+                .with_title(self.title.clone())
+                .with_position(outer_position)
+                .with_inner_size(size)
+                .with_min_inner_size(self.min_size)
+                .with_decorations(false)
+                .with_resizable(self.resizable);
+            let mut body = Some(body);
+            let mut result = None;
+            let order = self.order;
+            let mut floater = Some(self);
+            ctx.show_viewport_immediate(viewport_id, builder, |_, class| {
+                if class == egui::ViewportClass::EmbeddedWindow {
+                    return;
+                }
+                if ctx.input(|input| input.viewport().close_requested()) {
+                    *open = false;
+                    ctx.data_mut(|data| data.remove_temp::<bool>(native_key));
+                    restore_floater_area(ctx, window_id, order, restore_key);
+                    return;
+                }
+                if ctx
+                    .data_mut(|data| data.remove_temp::<bool>(window_id.with("native_start_drag")))
+                    .unwrap_or(false)
+                {
+                    ctx.send_viewport_cmd_to(viewport_id, egui::ViewportCommand::StartDrag);
+                }
+                let viewport_rect = ctx.input(|input| input.viewport_rect());
+                set_floater_area(ctx, window_id, order, egui::Pos2::ZERO, viewport_rect.size());
+                if let (Some(floater), Some(body)) = (floater.take(), body.take()) {
+                    result = floater.show(ctx, p, open, body);
+                }
+            });
+            return result;
+        }
+        let native_child = detached && ctx.viewport_id() == viewport_id;
+        if native_child {
+            let viewport_rect = ctx.input(|input| input.viewport_rect());
+            set_floater_area(ctx, window_id, self.order, egui::Pos2::ZERO, viewport_rect.size());
+        }
         super::layout::set_partial_outside(ctx, egui::Id::unique(self.id), self.partial_outside);
-        if window_hidden(ctx, egui::Id::unique(self.id), *open, self.chat) {
+        let role = if self.chat { HideKeep::Chat } else { HideKeep::None };
+        if window_hidden(ctx, egui::Id::unique(self.id), *open, role) {
             // its toolbar button still closes it with the interface hidden,
             // as it does the windows it toggles itself
             if close_asked(ctx, self.id) {
@@ -550,6 +805,7 @@ impl<'a> Floater<'a> {
             }
             return None;
         }
+        pills::note_window_drawn(ctx, egui::Id::unique(self.id));
         let min_id = egui::Id::unique((self.id, "minimized"));
         // persisted with the UI layout (ui_layout.ron)
         let minimized = ctx.data_mut(|d| d.get_persisted::<bool>(min_id)).unwrap_or(false);
@@ -598,7 +854,6 @@ impl<'a> Floater<'a> {
         let expand_asked = ctx.data_mut(|d| d.remove_temp::<bool>(egui::Id::unique(self.id).with(EXPAND)));
         let mut toggle_min = minimized && expand_asked.unwrap_or(false);
         let mut out = None;
-        let window_id = egui::Id::unique(self.id);
         let expanded_id = window_id.with("expanded_size");
         let restore_id = window_id.with("restore_size");
         let expanded = ctx.data_mut(|d| d.get_persisted::<Vec2>(expanded_id)).unwrap_or(self.default_size);
@@ -606,13 +861,25 @@ impl<'a> Floater<'a> {
         let resizable = self.resizable && !minimized;
         // The windows live between the bars (`layout::work_area`): none
         // opens larger than that room, nor outside it.
-        let work = super::layout::work_area(ctx);
+        let work = if native_child {
+            ctx.input(|input| input.viewport_rect())
+        } else {
+            super::layout::work_area(ctx)
+        };
         self.min_size = self.min_size.min(work.size());
-        self.default_size = self.default_size.min(work.size());
-        self.default_pos = fit_in(work, self.default_pos, self.default_size);
-        let opening = self
-            .cascade
-            .and_then(|group| cascade::prepare(ctx, window_id, group, egui::Rect::from_min_size(self.default_pos, expanded), work));
+        if native_child {
+            self.default_pos = egui::Pos2::ZERO;
+            self.default_size = work.size();
+        } else {
+            self.default_size = self.default_size.min(work.size());
+            self.default_pos = fit_in(work, self.default_pos, self.default_size);
+        }
+        let opening = (!native_child)
+            .then(|| {
+                self.cascade
+                    .and_then(|group| cascade::prepare(ctx, window_id, group, egui::Rect::from_min_size(self.default_pos, expanded), work))
+            })
+            .flatten();
         // A window as tall as its content (fixed, or of automatic height)
         // whose content is taller than the room scrolls it, from the frame
         // after the one that showed it too tall, and for as long as it is.
@@ -620,7 +887,9 @@ impl<'a> Floater<'a> {
         let scroll_id = window_id.with("body_scrolls");
         let scrolls = content_sized && ctx.data(|d| d.get_temp::<bool>(scroll_id)).unwrap_or(false);
         let mut still_too_tall = false;
-        let resize_drag = resizable.then(|| resize::Drag::prepare(ctx, window_id, self.min_size)).flatten();
+        let resize_drag = (!native_child)
+            .then(|| resizable.then(|| resize::Drag::prepare(ctx, window_id, self.min_size)).flatten())
+            .flatten();
         // A resizable window left larger than the room (the viewer window
         // was made smaller) is brought down to it, as Firestorm's floaters
         // are (LLFloaterView::adjustToFitScreen).
@@ -673,19 +942,23 @@ impl<'a> Floater<'a> {
         }
         // the viewer window changed size: the floater follows its edges;
         // a placement asked this frame and a resize in progress come after
-        let slot = super::layout::slot(ctx, window_id);
-        if opening.is_some() {
+        let mut slot = (!native_child).then(|| super::layout::slot(ctx, window_id));
+        if !native_child && opening.is_some() {
             super::layout::reanchor(ctx, window_id);
         }
-        let mut asked = opening.as_ref().map(|o| o.pos).or(slot.pos);
+        let mut asked = if native_child {
+            Some(egui::Pos2::ZERO)
+        } else {
+            opening.as_ref().map(|o| o.pos).or_else(|| slot.as_ref().and_then(|slot| slot.pos))
+        };
         // A window moves anywhere in the room the bars leave it
         // (`layout::move_area`: the whole screen with the islands, between
         // the Legacy Viewer's bars otherwise), past the edges the user lets
         // it cross, its title bar within reach (`layout::reach`); a window
         // dragged with its group has the group's limits.
-        let room = super::layout::move_area(ctx);
+        let room = if native_child { work } else { super::layout::move_area(ctx) };
         // the edge dragged snaps to the other windows and to the work area
-        let resized = resize_drag.map(|drag| {
+        let resized = (!native_child).then_some(resize_drag).flatten().map(|drag| {
             let rect = on_pixels(
                 ctx,
                 super::layout::resizing(ctx, p, window_id, drag.rect(), drag.edges(), drag.minimum()),
@@ -706,10 +979,16 @@ impl<'a> Floater<'a> {
         // quick drag of the left or top edge pushed the whole window back
         // by what that size exceeded, its opposite edge moving for a frame
         // (the human's report of 2026-10-16).
-        w = if resized.is_some() {
+        w = if native_child {
+            w.fixed_size(work.size()).constrain(false)
+        } else if resized.is_some() {
             w.constrain(false)
         } else {
-            w.constrain_to(slot.limits.unwrap_or_else(|| super::layout::reach(room, size, edges)))
+            w.constrain_to(
+                slot.as_ref()
+                    .and_then(|slot| slot.limits)
+                    .unwrap_or_else(|| super::layout::reach(room, size, edges)),
+            )
         };
         if let Some(pos) = ctx.data_mut(|d| d.remove_temp::<egui::Pos2>(window_id.with(PLACE_POS))) {
             asked = Some(pos);
@@ -724,7 +1003,7 @@ impl<'a> Floater<'a> {
         // Whatever places the window, its title bar stays in reach: egui
         // lets a window larger than its limits slide out of them by what it
         // has in excess, title first.
-        if let Some(pos) = title_in_reach(ctx, window_id, room, asked, resized.map(|r| r.size())) {
+        if !native_child && let Some(pos) = title_in_reach(ctx, window_id, room, asked, resized.map(|r| r.size())) {
             w = w.current_pos(pos);
         }
         // `steady_size`: once shown, the body in the window's exact rect
@@ -780,14 +1059,23 @@ impl<'a> Floater<'a> {
                         // a window with a compact body when minimized says
                         // so with the Performance window's compact / full
                         // icons rather than a collapse (#1035)
-                        let (icon, tip) = match (self.compact_minimized.is_some(), minimized) {
-                            (true, true) => ("arrows-maximize", aurora_i18n::tr!("common-full-view")),
-                            (true, false) => ("arrows-minimize", aurora_i18n::tr!("common-compact-view")),
-                            (false, true) => ("minus", aurora_i18n::tr!("common-expand")),
-                            (false, false) => ("minus", aurora_i18n::tr!("common-collapse")),
+                        let icon = minimize_title_icon(self.compact_minimized.is_some(), minimized);
+                        let tip = match (self.compact_minimized.is_some(), minimized) {
+                            (true, true) => aurora_i18n::tr!("common-full-view"),
+                            (true, false) => aurora_i18n::tr!("common-compact-view"),
+                            (false, true) => aurora_i18n::tr!("common-expand"),
+                            (false, false) => aurora_i18n::tr!("common-collapse"),
                         };
                         if title_button(ui, p, icon).on_hover_text(tip).clicked() {
                             toggle_min = true;
+                        }
+                        if native_child
+                            && title_button(ui, p, "picture-in-picture")
+                                .on_hover_text(aurora_i18n::tr!("floater-reattach"))
+                                .clicked()
+                        {
+                            ui.ctx().data_mut(|data| data.remove_temp::<bool>(native_key));
+                            restore_floater_area(ui.ctx(), window_id, self.order, restore_key);
                         }
                         for (icon, tip, clicked) in &mut self.actions {
                             let response = title_button(ui, p, icon).on_hover_text(*tip);
@@ -927,6 +1215,12 @@ impl<'a> Floater<'a> {
             {
                 title_response.with_new_rect(rect).on_hover_text(tooltip);
             }
+            if native_child {
+                let drag = ui.interact(title_rect, window_id.with("native_title_drag"), Sense::drag());
+                if drag.drag_started() {
+                    ui.ctx().send_viewport_cmd_to(viewport_id, egui::ViewportCommand::StartDrag);
+                }
+            }
             if compact {
                 divider(ui, p);
                 ui.add_space(UNDER_DIVIDER);
@@ -959,6 +1253,15 @@ impl<'a> Floater<'a> {
         });
         if let Some(response) = response {
             window_click_tolerance(&response.response);
+            if !native_child
+                && ctx.dragged_id() == Some(window_id.with("move"))
+                && ctx.input(|input| input.pointer.interact_pos().is_some_and(|pos| !input.viewport_rect().contains(pos)))
+                && let Some(area) = egui::AreaState::load(ctx, window_id)
+            {
+                ctx.data_mut(|data| data.insert_temp(restore_key, area));
+                ctx.data_mut(|data| data.insert_temp(native_key, true));
+                ctx.data_mut(|data| data.insert_temp(window_id.with("native_start_drag"), true));
+            }
             if content_sized {
                 let too_tall = if scrolls {
                     still_too_tall
@@ -967,7 +1270,9 @@ impl<'a> Floater<'a> {
                 };
                 ctx.data_mut(|d| d.insert_temp(scroll_id, too_tall));
             }
-            slot.shown(ctx, response.response.rect, minimized);
+            if let Some(slot) = slot.take() {
+                slot.shown(ctx, response.response.rect, minimized);
+            }
             if self.cascade.is_some() {
                 cascade::shown(ctx, window_id, response.response.rect, minimized);
             }
@@ -1029,12 +1334,26 @@ impl<'a> Floater<'a> {
     }
 }
 
+fn set_floater_area(ctx: &egui::Context, id: egui::Id, order: egui::Order, pos: egui::Pos2, size: Vec2) {
+    let mut state = egui::AreaState::load(ctx, id).unwrap_or_default();
+    state.set_left_top_pos(pos);
+    state.size = Some(size);
+    ctx.memory_mut(|memory| memory.areas_mut().set_state(egui::LayerId::new(order, id), state));
+}
+
+fn restore_floater_area(ctx: &egui::Context, id: egui::Id, order: egui::Order, key: egui::Id) {
+    if let Some(state) = ctx.data_mut(|data| data.remove_temp::<egui::AreaState>(key)) {
+        ctx.memory_mut(|memory| memory.areas_mut().set_state(egui::LayerId::new(order, id), state));
+    }
+}
+
 /// A window without a title bar, dragged by its whole surface (the
 /// mini-map): `frame` around `body`, which fills it. Like a floater it is
 /// placed by the layout (`layout::Slot`), snaps to the other windows when
 /// moved with Alt or resized, and is resized by the same edge handles.
 /// `locked`: the user can neither move nor resize it (it still follows the
-/// viewer's edges and the group it is glued to).
+/// viewer's edges and the group it is glued to). `keep_in_mouselook`: stays
+/// visible when entering mouselook (the mini-map, `LLAgent::endAnimationUpdateUI`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn bare_window(
     ctx: &egui::Context,
@@ -1045,12 +1364,15 @@ pub(crate) fn bare_window(
     default: egui::Rect,
     min_size: Vec2,
     locked: bool,
+    keep_in_mouselook: bool,
     body: impl FnOnce(&mut egui::Ui),
 ) {
     let window_id = egui::Id::unique(id);
-    if window_hidden(ctx, window_id, true, false) {
+    let role = if keep_in_mouselook { HideKeep::Mouselook } else { HideKeep::None };
+    if window_hidden(ctx, window_id, true, role) {
         return;
     }
+    pills::note_window_drawn(ctx, window_id);
     let drag = if locked {
         None
     } else {
@@ -1123,16 +1445,26 @@ fn on_pixels(ctx: &egui::Context, rect: egui::Rect) -> egui::Rect {
 const PLACE_POS: &str = "place_pos";
 
 /// The windows the hidden interface keeps out of sight (Alt+Shift+U,
+/// Which windows stay shown when [`hide_windows`] hides the interface:
+/// immersive mode (#859) keeps the chat windows; mouselook keeps the mini-map
+/// (`LLAgent::endAnimationUpdateUI`, indra/newview/llagent.cpp).
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub enum HideKeep {
+    #[default]
+    None,
+    Chat,
+    Mouselook,
+}
+
 /// LLFloaterView::hideAllFloaters / showHiddenFloaters): those open on the
 /// frame it was hidden. A window opened afterwards shows; one closed in the
-/// meantime is forgotten. Immersive mode (#859) keeps the chat windows.
+/// meantime is forgotten.
 #[derive(Clone, Default)]
 struct HiddenWindows {
     /// The frame whose open windows are hidden.
     capture: Option<u64>,
     ids: std::collections::HashSet<egui::Id>,
-    /// The chat windows stay (immersive mode).
-    keep_chat: bool,
+    keep: HideKeep,
 }
 
 fn hidden_windows_id() -> egui::Id {
@@ -1144,13 +1476,14 @@ pub fn interface_hidden(ctx: &egui::Context) -> bool {
     ctx.data(|d| d.get_temp::<HiddenWindows>(hidden_windows_id()).is_some())
 }
 
-/// Hide the windows open now (on the next frame), or show them back; with
-/// `keep_chat`, the chat windows stay. Called between two frames.
-pub fn hide_windows(ctx: &egui::Context, hide: bool, keep_chat: bool) {
+/// Hide the windows open now (on the next frame), or show them back; `keep`
+/// leaves the chat windows (immersive mode) or the mini-map (mouselook).
+/// Called between two frames.
+pub fn hide_windows(ctx: &egui::Context, hide: bool, keep: HideKeep) {
     let state = HiddenWindows {
         capture: hide.then(|| ctx.cumulative_frame_nr()),
         ids: Default::default(),
-        keep_chat,
+        keep,
     };
     ctx.data_mut(|d| {
         if hide {
@@ -1161,15 +1494,14 @@ pub fn hide_windows(ctx: &egui::Context, hide: bool, keep_chat: bool) {
     });
 }
 
-/// The window `id` (`open` or not, a `chat` window or not) is kept hidden
-/// this frame.
-fn window_hidden(ctx: &egui::Context, id: egui::Id, open: bool, chat: bool) -> bool {
+/// The window `id` (`open` or not, with its `role`) is kept hidden this frame.
+fn window_hidden(ctx: &egui::Context, id: egui::Id, open: bool, role: HideKeep) -> bool {
     let frame = ctx.cumulative_frame_nr();
     ctx.data_mut(|d| {
         let Some(mut state) = d.get_temp::<HiddenWindows>(hidden_windows_id()) else {
             return false;
         };
-        if chat && state.keep_chat {
+        if role != HideKeep::None && state.keep == role {
             return false;
         }
         let hidden = if !open {
@@ -1487,6 +1819,18 @@ pub(crate) const EXPAND: &str = "expand";
 
 /// Temporary frame of a floater asked to close (`close_floater`).
 const CLOSE: &str = "close";
+
+/// Title-bar minimize / expand icon (#3084). Ordinary floaters: minus while
+/// expanded, square while minimized. Compact bodies (Performance) keep the
+/// arrows-maximize / arrows-minimize pair.
+fn minimize_title_icon(compact: bool, minimized: bool) -> &'static str {
+    match (compact, minimized) {
+        (true, true) => "arrows-maximize",
+        (true, false) => "arrows-minimize",
+        (false, true) => "square",
+        (false, false) => "minus",
+    }
+}
 
 /// Title bar button with a Tabler icon (drawn by hand if it is missing).
 fn title_button(ui: &mut egui::Ui, p: &Palette, icon: &str) -> egui::Response {
@@ -1894,20 +2238,35 @@ pub(crate) fn control_font(ui: &egui::Ui, default_size: f32) -> egui::FontId {
 
 /// Flat tab strip. Returns true when the selection changed.
 pub fn tabs(ui: &mut egui::Ui, p: &Palette, selected: &mut usize, labels: &[(&str, bool)]) -> bool {
-    tabs_row(ui, p, selected, labels, false, false)
+    tabs_row(ui, p, selected, labels, false, false, None)
+}
+
+/// [`tabs`] plus each tab's rectangle, in order, so a drag can rest on one.
+pub fn tabs_with_rects(ui: &mut egui::Ui, p: &Palette, selected: &mut usize, labels: &[(&str, bool)]) -> (bool, Vec<egui::Rect>) {
+    let mut rects = Vec::new();
+    let changed = tabs_row(ui, p, selected, labels, false, false, Some(&mut rects));
+    (changed, rects)
 }
 
 /// The same tab strip at the density of fixed inspector controls.
 pub fn compact_tabs(ui: &mut egui::Ui, p: &Palette, selected: &mut usize, labels: &[(&str, bool)]) -> bool {
-    tabs_row(ui, p, selected, labels, false, true)
+    tabs_row(ui, p, selected, labels, false, true, None)
 }
 
 /// Equal-width tabs spanning a data inspector, with the usual theme and input handling.
 pub fn stretched_tabs(ui: &mut egui::Ui, p: &Palette, selected: &mut usize, labels: &[(&str, bool)]) -> bool {
-    tabs_row(ui, p, selected, labels, true, false)
+    tabs_row(ui, p, selected, labels, true, false, None)
 }
 
-fn tabs_row(ui: &mut egui::Ui, p: &Palette, selected: &mut usize, labels: &[(&str, bool)], stretched: bool, compact: bool) -> bool {
+fn tabs_row(
+    ui: &mut egui::Ui,
+    p: &Palette,
+    selected: &mut usize,
+    labels: &[(&str, bool)],
+    stretched: bool,
+    compact: bool,
+    mut rects: Option<&mut Vec<egui::Rect>>,
+) -> bool {
     let mut changed = false;
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
@@ -1935,6 +2294,9 @@ fn tabs_row(ui: &mut egui::Ui, p: &Palette, selected: &mut usize, labels: &[(&st
                 text_w[i] * compact + extra.min(40.0)
             };
             let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, height), if *enabled { Sense::click() } else { Sense::hover() });
+            if let Some(rects) = rects.as_mut() {
+                rects.push(rect);
+            }
             let sel = *selected == i;
             if sel || (resp.hovered() && *enabled) {
                 let fill = if sel {
@@ -1994,37 +2356,101 @@ pub fn segmented_size(ui: &egui::Ui, options: &[(&str, bool)]) -> Vec2 {
 
 /// Choice between a few options side by side, in one track: the chosen
 /// segment is lit, in the accent when its option is `accent` (Aurora's own
-/// look), in `raised` otherwise (a legacy look). Returns true when the
-/// selection changed.
+/// look), in `raised` otherwise (a legacy look). The lit face slides from
+/// the segment chosen before, as the poser's tracks do (`tracks::icon_track`;
+/// none under Reduce animations). Returns true when the selection changed.
 pub fn segmented(ui: &mut egui::Ui, p: &Palette, selected: &mut usize, options: &[(&str, bool)]) -> bool {
+    segmented_with_disabled(ui, p, selected, options, &[])
+}
+
+/// `segmented` with some options out of reach: `disabled[i]` is the tooltip
+/// that says why option `i` cannot be chosen (None, or past the end of the
+/// slice: it can). A disabled option is drawn dimmed, takes no hover or click.
+pub fn segmented_with_disabled(
+    ui: &mut egui::Ui,
+    p: &Palette,
+    selected: &mut usize,
+    options: &[(&str, bool)],
+    disabled: &[Option<&str>],
+) -> bool {
+    segmented_tall_with_disabled(ui, p, selected, options, SEGMENT_H, disabled)
+}
+
+/// `segmented` with a track `height` tall, to line it up with the fields
+/// and buttons of a taller row.
+pub fn segmented_tall(ui: &mut egui::Ui, p: &Palette, selected: &mut usize, options: &[(&str, bool)], height: f32) -> bool {
+    segmented_tall_with_disabled(ui, p, selected, options, height, &[])
+}
+
+/// `segmented_tall` and `segmented_with_disabled` together.
+pub fn segmented_tall_with_disabled(
+    ui: &mut egui::Ui,
+    p: &Palette,
+    selected: &mut usize,
+    options: &[(&str, bool)],
+    height: f32,
+    disabled: &[Option<&str>],
+) -> bool {
     let galleys = segment_galleys(ui, options);
     let widths: Vec<f32> = galleys.iter().map(|g| g.size().x + SEGMENT_PAD_X).collect();
-    let (track, _) = ui.allocate_exact_size(segmented_size(ui, options), Sense::hover());
+    let size = Vec2::new(segmented_size(ui, options).x, height);
+    let (track, _) = ui.allocate_exact_size(size, Sense::hover());
     let radius = ui.visuals().widgets.inactive.corner_radius;
     ui.painter().rect_filled(track, radius, p.bar);
-    let mut changed = false;
+    let mut rects = Vec::with_capacity(widths.len());
     let mut x = track.left() + SEGMENT_PAD;
-    for (i, ((label, accent), galley)) in options.iter().zip(galleys).enumerate() {
-        let rect = egui::Rect::from_min_size(
+    for w in &widths {
+        rects.push(egui::Rect::from_min_size(
             egui::pos2(x, track.top() + SEGMENT_PAD),
-            Vec2::new(widths[i], track.height() - SEGMENT_PAD * 2.0),
+            Vec2::new(*w, track.height() - SEGMENT_PAD * 2.0),
+        ));
+        x += w;
+    }
+    // the lit face, its edges sliding from the segment chosen before (kept
+    // from the track's left, so that moving the window does not slide it)
+    if let Some(chosen) = rects
+        .get(*selected)
+        .filter(|_| disabled.get(*selected).copied().flatten().is_none())
+    {
+        let id = ui.scope_id().with(("segmented-slide", options.len(), options.first().map(|o| o.0)));
+        let time = ui.style().animation_time;
+        let left = ui
+            .ctx()
+            .animate_value_with_time(id.with("left"), chosen.left() - track.left(), time);
+        let right = ui
+            .ctx()
+            .animate_value_with_time(id.with("right"), chosen.right() - track.left(), time);
+        let face = if options[*selected].1 { p.violet } else { p.raised };
+        let lit = egui::Rect::from_x_y_ranges(track.left() + left..=track.left() + right, chosen.y_range());
+        ui.painter().rect_filled(lit, inner_radius(ui.visuals()), face);
+    }
+    let mut changed = false;
+    for (i, ((label, accent), galley)) in options.iter().zip(galleys).enumerate() {
+        let rect = rects[i];
+        let off = disabled.get(i).copied().flatten();
+        let resp = ui.interact(
+            rect,
+            ui.scope_id().with(("segmented", i, *label)),
+            if off.is_some() { Sense::hover() } else { Sense::click() },
         );
-        x += widths[i];
-        let resp = ui.interact(rect, ui.scope_id().with(("segmented", i, *label)), Sense::click());
         let sel = *selected == i;
-        let (face, text) = match (sel, *accent) {
-            (true, true) => (Some(p.violet), p.on_accent),
-            (true, false) => (Some(p.raised), p.ink),
-            (false, _) if resp.hovered() => (Some(p.raised.gamma_multiply(0.5)), p.ink),
-            (false, _) => (None, p.muted),
+        let text = match (sel, *accent) {
+            _ if off.is_some() => p.muted_dim,
+            (true, true) => p.on_accent,
+            (true, false) => p.ink,
+            (false, _) if resp.hovered() => p.ink,
+            (false, _) => p.muted,
         };
-        if let Some(face) = face {
-            ui.painter().rect_filled(rect, inner_radius(ui.visuals()), face);
+        if !sel && off.is_none() && resp.hovered() {
+            ui.painter()
+                .rect_filled(rect, inner_radius(ui.visuals()), p.raised.gamma_multiply(0.5));
         }
         let at = letters_in_middle(ui.painter(), &galley, rect);
         ui.painter().galley(at, galley, text);
-        resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::RadioButton, true, sel, *label));
-        if resp.clicked() && !sel {
+        resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::RadioButton, off.is_none(), sel, *label));
+        if let Some(tip) = off {
+            resp.on_hover_text(tip);
+        } else if resp.clicked() && !sel {
             *selected = i;
             changed = true;
         }
@@ -2139,6 +2565,17 @@ pub fn icon_button(ui: &mut egui::Ui, p: &Palette, icon: &str, tip: &str, enable
 /// when clicked.
 pub fn icon_toggle(ui: &mut egui::Ui, p: &Palette, icon: &str, tip: &str, on: bool) -> bool {
     small_icon_button(ui, p, icon, tip, true, on)
+}
+
+/// The A–Z switch of a list drawn from the inventory: lit while `by_name`,
+/// off for the list's own order, `tip` saying which and what a click does;
+/// flips `by_name` and returns true when clicked.
+pub fn sort_by_name_toggle(ui: &mut egui::Ui, p: &Palette, by_name: &mut bool, tip: &str) -> bool {
+    let clicked = icon_toggle(ui, p, "sort-ascending-letters", tip, *by_name);
+    if clicked {
+        *by_name = !*by_name;
+    }
+    clicked
 }
 
 /// Flat icon toggle with a larger glyph and hit target, in logical points.
@@ -3095,18 +3532,68 @@ pub fn rail_row(
     on: bool,
     depth: usize,
 ) -> egui::Response {
+    rail_tree_row(ui, p, icon, tint, label, count, on, depth, None).0
+}
+
+/// Width the disclosure caret of `rail_tree_row` adds before the icon.
+const RAIL_CARET_ROOM: f32 = 18.0;
+/// Size of that caret, the one of the Inventory sidebar.
+const RAIL_CARET: f32 = 13.0;
+
+/// `rail_row` for a folder of a tree (the Places rail): when `open` is
+/// `Some`, the folder has sub-folders and a `disclosure_caret` comes before
+/// its icon, as in the Inventory sidebar. The caret is its own click target,
+/// returned beside the row: a click on it folds or unfolds, a click on the
+/// rest of the row chooses the folder.
+#[allow(clippy::too_many_arguments)]
+pub fn rail_tree_row(
+    ui: &mut egui::Ui,
+    p: &Palette,
+    icon: &str,
+    tint: Color32,
+    label: &str,
+    count: Option<usize>,
+    on: bool,
+    depth: usize,
+    open: Option<bool>,
+) -> (egui::Response, Option<egui::Response>) {
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.0), Sense::click());
     resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), on, label));
+    let x = rect.left() + 10.0 + depth as f32 * 14.0;
+    let caret_center = egui::pos2(x + 8.0, rect.center().y);
+    // Registered after the row, so it is the one a click on the caret reaches.
+    let caret = open.map(|open| {
+        let caret = ui.interact(
+            egui::Rect::from_center_size(caret_center, Vec2::splat(RAIL_CARET + 6.0)),
+            resp.id.with("rail_caret"),
+            Sense::click(),
+        );
+        caret.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), open, label));
+        caret
+    });
     if !ui.is_rect_visible(rect) {
-        return resp;
+        return (resp, caret);
     }
     let radius = ui.visuals().window_corner_radius;
     if on {
         ui.painter().rect_filled(rect, radius, p.violet.gamma_multiply(0.28));
-    } else if resp.hovered() {
+    } else if resp.hovered() || caret.as_ref().is_some_and(|c| c.hovered()) {
         ui.painter().rect_filled(rect, radius, p.raised);
     }
-    let x = rect.left() + 10.0 + depth as f32 * 14.0;
+    let x = match (open, &caret) {
+        (Some(open), Some(c)) => {
+            let color = if c.hovered() {
+                p.ink
+            } else if on {
+                p.violet_pale
+            } else {
+                p.muted_dim
+            };
+            paint_glyph(ui.painter(), disclosure_caret(open), caret_center, RAIL_CARET, color);
+            x + RAIL_CARET_ROOM
+        }
+        _ => x,
+    };
     if let Some(t) = super::icons::global(icon) {
         ui.painter().image(
             t.id(),
@@ -3135,7 +3622,7 @@ pub fn rail_row(
         let w = g.size().x;
         paint_row_text(ui.painter(), g, rect.right() - 10.0 - w, rect.center().y, p.muted);
     }
-    resp
+    (resp, caret)
 }
 
 /// The margin that puts the capitals of a text field in `font` in the middle
@@ -3290,7 +3777,7 @@ pub fn initials(name: &str) -> String {
 
 /// Part of a `w` x `h` picture a square shows: its center, the longer side
 /// cut (profile pictures are often 4:3).
-fn square_crop(w: usize, h: usize) -> egui::Rect {
+pub(crate) fn square_crop(w: usize, h: usize) -> egui::Rect {
     let (w, h) = (w.max(1) as f32, h.max(1) as f32);
     let (u, v) = if w > h { (h / w, 1.0) } else { (1.0, w / h) };
     egui::Rect::from_center_size(egui::pos2(0.5, 0.5), Vec2::new(u, v))
@@ -3372,6 +3859,23 @@ pub fn icon_menu(ui: &mut egui::Ui, p: &Palette, name: &str, tip: &str, content:
 }
 
 #[cfg(test)]
+mod spin_arrow_tests {
+    use super::arrow_hold_repeats;
+
+    #[test]
+    fn arrow_hold_repeats_lands_on_the_50_ms_marks() {
+        assert_eq!(arrow_hold_repeats(0.49), 0);
+        assert_eq!(arrow_hold_repeats(0.50), 1);
+        assert_eq!(arrow_hold_repeats(0.54), 1);
+        assert_eq!(arrow_hold_repeats(0.55), 2);
+        // 0.10 / 0.05 is 1.999… in f64. The repeat at 0.60 s must still count.
+        assert_eq!(arrow_hold_repeats(0.60), 3);
+        assert_eq!(arrow_hold_repeats(0.90), 9);
+        assert_eq!(arrow_hold_repeats(f64::NAN), 0);
+    }
+}
+
+#[cfg(test)]
 mod maturity_tests {
     use super::*;
     use aurora_net::search::{SIM_ACCESS_ADULT, SIM_ACCESS_MATURE, SIM_ACCESS_PG};
@@ -3392,5 +3896,53 @@ mod maturity_tests {
             let (got, _, _) = maturity_style(&p, super::super::bars::maturity_name(r)).unwrap();
             assert_eq!(got, letter);
         }
+    }
+}
+
+#[cfg(test)]
+mod segmented_disabled_tests {
+    use super::*;
+    use crate::ui::widgets::elide_tests::Frames;
+
+    /// A disabled option takes no click, whatever else is clicked changes
+    /// the choice.
+    #[test]
+    fn a_disabled_segment_cannot_be_chosen() {
+        let p = crate::theme::Theme::default().palette();
+        let mut chosen = Vec::new();
+        for (disabled, clicks_work) in [(Some("why"), false), (None, true)] {
+            let mut frames = Frames::new();
+            let mut selected = 0usize;
+            let draw = |frames: &mut Frames, events: Vec<egui::Event>, selected: &mut usize| {
+                frames.run(events, |ui| {
+                    segmented_with_disabled(
+                        ui,
+                        &p,
+                        selected,
+                        &[("Aaaa", true), ("Bbbb", true), ("Cccc", true)],
+                        &[None, disabled],
+                    );
+                })
+            };
+            draw(&mut frames, Vec::new(), &mut selected);
+            // the second segment's middle: after the first, in the track
+            let texts = draw(&mut frames, Vec::new(), &mut selected);
+            let b = texts.iter().find(|t| t.source == "Bbbb").expect("the label is drawn").rect.center();
+            draw(&mut frames, vec![egui::Event::PointerMoved(b)], &mut selected);
+            for pressed in [true, false] {
+                draw(
+                    &mut frames,
+                    vec![egui::Event::PointerButton {
+                        pos: b,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: Default::default(),
+                    }],
+                    &mut selected,
+                );
+            }
+            chosen.push((selected, clicks_work));
+        }
+        assert_eq!(chosen, vec![(0, false), (1, true)]);
     }
 }

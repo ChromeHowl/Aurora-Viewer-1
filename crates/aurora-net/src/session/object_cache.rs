@@ -355,6 +355,7 @@ mod tests {
             far: FarStep::new(Instant::now()),
             refuse_neighbours: false,
             fov: DEFAULT_FOV,
+            interest_list: crate::InterestListMode::Default,
             logout_started: None,
             finished: false,
             agent_moved: false,
@@ -383,6 +384,7 @@ mod tests {
             attach_queue: Default::default(),
             inventory_merchant_pending: false,
             next_inventory_callback: 0,
+            images: Default::default(),
         };
         let waiting = |session: &Session, sim: usize| session.sims[&addrs[sim]].circuit.unacked_count();
         let handshake = |region_id: Uuid| {

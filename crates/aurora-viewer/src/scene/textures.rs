@@ -17,6 +17,7 @@
 
 use super::fetch_priority;
 use super::jobs::{AlphaKind, JobResult, Jobs, SculptMap, Trash, classify_alpha, to_rgba};
+use super::legacy_mat::alpha_mode;
 use super::texture_budget::{self, Pressure};
 use super::texture_cache::{self, Transcoded};
 use super::texture_load::{DecodeMeter, LoadTotals, LoadWatch};
@@ -75,6 +76,41 @@ pub fn is_builtin_transparent(id: &Uuid) -> bool {
     *id == aurora_prim::te::TRANSPARENT_TEXTURE || *id == super::avatar::IMG_INVISIBLE || *id == aurora_prim::te::WATER_EXCLUSION_TEXTURE
 }
 
+/// Solid 0x7f the Legacy Viewer writes into `IMG_DEFAULT`
+/// (`LLViewerTextureManager::init`, llviewertexture.cpp).
+const IMG_DEFAULT_GREY: [u8; 4] = [0x7f, 0x7f, 0x7f, 0xff];
+
+/// Slot of a texture this viewer paints itself. `None` when the asset is fetched.
+///
+/// `IMG_DEFAULT` is the empty `@setcam_textures` substitute (rlvhelper.cpp).
+/// The Legacy Viewer fills it locally and does not keep the downloaded
+/// texels (`LLViewerTextureManager::init`, llviewertexture.cpp), so faces
+/// and particles that acquire it bind the missing grey and queue no fetch.
+fn reserved_slot(id: &Uuid) -> Option<u32> {
+    if id.is_nil() || *id == aurora_prim::te::BLANK_TEXTURE {
+        Some(aurora_render::textures::WHITE)
+    } else if is_builtin_transparent(id) {
+        Some(aurora_render::textures::TRANSPARENT)
+    } else if *id == aurora_prim::te::IMG_DEFAULT {
+        Some(aurora_render::textures::MISSING)
+    } else {
+        None
+    }
+}
+
+/// 1×1 preview of a reserved texture. The nil id has no preview of its own.
+fn reserved_preview(id: &Uuid) -> Option<[u8; 4]> {
+    if is_builtin_transparent(id) {
+        Some([0; 4])
+    } else if *id == aurora_prim::te::BLANK_TEXTURE {
+        Some([255; 4])
+    } else if *id == aurora_prim::te::IMG_DEFAULT {
+        Some(IMG_DEFAULT_GREY)
+    } else {
+        None
+    }
+}
+
 fn first_bytes(px: f32) -> usize {
     if px <= 0.0 {
         return INITIAL_BYTES;
@@ -94,6 +130,9 @@ fn level_held(info: &J2kInfo, len: usize, want: u8) -> u8 {
     discard
 }
 const UNUSED_EVICT: Duration = Duration::from_secs(45);
+/// A UI user that has not asked for its texture for this long is done with
+/// it (a window closed, a picture delivered that nothing refines).
+const UI_ASK_LAPSE: Duration = Duration::from_secs(5);
 /// Unused textures evicted per frame at most, and queue entries looked at
 /// (those used again since are only skipped): the textures of a region
 /// left by teleport go in about a second instead of in one frame.
@@ -214,6 +253,12 @@ pub enum TexSource {
     /// Server-side bake fetched from the appearance service.
     Bake {
         url: String,
+    },
+    /// Bake fetched from the avatar's simulator with `RequestImage`
+    /// (`LLVOAvatar::getImage` when `getImageURL` is empty: `FTT_HOST_BAKE`).
+    /// Not HTTP. OpenSim keeps the uploaded bake in that simulator only.
+    Host {
+        region: aurora_net::RegionHandle,
     },
 }
 
@@ -1172,8 +1217,11 @@ pub struct TextureStreamer {
     /// Textures whose upload a full video memory refused, waiting to be
     /// sent again (one warning while any wait, one line when all went).
     memory_waits: MemoryWaits,
-    /// Session-long UI users, independent from the bounded hover cache.
+    /// UI users other than the bounded hover cache: they keep the texture
+    /// for as long as they ask for it (`UI_ASK_LAPSE`).
     ui_permanent: std::collections::HashSet<Uuid>,
+    /// When each of those was last asked for.
+    ui_asked: HashMap<Uuid, Instant>,
     ui_ready: HashMap<Uuid, (u32, u32, Vec<u8>)>,
     ui_previews: super::texture_ui::Images,
     pub stats: TextureStats,
@@ -1211,6 +1259,11 @@ pub struct TextureStreamer {
     /// points their slot at the missing grey, so that their faces leave the
     /// rez grid (`textures::MISSING`).
     unavailable: Vec<Uuid>,
+    /// Host bakes to ask of their simulator this frame (`TexSource::Host`).
+    host_wants: Vec<aurora_net::image_udp::Want>,
+    /// The previous frame had host bakes in flight, so an empty list still
+    /// goes out and the simulator is told to stop.
+    host_live: bool,
     /// Decoded levels the uploads are done with and download bodies once
     /// merged, freed off this thread.
     trash: Trash<Vec<u8>>,
@@ -1251,11 +1304,7 @@ impl PreviewSource {
     /// Appearance editing can use resident pixels immediately and improve
     /// them as finer levels arrive; export still requires the original data.
     pub fn bake_ready(&self, id: Uuid) -> bool {
-        self.local.is_some()
-            || self.decoded.is_some()
-            || self.procedural
-            || is_builtin_transparent(&id)
-            || id == aurora_prim::te::BLANK_TEXTURE
+        self.local.is_some() || self.decoded.is_some() || self.procedural || reserved_preview(&id).is_some()
     }
 
     pub fn bake_revision(&self) -> PreviewRevision {
@@ -1269,10 +1318,10 @@ impl PreviewSource {
     }
 
     pub fn bake_image(self, id: Uuid) -> Option<Arc<aurora_render::preview::Image>> {
-        if is_builtin_transparent(&id) || id == aurora_prim::te::BLANK_TEXTURE {
+        if let Some(rgba) = reserved_preview(&id) {
             return Some(Arc::new(aurora_render::preview::Image {
                 size: [1, 1],
-                rgba: if is_builtin_transparent(&id) { vec![0; 4] } else { vec![255; 4] }.into(),
+                rgba: rgba.to_vec().into(),
             }));
         }
         let blocks = self.blocks.clone();
@@ -1431,11 +1480,8 @@ impl PreviewSource {
         // Reserved world textures have GPU texels but no fetched asset or
         // cache file. A missing transparent map would expose a white shell
         // over the skin of a layered mesh head.
-        if is_builtin_transparent(&id) {
-            return Some(image(1, 1, vec![0; 4]));
-        }
-        if id == aurora_prim::te::BLANK_TEXTURE {
-            return Some(image(1, 1, vec![255; 4]));
+        if let Some(rgba) = reserved_preview(&id) {
+            return Some(image(1, 1, rgba.to_vec()));
         }
         if self.procedural
             && let Some((pixels, w, h)) = crate::demo::local_texture(&id)
@@ -1565,6 +1611,7 @@ impl TextureStreamer {
             ui_wanted: Default::default(),
             memory_waits: Default::default(),
             ui_permanent: Default::default(),
+            ui_asked: HashMap::new(),
             ui_ready: HashMap::new(),
             ui_previews: Default::default(),
             stats: TextureStats::default(),
@@ -1581,6 +1628,8 @@ impl TextureStreamer {
             reslotted: Vec::new(),
             last_reslot: Instant::now(),
             unavailable: Vec::new(),
+            host_wants: Vec::new(),
+            host_live: false,
             trash: Trash::default(),
             cache_writer: None,
             alpha_changes: Vec::new(),
@@ -1653,17 +1702,50 @@ impl TextureStreamer {
     }
 
     /// The texture has see-through pixels (None until it is decoded): the
-    /// build floater's "Alpha mode" is only offered then.
+    /// build floater's "Alpha mode" is only offered then. The built-in
+    /// transparent texture is never downloaded. The Legacy Viewer preloads
+    /// `transparent.j2c` as RGBA (`LLViewerTextureList::doPreloadImages`,
+    /// llviewertexturelist.cpp) and `LLPanelFace::LLSelectedTE::getImageFormat`
+    /// (llpanelface.cpp) reports that as alpha, so the combo is offered.
     pub fn has_alpha(&self, id: &Uuid) -> Option<bool> {
+        if is_builtin_transparent(id) {
+            return Some(true);
+        }
         if !self.is_loaded(id) {
             return None;
         }
         Some(self.entries.get(id)?.alpha != AlphaKind::Opaque)
     }
 
+    /// The texture has an alpha channel, whatever its texels hold (None until
+    /// it is decoded): the build floater's "Alpha mode" is offered then, and
+    /// a face without a material defaults to Alpha blending, as
+    /// LLPanelFace::LLSelectedTE::getImageFormat reads the image format. A
+    /// channel of flat alpha 250-254 or 255 is still classed opaque for the
+    /// render passes, `has_alpha`.
+    pub fn has_alpha_channel(&self, id: &Uuid) -> Option<bool> {
+        if !self.is_loaded(id) {
+            return None;
+        }
+        let slot = self.entries.get(id)?.slot as usize;
+        Some(self.alpha_channel_by_slot.get(slot).copied().unwrap_or(false))
+    }
+
+    /// Alpha mode of a face with no stored material, from the format of its
+    /// diffuse (LLPanelFace::createDefaultMaterial): one rule for the build
+    /// panel and for a local normal or specular map's material.
+    pub fn default_alpha_mode(&self, id: &Uuid) -> u8 {
+        if self.has_alpha_channel(id).unwrap_or(false) {
+            alpha_mode::BLEND
+        } else {
+            alpha_mode::NONE
+        }
+    }
+
     pub fn describe(&self, id: &Uuid) -> String {
         match self.entries.get(id) {
             None if is_builtin_transparent(id) => "built-in transparent, never downloaded".into(),
+            None if *id == aurora_prim::te::IMG_DEFAULT => "built-in grey, never downloaded".into(),
             None => "not requested".into(),
             Some(e) => format!(
                 "{} bytes{}, decoded {:?}, want {}, alpha {:?}, failures {}{}{}{}{}{}",
@@ -1681,6 +1763,7 @@ impl TextureStreamer {
                     .unwrap_or_default(),
                 match &e.source {
                     TexSource::Bake { .. } => ", bake service",
+                    TexSource::Host { .. } => ", host bake",
                     TexSource::Asset => "",
                 },
                 e.last_error
@@ -1704,7 +1787,7 @@ impl TextureStreamer {
     /// Diagnostic: why a face drawn with `slot` for texture `id` would not
     /// show that texture (None when it should).
     pub fn face_problem(&self, id: &Uuid, slot: u32, table: &aurora_render::textures::TextureTable) -> Option<&'static str> {
-        if id.is_nil() || *id == aurora_prim::te::BLANK_TEXTURE || is_builtin_transparent(id) || self.local_slots.contains_key(id) {
+        if reserved_slot(id).is_some() || self.local_slots.contains_key(id) {
             return None;
         }
         let Some(e) = self.entries.get(id) else {
@@ -1765,14 +1848,8 @@ impl TextureStreamer {
     }
 
     pub fn acquire(&mut self, renderer: &mut Renderer, id: Uuid, source: TexSource) -> u32 {
-        if id.is_nil() {
-            return aurora_render::textures::WHITE;
-        }
-        if is_builtin_transparent(&id) {
-            return aurora_render::textures::TRANSPARENT;
-        }
-        if id == aurora_prim::te::BLANK_TEXTURE {
-            return aurora_render::textures::WHITE;
+        if let Some(slot) = reserved_slot(&id) {
+            return slot;
         }
         if let Some(slot) = self.acquire_known(id, &source) {
             return slot;
@@ -1848,13 +1925,14 @@ impl TextureStreamer {
     /// holds is forgotten by `update`, at once or, while a disk read, a
     /// decode or a download of it is under way, once that is over (its
     /// result would bring the old data back). Built-in textures (blank,
-    /// transparent, those of the demo) are left alone, as Firestorm leaves
-    /// IMG_DEFAULT and its default textures. Returns whether it was asked.
+    /// transparent, the flat grey of IMG_DEFAULT, those of the demo) are
+    /// left alone, as the Legacy Viewer leaves IMG_DEFAULT and its default
+    /// textures. Returns whether it was asked.
     pub fn refresh(&mut self, id: &Uuid) -> bool {
         if self.legacy_bump_entries.contains_key(id) {
             return false; // The face also refreshes its real height source.
         }
-        if id.is_nil() || is_builtin_transparent(id) || *id == aurora_prim::te::BLANK_TEXTURE || self.local_slots.contains_key(id) {
+        if reserved_slot(id).is_some() || self.local_slots.contains_key(id) {
             return false;
         }
         match self.entries.get_mut(id) {
@@ -2129,6 +2207,17 @@ impl TextureStreamer {
         e.unused_since = None;
         if e.source == TexSource::Asset && *source != TexSource::Asset {
             e.source = source.clone();
+        } else if let (TexSource::Host { region }, TexSource::Host { region: now }) = (&mut e.source, source) {
+            // The avatar's simulator changed (a teleport or a crossing): an
+            // unfinished bake is asked of the new one, and one the old region
+            // did not have may be there.
+            if *region != *now && !e.complete {
+                *region = *now;
+                if e.gone {
+                    e.gone = false;
+                    e.failures = 0;
+                }
+            }
         }
         Self::settle(&mut self.todo, &mut self.counts, id, e);
         Some(e.slot)
@@ -2235,12 +2324,62 @@ impl TextureStreamer {
         )
     }
 
-    /// Keep a texture resident and deliver a small RGBA copy for the UI.
+    /// Keep a texture resident and deliver a small RGBA copy for the UI,
+    /// until nothing asks for it any more (`keep_ui_image` once the copy is
+    /// taken): the copy lives on in egui, and a texture window that streams
+    /// the same texture finer goes on asking.
     pub fn want_ui_image(&mut self, renderer: &mut Renderer, id: Uuid, jobs: &Jobs) {
         if !id.is_nil() {
             self.ui_permanent.insert(id);
+            self.ui_asked.insert(id, Instant::now());
         }
         self.want_transient_ui_image(renderer, id, jobs);
+    }
+
+    /// A UI user still shows `id`, whose copy it has. A window opened again
+    /// on a copy that outlived its interest takes the texture back: a
+    /// preview only streams finer what something references.
+    pub fn keep_ui_image(&mut self, renderer: &mut Renderer, id: Uuid) {
+        if id.is_nil() || self.hold_ui_image(&id) {
+            return;
+        }
+        self.ui_permanent.insert(id);
+        self.ui_asked.insert(id, Instant::now());
+        self.take_ui_interest(renderer, id);
+        self.note_usage_fixed(&id, 256.0);
+    }
+
+    /// Renews the interest in `id`, if it has one.
+    fn hold_ui_image(&mut self, id: &Uuid) -> bool {
+        let asked = self.ui_asked.get_mut(id);
+        let held = asked.is_some();
+        if let Some(asked) = asked {
+            *asked = Instant::now();
+        }
+        held
+    }
+
+    /// The UI users that stopped asking let go of their textures, which
+    /// then live as any other: lowered under memory pressure, evicted once
+    /// unused, read again from the disk cache at the next `want_ui_image`.
+    fn lapse_ui_images(&mut self, now: Instant) {
+        let lapsed: Vec<Uuid> = self
+            .ui_asked
+            .iter()
+            .filter(|(_, asked)| now.duration_since(**asked) >= UI_ASK_LAPSE)
+            .map(|(id, _)| *id)
+            .collect();
+        for id in lapsed {
+            self.release_ui_image(&id);
+        }
+    }
+
+    /// The UI's copy of `id` is gone: the next `want_ui_image` delivers one
+    /// again, which a texture still wanted would not.
+    pub fn release_ui_image(&mut self, id: &Uuid) {
+        self.ui_asked.remove(id);
+        self.ui_permanent.remove(id);
+        self.release_transient_ui_image(id);
     }
 
     /// The inventory hover cache owns one bounded, releasable UI interest.
@@ -2250,29 +2389,38 @@ impl TextureStreamer {
         if id.is_nil() {
             return;
         }
-        if self.ui_wanted.insert(id) {
-            // Reserved textures bypass asset streaming and therefore never
-            // reach the upload callback that normally prepares UI images.
-            if is_builtin_transparent(&id) || id == aurora_prim::te::BLANK_TEXTURE {
-                self.ui_ready
-                    .insert(id, (1, 1, if is_builtin_transparent(&id) { vec![0; 4] } else { vec![255; 4] }));
-                return;
-            }
-            // procedural textures of the offline demo are never streamed
-            if let Some((px, w, h)) = crate::demo::local_texture(&id) {
-                self.ui_ready.insert(id, (w, h, px));
-                return;
-            }
-            let _ = self.acquire(renderer, id, TexSource::Asset);
-            if let Some(e) = self.entries.get_mut(&id) {
-                e.urgent = true;
-            }
+        if self.take_ui_interest(renderer, id) {
+            return;
         }
         if !self.ui_ready.contains_key(&id) {
             let source = self.preview_source(&id);
             self.ui_previews.request(id, source, jobs);
         }
         self.note_usage_fixed(&id, 256.0);
+    }
+
+    /// The one streamer reference of the UI. True for an image that is not
+    /// streamed, whose pixels are ready at once.
+    fn take_ui_interest(&mut self, renderer: &mut Renderer, id: Uuid) -> bool {
+        if !self.ui_wanted.insert(id) {
+            return false;
+        }
+        // Reserved textures bypass asset streaming and therefore never
+        // reach the upload callback that normally prepares UI images.
+        if let Some(rgba) = reserved_preview(&id) {
+            self.ui_ready.insert(id, (1, 1, rgba.to_vec()));
+            return true;
+        }
+        // procedural textures of the offline demo are never streamed
+        if let Some((px, w, h)) = crate::demo::local_texture(&id) {
+            self.ui_ready.insert(id, (w, h, px));
+            return true;
+        }
+        let _ = self.acquire(renderer, id, TexSource::Asset);
+        if let Some(e) = self.entries.get_mut(&id) {
+            e.urgent = true;
+        }
+        false
     }
 
     pub fn release_transient_ui_image(&mut self, id: &Uuid) {
@@ -2316,6 +2464,7 @@ impl TextureStreamer {
     }
 
     pub fn refine_ui_image_size(&mut self, id: Uuid, have: (u32, u32), jobs: &Jobs) {
+        self.hold_ui_image(&id);
         self.note_usage_fixed(&id, 256.0);
         if self.ui_ready.contains_key(&id) {
             return;
@@ -2350,20 +2499,22 @@ impl TextureStreamer {
 
     /// A face with this texture shows what it will show for now: loaded,
     /// not coming (`is_unavailable`), or drawn without a download (the
-    /// blank and the built-in transparent textures, local ones), which
-    /// never have an entry and so never count as loaded.
+    /// blank, the flat grey of IMG_DEFAULT and the built-in transparent
+    /// textures, local ones), which never have an entry and so never count
+    /// as loaded.
     pub fn is_settled(&self, id: &Uuid) -> bool {
-        id.is_nil()
-            || *id == aurora_prim::te::BLANK_TEXTURE
-            || is_builtin_transparent(id)
-            || self.local_slots.contains_key(id)
-            || self.is_loaded(id)
-            || self.is_unavailable(id)
+        reserved_slot(id).is_some() || self.local_slots.contains_key(id) || self.is_loaded(id) || self.is_unavailable(id)
     }
 
     /// Discard level on the GPU (None until the first upload).
     pub fn decoded_level(&self, id: &Uuid) -> Option<u8> {
         self.entries.get(id)?.decoded
+    }
+
+    /// The slot a texture currently draws with (it changes when a texture
+    /// met with the table full finally gets one). None: not tracked.
+    pub fn slot_of(&self, id: &Uuid) -> Option<u32> {
+        self.entries.get(id).map(|e| e.slot).or_else(|| self.local_slots.get(id).copied())
     }
 
     pub fn is_loaded(&self, id: &Uuid) -> bool {
@@ -2656,7 +2807,69 @@ impl TextureStreamer {
     fn url_for(&self, id: &Uuid, e: &Entry, viewer_asset: Option<&str>) -> Option<String> {
         match &e.source {
             TexSource::Bake { url } => Some(url.clone()),
+            // The simulator is asked over UDP (`note_host_image`), never HTTP.
+            TexSource::Host { .. } => None,
             TexSource::Asset => viewer_asset.map(|base| asset_url(base, "texture_id", id)),
+        }
+    }
+
+    /// Host-bake requests gathered by the last `update`. `Some` when the list
+    /// is non-empty, or when the previous frame had one, so a bake that
+    /// dropped out is cancelled.
+    pub fn take_host_wants(&mut self) -> Option<Vec<aurora_net::image_udp::Want>> {
+        let wants = std::mem::take(&mut self.host_wants);
+        let live = !wants.is_empty();
+        let send = live || self.host_live;
+        self.host_live = live;
+        send.then_some(wants)
+    }
+
+    /// Bytes of a host bake, or `None` when the simulator does not have it.
+    /// Missing is sticky: no ten-minute retry (that retry is the HTTP 404
+    /// path). The bytes take the same decode path as a finished HTTP body.
+    pub fn note_host_image(&mut self, id: Uuid, bytes: Option<Vec<u8>>) {
+        let Some(e) = self.entries.get_mut(&id) else {
+            return;
+        };
+        if !matches!(e.source, TexSource::Host { .. }) {
+            return;
+        }
+        e.fetching = false;
+        let mut unavailable = false;
+        let mut dirty = false;
+        match bytes {
+            None => {
+                let was = e.unavailable();
+                e.gone = true;
+                e.retry_at = None;
+                e.failures = e.failures.max(1);
+                unavailable = !was && e.unavailable();
+                log::info!("texture {id} host bake missing (ImageNotInDatabase)");
+            }
+            Some(bytes) => {
+                e.data = Arc::new(bytes);
+                e.complete = true;
+                e.gone = false;
+                e.retry_at = None;
+                e.failures = 0;
+                e.last_error = None;
+                e.error_logged = false;
+                if e.info.is_none() {
+                    e.info = aurora_assets::j2k_info(&e.data);
+                    e.want_for_its_size();
+                }
+                if !e.dirty_cache {
+                    e.dirty_cache = true;
+                    dirty = true;
+                }
+            }
+        }
+        Self::settle(&mut self.todo, &mut self.counts, id, e);
+        if unavailable {
+            self.unavailable.push(id);
+        }
+        if dirty {
+            self.dirty.push(id);
         }
     }
 
@@ -2704,6 +2917,7 @@ impl TextureStreamer {
             forgotten,
             trash,
             legacy_bump_entries,
+            host_wants,
             ..
         } = self;
         if *bc7_cache && cache_writer.is_none() {
@@ -2840,8 +3054,31 @@ impl TextureStreamer {
                     }
                 }
                 // 2. fetch more
+                // LLVOAvatar::getImage (llvoavatar.cpp): no appearance URL, so
+                // the bake is RequestImage to the object host, not ViewerAsset.
+                // fetching stays false: a host bake's priority is sent again
+                // as the view changes, and that flag would skip this visit.
+                if let TexSource::Host { region } = e.source {
+                    if !e.gone && !e.complete {
+                        host_wants.push(aurora_net::image_udp::Want {
+                            region,
+                            image: id,
+                            // Always the whole file. A simulator stops at the
+                            // packet of the level asked (OpenSim J2KImage
+                            // m_stopPacket) while the header still counts every
+                            // packet, and the bytes here are decoded only once
+                            // complete. A bake is small; the Legacy Viewer's
+                            // partial levels are not kept for it.
+                            discard: 0,
+                            priority: e.px_now(),
+                            bake: true,
+                        });
+                    }
+                    return;
+                }
                 let Some(url) = (match &e.source {
                     TexSource::Bake { url } => Some(url.clone()),
+                    TexSource::Host { .. } => None,
                     TexSource::Asset => viewer_asset.map(|base| asset_url(base, "texture_id", &id)),
                 }) else {
                     return;
@@ -3089,6 +3326,7 @@ impl TextureStreamer {
                 }
                 let source = match e.source {
                     TexSource::Bake { .. } => " (bake service)",
+                    TexSource::Host { .. } => " (host bake)",
                     TexSource::Asset => "",
                 };
                 if e.error_logged {
@@ -3574,6 +3812,7 @@ impl TextureStreamer {
             return;
         }
         self.last_maintenance = now;
+        self.lapse_ui_images(now);
         self.report_slotless(renderer.textures.capacity());
         // (a texture refused by a full video memory that is no longer
         // wanted at that level, or gone, waits no more)
@@ -4459,6 +4698,16 @@ mod tests {
     }
 
     #[test]
+    fn builtin_transparent_texture_has_alpha_before_it_is_loaded() {
+        let textures = TextureStreamer::new(PathBuf::new());
+        assert_eq!(textures.has_alpha(&aurora_prim::te::TRANSPARENT_TEXTURE), Some(true));
+        assert_eq!(textures.has_alpha(&super::super::avatar::IMG_INVISIBLE), Some(true));
+        assert_eq!(textures.has_alpha(&aurora_prim::te::WATER_EXCLUSION_TEXTURE), Some(true));
+        assert_eq!(textures.has_alpha(&Uuid::nil()), None);
+        assert_eq!(textures.has_alpha(&aurora_prim::te::BLANK_TEXTURE), None);
+    }
+
+    #[test]
     fn pick_mask_threshold_repeated_uvs_and_invalid_pixels() {
         let mut rgba = vec![0; 4 * 4 * 4];
         rgba[(3 * 4) * 4 + 3] = 32;
@@ -4578,6 +4827,44 @@ mod tests {
             streamer.release_transient_ui_image(&image);
             assert_eq!(streamer.entries[&image].refs, refs, "release is idempotent");
         }
+    }
+
+    #[test]
+    fn a_ui_image_nothing_asks_for_any_more_lets_go_of_its_texture() {
+        let now = Instant::now();
+        let (kept, left, in_world) = (Uuid::from_u128(1), Uuid::from_u128(2), Uuid::from_u128(3));
+        let e = |refs| {
+            let mut e = entry(Some(2), 256.0);
+            e.refs = refs;
+            e.urgent = true;
+            e
+        };
+        let mut streamer = pressed(0, vec![(kept.as_u128(), e(1)), (left.as_u128(), e(1)), (in_world.as_u128(), e(2))]);
+        let asked = now - UI_ASK_LAPSE;
+        for id in [kept, left, in_world] {
+            streamer.ui_wanted.insert(id);
+            streamer.ui_permanent.insert(id);
+            streamer.ui_asked.insert(id, asked);
+            streamer.ui_ready.insert(id, (1, 1, vec![255; 4]));
+        }
+        streamer.ui_asked.insert(kept, now);
+        streamer.lapse_ui_images(now);
+        assert!(streamer.ui_wanted.contains(&kept) && streamer.ui_permanent.contains(&kept));
+        assert_eq!(streamer.entries[&kept].refs, 1);
+        assert!(streamer.ui_ready.contains_key(&kept));
+        for id in [left, in_world] {
+            assert!(!streamer.ui_wanted.contains(&id) && !streamer.ui_permanent.contains(&id));
+            assert!(!streamer.ui_asked.contains_key(&id) && !streamer.ui_ready.contains_key(&id));
+        }
+        let (gone, seen) = (&streamer.entries[&left], &streamer.entries[&in_world]);
+        assert!(gone.refs == 0 && gone.unused_since.is_some() && !gone.urgent);
+        assert!(seen.refs == 1 && seen.unused_since.is_none(), "a world user keeps it");
+        assert!(streamer.hold_ui_image(&kept));
+        assert!(!streamer.hold_ui_image(&left), "lapsed: keep_ui_image takes the texture back");
+        assert!(!streamer.ui_asked.contains_key(&left));
+        streamer.release_ui_image(&kept);
+        assert!(!streamer.ui_wanted.contains(&kept), "the next want_ui_image delivers a copy again");
+        assert_eq!(streamer.entries[&kept].refs, 0);
     }
 
     #[test]
@@ -5047,6 +5334,27 @@ mod tests {
         assert_eq!(s.pressure.step(), step);
         s.entries.extend(entries.into_iter().map(|(id, e)| (Uuid::from_u128(id), e)));
         s
+    }
+
+    /// Alpha mode follows the format, the passes follow the texels: flat
+    /// alpha 250-254 is an alpha channel classed opaque.
+    #[test]
+    fn an_alpha_channel_of_opaque_texels_is_an_alpha_channel() {
+        let mut s = TextureStreamer::new(PathBuf::new());
+        let (id, slot) = (Uuid::from_u128(1), entry(None, 0.0).slot as usize);
+        s.alpha_channel_by_slot = vec![false; slot + 1];
+        s.entries.insert(id, entry(None, 0.0));
+        assert_eq!(s.has_alpha_channel(&id), None, "not decoded yet");
+        assert_eq!(s.default_alpha_mode(&id), alpha_mode::NONE, "not decoded yet");
+        s.entries.insert(id, entry(Some(0), 0.0));
+        assert_eq!(s.has_alpha_channel(&id), Some(false), "RGB");
+        assert_eq!(s.default_alpha_mode(&id), alpha_mode::NONE, "RGB");
+        s.alpha_channel_by_slot[slot] = true;
+        assert_eq!(s.entries[&id].alpha, AlphaKind::Opaque);
+        assert_eq!(s.has_alpha_channel(&id), Some(true), "RGBA, opaque texels");
+        assert_eq!(s.has_alpha(&id), Some(false));
+        assert_eq!(s.default_alpha_mode(&id), alpha_mode::BLEND, "RGBA, opaque texels");
+        assert_eq!(s.has_alpha_channel(&Uuid::from_u128(2)), None, "unknown");
     }
 
     #[test]
@@ -6033,6 +6341,40 @@ mod tests {
     }
 
     #[test]
+    fn a_host_bake_is_not_fetched_over_http() {
+        let mut b = RefreshBench::new();
+        let id = Uuid::from_u128(0x2860);
+        let mut e = entry(None, 100.0);
+        e.source = TexSource::Host { region: 42 };
+        e.want = 3;
+        e.cache_state = 2;
+        e.queued = true;
+        b.s.entries.insert(id, e);
+        b.s.todo.push(id);
+        b.s.update(&b.jobs, &b.fetcher, Some("https://assets.example/"));
+        let e = &b.s.entries[&id];
+        assert_eq!(e.fetch_key, 0);
+        assert!(b.s.by_fetch_key.is_empty());
+        assert!(!e.fetching);
+        let wants = b.s.take_host_wants().expect("a host bake is asked of its simulator");
+        assert_eq!(wants.len(), 1);
+        assert_eq!(wants[0].region, 42);
+        assert_eq!(wants[0].image, id);
+        assert!(wants[0].bake);
+        // the whole file, whatever level the view wants: a simulator stops at
+        // the level asked and the bytes are decoded only once complete
+        assert_eq!(wants[0].discard, 0);
+        b.s.note_host_image(id, None);
+        let e = &b.s.entries[&id];
+        assert!(e.gone);
+        assert!(e.retry_at.is_none());
+        b.s.update(&b.jobs, &b.fetcher, Some("https://assets.example/"));
+        let again = b.s.take_host_wants().unwrap_or_default();
+        assert!(again.is_empty());
+        assert_eq!(b.s.entries[&id].fetch_key, 0);
+    }
+
+    #[test]
     fn a_refresh_forgets_the_texture_and_its_files() {
         let mut b = RefreshBench::new();
         let id = Uuid::from_u128(0x7e57);
@@ -6090,6 +6432,28 @@ mod tests {
         // the invisible bake is never downloaded, so never refreshed either
         assert!(!b.s.refresh(&super::super::avatar::IMG_INVISIBLE));
         assert!(b.s.entries.is_empty());
+        // IMG_DEFAULT is painted locally (llviewertexture.cpp), so a refresh
+        // neither downloads it nor drops a cache file for it.
+        let grey = aurora_prim::te::IMG_DEFAULT;
+        assert_eq!(reserved_slot(&grey), Some(aurora_render::textures::MISSING));
+        assert!(!b.s.refresh(&grey));
+        assert!(b.s.forgotten.is_empty() && b.s.todo.is_empty() && !b.s.entries.contains_key(&grey));
+        assert!(b.s.is_settled(&grey));
+        let source = PreviewSource {
+            local: None,
+            bytes: Arc::default(),
+            jpeg: PathBuf::new(),
+            blocks: PathBuf::new(),
+            decoded: None,
+            size: None,
+            procedural: false,
+        };
+        assert!(source.clone().bake_ready(grey));
+        let baked = source.clone().bake_image(grey).expect("built-in grey");
+        assert_eq!(baked.size, [1, 1]);
+        assert_eq!(baked.rgba.as_ref(), &[0x7f, 0x7f, 0x7f, 0xff]);
+        assert_eq!(source.image(grey).expect("built-in grey").rgba.as_ref(), &[0x7f, 0x7f, 0x7f, 0xff]);
+        assert_eq!(b.s.describe(&grey), "built-in grey, never downloaded");
         // a texture not held: only its files go
         let id = Uuid::from_u128(0x7e59);
         for file in b.files(id) {

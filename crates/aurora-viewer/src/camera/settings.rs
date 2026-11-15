@@ -5,6 +5,19 @@
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoCameraMove {
+    PoserOpenFraming,
+    PoserSelectionFraming,
+    AutomaticTracking,
+    FollowEyes,
+    MovementReset,
+}
+
+pub fn camera_auto_move_allowed(posing: bool, setting: bool, _cause: AutoCameraMove) -> bool {
+    !posing || setting
+}
+
 #[cfg(test)]
 mod first_person_tests {
     use super::*;
@@ -33,17 +46,35 @@ mod first_person_tests {
     }
 
     #[test]
+    fn poser_camera_preference_gates_all_automatic_move_causes() {
+        for cause in [AutoCameraMove::PoserOpenFraming, AutoCameraMove::PoserSelectionFraming] {
+            assert!(camera_auto_move_allowed(true, true, cause));
+            assert!(!camera_auto_move_allowed(true, false, cause));
+            assert!(camera_auto_move_allowed(false, false, cause));
+        }
+        for cause in [
+            AutoCameraMove::AutomaticTracking,
+            AutoCameraMove::FollowEyes,
+            AutoCameraMove::MovementReset,
+        ] {
+            assert!(!camera_auto_move_allowed(true, false, cause));
+        }
+    }
+
+    #[test]
     fn first_person_options_default_off_and_keep_a_saved_choice() {
         let migrated: CameraSettings = serde_json::from_str("{}").unwrap();
         assert!(!migrated.show_avatar_in_mouselook);
         assert!(!migrated.mouselook_follow_eyes);
         assert_eq!(migrated.third_person_follow_joint, None);
         assert_eq!(migrated.third_person_follow_intensity, 100);
+        assert!(migrated.auto_move_while_posing);
         let chosen = CameraSettings {
             show_avatar_in_mouselook: true,
             mouselook_follow_eyes: true,
             third_person_follow_joint: Some(CameraFollowJoint::Head),
             third_person_follow_intensity: 75,
+            auto_move_while_posing: false,
             ..migrated
         };
         let saved = serde_json::to_string(&chosen).unwrap();
@@ -52,6 +83,7 @@ mod first_person_tests {
         assert!(loaded.mouselook_follow_eyes);
         assert_eq!(loaded.third_person_follow_joint, Some(CameraFollowJoint::Head));
         assert_eq!(loaded.third_person_follow_intensity, 75);
+        assert!(!loaded.auto_move_while_posing);
     }
 }
 
@@ -352,6 +384,11 @@ pub struct CameraSettings {
     pub offset_scale: f32,
     /// CameraAngle: vertical field of view, radians ("Viewing angle").
     pub fov: f32,
+    /// Distance of the near clip plane, metres ("Near clip"); limits
+    /// `NEAR_CLIP_RANGE`. Aurora addition: the Legacy Viewer has no
+    /// preference for it. The far plane is infinite (reverse-Z), and what
+    /// the Legacy Viewer calls the far clip is the Draw Distance.
+    pub near_clip: f32,
     /// ZoomTime: seconds of a transition between camera modes.
     pub zoom_time: f32,
     /// CameraPositionSmoothing ("Smoothing"), × 0.02 s half-life. Limits:
@@ -367,6 +404,8 @@ pub struct CameraSettings {
     pub disable_wheel_zoom: bool,
     /// ClickOnAvatarKeepsCamera.
     pub click_avatar_keeps_camera: bool,
+    /// Allow automatic camera movements initiated while editing a pose.
+    pub auto_move_while_posing: bool,
     /// FSResetCameraOnMovement.
     pub reset_on_movement: bool,
     /// FSResetCameraOnTP.
@@ -460,6 +499,7 @@ impl Default for CameraSettings {
             focus_offset,
             offset_scale,
             fov: DEFAULT_FOV,
+            near_clip: DEFAULT_NEAR_CLIP,
             zoom_time: 0.4,
             smoothing: 1.0,
             dynamic_strength: 2.0,
@@ -472,6 +512,7 @@ impl Default for CameraSettings {
             ignore_sim_constraints: false,
             disable_wheel_zoom: false,
             click_avatar_keeps_camera: false,
+            auto_move_while_posing: true,
             reset_on_movement: true,
             reset_on_teleport: true,
             reset_view_turns_avatar: false,
@@ -569,6 +610,13 @@ impl CameraSettings {
 pub const DEFAULT_FOV: f32 = std::f32::consts::FRAC_PI_3;
 /// LLViewerCamera min / max view angles of the "Viewing angle" slider.
 pub const FOV_RANGE: std::ops::RangeInclusive<f32> = 0.17..=2.97;
+/// The camera's near plane before the setting existed, kept as its default.
+pub const DEFAULT_NEAR_CLIP: f32 = 0.1;
+/// Limits of the "Near clip" slider: 1 cm lets a close-up or a build come
+/// within a hand of the lens; past 1 m the avatar is cut by the default
+/// third-person view. The projection is infinite reverse-Z, so the depth
+/// precision stays fine across the whole range.
+pub const NEAR_CLIP_RANGE: std::ops::RangeInclusive<f32> = 0.01..=1.0;
 /// CameraPositionSmoothing: the limits of Phototools' "Cam. Smoothing" slider
 /// (floater_phototools_camera.xml, floater_phototools.xml), up to a half-life
 /// of 6 s, and not the 9 of panel_preferences_move.xml: both sliders drive the
@@ -625,6 +673,7 @@ impl CameraSettings {
         let fix = |v: f32, lo: f32, hi: f32, def: f32| if v.is_finite() { v.clamp(lo, hi) } else { def };
         self.offset_scale = fix(self.offset_scale, 0.5, 3.0, d.offset_scale);
         self.fov = fix(self.fov, 5.0f32.to_radians(), 175.0f32.to_radians(), d.fov);
+        self.near_clip = fix(self.near_clip, *NEAR_CLIP_RANGE.start(), *NEAR_CLIP_RANGE.end(), d.near_clip);
         self.mouselook_zoom_fov = super::mouselook_zoom::sanitize(self.mouselook_zoom_fov);
         self.zoom_time = fix(self.zoom_time, 0.0, 4.0, d.zoom_time);
         self.smoothing = fix(self.smoothing, *SMOOTHING_RANGE.start(), *SMOOTHING_RANGE.end(), d.smoothing);
@@ -731,6 +780,34 @@ mod smoothing_range_tests {
         assert_eq!(saved(f32::NAN), CameraSettings::default().smoothing);
         // the default stays the Legacy Viewer's
         assert_eq!(CameraSettings::default().smoothing, 1.0);
+    }
+}
+
+#[cfg(test)]
+mod near_clip_tests {
+    use super::*;
+
+    #[test]
+    fn a_saved_near_clip_keeps_the_range_and_an_older_file_the_old_plane() {
+        let saved = |near_clip| {
+            CameraSettings {
+                near_clip,
+                ..Default::default()
+            }
+            .sanitized()
+            .near_clip
+        };
+        assert_eq!(saved(0.01), 0.01);
+        assert_eq!(saved(1.0), 1.0);
+        assert_eq!(saved(0.0), 0.01);
+        assert_eq!(saved(-3.0), 0.01);
+        assert_eq!(saved(5.0), 1.0);
+        assert_eq!(saved(f32::NAN), DEFAULT_NEAR_CLIP);
+        assert_eq!(saved(f32::INFINITY), DEFAULT_NEAR_CLIP);
+        // the plane every camera had before the setting
+        assert_eq!(CameraSettings::default().near_clip, 0.1);
+        let older: CameraSettings = serde_json::from_str(r#"{"fov":1.0}"#).expect("an older camera section");
+        assert_eq!(older.near_clip, DEFAULT_NEAR_CLIP);
     }
 }
 

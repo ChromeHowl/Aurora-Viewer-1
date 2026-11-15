@@ -14,6 +14,7 @@
 pub mod effects;
 pub mod extras;
 pub mod full_save;
+pub mod capture_360;
 pub mod gallery;
 pub mod inventory;
 pub mod isolate;
@@ -374,6 +375,8 @@ pub struct Settings {
     /// The viewfinder's custom modes C1 to C3: the names of the photo
     /// profiles pinned there (`saved`).
     pub banks: [Option<String>; 3],
+    /// The 360° snapshot window's (`capture_360`).
+    pub capture_360: capture_360::Settings,
 }
 
 impl Default for Settings {
@@ -410,6 +413,7 @@ impl Default for Settings {
             profiles: Default::default(),
             extras: Default::default(),
             banks: Default::default(),
+            capture_360: Default::default(),
         }
     }
 }
@@ -1114,8 +1118,9 @@ pub fn local_stamp() -> String {
     format!("{y:04}-{mo:02}-{d:02}_{h:02}{mi:02}{s:02}")
 }
 
+/// The local date and time: year, month, day, hour, minute, second.
 #[cfg(windows)]
-fn local_time() -> (u16, u16, u16, u16, u16, u16) {
+pub(crate) fn local_time() -> (u16, u16, u16, u16, u16, u16) {
     use windows_sys::Win32::System::SystemInformation::GetLocalTime;
     // SAFETY: GetLocalTime only fills the structure it is given.
     let t = unsafe {
@@ -1126,8 +1131,9 @@ fn local_time() -> (u16, u16, u16, u16, u16, u16) {
     (t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond)
 }
 
+/// The local date and time: year, month, day, hour, minute, second.
 #[cfg(not(windows))]
-fn local_time() -> (u16, u16, u16, u16, u16, u16) {
+pub(crate) fn local_time() -> (u16, u16, u16, u16, u16, u16) {
     // the TZ variable, else the system zone (/etc/localtime)
     civil(&chrono::Local::now())
 }

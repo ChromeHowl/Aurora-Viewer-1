@@ -172,7 +172,10 @@ fn status(classic: bool) -> StatusInfo<'static> {
         mouse_smoothing: false,
         release_keys: false,
         hide_selected: false,
+        animation_speed: 1.0,
+        slow_motion_animations: false,
         marketplace: false,
+        avatar_welcome: false,
         destinations: false,
         parcel_landmark: None,
         can_set_home: false,
@@ -362,6 +365,7 @@ fn frames_with(size: Vec2, classic: bool, at: PresencePosition, center: Center) 
                 restart: None,
                 presence_at: at,
                 classic_bars: classic,
+                still: false,
             };
             crate::ui::notification_center::show(ui.ctx(), &p, &icons, &world, &mut list, &mut history, &mut notif, &mut env, false);
         });
@@ -477,6 +481,7 @@ impl Clicks {
                 restart: None,
                 presence_at: at,
                 classic_bars: false,
+                still: false,
             };
             answers = crate::ui::notification_center::show(
                 ui.ctx(),

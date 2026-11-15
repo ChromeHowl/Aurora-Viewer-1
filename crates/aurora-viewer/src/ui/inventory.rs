@@ -40,7 +40,8 @@ pub use embedded::save_focused as document_save_focused;
 pub(crate) mod drag;
 mod embedded;
 mod folder_colors;
-pub use folder_colors::{demo as folder_colors_demo, demo_frame as folder_colors_demo_frame};
+pub(crate) mod hidden_folders;
+pub use folder_colors::{demo as folder_colors_demo, demo_frame as folder_colors_demo_frame, inherit as folder_colors_inherit};
 mod hover;
 pub use hover::demo_events as hover_demo_events;
 mod keyboard;
@@ -178,6 +179,7 @@ pub enum InvAction {
         resident: Uuid,
     },
     Preview(Uuid),
+    PreviewMany(Vec<Uuid>),
     /// Open a sky or water settings item in its editor (LLSettingsBridgeAction).
     EditEnvironment(Uuid),
     Gesture(crate::ui::gestures::Action),
@@ -196,6 +198,8 @@ pub enum InvAction {
     /// A sky, water or day for myself: its asset, flags and item.
     Environment(Uuid, u32, Uuid),
     EnvironmentParcel(Uuid),
+    /// Apply to myself and keep it for the parcel under the agent.
+    EnvironmentSaveParcel(Uuid, u32),
     ExportTextures {
         items: Vec<Uuid>,
         png: bool,
@@ -203,6 +207,8 @@ pub enum InvAction {
     /// Preferences › Confirmations / Inventory: stop asking before a Trash
     /// move (`DeleteItems` ignore box). Purge still always asks (#2344).
     StopConfirmingDelete,
+    /// A line in chat, for an inventory action asked from outside the window.
+    Notice(String),
     WearLibrary {
         item: Uuid,
         replace: bool,
@@ -368,8 +374,12 @@ impl Facts {
 pub enum EditDialog {
     Properties(Uuid),
     Discard(Uuid),
-    Share(Vec<Uuid>, Uuid),
+    /// Items to give, then one or more residents (LLAvatarActions::shareWithAvatars).
+    Share(Vec<Uuid>, Vec<Uuid>),
     Delete(Vec<Uuid>, bool),
+    /// Delete of a selection holding worn clothing or attachments: take them
+    /// off first, then move the selection to the Trash.
+    DetachDelete(Vec<Uuid>),
     Empty(Uuid),
     Ungroup(Uuid),
     ReplaceLinks(Box<replace_links::ReplaceLinks>),
@@ -423,6 +433,22 @@ pub struct InventoryWindow {
     pub additional: bool,
     pub state: Box<InventoryUi>,
     pub open: bool,
+}
+
+/// Whether an inventory window stays in the list this frame: open, the main
+/// panel, or closed with a document, confirmation or pending Detach and
+/// Delete of its own still running.
+fn keeps_window(w: &InventoryWindow) -> bool {
+    w.id == listings::PANEL
+        || w.open
+        || w.state.preview.is_some()
+        || w.state.dialog.is_some()
+        || w.state.move_to.is_some()
+        || w.state.thumbnail.item.is_some()
+        || w.state.bulk_permissions.active()
+        || w.state.detach_delete.is_some()
+        || w.state.protected_folders.open
+        || w.state.thumbnails_helper.open
 }
 
 /// The additional window's id: one at a time, its place and size kept
@@ -569,11 +595,20 @@ pub struct InventoryUi {
     /// "Do not show again" on the Delete confirmation (Trash moves only).
     delete_dont_ask: bool,
     pending_delete: Option<Box<delete::PendingDelete>>,
+    /// A confirmed Detach and Delete waiting for the items to come off.
+    detach_delete: Option<delete::DetachDelete>,
+    /// The open Detach and Delete confirmation came from the worn object's menu.
+    detach_from_world: bool,
     /// Last actual scroll offset and viewport height of this window's list.
     list_viewport: Option<(f32, f32)>,
     list_focus_frame: Option<u64>,
     /// Which row order the list drew last, for the work done outside it.
     shown_order: keyboard::ShownOrder,
+    /// The list's focus target that opened this document window, so closing
+    /// it hands the keyboard back there (see `clipboard::return_focus_to`).
+    document_owner: Option<egui::Id>,
+    /// Letters typed into the focused list (LLFolderView's type-ahead).
+    type_ahead: keyboard::TypeAhead,
     visible: Vec<Uuid>,
     pub clipboard: Vec<Uuid>,
     pub cut: bool,
@@ -597,6 +632,12 @@ pub struct InventoryUi {
     move_to: Option<move_to::MoveTo>,
     pub links_filter: Option<Uuid>,
     pub windows: Vec<InventoryWindow>,
+    pub(super) tab_hosts: super::preview_tabs::Hosts,
+    /// Properties asked for in a folder or additional window: answered by
+    /// the main inventory's state, which holds every Properties window
+    /// (`document.rs`, `answer_properties`).
+    pub(super) properties_asked: Vec<document::PropertiesAsk>,
+    pub(super) tab_host: Option<super::preview_tabs::View>,
     pub thumbnail: thumbnail::ThumbnailUi,
     hover: hover::State,
     pub share_picker: super::avatar_picker::AvatarPicker,
@@ -771,6 +812,13 @@ impl InventoryUi {
         }
     }
 
+    /// Hand the keyboard back to the list when a window it opened closes, as
+    /// `LLToastAlertPanel` restores the focus it saved (indra/newview,
+    /// lltoastalertpanel.cpp).
+    pub(crate) fn return_focus(&mut self, ctx: &egui::Context) {
+        clipboard::return_focus(ctx, self);
+    }
+
     /// RLVa's @showinv closes the additional window with the main one
     /// (RlvBehaviourToggleHandler<RLV_BHVR_SHOWINV>, rlvhandler.cpp).
     pub fn close_additional_window(&mut self) {
@@ -782,6 +830,7 @@ impl InventoryUi {
     /// LLFolderView::startRenamingSelectedItem: edit and select the name in place.
     pub fn begin_rename(&mut self, inv: &Inventory, id: Uuid) {
         self.keyboard_selection = false;
+        self.type_ahead.clear();
         self.selected = Some(id);
         self.selection.clear();
         self.selection.insert(id);
@@ -799,6 +848,22 @@ impl InventoryUi {
     /// show_item_original: clear filters, expand ancestors, select and scroll to the original.
     pub fn show_original(&mut self, inv: &Inventory, id: Uuid) {
         self.show_original_in(inv, id, 0);
+    }
+
+    /// "Detach and Delete" from the worn object's menu: ask the same
+    /// confirmation as Inventory's own entry, without opening the window.
+    /// Nothing opens while another dialog or a delete is under way; the
+    /// error says why it cannot be done, for chat.
+    pub fn ask_detach_delete(&mut self, inv: &Inventory, prefs: &InventoryPreferences, facts: &Facts, id: Uuid) -> Result<(), String> {
+        if self.dialog.is_some() || self.pending.is_some() || self.pending_delete.is_some() || self.detach_delete.is_some() {
+            return Ok(());
+        }
+        if id.is_nil() || !delete::detach_allowed(inv, &[id], prefs, facts) {
+            return Err(aurora_i18n::tr!("ui-inventory-delete-detach-cannot").into());
+        }
+        self.detach_from_world = true;
+        self.dialog = Some(EditDialog::DetachDelete(vec![id]));
+        Ok(())
     }
 
     fn show_original_in(&mut self, inv: &Inventory, id: Uuid, tab: usize) {
@@ -990,6 +1055,7 @@ impl InventoryUi {
     fn select(&mut self, ui: &egui::Ui, id: Uuid, secondary: bool) {
         clipboard::request_focus(ui, self);
         self.keyboard_selection = false;
+        self.type_ahead.clear();
         if secondary && self.selection.contains(&id) {
             self.selected = Some(id);
             return;
@@ -1631,7 +1697,10 @@ fn request_search(inv: &mut Inventory, root: Uuid, st: &mut InventoryUi, prefs: 
             continue;
         }
         complete &= folder.state == FetchState::Fetched;
-        if matches!(folder.state, FetchState::Unknown | FetchState::Failed) && inv.queue.len() + requests.len() < 16 {
+        if !inv.too_big.contains(&id)
+            && matches!(folder.state, FetchState::Unknown | FetchState::Failed)
+            && inv.queue.len() + requests.len() < 16
+        {
             requests.push(id);
         }
         todo.extend(folder.children.iter().copied());
@@ -1663,7 +1732,7 @@ fn search_scroll(
     if let Some(offset) = st.scroll_restore.take() {
         scroll = scroll.vertical_scroll_offset(offset);
     }
-    let row_height = rows::row_height(st);
+    let row_height = rows::row_height(ui, p, st);
     if navigated {
         st.scroll_hold = None;
     }
@@ -1709,6 +1778,7 @@ fn search_rows(
     range: std::ops::Range<usize>,
 ) {
     tree_spacing(ui);
+    let row_height = rows::row_height(ui, p, st);
     // Keep the complete order for Shift selection, while drawing only rows
     // intersecting the viewport. No arbitrary 500-item result limit.
     let rows = st.result_tree.rows[range].to_vec();
@@ -1730,8 +1800,12 @@ fn search_rows(
             );
             st.result_width = st.result_width.max(width);
         }
-        ui.horizontal(|ui| {
-            ui.set_min_height(rows::row_height(st));
+        // A Legacy row's own row centres its contents; this one places it at
+        // the top, so the row is as tall as it. Centred here, a row that starts
+        // at the theme's interact height sits lower and grows past `row_height`.
+        let legacy = st.aurora.is_none();
+        let draw = |ui: &mut egui::Ui| {
+            ui.set_min_height(row_height);
             ui.spacing_mut().item_spacing.x = 0.0;
             ui.add_space(row.depth.min(24) as f32 * ui.spacing().indent);
             if row.folder {
@@ -1743,7 +1817,12 @@ fn search_rows(
             } else {
                 item_row(ui, p, icons, inv, &row.id, st, prefs, facts, actions);
             }
-        });
+        };
+        if legacy {
+            ui.horizontal_top(draw);
+        } else {
+            ui.horizontal(draw);
+        }
     }
 }
 
@@ -2209,11 +2288,13 @@ pub fn show(
     // windows and dialogs that show them, not every frame while closed.
     let shown = *open
         || st.dialog.is_some()
+        || st.detach_delete.is_some()
         || st.move_to.is_some()
         || st.demo_menu.is_some()
         || st.windows.iter().any(|w| {
             w.id != listings::PANEL
                 || w.state.dialog.is_some()
+                || w.state.detach_delete.is_some()
                 || w.state.move_to.is_some()
                 || w.state.thumbnail.item.is_some()
                 || w.state.bulk_permissions.active()
@@ -2247,12 +2328,14 @@ pub fn show(
     // asked of the app (issue #1197)
     let mut wanted = Vec::new();
     for state in std::iter::once(&*st).chain(st.windows.iter().map(|w| &*w.state)) {
-        if let Some(EditDialog::Share(_, resident)) = &state.dialog {
-            world.social.want_name(*resident);
-            facts.names.insert(*resident, world.social.name_of(resident));
-            wanted.push(*resident);
-            if let Some(t) = pics.get(resident) {
-                facts.pictures.insert(*resident, t.clone());
+        if let Some(EditDialog::Share(_, residents)) = &state.dialog {
+            for resident in residents {
+                world.social.want_name(*resident);
+                facts.names.insert(*resident, world.social.name_of(resident));
+                wanted.push(*resident);
+                if let Some(t) = pics.get(resident) {
+                    facts.pictures.insert(*resident, t.clone());
+                }
             }
         }
     }
@@ -2292,6 +2375,7 @@ pub fn show(
     let show_inv = !world.rlva.has("showinv");
     let inv = &mut world.inventory;
     context_catalog::process_deferred(inv, st, prefs, &facts, &mut actions);
+    delete::finish_detach(inv, st, prefs, &facts, &mut actions);
     bulk_permissions::show(ctx, p, inv, st, world.agent_id, &mut actions);
     protected_folders::show(ctx, p, inv, st, prefs, show_inv);
     thumbnails_helper::show(ctx, p, inv, st, &mut actions);
@@ -2380,22 +2464,51 @@ pub fn show(
         &mut actions,
     );
     if let Some(residents) = st.share_picker.show(ctx, p, world)
-        && let Some(resident) = residents.first()
+        && !residents.is_empty()
     {
-        st.dialog = Some(EditDialog::Share(std::mem::take(&mut st.share_items), *resident));
+        st.dialog = Some(EditDialog::Share(std::mem::take(&mut st.share_items), residents));
     }
     let mut windows = std::mem::take(&mut st.windows);
+    for window in &mut windows {
+        if let Some(view) = &mut window.state.tab_host {
+            st.tab_hosts.report(view);
+        }
+    }
+    st.tab_hosts.update(windows.iter().filter_map(|window| {
+        let item = window.state.preview.or(match window.state.dialog {
+            Some(EditDialog::Properties(id)) => Some(id),
+            _ => None,
+        })?;
+        let item = world.inventory.items.get(&item)?;
+        Some(super::preview_tabs::Member {
+            key: window.id,
+            name: item.name.clone(),
+            dirty: window.state.preview_dirty,
+            enabled: window.state.preview.is_none() || world.inventory.can_preview(item.asset_type),
+        })
+    }));
+    // Keep selection fixed through this frame: a click in an earlier editor
+    // must not draw a second body for the same host later in this loop.
+    let mut tab_views: std::collections::HashMap<_, _> = windows
+        .iter()
+        .filter_map(|window| st.tab_hosts.view(window.id).map(|view| (window.id, view)))
+        .collect();
     let mut spawned = Vec::new();
+    let mut asked = Vec::new();
     for w in &mut windows {
         if !w.open {
             w.state.pending_delete = None;
         }
         if !w.root.is_nil() && !world.inventory.folders.contains_key(&w.root) {
             w.open = false;
+            // what it was deleting went with its folder
+            w.state.detach_delete = None;
             w.state.menu_editor.finish_inventory_frame(ctx, &mut prefs.context_menus);
             continue;
         }
         w.state.ui_id = w.id;
+        w.state.tab_host = tab_views.remove(&w.id);
+        let tab_visible = w.state.tab_host.as_ref().is_none_or(|host| host.active());
         if w.id == listings::PANEL && w.state.fetch_all {
             fetch_whole_inventory(&mut world.inventory, &mut w.state);
         }
@@ -2507,21 +2620,24 @@ pub fn show(
         controls::dialogs(ctx, p, &mut w.state, prefs);
         folder_colors::show(ctx, p, &world.inventory, &mut w.state, prefs);
         context_catalog::process_deferred(&mut world.inventory, &mut w.state, prefs, &facts, &mut actions);
-        dialogs::show(ctx, p, icons, &world.inventory, &mut w.state, prefs, &facts, images, &mut actions);
-        move_to::show(ctx, p, icons, &mut world.inventory, &mut w.state, prefs, &facts, &mut actions);
-        dialogs::preview(
-            ctx,
-            p,
-            icons,
-            &world.inventory,
-            &world.inventory,
-            &mut w.state,
-            images,
-            prefs,
-            script_settings,
-            facts.god_level,
-            &mut actions,
-        );
+        delete::finish_detach(&world.inventory, &mut w.state, prefs, &facts, &mut actions);
+        if tab_visible {
+            dialogs::show(ctx, p, icons, &world.inventory, &mut w.state, prefs, &facts, images, &mut actions);
+            move_to::show(ctx, p, icons, &mut world.inventory, &mut w.state, prefs, &facts, &mut actions);
+            dialogs::preview(
+                ctx,
+                p,
+                icons,
+                &world.inventory,
+                &world.inventory,
+                &mut w.state,
+                images,
+                prefs,
+                script_settings,
+                facts.god_level,
+                &mut actions,
+            );
+        }
         w.state.thumbnail.show(
             ctx,
             p,
@@ -2535,9 +2651,9 @@ pub fn show(
             &mut actions,
         );
         if let Some(residents) = w.state.share_picker.show(ctx, p, world)
-            && let Some(resident) = residents.first()
+            && !residents.is_empty()
         {
-            w.state.dialog = Some(EditDialog::Share(std::mem::take(&mut w.state.share_items), *resident));
+            w.state.dialog = Some(EditDialog::Share(std::mem::take(&mut w.state.share_items), residents));
         }
         st.wanted_images.extend(w.state.wanted_images.drain());
         st.wanted_hover_images.extend(w.state.wanted_hover_images.drain());
@@ -2550,23 +2666,21 @@ pub fn show(
         if w.id != listings::PANEL {
             w.state.menu_editor.finish_inventory_frame(ctx, &mut prefs.context_menus);
         }
+        if let Some(view) = &mut w.state.tab_host {
+            st.tab_hosts.report(view);
+        }
+        st.tab_hosts.append(&mut w.state.tab_hosts);
         spawned.append(&mut w.state.windows);
+        asked.append(&mut w.state.properties_asked);
     }
     // Documents and confirmations outlive the inventory window which opened
     // them, just like the main inventory's auxiliary floaters.
-    windows.retain(|w| {
-        w.id == listings::PANEL
-            || w.open
-            || w.state.preview.is_some()
-            || w.state.dialog.is_some()
-            || w.state.move_to.is_some()
-            || w.state.thumbnail.item.is_some()
-            || w.state.bulk_permissions.active()
-            || w.state.protected_folders.open
-            || w.state.thumbnails_helper.open
-    });
+    windows.retain(keeps_window);
     windows.append(&mut spawned);
     st.windows = windows;
+    for ask in asked {
+        st.answer_properties(ctx, ask);
+    }
     if let Some(id) = st.demo_menu {
         let mut menu_open = true;
         super::menu::popup_at(
@@ -2590,6 +2704,8 @@ pub fn show(
 mod delete_tests;
 #[cfg(test)]
 mod drag_tests;
+#[cfg(test)]
+mod tab_tests;
 #[cfg(test)]
 mod texture_tests;
 
@@ -4901,7 +5017,7 @@ mod tests {
         outside.parent = Uuid::from_u128(8002);
         inv.add_items(vec![nested, outside]);
         let mut st = InventoryUi {
-            search: "instructions".into(),
+            search: inv.items[&Uuid::from_u128(8103)].name.clone(),
             ..Default::default()
         };
         folder_window_frame(&ctx, &mut inv, root, &mut st);

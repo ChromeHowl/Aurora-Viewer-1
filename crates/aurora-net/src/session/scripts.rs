@@ -356,6 +356,7 @@ mod tests {
             far: FarStep::new(Instant::now()),
             refuse_neighbours: false,
             fov: DEFAULT_FOV,
+            interest_list: InterestListMode::Default,
             logout_started: None,
             finished: false,
             agent_moved: false,
@@ -384,6 +385,7 @@ mod tests {
             attach_queue: Default::default(),
             inventory_merchant_pending: false,
             next_inventory_callback: 0,
+            images: Default::default(),
         };
         for (object, sim) in [(Uuid::nil(), &main), (Uuid::from_u128(3), &neighbour)] {
             let target = ScriptTarget {

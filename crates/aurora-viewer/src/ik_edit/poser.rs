@@ -87,6 +87,8 @@ pub struct Config {
     pub confirm_overwrite: bool,
     /// Ask before a close that stops the pose and loses its edited joints.
     pub confirm_close: bool,
+    /// Move a position-edited joint directly instead of solving its chain.
+    pub move_joint_only: bool,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -106,12 +108,12 @@ impl Default for Config {
             unlock_pelvis: false,
             confirm_overwrite: false,
             confirm_close: true,
+            move_joint_only: false,
         }
     }
 }
-/// What the poser window asks of the app, which owns the consent state and
-/// the Preferences: the subject menu lists the nearby avatars with their
-/// consent action.
+/// Work the poser window asks of the app, which owns consent, preferences,
+/// and simulator object-property requests.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Request {
     Ask(Uuid),
@@ -121,6 +123,8 @@ pub enum Request {
     RepairBridge,
     /// Show the inventory folder of the uploaded poses in the inventory window.
     RevealCreatedPoses,
+    /// Fetch the simulator name for an owned animesh shown in the subject picker.
+    ObjectName(Uuid),
 }
 /// Which side of the paired joints the window edits: the Côté selector. In
 /// `Mirror` the left joint is edited and its counterpart follows (the
@@ -139,6 +143,9 @@ pub(super) struct State {
     settings_loaded: bool,
     subject: Uuid,
     sessions: HashMap<Uuid, data::Session>,
+    subject_names: HashMap<Uuid, String>,
+    subject_name_requested: HashMap<Uuid, Instant>,
+    subject_skip_logged: HashMap<Uuid, Instant>,
     pub(super) transform: usize,
     delta: bool,
     settings_open: bool,
@@ -207,6 +214,10 @@ pub(super) struct State {
     /// the subject before).
     pick_for: Uuid,
     pick_drop: u8,
+    /// A newly selected pose joint asks the app to frame it once. Camera
+    /// ownership stays with App, which applies the user's preference.
+    focus_requested: Option<(usize, crate::camera::AutoCameraMove)>,
+    open_frame_pending: bool,
     /// The joints edited over every subject, counted as the window shows:
     /// what a close that stops the pose would lose.
     edited_total: usize,
@@ -317,6 +328,19 @@ impl State {
     }
 }
 impl Editor {
+    pub fn take_poser_focus_request(&mut self) -> Option<(usize, crate::camera::AutoCameraMove)> {
+        self.poser.focus_requested.take()
+    }
+    pub fn take_poser_focus(&mut self, world: &World) -> Option<(Vec3, crate::camera::AutoCameraMove)> {
+        let (bone, cause) = self.take_poser_focus_request()?;
+        Some((self.editor_frame(world)?.joints.get(bone)?.w_axis.truncate(), cause))
+    }
+    pub(crate) fn update_poser_subject_names(&mut self, props: &[aurora_net::build::ObjectProps]) {
+        for prop in props.iter().filter(|p| !p.name.trim().is_empty()) {
+            self.poser.subject_names.insert(prop.object_id, prop.name.clone());
+            self.poser.subject_name_requested.remove(&prop.object_id);
+        }
+    }
     pub(super) fn poser_edited(&self, bone: usize) -> bool {
         self.poser.active && self.poser.sessions.get(&self.poser.subject).is_some_and(|s| s.edited(bone))
     }
@@ -533,6 +557,7 @@ impl Editor {
             ignore_script_ik: true,
             poser: State {
                 active: true,
+                open_frame_pending: true,
                 name: aurora_i18n::tr!("poser-new-name").to_string(),
                 names,
                 priority: 4,
@@ -705,6 +730,14 @@ impl Editor {
             }
             if mode == "poser-connected" {
                 self.pose_operation(rig, &pose, controls::Operation::TPose);
+            } else if mode == "poser-joint-off" {
+                self.toggle_pose_joint(rig.names["mHead"]);
+            } else if mode == "poser-finger-off" {
+                self.poser.group = 2;
+                self.set_pose_side(Side::Mirror, rig, &pose);
+                let bone = rig.names["mHandIndex1Left"];
+                self.select(bone, rig, &pose);
+                self.toggle_pose_joint(bone);
             } else if mode == "poser-scale" {
                 self.poser.transform = 2;
             } else if mode == "poser-hands" {

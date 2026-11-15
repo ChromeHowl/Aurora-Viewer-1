@@ -7,6 +7,8 @@
 
 mod layout;
 
+pub use layout::{LayoutChange, Watch as LayoutWatch};
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use winit::event::MouseButton;
@@ -90,6 +92,15 @@ fn learned(k: &str) -> Option<String> {
     LEARNED.read().ok()?.as_ref()?.get(k).cloned()
 }
 
+/// The keyboard layout changed while the viewer runs: what the keys typed
+/// before no longer names them, the new layout's labels take over until a
+/// key is pressed again.
+fn forget_learned() {
+    if let Ok(mut m) = LEARNED.write() {
+        *m = None;
+    }
+}
+
 fn key_label(k: &str) -> String {
     match k {
         "AltLeft" | "AltRight" => return "ALT".into(),
@@ -112,6 +123,7 @@ fn key_label(k: &str) -> String {
         "ArrowRight" => aurora_i18n::tr!("keybinds-right-arrow"),
         "PageUp" => aurora_i18n::tr!("keybinds-previous-page"),
         "PageDown" => aurora_i18n::tr!("keybinds-next-page"),
+        // LLKeyboard names KEY_HOME "Home" (indra/llwindow/llkeyboard.cpp).
         "Home" => aurora_i18n::tr!("keybinds-origin"),
         "End" => aurora_i18n::tr!("keybinds-end-2"),
         "Insert" => aurora_i18n::tr!("keybinds-insert"),
@@ -386,6 +398,13 @@ pub enum Action {
     CamPanRight,
     CamPanUp,
     CamPanDown,
+    CamRollLeft,
+    CamRollRight,
+    /// Catznip's Settings-MouseCam: the button held over the world takes
+    /// the camera, focused on the clicked point, until it is released
+    /// (app/mouse_cam.rs). Unbound by default: Preferences › Mouse and
+    /// keyboard gives it the middle button (`set_middle_mouse_camera`).
+    MouseCam,
     Chat,
     PushToTalk,
     ToggleMic,
@@ -536,6 +555,8 @@ pub fn is_held(a: Action) -> bool {
             | Action::CamPanRight
             | Action::CamPanUp
             | Action::CamPanDown
+            | Action::CamRollLeft
+            | Action::CamRollRight
             | Action::HudDrag
     )
 }
@@ -596,6 +617,9 @@ pub fn sections() -> &'static Vec<(&'static str, Vec<(Action, &'static str)>)> {
                     (Action::CamPanRight, aurora_i18n::tr!("keybinds-pan-view-right")),
                     (Action::CamPanUp, aurora_i18n::tr!("keybinds-pan-view-up")),
                     (Action::CamPanDown, aurora_i18n::tr!("keybinds-pan-view-down")),
+                    (Action::CamRollLeft, aurora_i18n::tr!("controls-roll-left")),
+                    (Action::CamRollRight, aurora_i18n::tr!("controls-roll-right")),
+                    (Action::MouseCam, aurora_i18n::tr!("keybinds-mouse-camera")),
                 ],
             ),
             (
@@ -732,6 +756,21 @@ fn kmod(code: KeyCode, ctrl: bool, shift: bool) -> Option<Binding> {
     })
 }
 
+/// The middle button, and Ctrl + the middle button (orbit on both axes):
+/// the Mouse Camera's bindings when the middle button moves the camera.
+fn middle_mouse_camera_bindings() -> [Option<Binding>; 2] {
+    let middle = Input::mouse(MouseButton::Middle);
+    [
+        middle.clone().map(Binding::plain),
+        middle.map(|input| Binding {
+            input,
+            ctrl: true,
+            shift: false,
+            alt: false,
+        }),
+    ]
+}
+
 /// Alt (+ Ctrl, + Shift) binding: Firestorm's third-person camera keys.
 fn kalt(code: KeyCode, ctrl: bool, shift: bool) -> Option<Binding> {
     Some(Binding {
@@ -744,7 +783,7 @@ fn kalt(code: KeyCode, ctrl: bool, shift: bool) -> Option<Binding> {
 
 impl Default for KeyBindings {
     fn default() -> Self {
-        Self::for_layout(layout::current())
+        Self::for_layout(&layout::current())
     }
 }
 
@@ -846,6 +885,9 @@ impl KeyBindings {
             (Action::CamPanRight, [kalt(K::ArrowRight, true, true), None]),
             (Action::CamPanUp, [kalt(K::ArrowUp, true, true), None]),
             (Action::CamPanDown, [kalt(K::ArrowDown, true, true), None]),
+            (Action::CamRollLeft, [k(K::KeyR), None]),
+            (Action::CamRollRight, [k(K::KeyT), None]),
+            (Action::MouseCam, [None, None]),
             (Action::Chat, [k(K::Enter), k(K::NumpadEnter)]),
             // menu_viewer.xml: Nearby Chat, shortcut="control|H" use_mac_ctrl="true"
             (Action::NearbyChat, [kmod(K::KeyH, true, false), None]),
@@ -1272,11 +1314,24 @@ impl EditHistory {
     }
 }
 
-/// The same logical letters/punctuation and non-Latin physical fallback as
-/// egui-winit, restricted to keys used by the fixed editing accelerators.
+/// Logical letters and punctuation used by the fixed editing accelerators,
+/// with the same non-Latin physical fallback as egui-winit. The number row
+/// and numpad 1–5 follow the key position instead. The Legacy Viewer's
+/// LLKeyboardWin32 constructor (indra/llwindow/llkeyboardwin32.cpp) maps
+/// `'0'..'9'` and numpad `0x60..0x69` by virtual key, and menu_viewer.xml
+/// binds the build tools to `control|1` through `control|5`. A French
+/// AZERTY layout types `'` on the 4 key; that character must not hide Create.
 pub fn native_shortcut_key(key: &winit::keyboard::Key, code: KeyCode) -> Option<egui::Key> {
     use egui::Key as E;
     use winit::keyboard::{Key, KeyCode as K, NamedKey};
+    match code {
+        K::Digit1 | K::Numpad1 => return Some(E::Num1),
+        K::Digit2 | K::Numpad2 => return Some(E::Num2),
+        K::Digit3 | K::Numpad3 => return Some(E::Num3),
+        K::Digit4 | K::Numpad4 => return Some(E::Num4),
+        K::Digit5 | K::Numpad5 => return Some(E::Num5),
+        _ => {}
+    }
     let logical = match key {
         Key::Character(letter) => E::from_name(letter),
         Key::Named(NamedKey::Escape) => Some(E::Escape),
@@ -1294,11 +1349,6 @@ pub fn native_shortcut_key(key: &winit::keyboard::Key, code: KeyCode) -> Option<
         K::KeyX => Some(E::X),
         K::KeyZ => Some(E::Z),
         K::KeyY => Some(E::Y),
-        K::Digit1 | K::Numpad1 => Some(E::Num1),
-        K::Digit2 | K::Numpad2 => Some(E::Num2),
-        K::Digit3 | K::Numpad3 => Some(E::Num3),
-        K::Digit4 | K::Numpad4 => Some(E::Num4),
-        K::Digit5 | K::Numpad5 => Some(E::Num5),
         K::Period | K::NumpadDecimal => Some(E::Period),
         K::Comma => Some(E::Comma),
         K::Escape => Some(E::Escape),
@@ -1382,12 +1432,22 @@ impl KeyBindings {
     /// the active layout (`for_layout`). A slot the user changed or cleared
     /// stays, and so does a default whose new key another action already uses.
     pub fn follow_layout_letters(&mut self) {
-        self.follow_letters_of(layout::current());
+        self.follow_letters_of(&layout::current());
     }
 
     fn follow_letters_of(&mut self, layout: &layout::KeyboardLayout) {
-        let before = Self::us_places(layout.movement_keys());
-        let after = Self::for_layout(layout);
+        self.move_defaults(&Self::us_places(layout.movement_keys()), &Self::for_layout(layout));
+    }
+
+    /// The defaults of this profile were chosen for a layout that only stood
+    /// in for the active one, not reported yet (Wayland, `LayoutWatch`): its
+    /// letter shortcuts still on those defaults move to the active layout's,
+    /// with the rules of `follow_layout_letters`.
+    pub fn follow_layout_change(&mut self, change: &LayoutChange) {
+        self.move_defaults(&Self::for_layout(&change.before), &Self::for_layout(&change.after));
+    }
+
+    fn move_defaults(&mut self, before: &Self, after: &Self) {
         for ((action, old), (_, new)) in before.map.iter().zip(&after.map) {
             for slot in 0..2 {
                 let (Some(old), Some(new)) = (&old[slot], &new[slot]) else {
@@ -1397,6 +1457,47 @@ impl KeyBindings {
                     continue;
                 }
                 self.set(*action, slot, Some(new.clone()));
+            }
+        }
+    }
+
+    /// The middle button moves the camera (Preferences › Mouse and keyboard).
+    pub fn middle_mouse_camera(&self) -> bool {
+        let middle = Input::mouse(MouseButton::Middle);
+        self.get(Action::MouseCam)
+            .iter()
+            .flatten()
+            .any(|b| Some(&b.input) == middle.as_ref())
+    }
+
+    /// Give the middle button to the Mouse Camera, taking it (and Ctrl + it)
+    /// from whatever had it, push-to-talk by default; or give it back to
+    /// push-to-talk when that has no binding left. As in Catznip, the button
+    /// does one or the other, never both.
+    pub fn set_middle_mouse_camera(&mut self, on: bool) {
+        let middle = Input::mouse(MouseButton::Middle);
+        if on {
+            let bindings = middle_mouse_camera_bindings();
+            for b in bindings.iter().flatten() {
+                for a in self.users(b) {
+                    for (slot, used) in self.get(a).iter().enumerate() {
+                        if used.as_ref() == Some(b) {
+                            self.set(a, slot, None);
+                        }
+                    }
+                }
+            }
+            for (slot, b) in bindings.into_iter().enumerate() {
+                self.set(Action::MouseCam, slot, b);
+            }
+        } else {
+            for (slot, b) in self.get(Action::MouseCam).iter().enumerate() {
+                if b.as_ref().is_some_and(|b| Some(&b.input) == middle.as_ref()) {
+                    self.set(Action::MouseCam, slot, None);
+                }
+            }
+            if self.get(Action::PushToTalk).iter().all(Option::is_none) {
+                self.set(Action::PushToTalk, 0, middle.map(Binding::plain));
             }
         }
     }
@@ -1547,6 +1648,16 @@ impl KeyBindings {
 mod tests {
     use super::*;
     use crate::build::ui::Shortcut;
+
+    /// LLKeyboard names KEY_HOME "Home" (indra/llwindow/llkeyboard.cpp).
+    /// French keeps Origine. Japanese keyboards print Home.
+    #[test]
+    fn the_home_key_is_labelled_home() {
+        assert_eq!(aurora_i18n::text_in("en", "keybinds-origin"), "Home");
+        assert_eq!(aurora_i18n::text_in("ja", "keybinds-origin"), "Home");
+        assert_eq!(aurora_i18n::text_in("fr", "keybinds-origin"), "Origine");
+        assert_eq!(key_label("Home"), aurora_i18n::text_in(aurora_i18n::language(), "keybinds-origin"));
+    }
 
     /// Space stops moving while held, as the Legacy Viewer's stop_moving;
     /// a settings file from before it keeps a Space the user gave to
@@ -1750,6 +1861,61 @@ mod tests {
             assert!(!kb.held(Action::Forward, &down, mods));
             let _ = kb.update_held_input(&mut down, &input, false, mods);
             assert!(!kb.held(action, &down, mods));
+        }
+    }
+
+    #[test]
+    fn camera_roll_defaults_hold_release_and_yield_to_modified_commands() {
+        let kb = KeyBindings::us_places([KeyCode::KeyW, KeyCode::KeyS, KeyCode::KeyA, KeyCode::KeyD]);
+        for (action, code, command) in [
+            (Action::CamRollLeft, KeyCode::KeyR, Action::Rebake),
+            (Action::CamRollRight, KeyCode::KeyT, Action::ShowTransparency),
+        ] {
+            let input = Input::key(code);
+            assert_eq!(kb.get(action), [Some(Binding::plain(input.clone())), None]);
+            assert_eq!(kb.users(&Binding::plain(input.clone())), vec![action], "no other plain-key default");
+            let mut down = HashSet::new();
+            assert_eq!(kb.update_held_input(&mut down, &input, true, Mods::default()), None);
+            assert!(kb.held(action, &down, Mods::default()));
+            kb.update_held_input(&mut down, &input, false, Mods::default());
+            assert!(!kb.held(action, &down, Mods::default()));
+            let modified = Mods {
+                ctrl: true,
+                alt: true,
+                ..Default::default()
+            };
+            assert_eq!(kb.update_held_input(&mut down, &input, true, modified), Some(command));
+            assert!(!kb.held(action, &down, modified));
+            assert!(!kb.held(action, &down, Mods::default()));
+        }
+    }
+
+    #[test]
+    fn camera_roll_bindings_upgrade_without_replacing_custom_or_cleared_keys() {
+        for action in [Action::CamRollLeft, Action::CamRollRight] {
+            let mut kb = KeyBindings::default();
+            let defaults = kb.get(action);
+            kb.map.retain(|(a, _)| *a != action);
+            assert_eq!(kb.clone().sanitized().get(action), defaults);
+            kb.set(Action::CamPanUp, 0, defaults[0].clone());
+            let mut kb = kb.sanitized();
+            assert_eq!(kb.get(action), [None, None]);
+            assert_eq!(kb.get(Action::CamPanUp)[0], defaults[0]);
+            let binding = kalt(KeyCode::KeyB, false, false);
+            kb.set(action, 1, binding.clone());
+            let saved = serde_json::to_string(&kb).expect("save bindings");
+            let mut kb = serde_json::from_str::<KeyBindings>(&saved).expect("restore bindings").sanitized();
+            assert_eq!(kb.get(action), [None, binding]);
+            assert!(kb.held(
+                action,
+                &HashSet::from([Input::key(KeyCode::KeyB)]),
+                Mods {
+                    alt: true,
+                    ..Default::default()
+                }
+            ));
+            kb.set(action, 1, None);
+            assert_eq!(kb.sanitized().get(action), [None, None]);
         }
     }
 
@@ -2456,6 +2622,45 @@ mod tests {
         assert_eq!(kb, KeyBindings::for_layout(&fr));
     }
 
+    /// A key's label learned from a key press gives way to the new
+    /// layout's when the layout changes (`layout::Watch::poll`). Lang5 is a
+    /// key no other test reads.
+    #[test]
+    fn a_layout_change_forgets_the_learned_labels() {
+        learn(KeyCode::Lang5, "q");
+        assert_eq!(key_label("Lang5"), "Q");
+        forget_learned();
+        assert_eq!(learned("Lang5"), None);
+        assert_ne!(key_label("Lang5"), "Q");
+    }
+
+    /// Wayland: a profile made while the first layout of `us,fr` stood in
+    /// for the active French one moves to AZERTY's places once the
+    /// compositor reports it, and the user's own keys stay.
+    #[test]
+    fn defaults_placed_for_a_stand_in_layout_move_to_the_reported_one() {
+        use KeyCode as K;
+        use std::sync::Arc;
+        let (us, fr) = (Arc::new(layout::KeyboardLayout::wasd()), Arc::new(layout::KeyboardLayout::zqsd()));
+        let change = |before: &Arc<_>, after: &Arc<_>| LayoutChange {
+            before: Arc::clone(before),
+            after: Arc::clone(after),
+            guessed: true,
+        };
+        let mut kb = KeyBindings::for_layout(&us);
+        kb.follow_layout_change(&change(&us, &fr));
+        assert_eq!(kb, KeyBindings::for_layout(&fr));
+        kb.follow_layout_change(&change(&fr, &us));
+        assert_eq!(kb, KeyBindings::for_layout(&us));
+
+        let mut kb = KeyBindings::for_layout(&us);
+        kb.set(Action::Mouselook, 0, k(K::KeyL)); // the user's own key
+        kb.follow_layout_change(&change(&us, &fr));
+        assert_eq!(kb.get(Action::Mouselook)[0], k(K::KeyL));
+        assert_eq!(kb.get(Action::Minimap)[0], kmod(K::Semicolon, true, true));
+        assert_eq!(kb.get(Action::Forward)[1], k(K::KeyW));
+    }
+
     #[test]
     fn movement_ignores_shift_and_mouse_ptt() {
         let kb = KeyBindings::default();
@@ -2479,6 +2684,43 @@ mod tests {
         kb.drop_letter_walk();
         assert_eq!(kb.get(Action::Forward), [Some(Binding::plain(Input::key(KeyCode::ArrowUp))), None]);
         assert_eq!(kb.get(Action::Back)[0], Some(Binding::plain(Input::key(KeyCode::ArrowDown))));
+    }
+
+    #[test]
+    fn the_middle_button_switches_between_push_to_talk_and_the_camera() {
+        let middle = Input::mouse(MouseButton::Middle).expect("the middle button is bindable");
+        let ctrl = Mods {
+            ctrl: true,
+            ..Default::default()
+        };
+        let alt = Mods {
+            alt: true,
+            ..Default::default()
+        };
+        // by default the button is push-to-talk's, as in the Legacy Viewer
+        let mut kb = KeyBindings::default();
+        assert!(!kb.middle_mouse_camera());
+        assert_eq!(kb.get(Action::MouseCam), [None, None]);
+        assert_eq!(kb.triggered(&middle, Mods::default()), None);
+        // switched on: the camera takes it, with and without Ctrl
+        kb.set_middle_mouse_camera(true);
+        assert!(kb.middle_mouse_camera());
+        assert_eq!(kb.get(Action::PushToTalk), [None, None]);
+        assert_eq!(kb.triggered(&middle, Mods::default()), Some(Action::MouseCam));
+        assert_eq!(kb.triggered(&middle, ctrl), Some(Action::MouseCam));
+        assert_eq!(kb.triggered(&middle, alt), None);
+        // switched off: push-to-talk has it again
+        kb.set_middle_mouse_camera(false);
+        assert!(!kb.middle_mouse_camera());
+        assert_eq!(kb.get(Action::MouseCam), [None, None]);
+        assert_eq!(kb.get(Action::PushToTalk), KeyBindings::default().get(Action::PushToTalk));
+        // push-to-talk moved to another key keeps it when switched off
+        let f8 = Some(Binding::plain(Input::key(KeyCode::F8)));
+        kb.set(Action::PushToTalk, 0, f8.clone());
+        kb.set_middle_mouse_camera(true);
+        assert_eq!(kb.get(Action::PushToTalk), [f8.clone(), None]);
+        kb.set_middle_mouse_camera(false);
+        assert_eq!(kb.get(Action::PushToTalk), [f8, None]);
     }
 
     #[test]

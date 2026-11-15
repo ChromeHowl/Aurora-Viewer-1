@@ -20,9 +20,9 @@ pub(super) fn show(
     let Some(mut dialog) = st.dialog.take() else {
         return;
     };
-    if let EditDialog::Share(ids, resident) = &dialog {
-        let picture = facts.pictures.get(resident);
-        if !share(ctx, p, icons, inv, prefs, facts, picture, st.ui_id, ids, *resident, actions) {
+    if let EditDialog::Share(ids, residents) = &dialog {
+        let picture = residents.first().and_then(|id| facts.pictures.get(id));
+        if !share(ctx, p, icons, inv, prefs, facts, picture, st.ui_id, ids, residents, actions) {
             st.dialog = Some(dialog);
         }
         return;
@@ -39,6 +39,7 @@ pub(super) fn show(
         EditDialog::Properties(..) => aurora_i18n::tr!("ui-inventory-dialogs-object-properties"),
         EditDialog::Delete(_, true) => aurora_i18n::tr!("ui-inventory-dialogs-purge-selection"),
         EditDialog::Delete(_, false) => aurora_i18n::tr!("ui-inventory-dialogs-delete-selection"),
+        EditDialog::DetachDelete(_) => aurora_i18n::tr!("ui-inventory-dialogs-detach-and-delete"),
         EditDialog::Empty(_) => aurora_i18n::tr!("common-empty-trash"),
         EditDialog::Ungroup(_) => aurora_i18n::tr!("ui-inventory-dialogs-ungroup-folder"),
         EditDialog::Discard(..) | EditDialog::SaveEmbedded(..) => aurora_i18n::tr!("ui-inventory-dialogs-save-changes"),
@@ -51,7 +52,7 @@ pub(super) fn show(
         dialog,
         EditDialog::Discard(_) | EditDialog::CopyEmbedded(..) | EditDialog::SaveEmbedded(_)
     );
-    let confirmation = matches!(dialog, EditDialog::Delete(..) | EditDialog::Empty(_));
+    let confirmation = matches!(dialog, EditDialog::Delete(..) | EditDialog::DetachDelete(_) | EditDialog::Empty(_));
     let window_id = format!(
         "inventory_{}_{}",
         if properties {
@@ -63,10 +64,22 @@ pub(super) fn show(
         },
         st.ui_id
     );
+    let window_id = if properties {
+        st.tab_host.as_ref().map_or(window_id.clone(), |host| host.window_id())
+    } else {
+        window_id
+    };
     let mut body = |ui: &mut egui::Ui| {
         match &mut dialog {
             EditDialog::Properties(id) => {
-                done = super::properties::show(ui, p, icons, inv, st, facts, images, *id, actions);
+                if let Some(host) = &mut st.tab_host {
+                    host.header(ui, p);
+                }
+                done = ui
+                    .push_id(st.ui_id, |ui| {
+                        super::properties::show(ui, p, icons, inv, st, facts, images, *id, actions)
+                    })
+                    .inner;
             }
             EditDialog::Discard(id) => {
                 ui.label(aurora_i18n::tr!("ui-inventory-dialogs-this-document-has-unsaved-changes"));
@@ -107,6 +120,9 @@ pub(super) fn show(
                         done = true;
                     }
                     if flat_button(ui, p, aurora_i18n::tr!("common-cancel")).clicked() {
+                        if let Some(host) = &mut st.tab_host {
+                            host.cancel_close();
+                        }
                         done = true;
                     }
                 });
@@ -220,6 +236,32 @@ pub(super) fn show(
                     }
                 }
             }
+            // "DeleteWornItems" (notifications.xml): no ignore box.
+            EditDialog::DetachDelete(ids) => {
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(if ids.len() == 1 {
+                        aurora_i18n::tr!("ui-inventory-dialogs-delete", value0 = rules::name(inv, ids[0]).to_string())
+                    } else {
+                        aurora_i18n::tr!("ui-inventory-dialogs-delete-the-selected-items", value0 = format!("{}", ids.len()))
+                    })
+                    .strong()
+                    .color(p.ink),
+                );
+                ui.add_space(4.0);
+                ui.label(aurora_i18n::tr!("ui-inventory-dialogs-detach-and-delete-body"));
+                if confirmation_buttons(
+                    ui,
+                    p,
+                    st.pending.is_none(),
+                    aurora_i18n::tr!("ui-inventory-dialogs-detach-and-delete"),
+                    &mut done,
+                    st.ui_id,
+                ) {
+                    super::delete::start_detach(inv, st, prefs, facts, actions, std::mem::take(ids));
+                    done = true;
+                }
+            }
             EditDialog::Empty(id) => {
                 ui.label(aurora_i18n::tr!(
                     "ui-inventory-dialogs-all-items-in-trash-will-be-permanently-deleted"
@@ -328,6 +370,15 @@ pub(super) fn show(
         }
         floater.show(ctx, p, &mut open, body);
     }
+    if !open
+        && matches!(dialog, EditDialog::Discard(_))
+        && let Some(host) = &mut st.tab_host
+    {
+        host.cancel_close();
+    }
+    if properties && let Some(host) = &mut st.tab_host {
+        host.closing(&mut open);
+    }
     if open && !done {
         st.dialog = Some(dialog);
     } else if matches!(dialog, EditDialog::Delete(..)) {
@@ -347,6 +398,28 @@ enum Fate {
     /// Not given: no transfer permission (LLGiveInventory::
     /// isInventoryGiveAcceptable), or another reason `rules::offer` names.
     Excluded,
+}
+
+/// How many names fit as a comma list before switching to "+ N people".
+const RESIDENTS_LISTED: usize = 2;
+
+/// Label for the give confirmation's recipients, and an optional hover with
+/// every name (when the label only keeps the first ones).
+fn residents_label(names: &[&str]) -> (String, Option<String>) {
+    if names.is_empty() {
+        return (String::new(), None);
+    }
+    if names.len() <= RESIDENTS_LISTED {
+        return (names.join(", "), None);
+    }
+    let more = names.len() - 1;
+    let label = aurora_i18n::tr!(
+        "ui-inventory-dialogs-give-to-many",
+        name = names[0].to_string(),
+        count = more as i64,
+        number = aurora_i18n::integer(more as i64)
+    );
+    (label, Some(names.join(", ")))
 }
 
 /// The confirmation of a give, from an inventory window or a drop on a
@@ -370,10 +443,17 @@ fn share(
     picture: Option<&egui::TextureHandle>,
     ui_id: Uuid,
     ids: &[Uuid],
-    resident: Uuid,
+    residents: &[Uuid],
     actions: &mut Vec<InvAction>,
 ) -> bool {
-    let name = facts.names.get(&resident).map_or("…", String::as_str);
+    if residents.is_empty() {
+        return true;
+    }
+    // LLAvatarActions::buildResidentsString joins every name; a long multi-
+    // select overflows the modal, so we keep one or two names then "+ N people"
+    let names: Vec<&str> = residents.iter().map(|id| facts.names.get(id).map_or("…", String::as_str)).collect();
+    let (name, name_tip) = residents_label(&names);
+    let first = residents[0];
     // ((icon, tint), name, fate, tag, why)
     let rows: Vec<((&str, egui::Color32), String, Fate, &str, String)> = ids
         .iter()
@@ -388,6 +468,18 @@ fn share(
                 |it| inventory_item_icon(inv, it, p),
             );
             let (fate, tag, why) = match rules::offer(inv, *id, &facts.worn) {
+                // A no-copy item leaves the inventory with its first give, so
+                // it can reach one resident only. The Legacy Viewer
+                // (give_inventory_cb, indra/newview/llavataractions.cpp) gives
+                // it to the first resident after CannotCopyWarning and stops
+                // there, leaving the others with nothing; Aurora leaves the
+                // no-copy item out and still gives the rest to everyone
+                // (stricter for the item, clearer for the user).
+                Ok(bucket) if rules::offer_has_no_copy(inv, &bucket) && residents.len() > 1 => (
+                    Fate::Excluded,
+                    aurora_i18n::tr!("ui-inventory-dialogs-no-copy"),
+                    aurora_i18n::tr!("ui-inventory-dialogs-no-copy-one-resident").to_owned(),
+                ),
                 Ok(bucket) if rules::offer_has_no_copy(inv, &bucket) => {
                     (Fate::NoCopy, aurora_i18n::tr!("ui-inventory-dialogs-no-copy"), String::new())
                 }
@@ -414,7 +506,7 @@ fn share(
         ui.set_width(360.0);
         ui.horizontal(|ui| {
             let (rect, _) = ui.allocate_exact_size(Vec2::splat(36.0), egui::Sense::hover());
-            crate::ui::widgets::avatar_disc(ui, p, rect, picture, name, false);
+            crate::ui::widgets::avatar_disc(ui, p, rect, picture, facts.names.get(&first).map_or("…", String::as_str), false);
             ui.add_space(4.0);
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 1.0;
@@ -423,7 +515,10 @@ fn share(
                         .size(12.0)
                         .color(p.muted),
                 );
-                ui.add(egui::Label::new(RichText::new(name).size(15.0).strong().color(p.ink)).truncate());
+                let label = ui.add(egui::Label::new(RichText::new(&name).size(15.0).strong().color(p.ink)).truncate());
+                if let Some(tip) = &name_tip {
+                    label.on_hover_text(tip);
+                }
             });
         });
         ui.add_space(10.0);
@@ -513,7 +608,12 @@ fn share(
         });
     });
     if give {
-        actions.push(InvAction::Share { items: given, resident });
+        for &resident in residents {
+            actions.push(InvAction::Share {
+                items: given.clone(),
+                resident,
+            });
+        }
     }
     give || cancel || modal.should_close()
 }
@@ -545,7 +645,11 @@ fn confirmation_buttons(ui: &mut egui::Ui, p: &Palette, enabled: bool, label: &s
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.add_enabled_ui(enabled, |ui| {
                 // the Legacy Viewer's default="true" OK: Enter clicks it
-                let response = widgets::default_button_sized(ui, p, label, Vec2::new(120.0, 28.0));
+                // 120 px, wider when the label needs it ("Detach and Delete")
+                let font = widgets::control_font(ui, 12.0);
+                let text = ui.painter().layout_no_wrap(label.to_owned(), font, p.ink).size().x;
+                let width = (text + 2.0 * ui.spacing().button_padding.x + 8.0).max(120.0);
+                let response = widgets::default_button_sized(ui, p, label, Vec2::new(width, 28.0));
                 if cfg!(test) || super::delete::demo_enabled() {
                     ui.ctx()
                         .data_mut(|data| data.insert_temp(egui::Id::unique(("inventory_delete_confirm", window)), response.rect.center()));
@@ -613,252 +717,271 @@ pub(super) fn preview(
         Vec2::new(500.0, 400.0)
     };
     let size = size.min((ctx.content_rect().size() - Vec2::splat(32.0)).max(Vec2::new(300.0, 220.0)));
+    let window_id = st.tab_host.as_ref().map_or_else(
+        || super::document::preview_window_id(st.ui_id, id, it.asset_type),
+        |host| host.window_id(),
+    );
     Floater::new(
-        &super::document::preview_window_id(st.ui_id, id, it.asset_type),
+        &window_id,
         format!("{}{}", it.name, if st.preview_dirty { " *" } else { "" }),
         ctx.content_rect().center() - size * 0.5,
         size,
     )
     .cascade(crate::ui::widgets::CascadeGroup::inventory(it.asset_type))
     .show(ctx, p, &mut open, |ui| {
-        if it.asset_type == 0 {
-            st.wanted_images.insert(it.asset_id);
-            if let Some(t) = images.get(&it.asset_id) {
-                // LLPreview::{handleMouseDown,handleHover}: carry the actual
-                // inventory item, so world drops still check its permissions.
-                let response = ui.add(
-                    egui::Image::new(t)
-                        .max_size(Vec2::splat(350.0))
-                        .fit_to_original_size(1.0)
-                        .sense(egui::Sense::click_and_drag()),
-                );
-                if drag_inventory.items.get(&id).is_some_and(|item| item.asset_type == 0) {
-                    response.dnd_set_drag_payload(InvDrag(id));
-                }
-                ctx.data_mut(|data| data.insert_temp(egui::Id::unique(("inventory_texture_preview", st.ui_id, id)), response.rect));
-            } else {
-                ui.label(aurora_i18n::tr!("ui-inventory-dialogs-loading-image"));
-            }
-            ui.label(
-                RichText::new(aurora_i18n::tr!("texture-library-drag-hint"))
-                    .size(10.0)
-                    .color(p.muted),
-            );
-        } else if matches!(it.asset_type, 20 | 1) {
-            if flat_button(ui, p, aurora_i18n::tr!("common-play")).clicked() {
-                if it.asset_type == 20 {
-                    actions.push(InvAction::Animation {
-                        asset: it.asset_id,
-                        local: false,
-                        start: true,
-                    });
-                } else {
-                    actions.push(InvAction::Sound(it.asset_id));
-                }
-            }
-            if it.asset_type == 20 {
-                if flat_button(ui, p, aurora_i18n::tr!("common-play-locally")).clicked() {
-                    actions.push(InvAction::Animation {
-                        asset: it.asset_id,
-                        local: true,
-                        start: true,
-                    });
-                }
-                if flat_button(ui, p, aurora_i18n::tr!("common-stop")).clicked()
-                    && let Some((asset, local)) = st.playing
-                {
-                    actions.push(InvAction::Animation {
-                        asset,
-                        local,
-                        start: false,
-                    });
-                }
-            }
-        } else {
-            if it.asset_type == 7 {
-                notecard_description(ui, inv, st, it, actions);
-            }
-            if it.asset_type == 7 && view.choose(ui, p) {
-                st.notecard_view = Some(view);
-                prefs.notecard_view = view;
-                let editor = egui::Id::unique(("inventory_document_text", st.ui_id, id));
-                ctx.memory_mut(|m| {
-                    m.request_focus(if view == super::markdown::View::Markdown {
-                        editor.with("markdown")
-                    } else {
-                        editor
-                    })
-                });
-            }
-            if it.asset_type == 56 && !it.asset_id.is_nil() && flat_button(ui, p, aurora_i18n::tr!("common-apply-to-myself-only")).clicked()
-            {
-                actions.push(InvAction::Environment(it.asset_id, it.flags, it.id));
-            }
-            let mut edited = super::embedded::EditorResult::default();
-            match &mut st.preview_text {
-                Some(Ok(text)) => {
-                    if matches!(it.asset_type, 7 | 10) && !editable {
-                        ui.label(RichText::new(aurora_i18n::tr!("notecard-read-only")).color(p.muted));
-                    }
-                    let documents = matches!(it.asset_type, 7 | 10);
-                    // the Save row is as tall as its button: its text and
-                    // padding once a large text size outgrows interact_size
-                    let save_row = ui
-                        .spacing()
-                        .interact_size
-                        .y
-                        .max(ui.text_style_height(&egui::TextStyle::Button) + ui.spacing().button_padding.y * 2.0);
-                    let footer_height = save_row
-                        + ui.spacing().item_spacing.y * 2.0
-                        + if st.preview_message.is_empty() {
-                            0.0
-                        } else {
-                            ui.fonts_mut(|fonts| {
-                                fonts.layout(
-                                    st.preview_message.clone(),
-                                    egui::TextStyle::Body.resolve(ui.style()),
-                                    p.ink,
-                                    ui.available_width(),
-                                )
-                            })
-                            .size()
-                            .y + ui.spacing().item_spacing.y
-                        }
-                        + if it.asset_type == 7 && aurora_net::inventory::notecard::Notecard::validate_text(text).is_err() {
-                            ui.text_style_height(&egui::TextStyle::Body) + ui.spacing().item_spacing.y
-                        } else {
-                            0.0
-                        };
-                    let editor_size = Vec2::new(ui.available_width(), (ui.available_height() - footer_height).max(60.0));
-                    if it.asset_type == 7 {
-                        edited = super::markdown::editor(
-                            ui,
-                            p,
-                            icons,
-                            egui::Id::unique(("inventory_document_text", st.ui_id, id)),
-                            text,
-                            st.preview_source.as_mut(),
-                            editable && !st.save_pending && !matches!(st.dialog, Some(EditDialog::Discard(_))),
-                            editor_size,
-                            view,
-                            &mut st.notecard_markdown,
-                            script_settings,
-                        );
-                    } else {
-                        egui::ScrollArea::both()
-                            .id_salt(("inventory_document_scroll", st.ui_id, id, view as usize))
-                            .max_height(if documents { editor_size.y } else { 300.0 })
-                            .auto_shrink(if documents { [false, false] } else { [true, true] })
-                            .show(ui, |ui| {
-                                if it.asset_type == 10 {
-                                    // beside the scroll bar's strip, when it shows
-                                    let size = Vec2::new(ui.available_width().min(editor_size.x), editor_size.y);
-                                    let editor_id = egui::Id::unique(("inventory_document_text", st.ui_id, id));
-                                    edited = super::embedded::editor(
-                                        ui,
-                                        p,
-                                        icons,
-                                        editor_id,
-                                        text,
-                                        st.preview_source.as_ref(),
-                                        editable && !st.save_pending && !matches!(st.dialog, Some(EditDialog::Discard(_))),
-                                        size,
-                                        super::embedded::Appearance::Source,
-                                    );
-                                } else {
-                                    ui.add(egui::Label::new(RichText::new(text.as_str()).monospace()).selectable(true));
-                                }
-                            });
-                    }
-                }
-                Some(Err(reason)) => {
-                    ui.label(RichText::new(reason.as_str()).color(p.warn));
-                }
-                None => {
-                    ui.label(aurora_i18n::tr!("common-loading-2"));
-                }
-            }
-            if let Some((position, dropped)) = edited.drop {
-                let item = rules::original(drag_inventory, dropped).and_then(|id| drag_inventory.items.get(&id));
-                if let Some(item) = item
-                    && let (Some(source), Some(Ok(text))) = (&mut st.preview_source, &mut st.preview_text)
-                {
-                    match source.insert_attachment(text, position, item) {
-                        Ok(_) => edited.changed = true,
-                        Err(reason) => st.preview_message = reason,
-                    }
-                } else {
-                    st.preview_message = aurora_i18n::tr!("common-item-not-found").into();
-                }
-            }
-            if edited.changed {
-                st.document_changed();
-            }
-            if let Some(marker) = edited.open {
-                actions.push(InvAction::Embedded {
-                    editor: st.ui_id,
-                    notecard: id,
-                    marker,
-                    copy: false,
-                });
-            }
-            if let Some(marker) = edited.copy {
-                st.dialog = Some(EditDialog::CopyEmbedded(id, marker));
-            }
-            let valid_size = st.preview_text.as_ref().is_some_and(|r| {
-                r.as_ref()
-                    .is_ok_and(|text| it.asset_type != 7 || aurora_net::inventory::notecard::Notecard::validate_text(text).is_ok())
-            });
-            let can_save =
-                editable && st.preview_dirty && !st.save_pending && valid_size && !matches!(st.dialog, Some(EditDialog::Discard(_)));
-            let mut clicked_save = false;
-            if matches!(it.asset_type, 7 | 10) {
-                ui.horizontal(|ui| {
-                    clicked_save = ui
-                        .push_id(("inventory_document_save", st.ui_id, id), |ui| {
-                            ui.add_enabled(can_save, egui::Button::new(aurora_i18n::tr!("notecard-save-button")))
-                        })
-                        .inner
-                        .clicked();
-                    if st.save_pending {
-                        ui.spinner();
-                        ui.label(aurora_i18n::tr!("notecard-saving"));
-                    } else if it.asset_type == 7
-                        && let Some(Ok(text)) = &st.preview_text
-                    {
-                        ui.label(
-                            RichText::new(aurora_i18n::tr!("notecard-byte-count", bytes = text.len().to_string())).color(if valid_size {
-                                p.muted
-                            } else {
-                                p.warn
-                            }),
-                        );
-                    }
-                });
-            }
-            if can_save
-                && (clicked_save || edited.save)
-                && let Some(Ok(text)) = &st.preview_text
-            {
-                actions.push(InvAction::SaveContent {
-                    editor: st.ui_id,
-                    item: it.id,
-                    text: text.clone(),
-                    close: false,
-                });
-            }
-            if !valid_size && it.asset_type == 7 && st.preview_text.as_ref().is_some_and(Result::is_ok) {
-                ui.label(RichText::new(aurora_i18n::tr!("notecard-text-too-large")).color(p.warn));
-            }
-            if !st.preview_message.is_empty() {
-                let saved = st.preview_message == aurora_i18n::tr!("app-document-saved")
-                    || st.preview_message == aurora_i18n::tr!("notecard-copy-complete");
-                ui.label(RichText::new(&st.preview_message).color(if saved { p.success } else { p.warn }));
-            }
+        if let Some(host) = &mut st.tab_host {
+            host.header(ui, p);
         }
+        ui.push_id(st.ui_id, |ui| {
+            if it.asset_type == 0 {
+                st.wanted_images.insert(it.asset_id);
+                if let Some(t) = images.get(&it.asset_id) {
+                    // LLPreview::{handleMouseDown,handleHover}: carry the actual
+                    // inventory item, so world drops still check its permissions.
+                    let response = ui.add(
+                        egui::Image::new(t)
+                            .max_size(Vec2::splat(350.0))
+                            .fit_to_original_size(1.0)
+                            .sense(egui::Sense::click_and_drag()),
+                    );
+                    if drag_inventory.items.get(&id).is_some_and(|item| item.asset_type == 0) {
+                        response.dnd_set_drag_payload(InvDrag(id));
+                    }
+                    ctx.data_mut(|data| data.insert_temp(egui::Id::unique(("inventory_texture_preview", st.ui_id, id)), response.rect));
+                } else {
+                    ui.label(aurora_i18n::tr!("ui-inventory-dialogs-loading-image"));
+                }
+                ui.label(
+                    RichText::new(aurora_i18n::tr!("texture-library-drag-hint"))
+                        .size(10.0)
+                        .color(p.muted),
+                );
+            } else if matches!(it.asset_type, 20 | 1) {
+                if flat_button(ui, p, aurora_i18n::tr!("common-play")).clicked() {
+                    if it.asset_type == 20 {
+                        actions.push(InvAction::Animation {
+                            asset: it.asset_id,
+                            local: false,
+                            start: true,
+                        });
+                    } else {
+                        actions.push(InvAction::Sound(it.asset_id));
+                    }
+                }
+                if it.asset_type == 20 {
+                    if flat_button(ui, p, aurora_i18n::tr!("common-play-locally")).clicked() {
+                        actions.push(InvAction::Animation {
+                            asset: it.asset_id,
+                            local: true,
+                            start: true,
+                        });
+                    }
+                    if flat_button(ui, p, aurora_i18n::tr!("common-stop")).clicked()
+                        && let Some((asset, local)) = st.playing
+                    {
+                        actions.push(InvAction::Animation {
+                            asset,
+                            local,
+                            start: false,
+                        });
+                    }
+                }
+            } else {
+                if it.asset_type == 7 {
+                    notecard_description(ui, inv, st, it, actions);
+                }
+                if it.asset_type == 7 && view.choose(ui, p) {
+                    st.notecard_view = Some(view);
+                    prefs.notecard_view = view;
+                    let editor = egui::Id::unique(("inventory_document_text", st.ui_id, id));
+                    ctx.memory_mut(|m| {
+                        m.request_focus(if view == super::markdown::View::Markdown {
+                            editor.with("markdown")
+                        } else {
+                            editor
+                        })
+                    });
+                }
+                if it.asset_type == 56
+                    && !it.asset_id.is_nil()
+                    && flat_button(ui, p, aurora_i18n::tr!("common-apply-to-myself-only")).clicked()
+                {
+                    actions.push(InvAction::Environment(it.asset_id, it.flags, it.id));
+                }
+                let mut edited = super::embedded::EditorResult::default();
+                match &mut st.preview_text {
+                    Some(Ok(text)) => {
+                        if matches!(it.asset_type, 7 | 10) && !editable {
+                            ui.label(RichText::new(aurora_i18n::tr!("notecard-read-only")).color(p.muted));
+                        }
+                        let documents = matches!(it.asset_type, 7 | 10);
+                        // the Save row is as tall as its button: its text and
+                        // padding once a large text size outgrows interact_size
+                        let save_row = ui
+                            .spacing()
+                            .interact_size
+                            .y
+                            .max(ui.text_style_height(&egui::TextStyle::Button) + ui.spacing().button_padding.y * 2.0);
+                        let footer_height = save_row
+                            + ui.spacing().item_spacing.y * 2.0
+                            + if st.preview_message.is_empty() {
+                                0.0
+                            } else {
+                                ui.fonts_mut(|fonts| {
+                                    fonts.layout(
+                                        st.preview_message.clone(),
+                                        egui::TextStyle::Body.resolve(ui.style()),
+                                        p.ink,
+                                        ui.available_width(),
+                                    )
+                                })
+                                .size()
+                                .y + ui.spacing().item_spacing.y
+                            }
+                            + if it.asset_type == 7 && aurora_net::inventory::notecard::Notecard::validate_text(text).is_err() {
+                                ui.text_style_height(&egui::TextStyle::Body) + ui.spacing().item_spacing.y
+                            } else {
+                                0.0
+                            };
+                        let editor_size = Vec2::new(ui.available_width(), (ui.available_height() - footer_height).max(60.0));
+                        if it.asset_type == 7 {
+                            edited = super::markdown::editor(
+                                ui,
+                                p,
+                                icons,
+                                egui::Id::unique(("inventory_document_text", st.ui_id, id)),
+                                text,
+                                st.preview_source.as_mut(),
+                                editable && !st.save_pending && !matches!(st.dialog, Some(EditDialog::Discard(_))),
+                                editor_size,
+                                view,
+                                &mut st.notecard_markdown,
+                                script_settings,
+                            );
+                        } else {
+                            egui::ScrollArea::both()
+                                .id_salt(("inventory_document_scroll", st.ui_id, id, view as usize))
+                                .max_height(if documents { editor_size.y } else { 300.0 })
+                                .auto_shrink(if documents { [false, false] } else { [true, true] })
+                                .show(ui, |ui| {
+                                    if it.asset_type == 10 {
+                                        // beside the scroll bar's strip, when it shows
+                                        let size = Vec2::new(ui.available_width().min(editor_size.x), editor_size.y);
+                                        let editor_id = egui::Id::unique(("inventory_document_text", st.ui_id, id));
+                                        edited = super::embedded::editor(
+                                            ui,
+                                            p,
+                                            icons,
+                                            editor_id,
+                                            text,
+                                            st.preview_source.as_ref(),
+                                            editable && !st.save_pending && !matches!(st.dialog, Some(EditDialog::Discard(_))),
+                                            size,
+                                            super::embedded::Appearance::Source,
+                                        );
+                                    } else {
+                                        ui.add(egui::Label::new(RichText::new(text.as_str()).monospace()).selectable(true));
+                                    }
+                                });
+                        }
+                    }
+                    Some(Err(reason)) => {
+                        ui.label(RichText::new(reason.as_str()).color(p.warn));
+                    }
+                    None => {
+                        ui.label(aurora_i18n::tr!("common-loading-2"));
+                    }
+                }
+                if let Some((position, dropped)) = edited.drop {
+                    let item = rules::original(drag_inventory, dropped).and_then(|id| drag_inventory.items.get(&id));
+                    if let Some(item) = item
+                        && let (Some(source), Some(Ok(text))) = (&mut st.preview_source, &mut st.preview_text)
+                    {
+                        match source.insert_attachment(text, position, item) {
+                            Ok(_) => edited.changed = true,
+                            Err(reason) => st.preview_message = reason,
+                        }
+                    } else {
+                        st.preview_message = aurora_i18n::tr!("common-item-not-found").into();
+                    }
+                }
+                if edited.changed {
+                    st.document_changed();
+                }
+                if let Some(marker) = edited.open {
+                    actions.push(InvAction::Embedded {
+                        editor: st.ui_id,
+                        notecard: id,
+                        marker,
+                        copy: false,
+                    });
+                }
+                if let Some(marker) = edited.copy {
+                    st.dialog = Some(EditDialog::CopyEmbedded(id, marker));
+                }
+                let valid_size = st.preview_text.as_ref().is_some_and(|r| {
+                    r.as_ref()
+                        .is_ok_and(|text| it.asset_type != 7 || aurora_net::inventory::notecard::Notecard::validate_text(text).is_ok())
+                });
+                let can_save =
+                    editable && st.preview_dirty && !st.save_pending && valid_size && !matches!(st.dialog, Some(EditDialog::Discard(_)));
+                let mut clicked_save = false;
+                if matches!(it.asset_type, 7 | 10) {
+                    ui.horizontal(|ui| {
+                        clicked_save = ui
+                            .push_id(("inventory_document_save", st.ui_id, id), |ui| {
+                                ui.add_enabled(can_save, egui::Button::new(aurora_i18n::tr!("notecard-save-button")))
+                            })
+                            .inner
+                            .clicked();
+                        if st.save_pending {
+                            ui.spinner();
+                            ui.label(aurora_i18n::tr!("notecard-saving"));
+                        } else if it.asset_type == 7
+                            && let Some(Ok(text)) = &st.preview_text
+                        {
+                            ui.label(
+                                RichText::new(aurora_i18n::tr!("notecard-byte-count", bytes = text.len().to_string()))
+                                    .color(if valid_size { p.muted } else { p.warn }),
+                            );
+                        }
+                    });
+                }
+                if can_save
+                    && (clicked_save || edited.save)
+                    && let Some(Ok(text)) = &st.preview_text
+                {
+                    actions.push(InvAction::SaveContent {
+                        editor: st.ui_id,
+                        item: it.id,
+                        text: text.clone(),
+                        close: false,
+                    });
+                }
+                if !valid_size && it.asset_type == 7 && st.preview_text.as_ref().is_some_and(Result::is_ok) {
+                    ui.label(RichText::new(aurora_i18n::tr!("notecard-text-too-large")).color(p.warn));
+                }
+                if !st.preview_message.is_empty() {
+                    let saved = st.preview_message == aurora_i18n::tr!("app-document-saved")
+                        || st.preview_message == aurora_i18n::tr!("notecard-copy-complete");
+                    ui.label(RichText::new(&st.preview_message).color(if saved { p.success } else { p.warn }));
+                }
+            }
+        });
     });
     super::embedded::preview(ctx, p, st, images);
+    if let Some(host) = &mut st.tab_host {
+        host.closing(&mut open);
+    }
     if !open {
+        if st.tab_host.is_some()
+            && (st.close_after_save && !st.save_pending
+                || actions
+                    .iter()
+                    .any(|action| matches!(action, InvAction::SaveContent {editor, close: true, ..} if *editor == st.ui_id)))
+        {
+            return;
+        }
         if st.save_pending {
             st.close_after_save = true;
             return;
@@ -869,6 +992,9 @@ pub(super) fn preview(
         }
         st.preview = None;
         st.reset_document();
+        // The closed document gives the list that opened it its keyboard
+        // back (LLToastAlertPanel restores the focus it saved).
+        super::clipboard::return_document_focus(ctx, st);
         if let Some((asset, local)) = st.playing {
             actions.push(InvAction::Animation {
                 asset,
@@ -936,116 +1062,131 @@ fn animation(
         st.animation_details = true;
     }
     let mut open = true;
-    Floater::new(
-        &format!("inventory_preview_{}_{}", st.ui_id, it.id),
+    let window_id = st
+        .tab_host
+        .as_ref()
+        .map_or_else(|| format!("inventory_preview_{}_{}", st.ui_id, it.id), |host| host.window_id());
+    let floater = Floater::new(
+        &window_id,
         aurora_i18n::tr!("ui-inventory-dialogs-animation", value0 = it.name.to_string()),
         ctx.content_rect().center() - egui::vec2(215.0, 85.0),
         Vec2::new(430.0, 170.0),
     )
-    .cascade(crate::ui::widgets::CascadeGroup::Animation)
-    .fixed()
-    .show(ctx, p, &mut open, |ui| {
-        ui.horizontal(|ui| {
-            ui.label(aurora_i18n::tr!("common-description"));
-            if let Some((_, description)) = &mut st.animation_description {
-                let can_edit = rules::mutable(inv, it.id) && rules::held(inv, it) & rules::MODIFY != 0 && st.pending.is_none();
-                let response = crate::ui::widgets::restricted_text_field(
-                    ui,
-                    can_edit,
-                    description,
-                    crate::ui::widgets::TextPolicy::PrintableNoPipe,
-                    |b, ui| egui::TextEdit::singleline(b).char_limit(127).desired_width(ui.available_width()),
-                );
-                if can_edit
-                    && description != &it.desc
-                    && response.lost_focus()
-                    && let Ok(change) = rules::patch(inv, it.id, llsd_map! { "desc" => description.clone() })
-                {
-                    actions.push(InvAction::Edit(change));
-                }
-            }
-        });
-        ui.horizontal(|ui| {
-            let playing = st.playing.filter(|(asset, _)| *asset == it.asset_id);
-            for (local, label) in [
-                (false, aurora_i18n::tr!("ui-inventory-dialogs-play-for-everyone")),
-                (true, aurora_i18n::tr!("common-play-locally")),
-            ] {
-                let same = playing.is_some_and(|(_, mode)| mode == local);
-                if ui
-                    .add_enabled(
-                        playing.is_none() || same,
-                        egui::Button::new(if same { aurora_i18n::tr!("common-stop") } else { label }),
-                    )
-                    .clicked()
-                {
-                    actions.push(InvAction::Animation {
-                        asset: it.asset_id,
-                        local,
-                        start: !same,
-                    });
-                }
-            }
-            if crate::ui::widgets::icon_button(
-                ui,
-                p,
-                if st.animation_details {
-                    "caret-up-filled"
-                } else {
-                    "caret-down-filled"
-                },
-                aurora_i18n::tr!("ui-inventory-dialogs-show-statistics"),
-                true,
-            ) {
-                st.animation_details = !st.animation_details;
-            }
-        });
-        if st.animation_details {
-            if let Some((_, stats)) = st.animation_stats.as_ref().filter(|(id, _)| *id == it.id) {
-                egui::Grid::new("animation_stats")
-                    .num_columns(2)
-                    .spacing(egui::vec2(64.0, 2.0))
-                    .show(ui, |ui| {
-                        ui.label(aurora_i18n::tr!(
-                            "ui-inventory-dialogs-priority",
-                            value0 = format!("{}", stats.priority)
-                        ));
-                        ui.label(aurora_i18n::tr!(
-                            "ui-inventory-dialogs-ease-in-s",
-                            value0 = aurora_i18n::number_text(&format!("{:.2}", stats.entry))
-                        ));
-                        ui.end_row();
-                        ui.label(aurora_i18n::tr!(
-                            "ui-inventory-dialogs-duration-s",
-                            value0 = aurora_i18n::number_text(&format!("{:.2}", stats.duration))
-                        ));
-                        ui.label(aurora_i18n::tr!(
-                            "ui-inventory-dialogs-ease-out-s",
-                            value0 = aurora_i18n::number_text(&format!("{:.2}", stats.exit))
-                        ));
-                        ui.end_row();
-                        ui.label(aurora_i18n::tr!(
-                            "ui-inventory-dialogs-looping",
-                            value0 = (if stats.looping {
-                                aurora_i18n::tr!("common-yes")
-                            } else {
-                                aurora_i18n::tr!("common-no")
-                            })
-                            .to_string()
-                        ));
-                        ui.label(aurora_i18n::tr!(
-                            "ui-inventory-dialogs-joints",
-                            value0 = format!("{}", stats.joints)
-                        ));
-                        ui.end_row();
-                    });
-            } else {
-                ui.label(RichText::new(aurora_i18n::tr!("ui-inventory-dialogs-loading-animation-statistics")).color(p.muted));
-            }
+    .cascade(crate::ui::widgets::CascadeGroup::Animation);
+    let floater = if st.tab_host.is_none() { floater.fixed() } else { floater };
+    floater.show(ctx, p, &mut open, |ui| {
+        if let Some(host) = &mut st.tab_host {
+            host.header(ui, p);
         }
+        ui.push_id(st.ui_id, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(aurora_i18n::tr!("common-description"));
+                if let Some((_, description)) = &mut st.animation_description {
+                    let can_edit = rules::mutable(inv, it.id) && rules::held(inv, it) & rules::MODIFY != 0 && st.pending.is_none();
+                    let response = crate::ui::widgets::restricted_text_field(
+                        ui,
+                        can_edit,
+                        description,
+                        crate::ui::widgets::TextPolicy::PrintableNoPipe,
+                        |b, ui| egui::TextEdit::singleline(b).char_limit(127).desired_width(ui.available_width()),
+                    );
+                    if can_edit
+                        && description != &it.desc
+                        && response.lost_focus()
+                        && let Ok(change) = rules::patch(inv, it.id, llsd_map! { "desc" => description.clone() })
+                    {
+                        actions.push(InvAction::Edit(change));
+                    }
+                }
+            });
+            ui.horizontal(|ui| {
+                let playing = st.playing.filter(|(asset, _)| *asset == it.asset_id);
+                for (local, label) in [
+                    (false, aurora_i18n::tr!("ui-inventory-dialogs-play-for-everyone")),
+                    (true, aurora_i18n::tr!("common-play-locally")),
+                ] {
+                    let same = playing.is_some_and(|(_, mode)| mode == local);
+                    if ui
+                        .add_enabled(
+                            playing.is_none() || same,
+                            egui::Button::new(if same { aurora_i18n::tr!("common-stop") } else { label }),
+                        )
+                        .clicked()
+                    {
+                        actions.push(InvAction::Animation {
+                            asset: it.asset_id,
+                            local,
+                            start: !same,
+                        });
+                    }
+                }
+                if crate::ui::widgets::icon_button(
+                    ui,
+                    p,
+                    if st.animation_details {
+                        "caret-up-filled"
+                    } else {
+                        "caret-down-filled"
+                    },
+                    aurora_i18n::tr!("ui-inventory-dialogs-show-statistics"),
+                    true,
+                ) {
+                    st.animation_details = !st.animation_details;
+                }
+            });
+            if st.animation_details {
+                if let Some((_, stats)) = st.animation_stats.as_ref().filter(|(id, _)| *id == it.id) {
+                    egui::Grid::new("animation_stats")
+                        .num_columns(2)
+                        .spacing(egui::vec2(64.0, 2.0))
+                        .show(ui, |ui| {
+                            ui.label(aurora_i18n::tr!(
+                                "ui-inventory-dialogs-priority",
+                                value0 = format!("{}", stats.priority)
+                            ));
+                            ui.label(aurora_i18n::tr!(
+                                "ui-inventory-dialogs-ease-in-s",
+                                value0 = aurora_i18n::number_text(&format!("{:.2}", stats.entry))
+                            ));
+                            ui.end_row();
+                            ui.label(aurora_i18n::tr!(
+                                "ui-inventory-dialogs-duration-s",
+                                value0 = aurora_i18n::number_text(&format!("{:.2}", stats.duration))
+                            ));
+                            ui.label(aurora_i18n::tr!(
+                                "ui-inventory-dialogs-ease-out-s",
+                                value0 = aurora_i18n::number_text(&format!("{:.2}", stats.exit))
+                            ));
+                            ui.end_row();
+                            ui.label(aurora_i18n::tr!(
+                                "ui-inventory-dialogs-looping",
+                                value0 = (if stats.looping {
+                                    aurora_i18n::tr!("common-yes")
+                                } else {
+                                    aurora_i18n::tr!("common-no")
+                                })
+                                .to_string()
+                            ));
+                            ui.label(aurora_i18n::tr!(
+                                "ui-inventory-dialogs-joints",
+                                value0 = format!("{}", stats.joints)
+                            ));
+                            ui.end_row();
+                        });
+                } else {
+                    ui.label(RichText::new(aurora_i18n::tr!("ui-inventory-dialogs-loading-animation-statistics")).color(p.muted));
+                }
+            }
+        });
     });
+    if let Some(host) = &mut st.tab_host {
+        host.closing(&mut open);
+    }
     if !open {
         st.preview = None;
+        // The closed document gives the list that opened it its keyboard
+        // back (LLToastAlertPanel restores the focus it saved).
+        super::clipboard::return_document_focus(ctx, st);
         if let Some((asset, local)) = st.playing.filter(|(asset, _)| *asset == it.asset_id) {
             actions.push(InvAction::Animation {
                 asset,
@@ -2537,7 +2678,7 @@ mod tests {
         let mut asked = ids.clone();
         asked.push(no_transfer);
         let mut st = InventoryUi {
-            dialog: Some(EditDialog::Share(asked.clone(), resident)),
+            dialog: Some(EditDialog::Share(asked.clone(), vec![resident])),
             ..Default::default()
         };
         let mut texts = Vec::new();
@@ -2550,6 +2691,24 @@ mod tests {
         for id in &ids {
             assert!(shown(&rules::name(&inv, *id)), "each entry listed");
         }
+        // many recipients: first name + count, not a truncated comma list
+        let crowd_names: Vec<&str> = (1..=5).map(|_| "Orion Example").collect();
+        let (many, tip) = residents_label(&crowd_names);
+        assert_eq!(
+            many,
+            aurora_i18n::tr!(
+                "ui-inventory-dialogs-give-to-many",
+                name = "Orion Example".to_string(),
+                count = 4i64,
+                number = aurora_i18n::integer(4)
+            )
+        );
+        assert_eq!(
+            tip.as_deref(),
+            Some("Orion Example, Orion Example, Orion Example, Orion Example, Orion Example")
+        );
+        assert_eq!(residents_label(&["A", "B"]).0, "A, B");
+        assert!(residents_label(&["A", "B"]).1.is_none());
         assert!(shown(aurora_i18n::tr!("ui-inventory-dialogs-no-copy")), "the no-copy entry marked");
         assert!(shown(&aurora_i18n::tr!(
             "ui-inventory-dialogs-no-copy-will-leave",
@@ -2583,6 +2742,52 @@ mod tests {
             "Give gives all but the entry left out"
         );
         assert!(st.dialog.is_none());
+        // several residents at once (LLAvatarActions::shareWithAvatars, #3074)
+        let crowd: Vec<Uuid> = (1..=5)
+            .map(|n| Uuid::from_u128(0xA0E0_5A4E_0000_0000_0000_0000_0000_0000 | n))
+            .collect();
+        st.dialog = Some(EditDialog::Share(ids.clone(), crowd.clone()));
+        let mut texts = Vec::new();
+        for _ in 0..4 {
+            texts = frame(&mut st, Vec::new()).0;
+        }
+        // a no-copy item reaches one resident only: with several it is left
+        // out (give_inventory_cb stops after the first resident), and the
+        // copyable items still go to everyone
+        let shown = |s: &str| texts.iter().any(|t| t == s);
+        assert!(shown(&aurora_i18n::tr!(
+            "ui-inventory-dialogs-not-given",
+            count = 1usize,
+            number = "1"
+        )));
+        assert!(
+            !shown(&aurora_i18n::tr!(
+                "ui-inventory-dialogs-no-copy-will-leave",
+                count = 1usize,
+                number = "1"
+            )),
+            "nothing leaves the inventory: {texts:?}"
+        );
+        let give_many = ctx
+            .data(|d| d.get_temp::<egui::Rect>(egui::Id::unique(("inventory_share_give", st.ui_id))))
+            .expect("give button")
+            .center();
+        let press = |pressed, pos| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        frame(&mut st, vec![egui::Event::PointerMoved(give_many), press(true, give_many)]);
+        let (_, actions) = frame(&mut st, vec![press(false, give_many)]);
+        assert_eq!(actions.len(), crowd.len(), "one Share action per resident");
+        for (action, who) in actions.iter().zip(&crowd) {
+            assert!(
+                matches!(action, InvAction::Share { items, resident: to } if *items == ids[..1] && to == who),
+                "Give the copyable item to {who}, never the no-copy one"
+            );
+        }
+        assert!(st.dialog.is_none());
         // nothing that can be given: Enter gives nothing
         let enter = egui::Event::Key {
             key: egui::Key::Enter,
@@ -2591,14 +2796,14 @@ mod tests {
             repeat: false,
             modifiers: Default::default(),
         };
-        st.dialog = Some(EditDialog::Share(vec![no_transfer], resident));
+        st.dialog = Some(EditDialog::Share(vec![no_transfer], vec![resident]));
         for _ in 0..3 {
             frame(&mut st, Vec::new());
         }
         let (_, actions) = frame(&mut st, vec![enter]);
         assert!(actions.is_empty() && st.dialog.is_some(), "nothing to give");
         // Escape
-        st.dialog = Some(EditDialog::Share(ids.clone(), resident));
+        st.dialog = Some(EditDialog::Share(ids.clone(), vec![resident]));
         for _ in 0..3 {
             frame(&mut st, Vec::new());
         }

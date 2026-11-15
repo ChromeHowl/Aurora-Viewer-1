@@ -406,8 +406,9 @@ impl App {
                 } else {
                     library::Presentation::Vertical
                 };
-            self.panels.texture_library =
-                !matches!(mode.as_str(), "baseline" | "preview" | "preview-drag" | "inventory-drag") && !mode.starts_with("cascade");
+            self.panels.texture_library = !matches!(mode.as_str(), "baseline" | "preview" | "preview-drag" | "inventory-drag")
+                && !mode.starts_with("cascade")
+                && !mode.starts_with("panorama");
             self.panels.chat = false;
             self.panels.people = false;
             self.panels.perf = false;
@@ -464,6 +465,9 @@ impl App {
                 self.panels.inventory = false;
                 ui::inventory::drag::demo::setup(ctx, &mut self.world.inventory, &mut self.inventory_ui);
             }
+            if mode.starts_with("panorama") {
+                crate::demo::texture_library::seed_panorama(&mut self.world.inventory, self.world.agent_id);
+            }
             if mode.starts_with("cascade") {
                 let kind = match mode.as_str() {
                     "cascade-notecard" => 7,
@@ -493,6 +497,43 @@ impl App {
         }
         if self.demo
             && self.library_demo_seeded
+            && self.frame_count == 620
+            && let Ok(mode) = std::env::var("AURORA_DEMO_TEXTURE_LIBRARY")
+            && mode.starts_with("tabs")
+        {
+            let kind = match mode.as_str() {
+                "tabs-properties" => 6,
+                "tabs-animations" => 20,
+                "tabs-sounds" => 1,
+                "tabs-notecards" => 7,
+                "tabs-scripts" => 10,
+                "tabs-textures" => 0,
+                _ => 57,
+            };
+            crate::demo::texture_library::seed_cascade(&mut self.world.inventory, self.world.agent_id, kind);
+            let items = if matches!(kind, 1 | 6 | 20) {
+                let mut items: Vec<_> = self
+                    .world
+                    .inventory
+                    .items
+                    .values()
+                    .filter(|item| item.asset_type == kind)
+                    .map(|item| item.id)
+                    .collect();
+                items.sort();
+                items.truncate(6);
+                items
+            } else {
+                crate::demo::texture_library::cascade_items(kind).to_vec()
+            };
+            if mode == "tabs-properties" {
+                self.inventory_ui.open_properties_many(&items);
+            } else {
+                self.apply_inventory_action(crate::ui::inventory::InvAction::PreviewMany(items));
+            }
+        }
+        if self.demo
+            && self.library_demo_seeded
             && std::env::var("AURORA_DEMO_TEXTURE_LIBRARY").is_ok_and(|mode| mode.starts_with("multi-preview"))
         {
             let items = crate::demo::texture_library::preview_items();
@@ -514,6 +555,34 @@ impl App {
             }
             if self.frame_count >= 760 && std::env::var("AURORA_DEMO_TEXTURE_LIBRARY").as_deref() == Ok("multi-preview-closed") {
                 self.panels.texture_library = false;
+            }
+        }
+        // `panorama`: the Aurora 360° upload opens as a panorama; `-switch`:
+        // a plain 2:1 texture, its 360° switch turned on; `-full`: enlarged;
+        // `-nocopy`: a marked item the agent may not copy (Copy UUID and
+        // Save As stay off)
+        if self.demo
+            && self.library_demo_seeded
+            && let Ok(mode) = std::env::var("AURORA_DEMO_TEXTURE_LIBRARY")
+            && mode.starts_with("panorama")
+        {
+            let items = crate::demo::texture_library::panorama_items();
+            let item = match mode.as_str() {
+                "panorama-switch" => items[1],
+                "panorama-nocopy" => items[2],
+                _ => items[0],
+            };
+            if self.frame_count == 620 {
+                ui::widgets::place_floater(
+                    ctx,
+                    &library::preview_window_id(item),
+                    egui::pos2(20.0, 60.0),
+                    egui::vec2(720.0, 480.0),
+                );
+                self.texture_library.open_preview(ctx, &self.world, item);
+            }
+            if self.frame_count == 700 {
+                self.texture_library.demo_panorama(&mode);
             }
         }
         if self.demo && self.library_demo_seeded && std::env::var("AURORA_DEMO_TEXTURE_LIBRARY").as_deref() == Ok("preview-sizes") {
@@ -635,7 +704,9 @@ impl App {
                 }
                 library::Action::SaveMaterial { item, material, name } => self.resource_material_save(item, material, name),
                 library::Action::RefreshTexture(asset) => {
-                    self.ui_images.remove(&asset);
+                    if let Some(image) = self.ui_images.remove(&asset) {
+                        self.ui_image_cache.forget(&asset, image.id());
+                    }
                     self.scene.textures.refresh(&asset);
                     self.texture_library.refresh_texture(&self.world, asset);
                 }
