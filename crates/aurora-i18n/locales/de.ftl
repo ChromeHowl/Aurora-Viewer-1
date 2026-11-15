@@ -16304,6 +16304,19 @@ cmdline-take-skipped-attachment = Skipped { $id }: attachments cannot be taken w
 cmdline-take-drop-refused = Not transferred: { $name } ({ $reason }).
 ui-options-commands-key2name-ignores-rlva = key2name ignores RLVa name hiding
 ui-options-commands-key2name-ignores-rlva-hint = When RLVa hides names, the key2name command prints the real name instead of an anonymous one. This reveals names that RLVa hides; the Legacy Viewer never does.
+ui-options-theme = Theme
+ui-options-theme-choice = Color theme
+ui-options-theme-help = A ready-made set of colors for the whole interface; colors only, the layout stays. A theme.json of your own in the skin folder still takes precedence. When Follow the system theme is on, it applies on top of this theme, and the colors you pick below win over both.
+ui-theme-aurora = Aurora
+ui-theme-graphite = Graphite
+ui-theme-legacy-dark = Legacy Dark
+ui-theme-legacy-vintage = Legacy Vintage
+ui-theme-dragon = Dragon
+ui-theme-light = Light
+ui-theme-ocean = Ocean
+ui-theme-forest = Forest
+ui-theme-ember = Ember
+ui-theme-rose = Rose
 import-local-mesh-scene = All pieces (fit to prim)
 rez-notecard-unsaved = Save the notecard before rezzing this object.
 app-vr-runtime-closed-title = VR software closed
@@ -16379,3 +16392,4 @@ anti-spam-demo-chat = Offline flood test: free gifts, touch me!
 anti-spam-blocked-burst = { $count ->
     [one] { $count } source blocked by the anti-spam for this session ({ $kinds }). Manage blocks in Preferences > Protections > Anti-spam.
    *[other] { $count } sources blocked by the anti-spam for this session ({ $kinds }). Manage blocks in Preferences > Protections > Anti-spam.
+}
