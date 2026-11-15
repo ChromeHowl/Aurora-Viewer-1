@@ -21,6 +21,7 @@ pub fn page(cx: &mut Cx, tab: usize) {
         _ => {
             use aurora_i18n::tr;
             let p = cx.p;
+            theme_choice(cx);
             interface_colors(cx);
             opacity(cx);
             cx.group(tr!("extra-skin"), |cx| {
@@ -127,6 +128,56 @@ fn opacity(cx: &mut Cx) {
         );
         cx.greyed(false);
     });
+}
+
+/// The named colour themes (`crate::theme_presets`): the skin's base, under
+/// the colours chosen below. Colours only; greyed while high contrast, which
+/// has its own.
+fn theme_choice(cx: &mut Cx) {
+    use crate::theme_presets;
+    use aurora_i18n::tr;
+    let high_contrast = crate::high_contrast::current();
+    cx.group(tr!("ui-options-theme"), |cx| {
+        cx.note(tr!("ui-options-theme-help"));
+        cx.greyed(high_contrast);
+        let names: Vec<&str> = theme_presets::all().iter().map(|t| t.name()).collect();
+        cx.keywords(&names.join(" "));
+        cx.row(tr!("ui-options-theme-choice"), "", &field!(interface_theme), |ui, s| {
+            let current = theme_presets::find(&s.interface_theme).unwrap_or(&theme_presets::all()[0]);
+            let mut changed = false;
+            egui::ComboBox::from_id_salt(ui.scope_id().with("theme"))
+                .width(COMBO_W)
+                .selected_text(current.name())
+                .truncate()
+                .show_ui(ui, |ui| {
+                    for preset in theme_presets::all() {
+                        ui.horizontal(|ui| {
+                            theme_strip(ui, preset);
+                            let selected = preset.id == current.id;
+                            if ui.selectable_label(selected, preset.name()).clicked() && !selected {
+                                s.interface_theme = preset.id.to_owned();
+                                changed = true;
+                            }
+                        });
+                    }
+                });
+            ui.add_space(6.0);
+            theme_strip(ui, current);
+            changed
+        });
+        cx.greyed(false);
+    });
+}
+
+/// A theme's panel, accent and text side by side: its colours are content
+/// (the theme's, whatever the one in use), not the interface's own.
+fn theme_strip(ui: &mut egui::Ui, preset: &crate::theme_presets::Preset) {
+    let size = egui::vec2(15.0, 15.0);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(size.x * 3.0, size.y), egui::Sense::hover());
+    for (i, color) in preset.swatches().into_iter().enumerate() {
+        let cell = egui::Rect::from_min_size(rect.min + egui::vec2(size.x * i as f32, 0.0), size);
+        ui.painter().rect_filled(cell, 0.0, color);
+    }
 }
 
 /// The accent, background and text of the interface, the rest following

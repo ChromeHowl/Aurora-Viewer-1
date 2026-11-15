@@ -6280,6 +6280,7 @@ before (`amis`, `groupes`, `repere`, `historique`…) are still accepted.
 | `AURORA_DEMO_COLORBLIND=protan\|deutan\|tritan\|mono[:strength]` | Colour blindness of this run (Preferences › Accessibility), never saved |
 | `AURORA_DEMO_CONTRAST=1\|0` | High contrast palette on or off for this run (Preferences › Accessibility), never saved |
 | `AURORA_DEMO_COLORS=accent:<hex>,surface:<hex>,text:<hex>` | Interface colours of this run (Preferences › Appearance › Skin), never saved |
+| `AURORA_DEMO_THEME=<id>` | Named colour theme of this run (Preferences › Appearance › Theme), never saved; `aurora`, `graphite`, `legacy-dark`, `legacy-vintage`, `dragon`, `light`, `ocean`, `forest`, `ember`, `rose` |
 | `AURORA_DEMO_OPACITY=active:<0-1>,inactive:…,conversations:…,bars:…,menus:…,console:…,tags:…,minimap:…` | See-through surfaces of this run (Preferences › Appearance › Skin), never saved |
 | `AURORA_DEMO_SYSTEM_THEME=<look>[;<look>…][;secs=<n>]` or `system` | Follows a made-up system theme, or the real one, in this run, never saved |
 | `AURORA_DEMO_PERF=compact`, `full`, `network` or `monitor-<section>` | Opens the Performance window: compact, the resource monitor, or one of its sections |
@@ -7876,6 +7877,20 @@ failure. Grid validation and any paid upload are performed by the human.
   and the bar islands, black text on the light violet accent; combine with
   `AURORA_DEMO_OPTIONS=14` (the Accessibility page) or
   `AURORA_DEMO_COLORBLIND`, which applies after it.
+- **`AURORA_DEMO_THEME=<id>`**: the named colour theme for this run, as
+  Preferences › Appearance › Theme does (colours only), without touching the
+  saved settings. The ids are `aurora` (the default look), `graphite`,
+  `legacy-dark`, `legacy-vintage`, `dragon`, `light`, `ocean`, `forest`,
+  `ember` and `rose`; an unknown id is logged and the saved theme stays.
+  One capture per theme: `AURORA_DEMO=1 AURORA_DEMO_THEME=light
+  AURORA_CAPTURE=light.png AURORA_CAPTURE_EXIT=1 AURORA_CAPTURE_FRAMES=620`.
+  What to look for: the windows, bars, fields, button faces, the accent
+  (selection, switches, the main buttons) and the text all in the theme's
+  colours, text readable everywhere (on `light`, dark text on light
+  windows; on the single-accent themes only the accent changes), the
+  Aurora logo and login artwork unchanged. `AURORA_DEMO_COLORS` applies on
+  top of it, `AURORA_DEMO_CONTRAST=1` ignores it. Combine with
+  `AURORA_DEMO_OPTIONS=appearance/2` (the Theme list and its colour strip).
 - **`AURORA_DEMO_OPACITY=active:1,inactive:0.3,bars:0.5`**: the opacity
   sliders for this run, any of them, as Preferences › Appearance › Skin ›
   Opacity does, without touching the saved settings. What to look for: the
