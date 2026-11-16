@@ -119,7 +119,7 @@ pub struct Badge<'a> {
 pub fn show(ctx: &egui::Context, p: &Palette, room: egui::Rect, badge: &Badge) -> bool {
     let max = (room.width() * 0.7).max(180.0);
     let mut clicked = false;
-    egui::Area::new(egui::Id::new(badge.id))
+    egui::Area::new(egui::Id::unique(badge.id))
         .order(egui::Order::Foreground)
         .pivot(Align2::CENTER_TOP)
         .fixed_pos(egui::pos2(room.center().x, room.top() + 12.0))

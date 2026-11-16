@@ -109,7 +109,7 @@ pub fn status(f: &Facts) -> Option<Status> {
 pub const PILL_SECONDS: f64 = 1.8;
 
 /// What the pill says: a mode, or the return to the plain view.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Pill {
     /// `None`: back to the normal view.
     pub status: Option<Status>,
