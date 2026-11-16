@@ -41,6 +41,7 @@ pub(super) fn glyph(choice: ShotChoice) -> Option<Glyph> {
         ShotChoice::FullSet => Some(Glyph::Icon("box-multiple-filled")),
         ShotChoice::Pano => Some(Glyph::Icon("panorama-horizontal-filled")),
         ShotChoice::Depth => Some(Glyph::Icon("layers-difference")),
+        ShotChoice::Path => Some(Glyph::Icon("movie")),
         ShotChoice::Bank(i) => Some(Glyph::Text(format!("C{}", i + 1))),
     }
 }
@@ -55,6 +56,10 @@ pub(super) fn label(choice: ShotChoice) -> (String, Option<&'static str>) {
         ),
         ShotChoice::Pano => ("360°".to_owned(), None),
         ShotChoice::Depth => (aurora_i18n::tr!("pcu-shot-depth").to_owned(), None),
+        ShotChoice::Path => (
+            aurora_i18n::tr!("vfp-shot-path").to_owned(),
+            Some(aurora_i18n::tr!("vfp-shot-path-caption")),
+        ),
         ShotChoice::Bank(i) => (format!("C{}", i + 1), None),
     }
 }
@@ -243,7 +248,13 @@ mod tests {
     #[test]
     fn every_mode_but_photo_marks_the_shutter() {
         assert!(glyph(ShotChoice::Photo).is_none());
-        for c in [ShotChoice::FullSet, ShotChoice::Pano, ShotChoice::Depth, ShotChoice::Bank(2)] {
+        for c in [
+            ShotChoice::FullSet,
+            ShotChoice::Pano,
+            ShotChoice::Depth,
+            ShotChoice::Path,
+            ShotChoice::Bank(2),
+        ] {
             assert!(glyph(c).is_some(), "{c:?}");
         }
         assert!(matches!(glyph(ShotChoice::Bank(1)), Some(Glyph::Text(t)) if t == "C2"));
