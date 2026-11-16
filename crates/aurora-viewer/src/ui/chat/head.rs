@@ -43,7 +43,9 @@ fn identity(world: &World, st: &ChatUi) -> Identity {
         let near = aurora_i18n::tr!("ui-chat-head-in-earshot", n = st.nearby_count);
         return Identity {
             title: aurora_i18n::tr!("common-nearby-chat").to_owned(),
-            subtitle: if region.is_empty() { near } else { format!("{region} · {near}") },
+            // the count first: a narrow head cuts the end of the line, and a long
+            // parcel name must not take the number with it
+            subtitle: if region.is_empty() { near } else { format!("{near} · {region}") },
             avatar: None,
             kind: None,
         };
@@ -155,24 +157,42 @@ pub(super) fn show(
             super::thread::paint_icon(ui.painter(), "map-pin-filled", pic.shrink(8.0), p.teal);
         }
     }
-    // the actions, from the right edge
+    // the actions, from the right edge: those the head has no room for go
+    // to its "…" menu (`head_layout`)
+    let selected = st.selected;
+    let group = who.kind.is_some_and(|k| k != sidebar::Kind::Private);
+    let friend = selected.is_some_and(|other| world.social.is_friend(&other));
+    let poke = selected
+        .filter(|_| !group)
+        .and_then(|other| crate::ui::poke::button(ui.ctx(), world, &other));
+    let title_font = egui::FontId::new(14.0, crate::ui::fonts::semibold(ui.ctx()));
+    let title_room = text_min(ui.fonts_mut(|f| f.row_height(&title_font)));
+    let present = present_actions(world, selected, who.kind, friend, poke.is_some());
+    let layout = head_layout(width, title_room, &present);
+    // what the menu repeats of the buttons it replaced (the members' panel
+    // only when it can open)
+    let dropped: Vec<HeadAction> = layout
+        .overflow
+        .iter()
+        .copied()
+        .filter(|a| *a != HeadAction::Members || members_room)
+        .collect();
     let mut x = rect.right() - 8.0;
     let mut slot = || {
         x -= TOOL + 2.0;
         egui::Rect::from_center_size(egui::pos2(x + TOOL * 0.5, rect.center().y), egui::Vec2::splat(TOOL))
     };
-    let selected = st.selected;
-    let group = who.kind.is_some_and(|k| k != sidebar::Kind::Private);
     // at the right edge, the close button of the conversation (the X of
     // its tab); the nearby chat cannot be closed
     if let Some(other) = selected
+        && layout.shows(HeadAction::Close)
         && tool(ui, p, slot(), "x", super::close_tip(world, &other), Tone::Plain).clicked()
     {
         actions.push(ConvAction::Close(other));
     }
     // a group chat's snooze beside its close (FSFloaterIM's title bar)
     if let Some(other) = selected
-        && super::can_snooze(world, &other)
+        && layout.shows(HeadAction::Snooze)
         && tool(
             ui,
             p,
@@ -188,70 +208,71 @@ pub(super) fn show(
     // the menu of the others
     let more = tool(ui, p, slot(), "dots-filled", aurora_i18n::tr!("ui-chat-more"), Tone::Plain);
     crate::ui::menu::dropdown(&more, p, egui::PopupCloseBehavior::CloseOnClick, |ui| {
-        header::more_items(ui, p, world, st, actions, group, true);
+        header::more_items(ui, p, world, st, actions, group, true, &dropped);
     });
     // find
-    let find_tip = aurora_i18n::tr!("ui-chat-find-in-conversation");
-    if tool(ui, p, slot(), "search-filled", find_tip, Tone::active(finding)).clicked() {
-        let search = st.searches.entry(selected).or_default();
-        if finding {
-            search.find = None;
-        } else {
-            search.open_find();
-            ui.ctx().memory_mut(|m| m.request_focus(find::field_id(selected)));
+    if layout.shows(HeadAction::Find) {
+        let find_tip = aurora_i18n::tr!("ui-chat-find-in-conversation");
+        if tool(ui, p, slot(), "search-filled", find_tip, Tone::active(finding)).clicked() {
+            toggle_find(ui.ctx(), st, finding);
         }
     }
     match (selected, who.kind) {
         // the nearby chat: the people around (the People window)
         (None, _) => {
-            if tool(ui, p, slot(), "users", aurora_i18n::tr!("common-nearby-people"), Tone::Plain).clicked() {
+            if layout.shows(HeadAction::People)
+                && tool(ui, p, slot(), "users", aurora_i18n::tr!("common-nearby-people"), Tone::Plain).clicked()
+            {
                 actions.push(ConvAction::OpenPeople(0));
             }
         }
         // a group or a conference: its members' panel
         (Some(_), Some(k)) if k != sidebar::Kind::Private => {
-            let open = st.members_open && members_room;
-            let tip = if open {
-                aurora_i18n::tr!("ui-chat-hide-members")
-            } else {
-                aurora_i18n::tr!("ui-chat-show-members")
-            };
-            let r = tool(
-                ui,
-                p,
-                slot(),
-                "users",
-                tip,
-                if members_room { Tone::active(open) } else { Tone::Off },
-            );
-            if r.clicked() && members_room {
-                st.members_open = !st.members_open;
+            if layout.shows(HeadAction::Members) {
+                let open = st.members_open && members_room;
+                let tip = if open {
+                    aurora_i18n::tr!("ui-chat-hide-members")
+                } else {
+                    aurora_i18n::tr!("ui-chat-show-members")
+                };
+                let r = tool(
+                    ui,
+                    p,
+                    slot(),
+                    "users",
+                    tip,
+                    if members_room { Tone::active(open) } else { Tone::Off },
+                );
+                if r.clicked() && members_room {
+                    st.members_open = !st.members_open;
+                }
             }
         }
         // a resident: their profile, and a teleport offered or requested (one
         // menu button in FSFloaterIM's toolbar, two buttons here)
         (Some(other), _) => {
-            if tool(ui, p, slot(), "user-filled", aurora_i18n::tr!("common-profile"), Tone::Plain).clicked() {
+            if layout.shows(HeadAction::Profile)
+                && tool(ui, p, slot(), "user-filled", aurora_i18n::tr!("common-profile"), Tone::Plain).clicked()
+            {
                 actions.push(ConvAction::Profile(other));
             }
             // the friendship offer of FSFloaterIM's add_friend_btn, hidden
             // (not greyed, as there) once they are our friend
             // (the friendship itself: no offer to a hidden friend)
-            if !world.social.is_friend(&other)
+            if layout.shows(HeadAction::AddFriend)
                 && tool(ui, p, slot(), "user-plus", aurora_i18n::tr!("ui-chat-add-friend"), Tone::Plain).clicked()
             {
                 crate::ui::context::request(ui.ctx(), crate::ui::context::CtxAction::AddFriend(other));
             }
-            if tool(ui, p, slot(), "send-filled", aurora_i18n::tr!("common-offer-teleport"), Tone::Plain).clicked() {
+            if layout.shows(HeadAction::Offer)
+                && tool(ui, p, slot(), "send-filled", aurora_i18n::tr!("common-offer-teleport"), Tone::Plain).clicked()
+            {
                 actions.push(ConvAction::OfferTeleport(other));
             }
             // the other direction, greyed for an offline friend as
             // FSFloaterIM::changed greys teleport_btn; a head too narrow
             // for it leaves it to the row of the "…" menu
-            let friend = world.social.is_friend(&other);
-            let poke = crate::ui::poke::button(ui.ctx(), world, &other);
-            let slots = 7 + usize::from(!friend) + usize::from(can_add_people(world, &other)) + usize::from(poke.is_some());
-            if request_fits(width, slots) {
+            if layout.shows(HeadAction::Request) {
                 let request = if world.social.can_request_teleport(&other) {
                     Tone::Plain
                 } else {
@@ -272,7 +293,8 @@ pub(super) fn show(
             }
             // a poke (`ui/poke.rs`), greyed out while they are offline or
             // just poked
-            if let Some(b) = poke
+            if layout.shows(HeadAction::Poke)
+                && let Some(b) = poke
                 && tool(
                     ui,
                     p,
@@ -292,12 +314,14 @@ pub(super) fn show(
     // confirmed) or a conference; a role group's chat cannot
     // (FSFloaterIM's add_participant_panel, isInviteAllowed)
     if let Some(other) = selected
-        && can_add_people(world, &other)
+        && layout.shows(HeadAction::AddPeople)
         && tool(ui, p, slot(), ADD_PEOPLE_ICON, aurora_i18n::tr!("ui-call-add-people"), Tone::Plain).clicked()
     {
         actions.push(ConvAction::PickPeople(other));
     }
-    if let Some(other) = selected {
+    if let Some(other) = selected
+        && layout.shows(HeadAction::Call)
+    {
         call_tool(ui, p, slot(), world, st, actions, other);
     }
     if finding {
@@ -320,13 +344,12 @@ pub(super) fn show(
     }
     // the names, up to the actions
     let text_left = pic.right() + 10.0;
-    let text_right = x - 6.0;
+    let text_right = (x - 6.0).max(text_left);
     let title_y = if who.subtitle.is_empty() {
         rect.center().y
     } else {
         rect.center().y - gap * 8.0 / LINE_GAP
     };
-    let title_font = egui::FontId::new(14.0, crate::ui::fonts::semibold(ui.ctx()));
     // a member of the Aurora team's tag after the name, cut before it
     let room = text_right - text_left;
     let mark = who.avatar.and_then(|id| crate::world::staff::mark(world, &id));
@@ -336,8 +359,11 @@ pub(super) fn show(
     } else {
         0.0
     };
-    let cut = crate::ui::widgets::paint_elided(
+    // the full text of what was cut, on hover over the names
+    let mut tips = crate::ui::widgets::CutTips::default();
+    crate::ui::widgets::paint_elided_tip(
         ui,
+        &mut tips,
         &who.title,
         egui::pos2(text_left, title_y),
         room - staff,
@@ -356,8 +382,9 @@ pub(super) fn show(
         crate::ui::staff::paint_at(ui, ui.painter(), p, mark, egui::pos2(text_left + shown + 6.0, title_y), 14.0);
     }
     if !who.subtitle.is_empty() {
-        crate::ui::widgets::paint_elided(
+        crate::ui::widgets::paint_elided_tip(
             ui,
+            &mut tips,
             &who.subtitle,
             egui::pos2(text_left, rect.center().y + gap * 9.0 / LINE_GAP),
             text_right - text_left,
@@ -369,20 +396,266 @@ pub(super) fn show(
     let r = ui.interact(names, ui.scope_id().with("head_names"), egui::Sense::click());
     if let Some(a) = who.avatar {
         super::name_menu(&r, p, world, a);
-        let r = r.on_hover_cursor(egui::CursorIcon::PointingHand);
-        let r = if cut { r.on_hover_text(&who.title) } else { r };
+        let r = tips.show(r.on_hover_cursor(egui::CursorIcon::PointingHand));
         if r.clicked() {
             actions.push(ConvAction::Profile(a));
         }
-    } else if cut {
-        r.on_hover_text(&who.title);
+    } else {
+        tips.show(r);
     }
 }
 
-/// Whether a head of `width` keeps its picture clear of `slots` buttons, the
-/// request's among them.
-pub(super) fn request_fits(width: f32, slots: usize) -> bool {
-    8.0 + slots as f32 * (TOOL + 2.0) + 12.0 + PIC <= width
+/// The "…" menu's rows for the buttons the head had no room for, followed by
+/// a separator. The offer, the request, the friendship, adding people and
+/// closing are rows of that menu already.
+pub(super) fn dropped_rows(
+    ui: &mut egui::Ui,
+    p: &Palette,
+    world: &World,
+    st: &mut ChatUi,
+    actions: &mut Vec<ConvAction>,
+    dropped: &[HeadAction],
+) {
+    use crate::ui::menu;
+    let selected = st.selected;
+    let mut any = false;
+    for action in dropped {
+        match (*action, selected) {
+            (HeadAction::Call, Some(other)) => {
+                any = true;
+                if world.call_of(&other).is_some() {
+                    if menu::item(ui, p, "phone-filled", aurora_i18n::tr!("ui-call-hang-up")) {
+                        actions.push(ConvAction::HangUp);
+                    }
+                } else if world.calls.invite_for(&other).is_some() {
+                    menu::item_if(ui, p, "phone-filled", aurora_i18n::tr!("ui-chat-call-ringing-banner"), false);
+                } else if !st.voice_on {
+                    menu::item_if(ui, p, "phone-filled", aurora_i18n::tr!("ui-call-voice-off"), false);
+                } else {
+                    let launched = world.call_launched(&other).is_some();
+                    let label = if launched {
+                        aurora_i18n::tr!("ui-chat-join-call")
+                    } else {
+                        aurora_i18n::tr!("common-voice-call")
+                    };
+                    if menu::item(ui, p, "phone-filled", label) {
+                        actions.push(ConvAction::Call(other));
+                    }
+                }
+            }
+            (HeadAction::Snooze, Some(other)) => {
+                any = true;
+                if menu::item(ui, p, super::SNOOZE_ICON, aurora_i18n::tr!("ui-chat-snooze-tip")) {
+                    actions.push(ConvAction::Snooze(other));
+                }
+            }
+            (HeadAction::Find, _) => {
+                any = true;
+                if menu::item(ui, p, "search-filled", aurora_i18n::tr!("ui-chat-find-in-conversation")) {
+                    open_find(ui.ctx(), st);
+                }
+            }
+            (HeadAction::People, None) => {
+                any = true;
+                if menu::item(ui, p, "users", aurora_i18n::tr!("common-nearby-people")) {
+                    actions.push(ConvAction::OpenPeople(0));
+                }
+            }
+            (HeadAction::Members, Some(_)) => {
+                any = true;
+                let label = if st.members_open {
+                    aurora_i18n::tr!("ui-chat-hide-members")
+                } else {
+                    aurora_i18n::tr!("ui-chat-show-members")
+                };
+                if menu::item(ui, p, "users", label) {
+                    st.members_open = !st.members_open;
+                }
+            }
+            (HeadAction::Profile, Some(other)) => {
+                any = true;
+                if menu::item(ui, p, "user-filled", aurora_i18n::tr!("common-profile")) {
+                    actions.push(ConvAction::Profile(other));
+                }
+            }
+            (HeadAction::Poke, Some(other)) => {
+                if let Some(b) = crate::ui::poke::button(ui.ctx(), world, &other) {
+                    any = true;
+                    if menu::item_if(ui, p, crate::ui::poke::ICON, b.tip, b.enabled) {
+                        crate::ui::context::request(ui.ctx(), crate::ui::context::CtxAction::Poke(other));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    if any {
+        menu::separator(ui, p);
+    }
+}
+
+/// The find bar of the head: opened with its field focused, or closed.
+fn toggle_find(ctx: &egui::Context, st: &mut ChatUi, finding: bool) {
+    let selected = st.selected;
+    let search = st.searches.entry(selected).or_default();
+    if finding {
+        search.find = None;
+    } else {
+        search.open_find();
+        ctx.memory_mut(|m| m.request_focus(find::field_id(selected)));
+    }
+}
+
+/// The find bar's menu row (a head without room for its button).
+pub(super) fn open_find(ctx: &egui::Context, st: &mut ChatUi) {
+    let finding = st.searches.get(&st.selected).is_some_and(|s| s.find.is_some());
+    toggle_find(ctx, st, finding);
+}
+
+/// A button of the head. The head lists the ones it has, from the right
+/// edge (the order they are drawn in), and `head_layout` says which of them
+/// it has room for: the others move to its "…" menu (`header::more_items`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum HeadAction {
+    Close,
+    Snooze,
+    /// The "…" menu itself: always kept, it holds what the others left.
+    More,
+    Find,
+    /// The nearby chat's People window.
+    People,
+    /// A group's members' panel.
+    Members,
+    Profile,
+    AddFriend,
+    Offer,
+    Request,
+    Poke,
+    AddPeople,
+    Call,
+}
+
+impl HeadAction {
+    /// How long the button stays while the head narrows, the lowest first.
+    /// The profile is a click on the picture and the names as well, and the
+    /// friendship, the requests and the others are rows of the "…" menu
+    /// anyway: they go before the call, the close and the offer.
+    fn keep(self) -> u8 {
+        match self {
+            HeadAction::More => 0,
+            HeadAction::Close => 1,
+            HeadAction::Call => 2,
+            HeadAction::Snooze => 3,
+            HeadAction::Offer => 4,
+            HeadAction::People | HeadAction::Members => 5,
+            HeadAction::Find => 6,
+            HeadAction::AddPeople => 7,
+            HeadAction::AddFriend => 8,
+            HeadAction::Poke => 9,
+            HeadAction::Profile => 10,
+            HeadAction::Request => 11,
+        }
+    }
+}
+
+/// What the head of `width` shows of its actions, and what goes to its menu.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct HeadLayout {
+    /// In the order they were given (the drawing order).
+    pub shown: Vec<HeadAction>,
+    /// The ones left out, in the same order.
+    pub overflow: Vec<HeadAction>,
+}
+
+impl HeadLayout {
+    pub(super) fn shows(&self, action: HeadAction) -> bool {
+        self.shown.contains(&action)
+    }
+}
+
+/// From a button's left edge to the next one's.
+const STEP: f32 = TOOL + 2.0;
+/// The right margin, the picture's margin and the picture.
+const EDGES: f32 = 8.0 + 12.0 + PIC;
+/// Between the picture and the names, and the names and the buttons.
+const TEXT_GAP: f32 = 16.0;
+/// The characters of the title the head always keeps room for.
+const TITLE_CHARS: f32 = 5.0;
+
+/// The width the names keep at the least, for a title font whose line is
+/// `row_height` tall (it follows the text size): `TITLE_CHARS` characters
+/// of the title, and the gaps around them.
+pub(super) fn text_min(row_height: f32) -> f32 {
+    TEXT_GAP + TITLE_CHARS * row_height * 0.6
+}
+
+/// Whether a head of `width` keeps `text_min` for its names beside the
+/// picture and `slots` buttons.
+pub(super) fn fits(width: f32, slots: usize, text_min: f32) -> bool {
+    EDGES + slots as f32 * STEP + text_min <= width
+}
+
+/// The buttons the head of a conversation has, from the right edge.
+fn present_actions(world: &World, selected: Option<Uuid>, kind: Option<sidebar::Kind>, friend: bool, poke: bool) -> Vec<HeadAction> {
+    let mut list = Vec::new();
+    if let Some(other) = selected {
+        list.push(HeadAction::Close);
+        if super::can_snooze(world, &other) {
+            list.push(HeadAction::Snooze);
+        }
+    }
+    list.push(HeadAction::More);
+    list.push(HeadAction::Find);
+    match (selected, kind) {
+        (None, _) => list.push(HeadAction::People),
+        (Some(_), Some(k)) if k != sidebar::Kind::Private => list.push(HeadAction::Members),
+        (Some(_), _) => {
+            list.push(HeadAction::Profile);
+            if !friend {
+                list.push(HeadAction::AddFriend);
+            }
+            list.push(HeadAction::Offer);
+            list.push(HeadAction::Request);
+            if poke {
+                list.push(HeadAction::Poke);
+            }
+        }
+    }
+    if let Some(other) = selected {
+        if can_add_people(world, &other) {
+            list.push(HeadAction::AddPeople);
+        }
+        list.push(HeadAction::Call);
+    }
+    list
+}
+
+/// Which of `actions` (in drawing order) a head of `width` shows, keeping
+/// `text_min` for its names: as many as fit, the ones that `keep` longest
+/// first, the "…" menu always. The others are `overflow`, for the menu.
+/// (It generalises the rule that dropped the teleport request alone.)
+pub(super) fn head_layout(width: f32, text_min: f32, actions: &[HeadAction]) -> HeadLayout {
+    let mut room = 0;
+    while room < actions.len() && fits(width, room + 1, text_min) {
+        room += 1;
+    }
+    let mut order: Vec<usize> = (0..actions.len()).collect();
+    order.sort_by_key(|&i| actions[i].keep());
+    // the menu is rank 0 and takes one slot even when none is left
+    let allowed = room.max(1);
+    let mut kept = vec![false; actions.len()];
+    for &i in order.iter().take(allowed) {
+        kept[i] = true;
+    }
+    let (mut shown, mut overflow) = (Vec::new(), Vec::new());
+    for (i, a) in actions.iter().enumerate() {
+        if kept[i] {
+            shown.push(*a);
+        } else {
+            overflow.push(*a);
+        }
+    }
+    HeadLayout { shown, overflow }
 }
 
 /// People can be added to a conversation with a resident or a
@@ -475,5 +748,144 @@ fn call_tool(ui: &mut egui::Ui, p: &Palette, rect: egui::Rect, world: &World, st
         if tool(ui, p, rect, "phone-filled", tip, tone).clicked() {
             actions.push(ConvAction::Call(other));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::HeadAction::*;
+    use super::*;
+
+    /// The buttons of the heads, in drawing order.
+    fn sets() -> Vec<(&'static str, Vec<HeadAction>)> {
+        vec![
+            ("nearby", vec![More, Find, People]),
+            ("group", vec![Close, Snooze, More, Find, Members, AddPeople, Call]),
+            ("conference", vec![Close, More, Find, Members, AddPeople, Call]),
+            ("friend", vec![Close, More, Find, Profile, Offer, Request, Poke, AddPeople, Call]),
+            (
+                "stranger",
+                vec![Close, More, Find, Profile, AddFriend, Offer, Request, Poke, AddPeople, Call],
+            ),
+        ]
+    }
+
+    /// A title line at the text sizes of the options.
+    fn texts() -> [f32; 3] {
+        [1.0, 1.5, 2.0].map(|scale| text_min(17.0 * scale))
+    }
+
+    #[test]
+    fn the_names_keep_their_room_and_the_menu_stays() {
+        for (name, set) in sets() {
+            for text in texts() {
+                for width in (240..=900).step_by(7) {
+                    let width = width as f32;
+                    let layout = head_layout(width, text, &set);
+                    let case = format!("{name} at {width}, names {text}");
+                    assert!(layout.shows(More), "{case}: the menu is always there");
+                    // the buttons leave the names their room, unless only the menu is left
+                    assert!(
+                        layout.shown.len() == 1 || fits(width, layout.shown.len(), text),
+                        "{case}: {layout:?}"
+                    );
+                    // nothing is lost: shown and overflow are the set, in order
+                    let mut all: Vec<HeadAction> = layout.shown.iter().chain(&layout.overflow).copied().collect();
+                    all.sort_by_key(|a| set.iter().position(|s| s == a));
+                    assert_eq!(all, set, "{case}");
+                    // as many as fit: one more would not
+                    assert!(
+                        layout.overflow.is_empty() || !fits(width, layout.shown.len() + 1, text),
+                        "{case}: room left unused"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_least_important_buttons_go_first() {
+        for (name, set) in sets() {
+            for text in texts() {
+                for width in (240..=900).step_by(11) {
+                    let layout = head_layout(width as f32, text, &set);
+                    let kept = layout.shown.iter().map(|a| a.keep()).max().unwrap_or(0);
+                    let dropped = layout.overflow.iter().map(|a| a.keep()).min().unwrap_or(u8::MAX);
+                    assert!(kept <= dropped, "{name} at {width}: {layout:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_wider_head_never_shows_fewer_buttons() {
+        for (name, set) in sets() {
+            for text in texts() {
+                let mut before = 0;
+                for width in (240..=900).step_by(3) {
+                    let shown = head_layout(width as f32, text, &set).shown.len();
+                    assert!(shown >= before, "{name} at {width}");
+                    before = shown;
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_roomy_head_shows_everything_and_the_request_goes_first() {
+        for (name, set) in sets() {
+            let layout = head_layout(900.0, text_min(17.0), &set);
+            assert!(layout.overflow.is_empty(), "{name}");
+        }
+        let (_, stranger) = sets().pop().expect("stranger");
+        // one button too many for the width: it is the request's
+        let full = stranger.len();
+        let width = EDGES + full as f32 * STEP + 90.0 - 1.0;
+        let layout = head_layout(width, 90.0, &stranger);
+        assert_eq!(layout.overflow, vec![Request]);
+    }
+
+    #[test]
+    fn the_smallest_window_keeps_the_essentials_of_each_head() {
+        // the nearby pop-out at its least holds its three buttons; a little
+        // narrower (or at a larger text) the find goes to the menu
+        assert!(head_layout(234.0, text_min(17.0), &sets()[0].1).overflow.is_empty());
+        let nearby = head_layout(214.0, text_min(17.0), &sets()[0].1);
+        assert_eq!(nearby.shown, vec![More, People]);
+        assert_eq!(nearby.overflow, vec![Find]);
+        // the workspace at its least (300 wide, the rail beside the pane)
+        let stranger = head_layout(242.0, text_min(17.0), &sets()[4].1);
+        assert_eq!(stranger.shown, vec![Close, More, Call]);
+        assert!(stranger.overflow.contains(&Offer), "the offer is a row of the menu");
+        // a head narrower than its picture: the menu alone
+        assert_eq!(head_layout(60.0, 90.0, &sets()[4].1).shown, vec![More]);
+    }
+
+    #[test]
+    fn the_names_room_follows_the_text_size() {
+        assert!(text_min(17.0 * 2.0) > text_min(17.0 * 1.5));
+        assert!(text_min(17.0 * 1.5) > text_min(17.0));
+        assert!(text_min(17.0) > TEXT_GAP);
+    }
+
+    #[test]
+    fn a_window_minimum_follows_the_text_size_and_never_shrinks() {
+        let base = egui::vec2(300.0, 240.0);
+        let at = |s: f32| crate::ui::widgets::text_min_size(base, s);
+        assert_eq!(at(1.0), base);
+        assert_eq!(at(0.8), base, "a smaller text keeps the base minimum");
+        assert!(at(1.5).x > at(1.0).x && at(2.0).x > at(1.5).x);
+        assert!(at(2.0).y > at(1.0).y);
+        assert_eq!(at(2.0).x, 600.0);
+    }
+
+    #[test]
+    fn only_what_was_cut_is_in_the_hover() {
+        let mut tips = crate::ui::widgets::CutTips::default();
+        assert_eq!(tips.text(), None);
+        tips.0.push("29 people in earshot · A long parcel name".to_owned());
+        assert_eq!(tips.text().as_deref(), Some("29 people in earshot · A long parcel name"));
+        tips.0.push("Name".to_owned());
+        assert_eq!(tips.text().as_deref(), Some("29 people in earshot · A long parcel name\nName"));
     }
 }

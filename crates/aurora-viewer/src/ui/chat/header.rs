@@ -328,12 +328,13 @@ pub(super) fn more_menu(
     workspace: bool,
 ) {
     crate::ui::widgets::icon_menu(ui, p, "dots-filled", aurora_i18n::tr!("ui-chat-more"), |ui| {
-        more_items(ui, p, world, st, actions, group, workspace);
+        more_items(ui, p, world, st, actions, group, workspace, &[]);
     });
 }
 
 /// The rows of the conversation's menu (`more_menu`, the workspace head's
-/// "…").
+/// "…"), after the rows of the head's buttons that had no room (`dropped`).
+#[allow(clippy::too_many_arguments)]
 pub(super) fn more_items(
     ui: &mut egui::Ui,
     p: &Palette,
@@ -342,7 +343,9 @@ pub(super) fn more_items(
     actions: &mut Vec<ConvAction>,
     group: bool,
     workspace: bool,
+    dropped: &[super::head::HeadAction],
 ) {
+    super::head::dropped_rows(ui, p, world, st, actions, dropped);
     let selected = st.selected;
     let search = st.searches.entry(selected).or_default();
     let filtering = search.filter.is_some();

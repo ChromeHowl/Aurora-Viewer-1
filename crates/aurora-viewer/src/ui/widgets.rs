@@ -94,6 +94,14 @@ pub(crate) fn window_dragging(ctx: &egui::Context) -> bool {
             .any(|layer| layer.id.with("move") == dragged)
 }
 
+/// `min` for a text size `scale` (`fonts::scale`): the width follows it, the
+/// height half as fast (a window's lines are only part of its height). Never
+/// below `min`: a smaller text keeps the base minimum.
+pub(crate) fn text_min_size(min: Vec2, scale: f32) -> Vec2 {
+    let scale = scale.max(1.0);
+    Vec2::new(min.x * scale, min.y * (1.0 + (scale - 1.0) * 0.5))
+}
+
 /// Wait for egui's click tolerance before moving a window. Area's drag-only
 /// background otherwise starts moving even while a button above it is clicked.
 /// Keep its move ID and hit-test plane: children and resize handles stay on top,
@@ -142,6 +150,47 @@ pub(crate) fn paint_elided(ui: &egui::Ui, text: &str, left_center: egui::Pos2, w
     let pos = row_text_origin(ui.painter(), &galley, left_center.x, left_center.y);
     let cut = galley.elided;
     ui.painter().galley(pos, galley, color);
+    cut
+}
+
+/// The whole text of the painted labels that were cut, for the hover over
+/// their row: `paint_elided` says "cut" and a caller that drops the answer
+/// leaves a text nobody can read in full (the head and the entries of the
+/// conversations, #text-fit). One tooltip for the row, not one per label.
+#[derive(Default)]
+pub(crate) struct CutTips(pub(super) Vec<String>);
+
+impl CutTips {
+    /// The tooltip: the cut texts, one per line; none when nothing was cut.
+    pub(crate) fn text(&self) -> Option<String> {
+        (!self.0.is_empty()).then(|| self.0.join("\n"))
+    }
+
+    /// `response` with the tooltip, when there is one.
+    pub(crate) fn show(self, response: egui::Response) -> egui::Response {
+        match self.text() {
+            Some(text) => response.on_hover_text(text),
+            None => response,
+        }
+    }
+}
+
+/// `paint_elided` for a row with a hover: a cut text is added whole to
+/// `tips`, for `CutTips::show` on the row's response. Returns whether it was
+/// cut. Prefer it to `paint_elided` wherever the width is not ours.
+pub(crate) fn paint_elided_tip(
+    ui: &egui::Ui,
+    tips: &mut CutTips,
+    text: &str,
+    left_center: egui::Pos2,
+    width: f32,
+    font: egui::FontId,
+    color: Color32,
+) -> bool {
+    let cut = paint_elided(ui, text, left_center, width, font, color);
+    if cut {
+        tips.0.push(text.to_owned());
+    }
     cut
 }
 
@@ -526,6 +575,8 @@ pub struct Floater<'a> {
     pub default_pos: egui::Pos2,
     pub default_size: Vec2,
     pub min_size: Vec2,
+    /// The minimum follows the text size (`min_size_for_text`).
+    min_follows_text: bool,
     pub resizable: bool,
     pub help: Option<&'a str>,
     /// Extra title bar buttons: (Tabler icon, tooltip, set when clicked),
@@ -585,6 +636,7 @@ impl<'a> Floater<'a> {
             default_pos: pos,
             default_size: size,
             min_size: Vec2::new(220.0, 120.0),
+            min_follows_text: false,
             resizable: true,
             height_only: false,
             help: None,
@@ -690,6 +742,15 @@ impl<'a> Floater<'a> {
     /// The body edge to edge under the title bar (see `flush_body`).
     pub fn flush_body(mut self) -> Self {
         self.flush_body = true;
+        self
+    }
+
+    /// The window's minimum size (`min_size`, set before `show`) grows with
+    /// the text size: its text is laid out in points that do not scale, so a
+    /// window kept to the minimum at a larger text size would cut it. For
+    /// windows made of text (the conversations).
+    pub fn min_size_for_text(mut self) -> Self {
+        self.min_follows_text = true;
         self
     }
 
@@ -866,6 +927,9 @@ impl<'a> Floater<'a> {
         } else {
             super::layout::work_area(ctx)
         };
+        if self.min_follows_text {
+            self.min_size = text_min_size(self.min_size, super::fonts::scale(ctx));
+        }
         self.min_size = self.min_size.min(work.size());
         if native_child {
             self.default_pos = egui::Pos2::ZERO;
