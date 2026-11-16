@@ -68,6 +68,15 @@ struct SettingsCreate {
     /// UpdateSettingsAgentInventory and FetchInventory2.
     caps: (String, String),
     asset_type: i32,
+    /// An imported script (`ImportScriptItem`): answered by
+    /// `ScriptItemImported`, with the grid's compile answer.
+    import: Option<ScriptImport>,
+}
+
+/// How an imported script is compiled once its item exists.
+#[derive(Clone, Copy)]
+struct ScriptImport {
+    compile: crate::scripts::CompileTarget,
 }
 
 fn material_save_error(reason: String) -> Error {
@@ -489,6 +498,7 @@ impl Session<'_> {
                 data,
                 caps,
                 asset_type: 56,
+                import: None,
             },
         );
         self.send_main(&message, true);
@@ -543,6 +553,7 @@ impl Session<'_> {
                 data,
                 caps,
                 asset_type: 7,
+                import: None,
             },
         );
         self.send_main(&message, true);
@@ -589,8 +600,133 @@ impl Session<'_> {
                 // the text goes up through UpdateScriptAgent alone
                 caps: (cap, String::new()),
                 asset_type: 10,
+                import: None,
             },
         );
+        self.send_main(&message, true);
+    }
+
+    /// An imported script (Aurora addition, see `NetCommand::ImportScriptItem`):
+    /// the creation of LLScriptRecoverQueue::recoverNext with the next owner
+    /// rights of the creation defaults (create_new_item) and, for SLua, the
+    /// SST_LUA subtype in the wearable type field, which the Legacy Viewer
+    /// sets for a Lua script (`create_new_item`). Its text goes up once the
+    /// callback names the item (onCreateScript). Every failure is answered
+    /// by `ScriptItemImported`, at once when nothing was sent.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn import_script_item(
+        &mut self,
+        request: Uuid,
+        parent: Uuid,
+        name: String,
+        description: String,
+        source: String,
+        compile: crate::scripts::CompileTarget,
+        permissions: Option<crate::inventory::upload::Permissions>,
+    ) {
+        let cap = self.main_cap("UpdateScriptAgent");
+        // DB_INV_ITEM_NAME_STR_LEN: 63 bytes, and no '|' (correctInventoryName)
+        let valid = !parent.is_nil()
+            && !name.trim().is_empty()
+            && name.len() <= 63
+            && !name.contains('|')
+            && source.len() <= crate::scripts::MAX_SOURCE;
+        let Some(cap) = cap.filter(|_| valid && self.asset_imports.settings.len() < 8) else {
+            emit(
+                self.sh,
+                NetEvent::ScriptItemImported {
+                    request,
+                    item: Uuid::nil(),
+                    result: Err(aurora_i18n::tr!("script-save-unavailable").into()),
+                },
+            );
+            return;
+        };
+        let callback = self.inventory_callback(false);
+        let mut message = CreateInventoryItem::default();
+        message.agent_data.agent_id = self.agent_id();
+        message.agent_data.session_id = self.session_id();
+        message.inventory_block.folder_id = parent;
+        message.inventory_block.callback_id = callback;
+        message.inventory_block.next_owner_mask = permissions.map_or(SCRIPT_RECOVERY_NEXT_OWNER, |rights| rights.next_owner);
+        // AT_LSL_TEXT, IT_LSL; SST_LUA (1) or NO_INV_SUBTYPE (0)
+        message.inventory_block.type_ = 10;
+        message.inventory_block.inv_type = 10;
+        message.inventory_block.wearable_type = u8::from(compile == crate::scripts::CompileTarget::Luau);
+        message.inventory_block.name = str_field(&name);
+        message.inventory_block.description = str_field(&description);
+        self.asset_imports.settings.insert(
+            callback,
+            SettingsCreate {
+                started: Instant::now(),
+                request,
+                folder: parent,
+                data: source.into_bytes(),
+                caps: (cap, String::new()),
+                asset_type: 10,
+                import: Some(ScriptImport { compile }),
+            },
+        );
+        self.send_main(&message, true);
+    }
+
+    /// onCreateScript for an imported script: the text goes up through
+    /// UpdateScriptAgent for the chosen compile target, not running (an
+    /// item of the inventory runs nowhere), and the grid's compile answer
+    /// comes back with the item. A script that does not compile is kept, as
+    /// the Legacy Viewer's editor and its recovery do.
+    fn imported_script_created(&mut self, pending: SettingsCreate, import: ScriptImport, item: &InvItem) {
+        let owner = self.agent_id();
+        let request = pending.request;
+        if item.id.is_nil() || item.asset_type != 10 || item.parent != pending.folder || item.owner != owner {
+            emit(
+                self.sh,
+                NetEvent::ScriptItemImported {
+                    request,
+                    item: item.id,
+                    result: Err(aurora_i18n::tr!("inventory-operations-the-server-did-not-confirm-the-save").into()),
+                },
+            );
+            return;
+        }
+        let http = self.sh.caps_http.clone();
+        let events = self.sh.events.clone();
+        let mut item = item.clone();
+        let id = item.id;
+        tokio::spawn(async move {
+            let target = crate::scripts::ScriptTarget {
+                object: Uuid::nil(),
+                item: id,
+            };
+            let options = crate::scripts::ScriptOptions {
+                compile: import.compile,
+                running: false,
+                experience: Uuid::nil(),
+            };
+            let source = String::from_utf8_lossy(&pending.data).into_owned();
+            let result = crate::scripts::save(&http, &pending.caps.0, target, options, source)
+                .await
+                .map(|saved| {
+                    item.asset_id = saved.asset;
+                    (item.clone(), saved)
+                });
+            let _ = events.send(NetEvent::ScriptItemImported { request, item: id, result });
+        });
+    }
+
+    /// The rights of an item of ours (LLViewerInventoryItem::updateServer
+    /// without AIS, as `set_default_permissions` sends them after a
+    /// creation): an UpdateInventoryItem with `item`'s own fields and
+    /// `rights`, limited by its owner mask.
+    pub(super) fn set_item_rights(&mut self, item: &InvItem, rights: crate::inventory::upload::Permissions) {
+        if item.id.is_nil() || item.owner != self.agent_id() {
+            return;
+        }
+        let mut message = UpdateInventoryItem::default();
+        message.agent_data.agent_id = self.agent_id();
+        message.agent_data.session_id = self.session_id();
+        message.agent_data.transaction_id = Uuid::new_v4();
+        message.inventory_data.push(permission_update(item, rights, 0));
         self.send_main(&message, true);
     }
 
@@ -629,6 +765,10 @@ impl Session<'_> {
     /// onInventoryItemCreated: everyone may copy the new settings item, then its asset
     /// goes up (updateInventoryItem).
     fn settings_created(&mut self, pending: SettingsCreate, item: &InvItem) {
+        if let Some(import) = pending.import {
+            self.imported_script_created(pending, import, item);
+            return;
+        }
         let owner = self.agent_id();
         if item.id.is_nil() || item.asset_type != pending.asset_type || item.parent != pending.folder || item.owner != owner {
             emit(
@@ -791,14 +931,26 @@ impl Session<'_> {
             if pending.started.elapsed() < Duration::from_secs(60) {
                 return true;
             }
-            emit(
-                self.sh,
-                NetEvent::InventoryContentSaved {
-                    request: pending.request,
-                    item: Uuid::nil(),
-                    result: Err(aurora_i18n::tr!("inventory-operations-the-server-did-not-confirm-the-save").into()),
-                },
-            );
+            let reason = aurora_i18n::tr!("inventory-operations-the-server-did-not-confirm-the-save");
+            if pending.import.is_some() {
+                emit(
+                    self.sh,
+                    NetEvent::ScriptItemImported {
+                        request: pending.request,
+                        item: Uuid::nil(),
+                        result: Err(reason.into()),
+                    },
+                );
+            } else {
+                emit(
+                    self.sh,
+                    NetEvent::InventoryContentSaved {
+                        request: pending.request,
+                        item: Uuid::nil(),
+                        result: Err(reason.into()),
+                    },
+                );
+            }
             false
         });
         self.asset_imports.creates.retain(|_, pending| {

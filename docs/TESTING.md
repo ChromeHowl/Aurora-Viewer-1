@@ -1971,6 +1971,7 @@ when unfocused") is ignored during a screenshot.
 | `AURORA_DEMO_COLOR_PICKER=<mode>` | Colour picker and gestures offline |
 | `AURORA_DEMO_SCRIPTS=<mode>` | Editing and saving scripts offline |
 | `AURORA_DEMO_SCRIPT_RECOVERY=1\|recover\|edit` | Copies of unsaved scripts and their recovery at login |
+| `AURORA_DEMO_SCRIPT_IMPORT=1\|object\|slua` | The Import scripts window with its own demo files, imported into a folder or an object |
 | `AURORA_DEMO_LSL_BRIDGE=1` | Messages of the Firestorm LSL bridge (hidden) |
 | `AURORA_DEMO_MOVELOCK=<mode>` | Bridge lifecycle/lock and native sitting choice; see details below |
 | `AURORA_DEMO_BRIDGE_QUERY=radar\|scripts\|object\|error` | Bridge altitude correction, basic script and extended object-information reports |
@@ -2924,6 +2925,25 @@ frame 280 and types in it at frame 320 without saving: within ten seconds
 the log says `script backup: unsaved changes copied`, and a run killed then
 started again with `edit` offers that text (`1` replaces it with its own). The copies are in the
 demo's account folder, `script-backups`, sealed with the cache key.
+
+**`AURORA_DEMO_SCRIPT_IMPORT=1|object|slua`**: the Import scripts window
+(Aurora addition; also from a folder's New menu and Build > Contents). At
+frame 300 the demo writes eleven files to a folder of its own below the
+temporary folder (no file dialog) and lists them; at frame 340 it presses
+Import. `1` imports into the demo folder "Right-click tests", `object` into
+the contents of the demo's action object (made modifiable and owned for the
+run; the demo does not echo the object's contents), `slua` on a region that
+runs SLua (without it the `.luau` row says the region does not run SLua).
+Expect one row each: `door` saved; `hud menu` (a BOM and Windows line ends,
+dropped and made LF) saved with two compile errors, lines 5 and 6, which the
+demo grid reports for the text `AURORA_DEMO_SYNTAX_ERROR`, clicking one opens
+the editor; `New Script` created as `New_Script` and shown as "New Script";
+`lamp` and then `lamp 2` (same name from `.lsl` and `.txt`); `m_ller` (the
+non-ASCII character is one `_`); `broken` (not UTF-8), `empty` and `binary`
+skipped with their reason; `refused` fails and its empty item is kept. Rows
+work one at a time, in order; the footer counts and a notice says how it
+ended. The scripts take the creation defaults of Preferences' inventory
+"Default permissions" (Scripts row).
 
 **`AURORA_DEMO_HOVER_TIPS=bubble|card|readout|legacy[:all][:noland][:avatars]`** — the
 world tooltips on for the session in that form (the Legacy Viewer's text

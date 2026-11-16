@@ -159,6 +159,15 @@ fn creation(c: &mut Catalog, zone: &str, parent: Uuid, enabled: bool) {
             },
         );
     }
+    // Aurora addition: several script files of the disk at once
+    c.invoke(
+        "import-scripts",
+        zone,
+        "file-import",
+        aurora_i18n::tr!("script-import-menu"),
+        enabled,
+        InvAction::ImportScripts { parent },
+    );
     let clothes = c.group(
         "new-clothes",
         zone,

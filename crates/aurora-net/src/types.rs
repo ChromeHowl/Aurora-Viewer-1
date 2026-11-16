@@ -1404,6 +1404,15 @@ pub enum NetEvent {
         item: Uuid,
         result: Result<crate::inventory::InvItem, String>,
     },
+    /// The answer to `ImportScriptItem`: the item with its saved asset and
+    /// the grid's compile answer, or why it failed. `item` names the item
+    /// when it was created but its text could not be saved (nil when no item
+    /// exists).
+    ScriptItemImported {
+        request: Uuid,
+        item: Uuid,
+        result: Result<(crate::inventory::InvItem, crate::scripts::ScriptSaved), String>,
+    },
     /// SaveAssetIntoInventory confirms that a detached object's asset is saved.
     AttachmentAssetSaved(Uuid),
     OutfitUpdated {
@@ -2482,6 +2491,31 @@ pub enum NetCommand {
         name: String,
         description: String,
         source: String,
+    },
+    /// A script imported from a file of the user's disk (an Aurora addition:
+    /// the Legacy Viewer loads a file into an open editor only). The same two
+    /// steps as `CreateScriptItem` (LLScriptRecoverQueue::recoverNext and
+    /// onCreateScript), with the next owner rights of the creation defaults
+    /// (create_new_item), SST_LUA for a `Luau` compile target and the grid's
+    /// compile answer kept. Answered by `ScriptItemImported`; the group and
+    /// everyone rights of `permissions` are not applied here, the caller
+    /// sends `SetItemRights` once the answer is in.
+    ImportScriptItem {
+        request: Uuid,
+        parent: Uuid,
+        name: String,
+        description: String,
+        source: String,
+        compile: crate::scripts::CompileTarget,
+        permissions: Option<crate::inventory::upload::Permissions>,
+    },
+    /// UpdateInventoryItem of an item of ours with these rights (the rights
+    /// `set_default_permissions` applies after a creation, indra/newview/
+    /// llviewerinventory.cpp). `item` is the item as last known, with its
+    /// current asset.
+    SetItemRights {
+        item: crate::inventory::InvItem,
+        rights: crate::inventory::upload::Permissions,
     },
     /// A new environment settings item holding `data` (LLSettingsVOBase::
     /// createInventoryItem): CreateInventoryItem, then the asset through

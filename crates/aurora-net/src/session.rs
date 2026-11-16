@@ -3018,6 +3018,16 @@ impl Session<'_> {
                 description,
                 source,
             } => self.create_script_item(request, parent, name, description, source),
+            NetCommand::ImportScriptItem {
+                request,
+                parent,
+                name,
+                description,
+                source,
+                compile,
+                permissions,
+            } => self.import_script_item(request, parent, name, description, source, compile, permissions),
+            NetCommand::SetItemRights { item, rights } => self.set_item_rights(&item, rights),
             NetCommand::CreateInventoryItem {
                 parent,
                 kind,

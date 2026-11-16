@@ -39,7 +39,7 @@ fn creation_name(name: &str) -> String {
 
 /// LLViewerAssetType::generateDescriptionFor(AT_LSL_TEXT): the local time
 /// and the asset type's human readable name.
-fn description(now: chrono::DateTime<chrono::Local>) -> String {
+pub(super) fn description(now: chrono::DateTime<chrono::Local>) -> String {
     format!("{} lsl2 script", now.format("%Y-%m-%d %H:%M:%S"))
 }
 
