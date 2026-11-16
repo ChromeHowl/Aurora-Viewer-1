@@ -23,6 +23,7 @@ use egui::{Rect, Vec2};
 
 /// Default gap between two toasts, and between the toasts and the chat
 /// lines (the `toast_gap` option replaces it).
+#[cfg(test)]
 pub const GAP: f32 = 6.0;
 /// From Firestorm's full-width bars and from the window's sides (the
 /// islands' room already keeps their 8 px).
