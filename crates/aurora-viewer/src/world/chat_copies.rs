@@ -17,7 +17,6 @@
 
 use super::{ChatKind, ChatLine, Origin, World};
 use crate::ui_sound::{ImKind, ImMessage};
-use std::time::SystemTime;
 
 /// The copies kept for the lines over the world (they show 50 rows at most).
 const MAX_CONSOLE: usize = 50;
@@ -94,6 +93,7 @@ mod tests {
     use super::*;
     use crate::scene::avatar::AvatarLibrary;
     use std::sync::Arc;
+    use std::time::SystemTime;
     use uuid::Uuid;
 
     const ME: Uuid = Uuid::from_u128(1);
