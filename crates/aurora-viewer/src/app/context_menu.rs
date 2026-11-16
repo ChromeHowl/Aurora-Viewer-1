@@ -555,6 +555,9 @@ impl App {
             CtxAction::Share(id) => self.share_with(id),
             CtxAction::MarkAvatars(ids, color) => self.world.avatar_marks.set(&ids, color),
             CtxAction::ClearAllMarks => self.world.avatar_marks.clear_all(),
+            CtxAction::MarkCustom(ids) => {
+                self.avatar_mark_ui = Some(ui::avatar_marks::CustomMark::new(&self.world, ids, self.avatar_mark_last));
+            }
             CtxAction::EstateKick(id) => self.ask_estate(id, land_moderation::EstateAct::Kick),
             CtxAction::EstateTeleportHome(id) => self.ask_estate(id, land_moderation::EstateAct::TeleportHome),
             CtxAction::EstateBan(id) => self.ask_estate(id, land_moderation::EstateAct::Ban),

@@ -16394,3 +16394,7 @@ beacons-light-boxes = Bounding boxes for lights in scene
 beacons-region-corners = Region corners
 
 
+ui-minimap-custom-marker = Custom color…
+ui-avatar-mark-title = Marker color
+ui-avatar-mark-many = { $count } residents
+ui-avatar-mark-private = Only you see markers. They last until you log out.

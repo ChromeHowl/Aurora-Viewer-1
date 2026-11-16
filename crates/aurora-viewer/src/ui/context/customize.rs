@@ -419,6 +419,7 @@ fn action_key(action: &CtxAction) -> String {
         CtxAction::Share(..) => "Share",
         CtxAction::MarkAvatars(..) => "MarkAvatars",
         CtxAction::ClearAllMarks => "ClearAllMarks",
+        CtxAction::MarkCustom(..) => "MarkCustom",
     };
     match action {
         CtxAction::TakeOffClothing(kind) | CtxAction::DetachAt(kind) => format!("{base}:{kind}"),
