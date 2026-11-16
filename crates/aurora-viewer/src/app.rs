@@ -169,6 +169,7 @@ mod social_menu_demo;
 mod socks_proxy;
 mod stand_fidget;
 mod stand_fly;
+mod status_sharing;
 mod stream_list;
 mod suggest_demo;
 mod task_notecards;
@@ -603,6 +604,8 @@ pub struct App {
     demo_bubble_chat: f64,
     /// AURORA_DEMO_PEOPLE: the states of its residents were sent.
     demo_people_states: bool,
+    /// Our status for the other Aurora viewers (`status_share`).
+    status_sharing: status_sharing::Sharing,
     /// Interface parts of the frame's profile (`u_*`).
     ui_parts: Parts,
     /// The interface's shapes leave for the render thread, which
@@ -2016,6 +2019,7 @@ impl App {
             demo_tag_states: None,
             demo_bubble_chat: 0.0,
             demo_people_states: false,
+            status_sharing: Default::default(),
             ui_parts: Parts::default(),
             egui_hand_over: EguiHandOver::default(),
             egui_shadow: Default::default(),
@@ -12115,6 +12119,7 @@ impl App {
             self.world.poser_camera = Some(self.camera.position);
             self.tick_poser_consent();
             self.tick_portals();
+            self.tick_status_sharing();
             // Persist a sensitivity drag once it rests, like the other sliders.
             if !self.egui_ctx.input(|i| i.pointer.any_down()) && self.ik_editor.sync_poser_settings(&mut self.settings.poser) {
                 self.settings.save();

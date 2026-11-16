@@ -25,6 +25,7 @@ pub mod render_photo;
 mod saver;
 pub mod shadow_realm;
 pub mod socks_proxy;
+pub mod status_share;
 pub mod stream_list;
 pub mod teleport;
 pub mod teleport_extras;
@@ -633,6 +634,9 @@ pub struct Settings {
     /// Radar tracking, contact sets' notices, name tags and floating texts
     /// (settings/people.rs).
     pub people: people::People,
+    /// The status beside the name plate, shared with the other Aurora
+    /// viewers nearby (settings/status_share.rs).
+    pub status_share: status_share::StatusShare,
     /// Friends tab of the People window.
     pub friends_list: crate::ui::people::FriendsSettings,
     /// Teleport history columns, world map extras and teleport options
@@ -2456,6 +2460,7 @@ impl Default for Settings {
             contacts: Default::default(),
             radar: Default::default(),
             people: Default::default(),
+            status_share: Default::default(),
             friends_list: Default::default(),
             teleport: Default::default(),
             teleport_extras: Default::default(),
@@ -3323,6 +3328,7 @@ impl Settings {
             profile.locked = true;
         }
         self.people.sanitize();
+        self.status_share.sanitize();
         self.grids.retain_mut(|grid| grid.validate().is_ok());
         if let Some(on) = self.former_chat_timestamps.take() {
             self.chat_timestamps_nearby = on;

@@ -105,6 +105,7 @@ mod snapshot;
 mod socks_credentials;
 mod spelling;
 mod splash;
+mod status_share;
 mod stream_title;
 mod sys_probe;
 mod system_info;

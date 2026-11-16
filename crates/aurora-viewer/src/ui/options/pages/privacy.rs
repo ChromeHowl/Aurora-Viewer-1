@@ -148,6 +148,86 @@ fn login_favorites_row(cx: &mut Cx) {
     });
 }
 
+/// The status beside our name plate, shared with the other Aurora viewers
+/// nearby (`crate::status_share`): everything off until the master switch.
+fn status_group(cx: &mut Cx) {
+    use aurora_i18n::tr;
+    cx.group(tr!("status-share-group"), |cx| {
+        cx.note(tr!("status-share-note"));
+        cx.toggle(
+            tr!("status-share-enable"),
+            tr!("status-share-enable-hint"),
+            &field!(status_share.share),
+        );
+        cx.greyed(!cx.s.status_share.share);
+        cx.toggle(
+            tr!("status-share-music-switch"),
+            tr!("status-share-music-switch-hint"),
+            &field!(status_share.music),
+        );
+        cx.toggle(
+            tr!("status-share-music-detail"),
+            tr!("status-share-music-detail-hint"),
+            &field!(status_share.music_detail),
+        );
+        cx.toggle(
+            tr!("status-share-programs-switch"),
+            tr!("status-share-programs-switch-hint"),
+            &field!(status_share.programs),
+        );
+        let p = cx.p;
+        cx.below().row(
+            tr!("status-share-programs-list"),
+            tr!("status-share-programs-list-hint"),
+            &field!(status_share.programs_allowed),
+            |ui, s| {
+                let mut changed = false;
+                ui.vertical(|ui| {
+                    for program in crate::status_share::PROGRAMS {
+                        let mut on = s.status_share.allows(program.id);
+                        if widgets::checkbox(ui, &p, &mut on, program.name).changed() {
+                            s.status_share.allow(program.id, on);
+                            changed = true;
+                        }
+                    }
+                });
+                changed
+            },
+        );
+        cx.toggle(
+            tr!("status-share-custom-switch"),
+            tr!("status-share-custom-switch-hint"),
+            &field!(status_share.custom),
+        );
+        let field = field!(status_share.custom_text);
+        let get = field.get_mut;
+        cx.row(
+            tr!("status-share-custom-text"),
+            tr!("status-share-custom-text-hint"),
+            &field,
+            |ui, s| {
+                ui.add(
+                    egui::TextEdit::singleline(get(s))
+                        .char_limit(crate::settings::status_share::CUSTOM_MAX)
+                        .desired_width(240.0),
+                )
+                .changed()
+            },
+        );
+        cx.toggle(
+            tr!("status-share-hide-busy"),
+            tr!("status-share-hide-busy-hint"),
+            &field!(status_share.hide_when_busy),
+        );
+        cx.greyed(false);
+        cx.toggle(
+            tr!("status-share-show-others"),
+            tr!("status-share-show-others-hint"),
+            &field!(status_share.show_others),
+        );
+    });
+}
+
 pub(super) fn page(cx: &mut Cx) {
     use aurora_i18n::tr;
     account_group(cx);
@@ -225,6 +305,7 @@ pub(super) fn page(cx: &mut Cx) {
             );
         });
     });
+    status_group(cx);
     // Advanced › Quiet Snapshots of the Legacy Viewer (PlayModeUISndSnapshot):
     // no shutter heard around nor snapshot animation seen
     cx.group(tr!("ui-options-privacy-photos"), |cx| {

@@ -6,6 +6,7 @@
 use super::aurora;
 use super::mark::Look;
 use super::mesh::{self, Border, Glow, Outline, Ring};
+use super::status_chip;
 use super::{Badge, Badges, Content, Halo, Layout, Level, Metrics, Picture, Presence, Role, SCALE, SubLine, Tag, TextSize};
 use crate::theme::Palette;
 use egui::epaint::TextShape;
@@ -424,7 +425,60 @@ pub(super) fn plate(env: &Env<'_>, tag: &Tag<'_>, st: &State, cache: &mut Cache)
             contents(env, &painter, rect, &to, tag, alpha * st.progress, &mut cache.marks);
         }
     }
+    status(env, rect, c, st, alpha);
     (rect, surface, marker_slot(st.level, c, &to, rect))
+}
+
+/// The status chip beside a full plate (`status_chip`): a round badge with
+/// its category's icon, sliding out to a pill with the line under the
+/// pointer. Not while the plate changes level: it appears with the full
+/// plate. Fades with the plate and with the end of the status.
+fn status(env: &Env<'_>, rect: Rect, c: &Content, st: &State, alpha: f32) {
+    let Some(status) = &c.status else { return };
+    if st.level != Level::Full || st.from.is_some() {
+        return;
+    }
+    let a = alpha * status.fade;
+    if a <= 0.004 {
+        return;
+    }
+    let (p, ppp) = (env.p, env.pixels_per_point);
+    let m = Metrics::of(Level::Full, SCALE);
+    // the line is elided like the plate's own; the pill is as wide as it
+    let small = TextFormat::simple(FontId::proportional(m.sub_pt), p.ink);
+    let text = line(env, &status.text, small, m.max_text * 0.8);
+    // AURORA_DEMO_STATUS=open: as under the pointer
+    let hover = if crate::demo::status::open() { 1.0 } else { st.hover };
+    let chip = status_chip::rect(rect, hover, text.size().x, &m);
+    // on whole pixels, like the plate
+    let chip = Rect::from_min_size(
+        Pos2::new((chip.min.x * ppp).round() / ppp, (chip.min.y * ppp).round() / ppp),
+        chip.size(),
+    );
+    let fill = env.tint.gamma_multiply(BADGE_OPACITY * a);
+    let edge = mesh::over(p.ink.gamma_multiply(0.16 * a), fill);
+    let mut disc = Mesh::default();
+    Outline::pill(chip, ppp).disc(&mut disc, fill, edge, 1.0);
+    env.painter.add(Shape::mesh(disc));
+    let icon_at = Pos2::new(chip.left() + m.badge * 0.5, chip.center().y);
+    if let Some(icon) = env
+        .icons
+        .get(status.icon)
+        .cloned()
+        .or_else(|| crate::ui::icons::global(status.icon))
+    {
+        let size = Vec2::splat(m.badge_icon);
+        env.painter
+            .image(icon.id(), Rect::from_center_size(icon_at, size), WHOLE, p.teal.gamma_multiply(a));
+    }
+    if hover > 0.02 {
+        // the text is clipped to the pill as it opens
+        let painter = env.painter.with_clip_rect(chip.intersect(env.painter.clip_rect()));
+        let at = Pos2::new(chip.left() + m.badge, chip.center().y - text.size().y * 0.5);
+        let mut shape = TextShape::new(at, text, p.ink);
+        shape.opacity_factor = a * hover;
+        painter.add(shape);
+    }
 }
 
 /// Where a contact-set marker lands on a plate (`ui/contact_markers.rs`):

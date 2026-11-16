@@ -339,6 +339,9 @@ pub mod source;
 /// The Aurora team's marks on demo residents (AURORA_DEMO_STAFF).
 #[path = "demo_staff.rs"]
 pub mod staff;
+/// Status chips beside the name plates (AURORA_DEMO_STATUS).
+#[path = "demo_status.rs"]
+pub mod status;
 /// Streaming hitch test: objects and textures arriving in waves
 /// (AURORA_DEMO_STREAM).
 #[path = "demo_stream.rs"]

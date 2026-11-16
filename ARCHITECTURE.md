@@ -1777,6 +1777,22 @@ layer, hidden by the scene: Aurora's thread from the left wrist to the
 side of the target, or the Legacy Viewer's particles. `demo_beams.rs` is
 `AURORA_DEMO_BEAMS`.
 
+The status beside the name plate is an Aurora extension, not a Legacy Viewer
+feature. `aurora-net/src/avatar_status.rs` is its wire format (a ViewerEffect
+of Aurora's own type 0xA7 with a small versioned payload, sent unreliably,
+cleaned on receive: plain text, 100 bytes, no control or bidirectional
+characters); `session.rs` sends `NetCommand::AvatarStatus` and raises
+`NetEvent::AvatarStatus`. `world/avatar_status.rs` holds the statuses by sender
+id with their expiry and sequence rule. `status_share/` decides what we
+share: `mod.rs` the table of programs and the choice among text, music and
+programs, `sender.rs` when a packet goes out (change, heartbeat, arrivals,
+clears), `collect.rs` the thread that reads the Windows media session and the
+process list, only while the master switch is on; `app/status_sharing.rs` runs
+it once a frame. `settings/status_share.rs` and Preferences › Privacy › My
+status are its settings, all off by default. `ui/nameplate/status_chip.rs`
+places the chip beside a full plate and `paint::status` draws it.
+`demo_status.rs` is `AURORA_DEMO_STATUS`.
+
 `world/anti_spam.rs` owns session-local counters and source/category blocks,
 following NACLAntiSpamQueue::checkEntry and the incoming message handlers in
 `indra/newview/NACLantispam.cpp`, `llimprocessing.cpp` and `llviewermessage.cpp`.

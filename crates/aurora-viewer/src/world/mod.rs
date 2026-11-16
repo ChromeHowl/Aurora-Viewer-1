@@ -6,6 +6,7 @@ pub mod appearance;
 pub mod appearance_xml;
 pub mod attachment_inventory;
 pub mod attention;
+pub mod avatar_status;
 pub mod blocking;
 pub mod body;
 pub mod bubble_chat;
@@ -538,6 +539,9 @@ pub struct World {
     pub point_at: pointat::PointAts,
     /// Selection and give beams, ours and the others' (`beams`).
     pub beams: beams::Beams,
+    /// The statuses beside the name plates, ours and the other Aurora
+    /// viewers' (`avatar_status`).
+    pub avatar_status: avatar_status::AvatarStatuses,
     /// Object messages from elsewhere (Preferences › Privacy, issue #623).
     pub object_im_filter: object_im_filter::Settings,
     /// The Omnifilter's rules (`crate::omnifilter`, `world/omnifilter.rs`).
@@ -1056,6 +1060,7 @@ impl World {
             look_at: lookat::LookAts::default(),
             point_at: pointat::PointAts::default(),
             beams: beams::Beams::default(),
+            avatar_status: avatar_status::AvatarStatuses::default(),
             object_im_filter: object_im_filter::Settings::default(),
             omnifilter: Default::default(),
             omnifilter_replies: Vec::new(),
@@ -4828,6 +4833,14 @@ impl World {
                         .receive(effect, source, target, position, color, duration, std::time::Instant::now(), |id| {
                             objects.index_of_uuid(id).is_some()
                         });
+                }
+                None
+            }
+            NetEvent::AvatarStatus { source, status, duration } => {
+                // our own echo, if a region relays one, is not applied: ours
+                // is set from what we share
+                if source != self.agent_id {
+                    self.avatar_status.receive(source, status, duration, std::time::Instant::now());
                 }
                 None
             }

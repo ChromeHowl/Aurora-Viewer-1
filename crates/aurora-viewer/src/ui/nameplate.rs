@@ -25,6 +25,7 @@ mod mesh;
 mod paint;
 pub(crate) use paint::{plain_border, readable_on, set_background};
 pub(crate) mod playground;
+mod status_chip;
 #[cfg(test)]
 mod tests;
 
@@ -319,6 +320,9 @@ pub struct Content {
     /// The name in the colour of the avatar's chat range
     /// (FSTagShowDistanceColors), under a radar mark.
     pub name_band: Option<crate::world::radar::Band>,
+    /// What the resident listens to, uses or wrote, as the chip beside a
+    /// full plate reads it (`status_chip`, `crate::status_share`).
+    pub status: Option<crate::status_share::StatusLine>,
 }
 
 /// A live editor preview shares the live geometry, contrast and badge code.
@@ -346,6 +350,7 @@ pub fn preview(ui: &mut egui::Ui, p: &Palette, appearance: std::sync::Arc<crate:
         mark: None,
         marked: None,
         name_band: None,
+        status: None,
     };
     let tag = Tag {
         id: Uuid::nil(),
