@@ -1338,6 +1338,7 @@ ui-context-new-contact-set = Novo conjunto de contatos…
 ui-appearance-gallery-add-to-your-outfit = Adicione à sua roupa
 common-add-2 = Adicionar…
 ui-environment-adjusts-the-sky-for-your-view-only-other-people = Ajusta o céu apenas para sua visualização; outras pessoas não veem essas mudanças.
+ui-environment-apply-lighting-hint = Aplica o céu mostrado aqui ao pacote ou à região para todos, como Aplicar ao pacote/região do editor de céu.
 build-ui-texture-fit-media-texture-to-face = Ajustar a textura da mídia ao rosto
 ui-environment-adjust-the-current-sky-for-your-view-only = Ajuste o céu atual apenas para sua visualização
 ui-sound-alert = Alerta

@@ -41,7 +41,7 @@ impl App {
     /// known. An asset applied from the inventory has the rights of the
     /// items holding it (the most open of them: any of them could be opened
     /// in the editor); the inventory is only read here, on a user action.
-    fn source_flags(&self, rights: SourceRights) -> Option<u32> {
+    pub(super) fn source_flags(&self, rights: SourceRights) -> Option<u32> {
         match rights {
             SourceRights::Flags(flags) => Some(flags),
             SourceRights::Asset(asset) => self
@@ -461,7 +461,7 @@ fn subtype_of(doc: &SettingsDoc) -> u8 {
 
 /// What the editor says of a source's rights when it opens on a snapshot
 /// (the save entries it turns off), None when they allow everything.
-fn source_notice(rights: Rights) -> Option<&'static str> {
+pub(super) fn source_notice(rights: Rights) -> Option<&'static str> {
     if rights == Rights::PREVIEW_ONLY {
         Some(aurora_i18n::tr!("ui-env-editor-source-unknown"))
     } else if !rights.save {

@@ -136,6 +136,14 @@ pub struct EnvironmentUi {
     pub weather_open: bool,
     /// The parcel button (kept by the app).
     pub parcel_choice: ParcelChoice,
+    /// What the agent may apply from "Personal lighting" (kept by the app;
+    /// the sky editor's `EditorAccess`).
+    pub lighting_access: super::env_editor::EditorAccess,
+    /// "Apply To Parcel" (`Some(false)`) or "Apply To Region" (`Some(true)`)
+    /// was pressed in "Personal lighting" (taken by the app).
+    pub lighting_apply: Option<bool>,
+    /// The outcome of the last apply, and whether it failed.
+    pub lighting_message: Option<(String, bool)>,
     /// Open this list's drop-down on the next frame (demo captures).
     pub open_list: Option<SettingsKind>,
     /// Type this into an open list's search field (demo captures).
@@ -468,7 +476,7 @@ impl EnvironmentUi {
             "personal_lighting",
             aurora_i18n::tr!("ui-environment-personal-lighting"),
             pos,
-            Vec2::new(400.0, 560.0),
+            Vec2::new(400.0, 640.0),
         )
         .fixed()
         .help(aurora_i18n::tr!("ui-environment-adjusts-the-sky-for-your-view-only-other-people"))
@@ -625,6 +633,30 @@ impl EnvironmentUi {
                     self.confirm_reset = true;
                 }
             });
+            // the sky editor's "Apply To Parcel / Region" for the sky shown
+            // here (the Legacy Viewer's Personal lighting has none)
+            ui.horizontal(|ui| {
+                let access = self.lighting_access;
+                ui.add_enabled_ui(access.parcel, |ui| {
+                    if widgets::flat_button(ui, p, aurora_i18n::tr!("ui-env-editor-apply-parcel"))
+                        .on_hover_text(aurora_i18n::tr!("ui-environment-apply-lighting-hint"))
+                        .clicked()
+                    {
+                        self.lighting_apply = Some(false);
+                    }
+                });
+                ui.add_enabled_ui(access.region, |ui| {
+                    if widgets::flat_button(ui, p, aurora_i18n::tr!("ui-env-editor-apply-region"))
+                        .on_hover_text(aurora_i18n::tr!("ui-environment-apply-lighting-hint"))
+                        .clicked()
+                    {
+                        self.lighting_apply = Some(true);
+                    }
+                });
+            });
+            if let Some((text, error)) = &self.lighting_message {
+                ui.label(RichText::new(text).size(11.5).color(if *error { p.danger } else { p.muted }));
+            }
             if !same_sky(&before, &s) {
                 eep.edit_personal(|sky| {
                     *sky = s;
