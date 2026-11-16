@@ -101,6 +101,8 @@ pub const COMMANDS: &[Command] = commands![
     "movelock_options", "lock-filled", "movelock-options", true;
     "quickjump", "arrow-big-up-lines-filled", "ui-bars-quickjump", true;
     "movement_enhancer", "swimming", "movement-title", true;
+    // Aurora's own: the Director, a camera track to film with
+    "director", "movie", "toolbar-command-director", true;
     // Firestorm's, not in Aurora yet
     "avatar", "user-circle", "toolbar-command-avatar", true;
     "destinations", "map-2", "toolbar-command-destinations", true;

@@ -139,6 +139,9 @@ impl App {
             Some(aurora_i18n::tr!("camtools-refused-rlva"))
         } else if self.camera.mouselook() {
             Some(aurora_i18n::tr!("camtools-refused-mouselook"))
+        } else if self.director.d.mode != crate::director::Mode::Editing {
+            // (the Director's track plays or holds the view)
+            Some(aurora_i18n::tr!("camtools-refused-director"))
         } else {
             None
         }
@@ -418,6 +421,39 @@ impl App {
         }
     }
 
+    // ------------------------------------------------- Director bridge
+
+    /// The Camera Path being edited as a Director track (`camera/track_path.rs`).
+    pub(super) fn path_as_track(&self) -> Result<crate::camera::track::Track, crate::camera::track_path::Bridge> {
+        let origin = self.world.main_origin().ok_or(crate::camera::track_path::Bridge::Invalid)?;
+        crate::camera::track_path::track_from_path(&self.camera_tools.path, origin)
+    }
+
+    /// `track` becomes the Camera Path being edited (named `name`); its
+    /// waypoints' count. Refused while a path plays: the waypoints do not
+    /// change under a playback.
+    pub(super) fn path_from_track(
+        &mut self,
+        track: &crate::camera::track::Track,
+        name: &str,
+    ) -> Result<usize, crate::camera::track_path::Bridge> {
+        use crate::camera::track_path::{self, Bridge};
+        if self.camera_tools.playing() {
+            return Err(Bridge::Invalid);
+        }
+        let origin = self.world.main_origin().ok_or(Bridge::Invalid)?;
+        // RLVa @showloc: the places' names are not kept either
+        let hide = self.world.rlva.has("showloc");
+        let path = track_path::path_from_track(track, origin, name, |x, y| {
+            self.region_at(x, y)
+                .map(|(handle, region)| (handle, if hide { String::new() } else { region }))
+        })?;
+        let count = path.waypoints.len();
+        self.camera_tools.path = path;
+        self.camera_tools.ui.selected = None;
+        Ok(count)
+    }
+
     // ------------------------------------------------------- last chatter
 
     /// View › Look at Last Chatter (LLViewLookAtLastChatter): offered in
@@ -592,7 +628,9 @@ impl App {
                 tools.ui.selected = None;
                 tools.status.clear();
             }
-            PathAction::Import => self.path_import(),
+            PathAction::Import => {
+                self.path_import();
+            }
             PathAction::Export => self.path_export(),
         }
     }
@@ -603,9 +641,9 @@ impl App {
 
     /// Read a Camera Path file over the waypoints being edited: whole, or
     /// not at all.
-    fn path_import(&mut self) {
+    pub(super) fn path_import(&mut self) -> bool {
         let Some(file) = Self::path_dialog().set_title(aurora_i18n::tr!("camtools-path-import")).pick_file() else {
-            return;
+            return false;
         };
         let here = self.world.main().map(|r| (r.handle, r.name.clone()));
         let read = std::fs::metadata(&file)
@@ -638,6 +676,7 @@ impl App {
                     aurora_i18n::tr!("camtools-path-imported", count = tools.path.waypoints.len() as i64)
                 };
                 tools.status = text;
+                true
             }
             Err(error) => {
                 log::warn!("camera path: {} not read ({error:?})", file.display());
@@ -649,11 +688,12 @@ impl App {
                     ReadError::NoRegion => aurora_i18n::tr!("camtools-refused-offline").to_owned(),
                     ReadError::Format => aurora_i18n::tr!("camtools-path-import-format").to_owned(),
                 };
+                false
             }
         }
     }
 
-    fn path_export(&mut self) {
+    pub(super) fn path_export(&mut self) {
         let tools = &mut self.camera_tools;
         if tools.path.waypoints.is_empty() {
             return;

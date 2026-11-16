@@ -257,12 +257,16 @@ struct PostU {
     tonemap_mix: f32,
     /// Written on the GPU by `Exposure::encode`; 1 until then.
     auto_exposure: f32,
-    /// A cut-out photo (cutout.rs): 1 the snapshot, 2 the live view.
+    /// A cut-out photo (cutout.rs): 1 the snapshot, 2 the live view over
+    /// its checkerboard, 3 the live view over `cutout_key`.
     cutout: f32,
     /// 1: no post-processing (`FrameParams::no_post`).
     no_post: f32,
     /// The part of the photo the frame draws ([`photo_part`]).
     photo_part: [f32; 4],
+    /// The key color of a cut-out live view (`FrameParams::cutout_key`),
+    /// linear RGB.
+    cutout_key: [f32; 4],
     /// The colour grade (grade.rs): the white balance's gains, then lift,
     /// gamma, gain and vibrance; x of `grade_on` 1 when the latter change
     /// something, y the debanding.
@@ -9410,13 +9414,15 @@ impl Backend {
                 f.tonemap_mix.clamp(0.0, 1.0)
             },
             auto_exposure: 1.0,
-            cutout: match (f.cutout, snapshot.is_some()) {
-                (false, _) => 0.0,
-                (true, true) => 1.0,
-                (true, false) => 2.0,
+            cutout: match (f.cutout, snapshot.is_some() || f.cutout_alpha, f.cutout_key) {
+                (false, ..) => 0.0,
+                (true, true, _) => 1.0,
+                (true, false, None) => 2.0,
+                (true, false, Some(_)) => 3.0,
             },
             no_post: if f.no_post { 1.0 } else { 0.0 },
             photo_part: photo_part(f.photo_tile),
+            cutout_key: f.cutout_key.map_or([0.0; 4], |[r, g, b]| [r, g, b, 1.0]),
             white_balance: f.grade.white_balance().extend(1.0).to_array(),
             grade: f.grade.display(),
             grade_on: [
