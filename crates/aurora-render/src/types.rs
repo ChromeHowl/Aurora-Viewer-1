@@ -1649,9 +1649,20 @@ pub struct RainLook {
     /// The lying snow's detail texture (normal and height): its bindless
     /// slot, 0 for none.
     pub snow_detail: u32,
+    /// How far the weather lying on the ground is drawn at most (m): the
+    /// farther of the puddles' and the snow's distances. The wetness
+    /// memory's square covers it (128, 256 or 512 m).
+    pub memory_reach: f32,
+    /// Deep snow's reach around my avatar at High weather quality (m, 10 to
+    /// 40); Low and Medium keep their share of it (two thirds, 13/15).
+    pub deep_reach: f32,
     /// How deep snow lies in the open at least (0..1): a region's weather
     /// gives its whole history (who comes in late sees what has built up).
     pub snow_lying: f32,
+    /// Snow lying on the ground is drawn ("Snow settles"), whatever falls
+    /// now: off, none at once, nor while what lay melts after the weather
+    /// turned to rain or cleared (the memory keeps it, unseen).
+    pub snow_settles: bool,
     /// Footprints are kept in the lying snow.
     pub footprints: bool,
     /// Their map: how wide (m, 32 to 64: the wider, the coarser) and where
@@ -1701,7 +1712,10 @@ impl Default for RainLook {
             quality: 2,
             snow: 0.0,
             snow_detail: 0,
+            memory_reach: 60.0,
+            deep_reach: 15.0,
             snow_lying: 0.0,
+            snow_settles: true,
             footprints: false,
             trail_extent: 32.0,
             trail_centre: [0.0; 2],

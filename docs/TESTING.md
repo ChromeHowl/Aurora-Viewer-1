@@ -4815,10 +4815,14 @@ both open states and the selection count. Capture at frame 620.
 | `AURORA_DEMO_AA_SWITCH=<frame>:<mode>[,…]` | Anti-aliasing changed at these frames, as Preferences would |
 | `AURORA_RAIN=<0..1>` | Rain of this strength until the Aurora Weather window is used |
 | `AURORA_SNOW=<0..1>` | Snow of this strength until the Aurora Weather window is used |
-| `AURORA_SNOW_LYING=<0..1>` | Snow already lying this deep while it snows |
+| `AURORA_SNOW_LYING=<0..1>` | Snow held at least this deep on the ground |
 | `AURORA_SNOW_DEEP=0\|1` | Deep snow off or on until the Aurora Weather window is used |
+| `AURORA_SNOW_DEEP_REACH=<m>` | Deep snow's reach (10 to 40 m) until the Aurora Weather window is used |
+| `AURORA_DEMO_SNOW_ROOF=1` | Four canopies in the snow: plain, open at the top, glass, leaves |
+| `AURORA_DEMO_SNOW_SPIN=1\|settles-off` | Boxes turning slowly, fast and by a script's steps in the lying snow |
+| `AURORA_DEMO_SNOW_SPIN=timer` | The same, the script's box stepped every 10 s (a move's hold between steps) |
 | `AURORA_WEATHER_QUALITY=low\|medium\|high` | The weather's quality until the Aurora Weather window is used |
-| `AURORA_RAIN_DEBUG=1` | Rain's wetness memory drawn in colours over the ground |
+| `AURORA_RAIN_DEBUG=1` | Rain's wetness memory drawn in colours over the ground (`=snow`: why the snow lies or not) |
 | `AURORA_THUNDER_AT=<s>` | A lightning strike 1 km away this many seconds after the start |
 | `AURORA_THUNDER_HOLD=<flash>` | The lightning's light on the world held at this brightness |
 | `AURORA_NORTHERN_LIGHTS=<0..1>[,<deg>[,<colours>]]` | The northern lights at this brightness until the Aurora Weather window is used |
@@ -4830,16 +4834,48 @@ both open states and the selection count. Capture at frame 620.
   this viewer only. `AURORA_RAIN=<0..1>` sets the rain (0 none, 1 a
   downpour) for captures and stays until the window is touched in that
   session; `AURORA_SNOW=<0..1>` sets snow the same way (it wins over
-  `AURORA_RAIN`), and `AURORA_SNOW_LYING=<0..1>` starts it with that much
-  snow on the ground (it builds over minutes otherwise: a dusting, then a
-  white cover on what faces up, none on walls or steep roofs).
-  `AURORA_SNOW_DEEP` and `AURORA_WEATHER_QUALITY` set deep snow and the
+  `AURORA_RAIN`), and `AURORA_SNOW_LYING=<0..1>` holds at least that much
+  snow on the ground for the whole session, never melting below it ("Snow
+  settles" off still hides it; without the variable it builds over minutes:
+  a dusting, then a white cover on what faces up, none on walls or steep
+  roofs).
+  `AURORA_SNOW_DEEP`, `AURORA_SNOW_DEEP_REACH` (metres) and `AURORA_WEATHER_QUALITY` set deep snow, its reach and the
   quality the same way, to measure each with `AURORA_PROFILE`. The wind,
   the puddles and the thunder come from the settings.
-  `AURORA_RAIN_DEBUG=1` colours the
+  `AURORA_DEMO_SNOW_ROOF=1` (with `AURORA_SNOW` and `AURORA_SNOW_LYING`)
+  sets four canopies 3 m above the plaza, north of the arrival, and looks
+  at them from the side: a plain one (snow on it, bare ground under it),
+  one whose top face is fully transparent while its underside still shows
+  (a skybox's painted ceiling: the snow falls through it onto the ground
+  under it), a glass one at 30 % (bare ground under it; the snow on
+  blended faces is not drawn), and leaves: the same open top over a
+  blended underside at 70 %, as a tree's cards facing down (bare ground
+  under it). The rain's shelter map holds what is seen from above: a face
+  turned down is left out, unless it is two-sided or has alpha (masked or
+  blended).
+  `AURORA_DEMO_SNOW_SPIN=1` (with `AURORA_SNOW` and `AURORA_SNOW_LYING`)
+  sets three flat red boxes in a row 6 m north of the arrival from frame
+  60: one turning at 0.005 rad/s, one at 0.3 rad/s, and one turned 15°
+  each second by plain updates with no motion reported, as a script's
+  llSetRot on a timer. What moves stays out of the rain's shelter map, so
+  none of them takes the ground's snow: no white squares on their tops or
+  sides, and none appearing or vanishing as they turn. `timer` steps the
+  third box every 600 frames instead (10 s with `AURORA_FPS_LIMIT=60`),
+  longer than a single move's hold: from its second step on it must stay
+  bare between its steps (capture around frame 2300, between the fourth
+  and the fifth). `settles-off` turns the weather drawn to rain with "Snow settles"
+  off at frame 700 (that run only, never the settings): the snow lying
+  goes at once instead of melting away in view. Capture both with the
+  shadows on and off (the shelter map is redrawn once a second with them
+  off). `AURORA_RAIN_DEBUG=1` colours the
   ground by its wetness memory: yellow, outside the memory; red, only
   assumed open (seen beyond the shelter map); green, wet; blue, dry under
-  cover; brighter, the wetter. `AURORA_THUNDER_AT=<s>` makes one strike
+  cover; brighter, the wetter. `AURORA_RAIN_DEBUG=snow` colours it by why
+  the snow lies or not: white, deep snow's own surface; red, no snow in the
+  memory there; yellow, too steep by the surface's facing; blue, off the
+  surface the shelter map has there (under cover, or not in the map),
+  purple the same beyond the near map; green, lying (darker beyond the
+  near map). `AURORA_THUNDER_AT=<s>` makes one strike
   1 km away, `s` seconds after the start, whether Thunder is on or not: its
   flash at once and, for most strikes, a bolt in the sky in its direction,
   then its thunder about 3 s later (heard only with `AURORA_DEMO_SOUND` in
