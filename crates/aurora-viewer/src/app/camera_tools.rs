@@ -13,6 +13,7 @@ use crate::camera::path_file::{self, ReadError};
 use crate::camera::{Owner, View};
 use crate::theme::Palette;
 use crate::ui::camera_path::{CameraPathUi, PathAction, PathView};
+use crate::ui::viewfinder::{PathFrame, SavedPath, WorldPath};
 use crate::world::notifications::{Data, Kind};
 use uuid::Uuid;
 
@@ -50,6 +51,64 @@ impl CameraTools {
 
     pub fn playing(&self) -> bool {
         self.player.is_some()
+    }
+
+    /// Recording: a waypoint each time the user's camera move ends.
+    pub(super) fn recording(&self) -> bool {
+        self.recording
+    }
+
+    /// The last thing told to the user (what the viewfinder's sheet shows).
+    pub(super) fn status(&self) -> &str {
+        &self.status
+    }
+
+    /// The path being edited and played.
+    pub(super) fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// The waypoint selected on the viewfinder's timeline, if it is still
+    /// there.
+    pub(super) fn selected(&self) -> Option<usize> {
+        self.ui.selected.filter(|i| *i < self.path.waypoints.len())
+    }
+
+    pub(super) fn select(&mut self, index: Option<usize>) {
+        self.ui.selected = index;
+    }
+
+    /// The path being edited replaced (the viewfinder's demo).
+    pub(super) fn set_path(&mut self, path: Path) {
+        self.path = path;
+    }
+
+    /// What the viewfinder's Path mode shows this frame: the path being
+    /// edited, its playback, the saved paths and `world`, the path put on
+    /// the screen.
+    pub(super) fn viewfinder_frame(&self, world: WorldPath) -> PathFrame<'_> {
+        PathFrame {
+            name: &self.path.name,
+            waypoints: &self.path.waypoints,
+            looped: self.path.looped,
+            hold: self.path.hold,
+            playing: self.player.is_some(),
+            recording: self.recording,
+            elapsed: self.player.map_or(0.0, |player| player.elapsed()),
+            selected: self.selected(),
+            status: &self.status,
+            saved: self
+                .library
+                .paths
+                .iter()
+                .map(|saved| SavedPath {
+                    name: &saved.name,
+                    waypoints: saved.waypoints.len(),
+                    duration: saved.duration(),
+                })
+                .collect(),
+            world,
+        }
     }
 }
 
@@ -452,7 +511,7 @@ impl App {
         }
     }
 
-    fn camera_path_action(&mut self, action: PathAction) {
+    pub(super) fn camera_path_action(&mut self, action: PathAction) {
         // the waypoints do not change under a playback
         let edits = matches!(
             action,

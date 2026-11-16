@@ -745,6 +745,9 @@ pub enum Shot {
     FullSet,
     /// A 360° photo (`pano`).
     Pano,
+    /// The camera movie (`ui::viewfinder::path`): the shutter adds a
+    /// waypoint to the Camera Path instead of taking a photo.
+    Path,
 }
 
 /// An entry of the mode list.
@@ -754,6 +757,8 @@ pub enum ShotChoice {
     FullSet,
     Pano,
     Depth,
+    /// The camera movie: the shutter places waypoints.
+    Path,
     /// A custom mode, C1 to C3 (0 to 2): a photo profile pinned there.
     Bank(u8),
 }
@@ -775,6 +780,8 @@ pub enum Fire {
     Take,
     FullSave,
     Pano,
+    /// A waypoint of the Camera Path (no photo, no blackout).
+    Waypoint,
 }
 
 /// The mode shown: the depth switch, else the custom mode loaded, else the
@@ -786,6 +793,7 @@ pub fn shown(shot: Shot, depth: bool, bank: Option<u8>) -> ShotChoice {
         (false, None, Shot::Photo) => ShotChoice::Photo,
         (false, None, Shot::FullSet) => ShotChoice::FullSet,
         (false, None, Shot::Pano) => ShotChoice::Pano,
+        (false, None, Shot::Path) => ShotChoice::Path,
     }
 }
 
@@ -797,6 +805,7 @@ pub fn available(pano_ok: bool, depth_ok: bool, banks: [bool; 3]) -> Vec<(ShotCh
         (ShotChoice::FullSet, None),
         (ShotChoice::Pano, (!pano_ok).then_some(Refused::CameraLimited)),
         (ShotChoice::Depth, (!depth_ok).then_some(Refused::VisionLimited)),
+        (ShotChoice::Path, None),
     ];
     for (i, ok) in banks.into_iter().enumerate() {
         v.push((ShotChoice::Bank(i as u8), (!ok).then_some(Refused::NoProfile)));
@@ -815,14 +824,16 @@ pub fn choose(choice: ShotChoice, shot: &mut Shot, depth: &mut bool, bank: &mut 
     *shot = match choice {
         ShotChoice::FullSet => Shot::FullSet,
         ShotChoice::Pano => Shot::Pano,
+        ShotChoice::Path => Shot::Path,
         _ => Shot::Photo,
     };
     needs_disk(*shot, *depth)
 }
 
-/// The mode only writes to the disk.
+/// The mode only writes to the disk (the Path mode writes nothing: its
+/// waypoints are the Camera Path's).
 pub fn needs_disk(shot: Shot, depth: bool) -> bool {
-    depth || shot != Shot::Photo
+    depth || matches!(shot, Shot::FullSet | Shot::Pano)
 }
 
 /// The destination is no longer the disk: a mode that writes there goes
@@ -842,6 +853,7 @@ pub fn shutter_action(shot: Shot, depth: bool) -> Fire {
     match (depth, shot) {
         (false, Shot::FullSet) => Fire::FullSave,
         (false, Shot::Pano) => Fire::Pano,
+        (false, Shot::Path) => Fire::Waypoint,
         _ => Fire::Take,
     }
 }
@@ -865,6 +877,23 @@ mod tests {
         assert_eq!(shown(Shot::Pano, false, None), ShotChoice::Pano);
         assert_eq!(shown(Shot::Photo, false, Some(1)), ShotChoice::Bank(1));
         assert_eq!(shown(Shot::default(), false, None), ShotChoice::Photo, "the default");
+        assert_eq!(shown(Shot::Path, false, None), ShotChoice::Path);
+        assert_eq!(shown(Shot::Path, true, None), ShotChoice::Depth, "Depth still wins");
+    }
+
+    #[test]
+    fn the_path_mode_places_waypoints_and_leaves_the_destination_alone() {
+        let (mut shot, mut depth, mut bank) = (Shot::Pano, false, Some(1));
+        assert!(!choose(ShotChoice::Path, &mut shot, &mut depth, &mut bank), "no disk needed");
+        assert_eq!((shot, depth, bank), (Shot::Path, false, None));
+        assert_eq!(shutter_action(shot, depth), Fire::Waypoint);
+        assert!(!needs_disk(Shot::Path, false));
+        // a destination that is not the disk keeps the mode
+        let mut depth = false;
+        assert!(!on_destination(false, &mut shot, &mut depth));
+        assert_eq!(shot, Shot::Path);
+        // the depth switch turned on over it takes the shutter back
+        assert_eq!(shutter_action(Shot::Path, true), Fire::Take);
     }
 
     #[test]
@@ -907,7 +936,9 @@ mod tests {
         assert_eq!(next_choice(ShotChoice::Bank(2), &list), ShotChoice::Photo);
         let none = available(true, false, [false; 3]);
         assert_eq!(none[3].1, Some(Refused::VisionLimited));
-        assert_eq!(next_choice(ShotChoice::Pano, &none), ShotChoice::Photo);
+        assert_eq!(none[4], (ShotChoice::Path, None), "the Path mode is never refused");
+        assert_eq!(next_choice(ShotChoice::Pano, &none), ShotChoice::Path, "Depth skipped");
+        assert_eq!(next_choice(ShotChoice::Path, &none), ShotChoice::Photo, "the empty slots skipped");
     }
 
     #[test]
