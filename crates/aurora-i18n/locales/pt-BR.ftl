@@ -16376,3 +16376,16 @@ anti-spam-blocked-burst = { $count ->
    *[other] { $count } sources blocked by the anti-spam for this session ({ $kinds }). Manage blocks in Preferences > Protections > Anti-spam.
 }
 
+demo-sound-doppler-source = Passing sound
+ui-options-first-click-hud = Worn HUDs
+ui-options-first-click-own = My objects
+ui-options-first-click-friend = Friends' objects
+ui-options-first-click-group = Group objects
+ui-options-first-click-land = Landowner's objects
+ui-options-first-click-land-help = Objects of the parcel's owner or group, on the parcel you stand on
+ui-options-first-click-any = Anyone's objects
+ui-options-first-click-all-faces = Every media face
+ui-options-first-click-all-faces-help = Also the faces whose media does not ask for the first click
+ui-options-sound-doppler = Doppler effect
+ui-options-sound-doppler-help = A moving sound plays higher as it comes closer and lower as it goes away, like a passing car. 1: as in the Legacy Viewer. 0: off. 2: twice as strong.
+
