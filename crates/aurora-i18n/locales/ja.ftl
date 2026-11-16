@@ -2788,6 +2788,11 @@ ui-options-compact-automated-chat = 人以外からのメッセージをコン�
 ui-options-compact-automated-chat-hint = オブジェクトやスクリプトの発言、ビューアーの通知を種類ごとのアイコン付きの小さな行で表示します。人のメッセージだけが通常のサイズになります。これらは未読に数えられず、通知（キーワード音、点滅、システム通知）も発生しません。通知されるのは人のメッセージだけです。
 ui-options-compact-im-system-lines = 会話のシステム行もコンパクトに表示
 ui-options-compact-im-system-lines-hint = 会話中のビューアーからの行（通話の開始・終了、自動返信の送信など）も、アイコン付きの小さな行で表示します。
+ui-options-blocked-chat = ブロックした住人のチャット
+ui-options-blocked-chat-hint = ブロックした住人が発言したときに、近くのチャットに表示する内容です。チャットバーの上、吹き出し、サウンド、未読数には出ません。
+ui-options-blocked-chat-hidden = 非表示
+ui-options-blocked-chat-collapsed = 折りたたむ
+ui-options-blocked-chat-greyed = グレー表示
 ui-options-show-contacts-tab = コンタクトタブを表示
 ui-options-show-contacts-tab-hint = 会話ウィンドウに「コンタクト」を表示します。
 ui-options-payment-opens-conversation = 住人から支払いを受けたときに会話を開く
@@ -5373,6 +5378,11 @@ ui-chat-latest-new = { $count ->
     [one] 新着メッセージ{ $count }件
    *[other] 新着メッセージ{ $count }件
     }
+ui-chat-blocked-hidden = { $count ->
+    [one] 非表示のメッセージ{ $count }件
+   *[other] 非表示のメッセージ{ $count }件
+    }
+ui-chat-blocked-show = ブロックした住人の発言です。「表示」でここにグレーで表示します。
 ui-chat-copy-message = メッセージをコピー
 ui-chat-quote-message = 引用
 ui-chat-drop-to-give = ここにドロップして{ $name }に渡す
@@ -7229,6 +7239,14 @@ demo-chat-lines-long = 見学は噴水から始まり、ギャラリーと屋上
 demo-chat-lines-shout = あと5分で開場です！
 demo-emotes-nova = /me 噴水のそばにベンチを置く
 demo-emotes-orion = ここから見ると素敵！
+demo-muted-chat-near-1 = 今夜ギャラリーに来る人はいますか？
+demo-muted-chat-blocked-1 = みなさん、こんにちは！！
+demo-muted-chat-blocked-2 = 私の店を見て、グリッドで一番安いよ
+demo-muted-chat-blocked-3 = リンクをクリックして、今すぐ
+demo-muted-chat-object = 無料でお金がもらえる、タッチして！
+demo-muted-chat-near-2 = 9時に行きます。
+demo-muted-chat-blocked-4 = どうして誰も返事しないの
+demo-muted-chat-near-3 = またあとで！
 demo-chat-bubbles-whisper = ねえ、屋上庭園はもう開いてるよ
 demo-object-chat-greeter = 広場の案内係
 demo-object-chat-welcome = 広場へようこそ！タッチすると今週のイベントのノートカードを差し上げます。
@@ -15398,8 +15416,6 @@ chat-extras-group-nearby = 近くのチャットの表示
 chat-extras-group-conversations = 会話の表示
 chat-extras-seconds = チャットの時刻に秒を表示
 chat-extras-seconds-hint = チャットと会話記録の時刻に秒を表示します
-chat-extras-show-muted = ブロックしたチャットを灰色で表示
-chat-extras-show-muted-hint = ブロックした住人やオブジェクトの発言を、近くのチャットの履歴に灰色で残します。ワールド上や吹き出しには表示しません
 chat-extras-show-chat-type = 近くのチャットの音量ボタン
 chat-extras-show-chat-type-hint = 近くのチャット欄の横にある、ささやく・話す・叫ぶボタン
 chat-extras-beyond-range = 遠くのチャットを暗く表示

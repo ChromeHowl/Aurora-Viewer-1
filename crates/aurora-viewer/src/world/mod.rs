@@ -326,10 +326,6 @@ pub enum Origin {
     /// (FSShowIMInChatHistory, `chat_copies.rs`): its name as written, with
     /// its "IM:" or group prefix, faded, never written to a transcript.
     Copy,
-    /// What a blocked resident or object said, kept greyed in the nearby
-    /// chat (FSShowMutedChatHistory, `chat_copies.rs`): never over the world,
-    /// never written to a transcript.
-    Muted,
 }
 
 #[derive(Debug, Clone)]
@@ -340,6 +336,10 @@ pub struct ChatLine {
     pub kind: ChatKind,
     pub source: Uuid,
     pub origin: Origin,
+    /// A blocked resident's line, kept for the nearby chat's history only
+    /// (FSShowMutedChatHistory, `settings::BlockedChat`): never above the
+    /// chat bar, never counted, logged or alerted.
+    pub blocked: bool,
 }
 
 /// Drawn speed (m/s) under which our walk stops after a release, with
@@ -442,6 +442,9 @@ pub struct World {
     /// Lines not sent by a person neither count as unread nor alert
     /// (Preferences › Chat, #741, off), given every frame by the app.
     pub quiet_automated_chat: bool,
+    /// What becomes of a blocked resident's nearby chat (Preferences ›
+    /// Chat, hidden by default), given every frame by the app.
+    pub blocked_chat: crate::settings::BlockedChat,
     /// A resident starting to type to us opens the conversation with an
     /// announcement (FSAnnounceIncomingIM, `im_announce.rs`), given every
     /// frame by the app.
@@ -1022,6 +1025,7 @@ impl World {
             nearby_news: false,
             chat_badge: 0,
             quiet_automated_chat: false,
+            blocked_chat: crate::settings::BlockedChat::Hidden,
             announce_incoming_im: false,
             chat_display: Default::default(),
             console_copies: VecDeque::new(),
@@ -1216,6 +1220,7 @@ impl World {
         // a setting, not the session's: the arrival's lines follow it too
         let quiet = self.quiet_automated_chat;
         let display = std::mem::take(&mut self.chat_display);
+        let blocked_chat = self.blocked_chat;
         let fly_override = self.fly_override;
         // the rules are the computer's, not the session's
         let omnifilter = std::mem::take(&mut self.omnifilter);
@@ -1225,6 +1230,7 @@ impl World {
         self.cache_dir = cache_dir;
         self.quiet_automated_chat = quiet;
         self.chat_display = display;
+        self.blocked_chat = blocked_chat;
         self.fly_override = fly_override;
     }
 
@@ -2399,6 +2405,7 @@ impl World {
             kind: ChatKind::System,
             source: Uuid::nil(),
             origin: Origin::Live,
+            blocked: false,
         };
         self.notice_topics.note(&line, topic);
         self.push_chat(line);
@@ -2414,6 +2421,7 @@ impl World {
             kind: ChatKind::System,
             source: Uuid::nil(),
             origin: Origin::Live,
+            blocked: false,
         };
         self.notice_topics.note(&line, topic);
         self.conversation_push(session, line, false);
@@ -4888,16 +4896,20 @@ impl World {
         if !own_attachment && !self.rlva.receive_chat(&mut c, self.agent_id) {
             return;
         }
-        if c.message.is_empty() || self.lsl_bridge.hides(&c) || self.object_chat_filtered(&c) {
+        if c.message.is_empty() || self.lsl_bridge.hides(&c) {
             return;
         }
-        // a resident the Shadow Realm hides, or their object: not a trace
+        // a resident the Shadow Realm hides, or their object: not a trace,
+        // before and apart from the block list (`shadow_realm.rs`)
         if self.shadow_hides_chat(&c) {
             return;
         }
+        // a blocked resident's line goes to the history alone, if at all
         if self.chat_blocked(&c) {
-            // dropped, or kept greyed (FSShowMutedChatHistory)
-            self.keep_muted_chat(c);
+            self.blocked_chat_line(c);
+            return;
+        }
+        if self.object_chat_filtered(&c) {
             return;
         }
         if self.receive_hand_contacts(&c, Instant::now()) {
@@ -5031,6 +5043,7 @@ impl World {
             kind,
             source: c.source_id,
             origin: Origin::Live,
+            blocked: false,
         };
         self.translate_chat(&line);
         self.push_chat(line);
@@ -5142,6 +5155,7 @@ impl World {
                 kind: ChatKind::Im,
                 source: im.from_agent_id,
                 origin: Origin::Live,
+                blocked: false,
             };
             let opened = !self.chat_log.conversations.known.contains(&im.from_agent_id);
             self.conversation_push(im.from_agent_id, line, true);
@@ -5238,6 +5252,7 @@ impl World {
             kind,
             source,
             origin: Origin::Live,
+            blocked: false,
         };
         // an object's message is translated as its nearby lines are
         self.translate_chat(&line);
@@ -6276,6 +6291,7 @@ impl World {
             kind: ChatKind::OWN,
             source: Uuid::nil(),
             origin: Origin::Live,
+            blocked: false,
         };
         self.conversation_push(to, line, false);
     }

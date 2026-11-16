@@ -2801,6 +2801,11 @@ ui-options-compact-automated-chat = Compact messages that do not come from a per
 ui-options-compact-automated-chat-hint = What objects and scripts say, and the viewer's notices, take one small row with an icon of their kind; only people's messages keep their full size. They no longer count as unread nor alert you (keyword sound, flash, system notification): only people's messages do.
 ui-options-compact-im-system-lines = Compact the conversations' system lines too
 ui-options-compact-im-system-lines-hint = The viewer's lines in a conversation (a call started or ended, an automatic reply sent) take the same small row, with their icon.
+ui-options-blocked-chat = Blocked residents' chat
+ui-options-blocked-chat-hint = What the nearby chat shows when a resident you blocked talks. Never above the chat bar, in a bubble, a sound or an unread count.
+ui-options-blocked-chat-hidden = Hidden
+ui-options-blocked-chat-collapsed = Collapsed
+ui-options-blocked-chat-greyed = Greyed
 ui-options-show-contacts-tab = Show the Contacts tab
 ui-options-show-contacts-tab-hint = Show Contacts in the Conversations window.
 ui-options-payment-opens-conversation = Open the conversation when a resident pays you
@@ -5398,6 +5403,11 @@ ui-chat-latest-new = { $count ->
     [one] { $count } new message
    *[other] { $count } new messages
     }
+ui-chat-blocked-hidden = { $count ->
+    [one] { $count } message hidden
+   *[other] { $count } messages hidden
+    }
+ui-chat-blocked-show = Lines from residents you blocked: Show puts them here, greyed.
 ui-chat-copy-message = Copy the message
 ui-chat-quote-message = Quote
 ui-chat-drop-to-give = Drop here to give to { $name }
@@ -7267,6 +7277,14 @@ demo-chat-lines-long = The tour starts at the fountain, then we go up to the gal
 demo-chat-lines-shout = Doors open in five minutes!
 demo-emotes-nova = /me sets a bench down by the fountain
 demo-emotes-orion = Looks great from here!
+demo-muted-chat-near-1 = Who's coming to the gallery tonight?
+demo-muted-chat-blocked-1 = HEY EVERYONE
+demo-muted-chat-blocked-2 = look at my store, best prices on the grid
+demo-muted-chat-blocked-3 = click my link, click it now
+demo-muted-chat-object = FREE MONEY, touch me!
+demo-muted-chat-near-2 = I'll be there at nine.
+demo-muted-chat-blocked-4 = why is nobody answering me
+demo-muted-chat-near-3 = See you there!
 demo-chat-bubbles-whisper = Psst, the roof garden is already open
 demo-object-chat-greeter = Plaza Greeter
 demo-object-chat-welcome = Welcome to the plaza! Touch me for a notecard with this week's events.
@@ -15511,8 +15529,6 @@ chat-extras-group-nearby = Nearby chat display
 chat-extras-group-conversations = Conversations display
 chat-extras-seconds = Seconds in chat times
 chat-extras-seconds-hint = Shows the seconds in the times of the chat and of the transcripts
-chat-extras-show-muted = Show blocked chat, greyed
-chat-extras-show-muted-hint = What blocked residents and objects say stays in the nearby chat history, greyed; never over the world or in a bubble
 chat-extras-show-chat-type = Volume button in nearby chat
 chat-extras-show-chat-type-hint = The whisper, say and shout button beside the nearby chat field
 chat-extras-beyond-range = Dim chat from afar

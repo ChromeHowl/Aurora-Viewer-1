@@ -319,9 +319,13 @@ impl World {
     /// (LogNearbyChat). The instant messages copied there only with
     /// FSLogIMInChatHistory (off by default; FSFloaterNearbyChat::
     /// addMessage), behind their "IM:" or group name; those of objects are.
+    /// A blocked resident's never (FSFloaterNearbyChat::addMessage returns
+    /// before logging a muted line).
     pub(super) fn log_nearby(&mut self, line: &ChatLine) {
         let copy = line.origin == Origin::Copy && line.kind == ChatKind::Im;
-        let logged = if copy {
+        let logged = if line.blocked {
+            false
+        } else if copy {
             self.chat_display.more.log_im_copies
         } else {
             line.origin == Origin::Live && line.kind != ChatKind::Im
@@ -580,6 +584,7 @@ impl World {
                     kind,
                     source,
                     origin: Origin::Log,
+                    blocked: false,
                 }
             })
             .collect()
@@ -685,6 +690,7 @@ impl World {
                     kind: if mine { ChatKind::OWN } else { ChatKind::Im },
                     source: if mine { Uuid::nil() } else { h.from_id },
                     origin: Origin::ServerLog,
+                    blocked: false,
                 }
             })
             .collect();
@@ -934,6 +940,7 @@ mod tests {
             kind: ChatKind::Local(ChatType::Shout),
             source: Uuid::from_u128(2),
             origin: Origin::Live,
+            blocked: false,
         });
         // ours, as the simulator echoes it, keeps its volume and its verb
         // (#1323)
@@ -974,6 +981,7 @@ mod tests {
             kind: ChatKind::Im,
             source: jane,
             origin: Origin::Copy,
+            blocked: false,
         };
         w.nearby_push(copy("not logged"));
         w.chat_display.more.log_im_copies = true;

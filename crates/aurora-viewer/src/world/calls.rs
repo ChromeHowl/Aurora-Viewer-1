@@ -905,6 +905,7 @@ impl World {
                 kind: ChatKind::System,
                 source: Uuid::nil(),
                 origin: Origin::Live,
+                blocked: false,
             },
             true,
         );

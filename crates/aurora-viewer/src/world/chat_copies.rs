@@ -6,9 +6,10 @@
 //!   the message's toast), behind "IM:" or the group's name cut to
 //!   FSShowGroupNameLength (LLIMModel::addMessage and the v1-style console
 //!   of indra/newview/llimview.cpp);
-//! - what a blocked resident or object says, kept greyed in the nearby chat
-//!   (FSShowMutedChatHistory, process_chat_from_simulator in
-//!   indra/newview/llviewermessage.cpp), all originally LGPL 2.1.
+//!   all originally LGPL 2.1.
+//!
+//! A blocked resident's line is kept apart, in `blocking.rs`
+//! (`blocked_chat_line`).
 //!
 //! A copy is written to the nearby chat's transcript only with
 //! FSLogIMInChatHistory (`World::log_nearby`), is never counted as unread
@@ -16,7 +17,6 @@
 
 use super::{ChatKind, ChatLine, Origin, World};
 use crate::ui_sound::{ImKind, ImMessage};
-use aurora_net::{ChatMessage, ChatSourceType, ChatType};
 use std::time::SystemTime;
 
 /// The copies kept for the lines over the world (they show 50 rows at most).
@@ -49,6 +49,7 @@ impl World {
             kind: ChatKind::Im,
             source: line.source,
             origin: Origin::Copy,
+            blocked: false,
         };
         if console {
             self.console_copies.push_back(copy.clone());
@@ -68,30 +69,6 @@ impl World {
             ImKind::Private => self.chat_display.im_in_console,
             ImKind::Group | ImKind::Conference => self.chat_display.group_im_in_console,
         }
-    }
-
-    /// A blocked resident's or object's nearby line (`chat_blocked`): kept
-    /// greyed in the nearby chat when asked, else dropped as before. Nothing
-    /// else follows it: no bubble, no sound, no alert, no unread count.
-    pub(super) fn keep_muted_chat(&mut self, c: ChatMessage) {
-        if !self.chat_display.show_muted_chat || c.message.is_empty() {
-            return;
-        }
-        let kind = match (c.source_type, c.chat_type) {
-            (ChatSourceType::Agent, t @ (ChatType::Whisper | ChatType::Normal | ChatType::Shout)) => ChatKind::Local(t),
-            (ChatSourceType::Object, t @ (ChatType::Whisper | ChatType::Normal | ChatType::Shout | ChatType::OwnerSay)) => {
-                ChatKind::Object(t)
-            }
-            _ => return,
-        };
-        self.nearby_push(ChatLine {
-            time: SystemTime::now(),
-            from: c.from_name,
-            text: c.message,
-            kind,
-            source: c.source_id,
-            origin: Origin::Muted,
-        });
     }
 }
 
@@ -141,6 +118,7 @@ mod tests {
                 kind: ChatKind::Im,
                 source: JANE,
                 origin: Origin::Live,
+                blocked: false,
             },
             true,
         );
@@ -208,38 +186,5 @@ mod tests {
         let m = receive(&mut w, JANE, ImKind::Private, "hello");
         w.copy_message(&m);
         assert!(w.chat.is_empty());
-    }
-
-    #[test]
-    fn muted_chat_is_kept_greyed_only_when_asked() {
-        let mut w = world();
-        let said = |text: &str| ChatMessage {
-            from_name: "Jane Doe".into(),
-            source_id: JANE,
-            owner_id: JANE,
-            source_type: ChatSourceType::Agent,
-            chat_type: ChatType::Normal,
-            position: glam::Vec3::ZERO,
-            message: text.into(),
-            region: None,
-        };
-        w.keep_muted_chat(said("hidden"));
-        assert!(w.chat.is_empty(), "dropped by default");
-        w.chat_display.show_muted_chat = true;
-        w.keep_muted_chat(said("kept"));
-        let line = w.chat.back().expect("kept");
-        assert_eq!((line.origin, line.kind), (Origin::Muted, ChatKind::Local(ChatType::Normal)));
-        assert_eq!(w.chat_unread, 0);
-        // typing notices and the debug channel never show
-        w.keep_muted_chat(ChatMessage {
-            chat_type: ChatType::StartTyping,
-            ..said("x")
-        });
-        w.keep_muted_chat(ChatMessage {
-            source_type: ChatSourceType::Object,
-            chat_type: ChatType::Debug,
-            ..said("error")
-        });
-        assert_eq!(w.chat.len(), 1);
     }
 }

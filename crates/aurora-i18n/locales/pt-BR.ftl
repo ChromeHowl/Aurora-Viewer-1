@@ -15454,8 +15454,6 @@ chat-extras-group-nearby = Nearby chat display
 chat-extras-group-conversations = Conversations display
 chat-extras-seconds = Seconds in chat times
 chat-extras-seconds-hint = Shows the seconds in the times of the chat and of the transcripts
-chat-extras-show-muted = Show blocked chat, greyed
-chat-extras-show-muted-hint = What blocked residents and objects say stays in the nearby chat history, greyed; never over the world or in a bubble
 chat-extras-show-chat-type = Volume button in nearby chat
 chat-extras-show-chat-type-hint = The whisper, say and shout button beside the nearby chat field
 chat-extras-beyond-range = Dim chat from afar
@@ -16377,3 +16375,21 @@ anti-spam-blocked-burst = { $count ->
    *[other] { $count } sources blocked by the anti-spam for this session ({ $kinds }). Manage blocks in Preferences > Protections > Anti-spam.
 }
 
+ui-options-blocked-chat = Blocked residents' chat
+ui-options-blocked-chat-hint = What the nearby chat shows when a resident you blocked talks. Never above the chat bar, in a bubble, a sound or an unread count.
+ui-options-blocked-chat-hidden = Hidden
+ui-options-blocked-chat-collapsed = Collapsed
+ui-options-blocked-chat-greyed = Greyed
+ui-chat-blocked-hidden = { $count ->
+    [one] { $count } message hidden
+   *[other] { $count } messages hidden
+    }
+ui-chat-blocked-show = Lines from residents you blocked: Show puts them here, greyed.
+demo-muted-chat-near-1 = Who's coming to the gallery tonight?
+demo-muted-chat-blocked-1 = HEY EVERYONE
+demo-muted-chat-blocked-2 = look at my store, best prices on the grid
+demo-muted-chat-blocked-3 = click my link, click it now
+demo-muted-chat-object = FREE MONEY, touch me!
+demo-muted-chat-near-2 = I'll be there at nine.
+demo-muted-chat-blocked-4 = why is nobody answering me
+demo-muted-chat-near-3 = See you there!

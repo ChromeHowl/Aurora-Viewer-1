@@ -2804,6 +2804,11 @@ ui-options-compact-automated-chat = Messages compacts pour tout ce qui ne vient 
 ui-options-compact-automated-chat-hint = Ce que disent les objets et les scripts, et les avis du viewer, tiennent sur une petite ligne avec une icône de leur type ; seuls les messages des personnes gardent leur taille normale. Ils ne comptent plus comme non lus et ne vous alertent plus (son des mots-clés, clignotement, notification système) : seuls les messages des personnes le font.
 ui-options-compact-im-system-lines = Compacter aussi les lignes système des IM
 ui-options-compact-im-system-lines-hint = Les lignes du viewer dans une conversation (appel commencé ou terminé, réponse automatique envoyée) prennent la même petite ligne, avec leur icône.
+ui-options-blocked-chat = Chat des résidents bloqués
+ui-options-blocked-chat-hint = Ce que le chat local montre quand un résident que vous avez bloqué parle. Jamais au-dessus de la barre de chat, dans une bulle, un son ou un compteur de non-lus.
+ui-options-blocked-chat-hidden = Masqué
+ui-options-blocked-chat-collapsed = Replié
+ui-options-blocked-chat-greyed = En gris
 ui-options-show-contacts-tab = Afficher l'onglet Contacts
 ui-options-show-contacts-tab-hint = Affiche Contacts dans la fenêtre Conversations.
 ui-options-payment-opens-conversation = Ouvrir la conversation quand un résident vous paie
@@ -5404,6 +5409,11 @@ ui-chat-latest-new = { $count ->
     [one] { $count } nouveau message
    *[other] { $count } nouveaux messages
     }
+ui-chat-blocked-hidden = { $count ->
+    [one] { $count } message masqué
+   *[other] { $count } messages masqués
+    }
+ui-chat-blocked-show = Lignes de résidents que vous avez bloqués : Afficher les montre ici, en gris.
 ui-chat-copy-message = Copier le message
 ui-chat-quote-message = Citer
 ui-chat-drop-to-give = Déposez ici pour donner à { $name }
@@ -7275,6 +7285,14 @@ demo-chat-lines-long = La visite commence à la fontaine, puis on monte à la ga
 demo-chat-lines-shout = Ouverture des portes dans cinq minutes !
 demo-emotes-nova = /me pose un banc près de la fontaine
 demo-emotes-orion = Ça rend très bien d'ici !
+demo-muted-chat-near-1 = Qui vient à la galerie ce soir ?
+demo-muted-chat-blocked-1 = SALUT TOUT LE MONDE
+demo-muted-chat-blocked-2 = venez voir ma boutique, les meilleurs prix de la grille
+demo-muted-chat-blocked-3 = cliquez sur mon lien, cliquez maintenant
+demo-muted-chat-object = ARGENT GRATUIT, touchez-moi !
+demo-muted-chat-near-2 = J'y serai à neuf heures.
+demo-muted-chat-blocked-4 = pourquoi personne ne me répond
+demo-muted-chat-near-3 = À tout à l'heure !
 demo-chat-bubbles-whisper = Psst, le jardin sur le toit est déjà ouvert
 demo-object-chat-greeter = Accueil de la place
 demo-object-chat-welcome = Bienvenue sur la place ! Touchez-moi pour recevoir une notecard avec les événements de la semaine.
@@ -15497,8 +15515,6 @@ chat-extras-group-nearby = Affichage du chat local
 chat-extras-group-conversations = Affichage des conversations
 chat-extras-seconds = Secondes dans les heures du chat
 chat-extras-seconds-hint = Affiche les secondes dans les heures du chat et des transcriptions
-chat-extras-show-muted = Afficher le chat bloqué, grisé
-chat-extras-show-muted-hint = Ce que disent les résidents et objets bloqués reste dans l’historique du chat local, grisé ; jamais au-dessus du monde ni dans une bulle
 chat-extras-show-chat-type = Bouton de volume du chat local
 chat-extras-show-chat-type-hint = Le bouton chuchoter, parler, crier à côté du champ du chat local
 chat-extras-beyond-range = Atténuer le chat lointain

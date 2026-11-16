@@ -86,10 +86,10 @@ pub struct ChatDisplay {
     pub show_emoji_button: bool,
     /// FSShowIMSendButton (on): the send button of the conversations.
     pub show_im_send_button: bool,
-    /// FSShowMutedChatHistory (off): what blocked residents and objects say
-    /// stays in the nearby chat, greyed (never over the world nor in a
-    /// bubble).
-    pub show_muted_chat: bool,
+    /// The former FSShowMutedChatHistory switch of this group, read once:
+    /// it became `Settings::blocked_chat` (on: Greyed).
+    #[serde(rename = "show_muted_chat", skip_serializing)]
+    pub(crate) former_show_muted_chat: Option<bool>,
     /// FSSecondsinChatTimestamps (off): seconds in the times of the chat
     /// and of the transcripts.
     pub seconds_in_timestamps: bool,
@@ -127,7 +127,7 @@ impl Default for ChatDisplay {
             emoji_popup_while_typing: true,
             show_emoji_button: true,
             show_im_send_button: true,
-            show_muted_chat: false,
+            former_show_muted_chat: None,
             seconds_in_timestamps: false,
             more: Default::default(),
         }
@@ -256,6 +256,20 @@ mod tests {
         let partial: ChatDisplay = serde_json::from_value(serde_json::json!({ "show_you": true })).expect("partial");
         assert!(partial.show_you);
         assert_eq!(partial.ooc_prefix, "((");
+    }
+
+    #[test]
+    fn the_former_show_muted_chat_switch_becomes_the_blocked_chat_choice() {
+        use crate::settings::BlockedChat;
+        let on: crate::settings::Settings =
+            serde_json::from_value(serde_json::json!({ "chat_display": { "show_muted_chat": true } })).expect("old file");
+        assert_eq!(on.sanitized().blocked_chat, BlockedChat::Greyed);
+        let off: crate::settings::Settings =
+            serde_json::from_value(serde_json::json!({ "chat_display": { "show_muted_chat": false } })).expect("old file");
+        assert_eq!(off.sanitized().blocked_chat, BlockedChat::Hidden);
+        // a choice already made is not overridden by an absent former switch
+        let made: crate::settings::Settings = serde_json::from_value(serde_json::json!({ "blocked_chat": "Collapsed" })).expect("file");
+        assert_eq!(made.sanitized().blocked_chat, BlockedChat::Collapsed);
     }
 
     #[test]

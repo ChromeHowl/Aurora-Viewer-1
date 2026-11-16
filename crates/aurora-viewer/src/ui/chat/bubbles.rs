@@ -445,6 +445,7 @@ mod tests {
             kind,
             source: uuid::Uuid::from_u128(1),
             origin: Origin::Live,
+            blocked: false,
         };
         let day = 86_400;
         // yesterday's two lines, then today's
@@ -492,6 +493,7 @@ mod tests {
             kind,
             source: uuid::Uuid::from_u128(7),
             origin: Origin::Live,
+            blocked: false,
         };
         let mut list_top = 0.0;
         let mut output = ctx.run_ui(

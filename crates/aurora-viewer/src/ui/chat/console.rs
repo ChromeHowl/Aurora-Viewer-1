@@ -98,7 +98,10 @@ pub(super) fn recent(
         .chat
         .iter()
         .rev()
-        .filter(|l| !matches!(l.origin, Origin::Copy | Origin::Muted))
+        .filter(|l| !matches!(l.origin, Origin::Copy))
+        // a blocked resident's line stays in the history (LLNearbyChatHandler
+        // never sees a muted line)
+        .filter(|l| !l.blocked)
         .filter(|l| residents || !super::said_by_resident(l))
         .take(max)
         .chain(world.console_copies.iter().rev().take(max))
@@ -531,6 +534,7 @@ mod tests {
             kind,
             source: uuid::Uuid::from_u128(source),
             origin: Origin::Live,
+            blocked: false,
         }
     }
 

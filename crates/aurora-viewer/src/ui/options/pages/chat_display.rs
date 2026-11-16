@@ -18,12 +18,6 @@ pub fn groups(cx: &mut Cx) {
             tr!("chat-extras-seconds-hint"),
             &field!(chat_display.seconds_in_timestamps),
         );
-        // FSShowMutedChatHistory
-        cx.toggle(
-            tr!("chat-extras-show-muted"),
-            tr!("chat-extras-show-muted-hint"),
-            &field!(chat_display.show_muted_chat),
-        );
         // FSShowChatType
         cx.toggle(
             tr!("chat-extras-show-chat-type"),

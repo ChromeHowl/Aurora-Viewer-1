@@ -84,6 +84,7 @@ mod tests {
             kind: ChatKind::Local(aurora_net::ChatType::Shout),
             source,
             origin: super::super::Origin::Live,
+            blocked: false,
         };
         assert!(!w.said_far(&line(near)));
         assert!(w.said_far(&line(away)));

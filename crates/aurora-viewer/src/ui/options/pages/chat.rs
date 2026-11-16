@@ -86,6 +86,19 @@ pub fn page(cx: &mut Cx, tab: usize) {
                         &field!(group_emotes),
                     );
                 });
+                // FSShowMutedChatHistory (off: Hidden); Collapsed is Aurora's
+                // middle way
+                use crate::settings::BlockedChat;
+                cx.combo(
+                    tr!("ui-options-blocked-chat"),
+                    tr!("ui-options-blocked-chat-hint"),
+                    &field!(blocked_chat),
+                    &[
+                        (BlockedChat::Hidden, tr!("ui-options-blocked-chat-hidden")),
+                        (BlockedChat::Collapsed, tr!("ui-options-blocked-chat-collapsed")),
+                        (BlockedChat::Greyed, tr!("ui-options-blocked-chat-greyed")),
+                    ],
+                );
                 cx.toggle(
                     tr!("ui-options-chat-keep-focus"),
                     tr!("ui-options-chat-keep-focus-hint"),

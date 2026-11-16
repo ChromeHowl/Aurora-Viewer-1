@@ -2,6 +2,7 @@
 
 mod action_marker;
 mod app_links;
+mod blocked;
 pub(crate) use app_links::{group_name as app_link_group_name, take_wanted as take_app_link_wants};
 mod bubbles;
 mod call;
@@ -124,6 +125,9 @@ pub struct ChatUi {
     /// Conversation whose entry the list scrolls to: one opened from
     /// elsewhere (a name's menu, a notification) may be out of its view.
     reveal: Option<uuid::Uuid>,
+    /// The folded runs of a blocked resident's nearby lines opened by their
+    /// Show, by the number of their first line (`blocked::fold_row`).
+    blocked_opened: std::collections::BTreeSet<u64>,
     /// The "Contacts" tab is shown instead (FSFloaterContacts docked as
     /// the first tab of FSFloaterIMContainer).
     pub contacts: bool,
@@ -1196,8 +1200,6 @@ pub(crate) fn history_tone(p: &Palette, origin: Origin) -> Option<Color32> {
         Origin::ServerLog => Some(p.muted_dim.lerp_to_gamma(p.success, 0.3)),
         // FSIMChatHistoryFade: a copied IM faded into the background
         Origin::Copy => Some(p.ink.gamma_multiply(display::get().im_nearby_fade)),
-        // FSShowMutedChatHistory: in the colour of the blocked
-        Origin::Muted => Some(super::colors::text(super::colors::get().chat_muted)),
     }
 }
 
@@ -2716,7 +2718,7 @@ struct Copied<'a> {
 
 impl Copied<'_> {
     fn text(&self, sel: &select::Selection) -> String {
-        let seqs = self.view.lines().map(|i| self.first + i as u64);
+        let seqs = self.view.shown_lines().map(|i| self.first + i as u64);
         sel.copy_text(seqs, |seq| {
             let Some(line) = seq.checked_sub(self.first).and_then(|i| self.lines.get(i as usize)) else {
                 return (String::new(), String::new());
@@ -2971,6 +2973,8 @@ fn conversation_lines(ui: &mut egui::Ui, p: &Palette, l: Lines, st: &mut ChatUi,
     let current = search.find.as_ref().and_then(|f| f.current_line(view));
     // the labelled links' hint follows the nearby chat's or the IMs' option
     display::links_in(ui.ctx(), Some(st.selected.is_none()));
+    // the folded run of blocked lines whose Show was clicked, by its first line
+    let mut opened_fold = None;
     let area = super::widgets::scroll_offset::show(ui, egui::ScrollArea::vertical(), ("conv", st.selected));
     let out = area
         .stick_to_bottom(!paused)
@@ -2994,6 +2998,14 @@ fn conversation_lines(ui: &mut egui::Ui, p: &Palette, l: Lines, st: &mut ChatUi,
                     find: &needle,
                     layout,
                     first_unread,
+                    // (only the nearby chat has a blocked resident's lines)
+                    blocked: match st.selected {
+                        None => view::Blocked {
+                            mode: w.blocked_chat,
+                            opened: &st.blocked_opened,
+                        },
+                        Some(_) => view::Blocked::default(),
+                    },
                 },
                 width,
             );
@@ -3023,12 +3035,21 @@ fn conversation_lines(ui: &mut egui::Ui, p: &Palette, l: Lines, st: &mut ChatUi,
                 let Some(line) = lines.get(row.line) else {
                     return;
                 };
+                if row.folded > 0 {
+                    if blocked::fold_row(ui, p, row.look, row.folded) {
+                        opened_fold = Some(clock.first + row.line as u64);
+                    }
+                    return;
+                }
                 let mark = mark.filter(|_| row.hit);
                 find::forget_message(ui.ctx());
                 let mut draw = |ui: &mut egui::Ui| match &mut rows {
                     Rows::Classic(_) => draw_line(ui, &mut env, line, row.look, mark),
                     Rows::Thread(th) => thread::draw(ui, &mut env, th, line, row.look, mark, painted),
                 };
+                // a blocked resident's line, kept in the history: greyed
+                let opacity = ui.opacity();
+                ui.multiply_opacity(blocked::alpha(line));
                 if line.kind.is_card() {
                     // a card: its own labels and buttons
                     draw(ui);
@@ -3038,6 +3059,7 @@ fn conversation_lines(ui: &mut egui::Ui, p: &Palette, l: Lines, st: &mut ChatUi,
                         select::row(ui, seq, selection.of_row(seq), painted, draw);
                     });
                 }
+                ui.set_opacity(opacity);
                 if painted && current == Some(row.line) {
                     find::current_marker(ui, p);
                 }
@@ -3066,6 +3088,9 @@ fn conversation_lines(ui: &mut egui::Ui, p: &Palette, l: Lines, st: &mut ChatUi,
                 );
             }
         });
+    if let Some(seq) = opened_fold {
+        st.blocked_opened.insert(seq);
+    }
     display::links_in(ui.ctx(), None);
     let mut offset = out.state.unclamped_offset();
     let mut store = false;
@@ -3073,7 +3098,7 @@ fn conversation_lines(ui: &mut egui::Ui, p: &Palette, l: Lines, st: &mut ChatUi,
     // ours nor the notices
     let arrived = lines.map_or(0, |lines| {
         view.arrived(clock.first, |i| {
-            lines.get(i).is_some_and(|l| !l.kind.is_own() && !l.kind.is_notice())
+            lines.get(i).is_some_and(|l| !l.kind.is_own() && !l.kind.is_notice() && !l.blocked)
         })
     });
     let latest_id = ui.scope_id().with(("latest", st.selected));
@@ -6223,6 +6248,7 @@ mod tests {
             kind,
             source: uuid::Uuid::from_u128(7),
             origin: Origin::Live,
+            blocked: false,
         };
         let job = |l: &crate::world::ChatLine, pill: Option<&egui::FontFamily>| {
             line_job(
@@ -6270,6 +6296,7 @@ mod tests {
             kind,
             source: uuid::Uuid::from_u128(source),
             origin: Origin::Live,
+            blocked: false,
         };
         let id = uuid::Uuid::from_u128;
         assert_eq!(
@@ -6304,6 +6331,7 @@ mod tests {
                 kind,
                 source: uuid::Uuid::from_u128(source),
                 origin: Origin::Live,
+                blocked: false,
             });
         }
         let ctx = egui::Context::default();
@@ -6789,6 +6817,7 @@ mod tests {
                 kind: ChatKind::Local(ChatType::Normal),
                 source: uuid::Uuid::from_u128(source),
                 origin: Origin::Live,
+                blocked: false,
             });
             world.chat_clock.pushed_back();
         }
