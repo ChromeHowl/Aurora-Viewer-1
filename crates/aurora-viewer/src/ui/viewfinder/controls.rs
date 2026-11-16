@@ -594,7 +594,13 @@ impl Viewfinder {
                             ui.set_width(32.0);
                             ui.spacing_mut().item_spacing.y = 4.0;
                             // Cameratools (the World menu's window and icon)
-                            if widgets::icon_button(ui, p, crate::ui::options::cameratools::ICON, aurora_i18n::tr!("camx-cameratools-title"), true) {
+                            if widgets::icon_button(
+                                ui,
+                                p,
+                                crate::ui::options::cameratools::ICON,
+                                aurora_i18n::tr!("camx-cameratools-title"),
+                                true,
+                            ) {
                                 out.push(Out::Cameratools);
                             }
                             let (in_tip, out_tip) = if mode == CamMode::Free {
