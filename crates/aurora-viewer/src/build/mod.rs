@@ -2782,30 +2782,6 @@ impl BuildTool {
         Some((s.move_hologram, self.manip.move_ghost()?))
     }
 
-    /// RenderLightRadius (LLViewerWindow::renderSelections, while the tools
-    /// are open): around each selected light, a sphere of its radius in its
-    /// colour at half opacity. The Legacy Viewer fills it; here three
-    /// circles outline it, so the prims inside stay readable.
-    fn light_radius_draw(&self, p: &draw::Painter3d, world: &World, now: Instant) {
-        if self.select_type(world) != SelectType::World {
-            return;
-        }
-        for idx in self.sel_prims(world) {
-            let Some(light) = world.objects.get(idx).and_then(|o| o.extra.light) else {
-                continue;
-            };
-            let Some((center, _, false)) = crate::scene::Scene::object_transform(world, idx, now, 0) else {
-                continue;
-            };
-            // getLightSRGBColor: the packed colour is linear
-            let srgb = |c: f32| c.clamp(0.0, 1.0).powf(1.0 / 2.2);
-            let color = draw::rgba(srgb(light.color[0]), srgb(light.color[1]), srgb(light.color[2]), 0.5);
-            for [a, b] in draw::light_radius_circles(center, light.radius) {
-                p.line(a, b, color, 1.5);
-            }
-        }
-    }
-
     /// RenderReflectionProbeVolumes (LLPipeline::renderDebug), whatever the
     /// tools show: the reach of every reflection probe. The Legacy Viewer
     /// shades it with a full-screen debug pass (reflectionProbeDisplay);
@@ -2905,9 +2881,6 @@ impl BuildTool {
         }
         if !self.open || self.replacement_active() || self.ui.color_picker.pipette {
             return;
-        }
-        if s.tools.light_radius {
-            self.light_radius_draw(&p, world, now);
         }
         match self.tool {
             Tool::Edit => {
