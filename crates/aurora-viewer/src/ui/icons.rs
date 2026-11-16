@@ -499,6 +499,7 @@ const FILLED: &[(&str, &[u8])] = svg_list!(
     "toggle-right",
     "trash",
     "trash-x",
+    "umbrella",
     "user",
     "video",
     "world",

@@ -16579,3 +16579,4 @@ director-path-opened = Camera Path opened: { $count } keyframes.
 director-path-sent = Track sent to the Camera Path: { $count } waypoints.
 director-path-too-many = The Camera Path has more waypoints than a track holds.
 director-path-bad = The track and the Camera Path do not fit: a view or a region is missing.
+ui-bars-aurora-weather = Aurora Weather…
