@@ -65,6 +65,7 @@ fn sample() -> Content {
         mark: None,
         marked: None,
         name_band: None,
+        status: None,
     }
 }
 
