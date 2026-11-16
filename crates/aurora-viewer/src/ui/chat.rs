@@ -2612,13 +2612,26 @@ fn header_names_styled(
     r
 }
 
+/// A system line's text, in [brackets] with FSIMSystemMessageBrackets
+/// (FSChatHistory::appendMessage). Every chat style uses it (the Legacy
+/// Viewer has the option in its plain-text mode only).
+pub(super) fn system_text(text: &str) -> Cow<'_, str> {
+    if display::get().system_brackets {
+        Cow::Owned(format!("[{text}]"))
+    } else {
+        Cow::Borrowed(text)
+    }
+}
+
 /// The name a line shows for its sender (FSChatHistoryHeader): the display
 /// name looked up, mine, else the name the line came with; history lines are
 /// looked up for nothing.
 pub(crate) fn sender_name(world: &World, own_name: &str, line: &crate::world::ChatLine) -> String {
     let options = display::get();
     // FSChatHistoryShowYou: "You" for our own lines of this session
-    if options.show_you && line.kind.is_own() && line.origin == Origin::Live {
+    // (not on an emote, whose text is the name; FSUrlEntryAgentSelf)
+    let emote = line.text.starts_with("/me ") || line.text.starts_with("/me'");
+    if options.show_you && line.kind.is_own() && line.origin == Origin::Live && !emote {
         return aurora_i18n::tr!("chat-extras-you").to_owned();
     }
     // FSMarkObjects: an object without a name
@@ -3201,11 +3214,7 @@ pub(crate) fn draw_line(ui: &mut egui::Ui, env: &mut LineEnv, line: &crate::worl
         // its time first, as the header strips show theirs
         // (FSChatHistory::appendMessage stamps the system's lines too, #1999)
         // FSIMSystemMessageBrackets: "[text]" in these lines
-        let text = if display::get().system_brackets {
-            Cow::Owned(format!("[{}]", line.text))
-        } else {
-            Cow::Borrowed(line.text.as_str())
-        };
+        let text = system_text(&line.text);
         ui.horizontal_top(|ui| {
             let time = hhmm(line.time);
             if !time.is_empty() {

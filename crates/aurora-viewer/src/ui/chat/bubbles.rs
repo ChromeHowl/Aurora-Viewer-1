@@ -116,7 +116,8 @@ fn text_width(ui: &egui::Ui, text: &str, size: f32, max: f32) -> f32 {
 fn system_pill(ui: &mut egui::Ui, env: &mut LineEnv, line: &crate::world::ChatLine, mark: Option<Mark>) {
     let (p, world) = (env.p, env.world);
     let tone = if env.plain_history { None } else { history_tone(p, line.origin) };
-    let width = text_width(ui, &line.text, chat_size(ui.ctx(), TEXT_SIZE), ui.available_width() * 0.86);
+    let text = super::system_text(&line.text);
+    let width = text_width(ui, &text, chat_size(ui.ctx(), TEXT_SIZE), ui.available_width() * 0.86);
     ui.add_space(3.0);
     ui.vertical_centered(|ui| {
         egui::Frame::new()
@@ -132,7 +133,7 @@ fn system_pill(ui: &mut egui::Ui, env: &mut LineEnv, line: &crate::world::ChatLi
                         env.emoji,
                         world,
                         env.want_names,
-                        &line.text,
+                        &text,
                         chat_size(ui.ctx(), 12.0),
                         tone.unwrap_or(p.muted),
                         true,
