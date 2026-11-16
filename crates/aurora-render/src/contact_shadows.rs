@@ -564,6 +564,7 @@ pub(crate) struct ContactShadows {
     /// This frame's samples: those of `photo` when it is not Bend's.
     samples: (i32, i32),
     pipeline_layout: wgpu::PipelineLayout,
+    /// The whole mask lit, for an image that does not fit the combine buffer.
     clear: wgpu::ComputePipeline,
     /// Writes `shadow_max` into the mask, after the wavefronts.
     combine: wgpu::ComputePipeline,
@@ -588,7 +589,11 @@ struct Filter {
 }
 
 impl Filter {
-    fn new(device: &wgpu::Device) -> Self {
+    /// `skip_lit`: a tile with no shadow under it is written lit without
+    /// the filter's taps (`SKIP_LIT`, contact_shadows_filter.wgsl); off for
+    /// the AMD RX 9000 cards ([`Variant::NoShared`]), which keep the filter
+    /// without an atomic in workgroup memory, like their pass.
+    fn new(device: &wgpu::Device, skip_lit: bool) -> Self {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("contact shadows filter"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/contact_shadows_filter.wgsl").into()),
@@ -625,19 +630,22 @@ impl Filter {
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
-        let make = |entry: &'static str| {
+        let make = |entry: &'static str, constants: &[(&str, f64)]| {
             device.create_compute_pipeline_cached(&wgpu::ComputePipelineDescriptor {
                 label: Some("contact shadows filter"),
                 layout: Some(&pl),
                 module: &module,
                 entry_point: Some(entry),
-                compilation_options: Default::default(),
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants,
+                    ..Default::default()
+                },
                 cache: None,
             })
         };
         Filter {
-            soft: make("main"),
-            copy: make("copy"),
+            soft: make("main", &[("SKIP_LIT", f64::from(skip_lit))]),
+            copy: make("copy", &[]),
             layout,
         }
     }
@@ -777,7 +785,7 @@ impl ContactShadows {
             })
         };
         let (pipeline, clear, combine) = (make("main"), make("clear"), make("write_mask"));
-        let filter = Filter::new(device);
+        let filter = Filter::new(device, variant != Variant::NoShared);
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("contact shadows params"),
             size: stride * 8,
@@ -1000,12 +1008,15 @@ impl ContactShadows {
 
     /// The dispatches of `write`, after the depth prepass (`more`: after
     /// the blended faces and the cards were drawn into `depth`), in one
-    /// pass: wgpu orders its dispatches. The mask and the combine buffer
-    /// are cleared first (0, lit): the pixel under the light's point, which
+    /// pass: wgpu orders its dispatches. The combine buffer is zero (lit)
+    /// when the pass starts: a new one is, and `write_mask` zeroes it again
+    /// after reading it, so no dispatch empties it each frame (as for
+    /// upstream's mask, 47e5ccd51); the pixel under the light's point, which
     /// no wavefront writes, and the sky stay lit. The wavefronts `atomicMax`
     /// into the combine buffer, which gives the same result in any order;
     /// `write_mask` then stores one value per pixel, and the filter softens
-    /// that mask into `result`, over the same depth.
+    /// that mask into `result`, over the same depth. An image past the
+    /// device's storage limit only clears its mask.
     pub(crate) fn encode(&self, encoder: &mut wgpu::CommandEncoder, t: &Targets, more: bool) {
         let (group, filter_group) = if more {
             (&t.group_more, &t.filter_group_more)
@@ -1017,9 +1028,11 @@ impl ContactShadows {
             label: Some("contact shadows"),
             timestamp_writes: None,
         });
-        pass.set_pipeline(&self.clear);
-        pass.set_bind_group(0, group, &[0]);
-        pass.dispatch_workgroups(groups.0, groups.1, groups.2);
+        if !t.fits {
+            pass.set_pipeline(&self.clear);
+            pass.set_bind_group(0, group, &[0]);
+            pass.dispatch_workgroups(groups.0, groups.1, groups.2);
+        }
         if t.fits && self.variant != Variant::Skip {
             pass.set_pipeline(match &self.photo {
                 Some((s, photo)) if *s == self.samples => photo,
@@ -1487,13 +1500,12 @@ mod tests {
         queue.submit([encoder.finish()]);
         // the sun ahead and high, its point on screen above the image
         let light = [0.2, 1.6, 0.0, 0.8];
-        let mask_at = |variant: Variant, scale: f32| -> Vec<u8> {
-            let mut cs = ContactShadows::with_variant(&device, variant);
-            let t = cs.targets(&device, &depth_view, format, w, h);
+        // one frame of `cs` over `t` for `light`: the pass's mask
+        let frame = |cs: &mut ContactShadows, t: &Targets, light: [f32; 4], scale: f32| -> Vec<u8> {
             let proj = glam::camera::rh::proj::directx::perspective_infinite_reverse(1.0, 1.6, 0.1);
-            cs.write(&device, &queue, &t, light, &proj, scale);
+            cs.write(&device, &queue, t, light, &proj, scale);
             let mut encoder = device.create_command_encoder(&Default::default());
-            cs.encode(&mut encoder, &t, false);
+            cs.encode(&mut encoder, t, false);
             let row = (w * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
             let buffer = device.create_buffer(&wgpu::BufferDescriptor {
                 label: None,
@@ -1525,8 +1537,24 @@ mod tests {
                 .flat_map(|r| r[..(w * 4) as usize].chunks(4).map(|p| p[0]))
                 .collect()
         };
+        let mask_at = |variant: Variant, scale: f32| -> Vec<u8> {
+            let mut cs = ContactShadows::with_variant(&device, variant);
+            let t = cs.targets(&device, &depth_view, format, w, h);
+            frame(&mut cs, &t, light, scale)
+        };
         let mask = |variant: Variant| mask_at(variant, 1.0);
         let bend = mask(Variant::Bend);
+        // the combine buffer is not emptied by a dispatch each frame
+        // (`write_mask` zeroes it): a frame after another one, lit from
+        // elsewhere, is the same as on a fresh target
+        {
+            let mut cs = ContactShadows::with_variant(&device, Variant::Bend);
+            let t = cs.targets(&device, &depth_view, format, w, h);
+            let elsewhere = frame(&mut cs, &t, [-0.5, 1.5, 0.0, 0.8], 1.0);
+            assert_ne!(elsewhere, bend, "another light, another shadow");
+            let next = frame(&mut cs, &t, light, 1.0);
+            assert!(next == bend, "a frame after another differs from a fresh one");
+        }
         let shadowed = bend.iter().filter(|&&v| v > 128).count();
         assert!(shadowed > 50 && shadowed < bend.len() / 2, "a shadow to compare: {shadowed} pixels");
         // the pixels two wavefronts write, included in the comparison: the

@@ -62,7 +62,8 @@ struct Params {
 @group(0) @binding(2) var out_tex: texture_storage_2d<rgba8unorm, write>;
 // One quantized shadow per pixel, 0 lit, 255 in contact shadow. Wavefronts
 // meet on a texel where their rays floor together; `atomicMax` keeps the
-// darker one. `clear` zeros it, `write_mask` stores it into `out_tex`.
+// darker one. `write_mask` stores it into `out_tex` and zeroes it again for
+// the next frame (a new buffer is zeroed by the device).
 @group(0) @binding(3) var<storage, read_write> shadow_max: array<atomic<u32>>;
 
 // The mask value of `result` (1 lit, 0 in shadow), as the unorm8 the store
@@ -298,11 +299,17 @@ fn write_mask(@builtin(global_invocation_id) id: vec3<u32>) {
     }
     let pixel = id.y * size.x + id.x;
     let v = f32(atomicLoad(&shadow_max[pixel])) / 255.0;
+    // ready for the next frame: no dispatch empties the buffer first (0.02 ms
+    // at 1920 x 1080 on an RTX 4090 in upstream's measure of the same trick
+    // for its mask)
+    atomicStore(&shadow_max[pixel], 0u);
     textureStore(out_tex, vec2<i32>(id.xy), vec4<f32>(v, 0.0, 0.0, 0.0));
 }
 
-// Every pixel lit, before the wavefronts (wgpu's clear_texture needs a
-// device feature).
+// Every pixel lit, for an image past the device's storage limit only (no
+// wavefront and no `write_mask` then; wgpu's clear_texture needs a device
+// feature). Otherwise `write_mask` writes every pixel and leaves the buffer
+// zeroed.
 @compute @workgroup_size(8, 8, 1)
 fn clear(@builtin(global_invocation_id) id: vec3<u32>) {
     let size = textureDimensions(out_tex);
