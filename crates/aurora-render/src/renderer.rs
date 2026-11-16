@@ -7417,12 +7417,7 @@ impl Backend {
 
     /// Compile the pipelines for `samples`, `ssr` and the soft shadows'
     /// path `soft` on a worker thread.
-    fn start_pipeline_build(
-        &self,
-        samples: u32,
-        ssr: bool,
-        soft: bool,
-    ) -> (PipelineBuild, Option<std::thread::JoinHandle<()>>) {
+    fn start_pipeline_build(&self, samples: u32, ssr: bool, soft: bool) -> (PipelineBuild, Option<std::thread::JoinHandle<()>>) {
         let (tx, done) = std::sync::mpsc::sync_channel(1);
         let device = self.device.clone();
         let layouts = [
