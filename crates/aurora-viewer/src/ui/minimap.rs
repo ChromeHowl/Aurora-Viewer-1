@@ -1718,7 +1718,7 @@ mod dot_tests {
         let mut world = World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
         world.agent_id = Uuid::from_u128(1);
         let (marked, stranger) = (Uuid::from_u128(7), Uuid::from_u128(8));
-        world.avatar_marks.set(&[marked], [186, 0, 31]);
+        world.avatar_marks.set(&[marked], Some([186, 0, 31]));
         world.rlva_configure(true);
         let dot = |world: &World, id: &Uuid| crate::ui::colors::map_color(world, id, "Somebody Else");
         let red = dot(&world, &marked);

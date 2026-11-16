@@ -2207,6 +2207,7 @@ mod tests {
             object_view: false,
             keys: &keys,
             free: None,
+            camera_tools: (false, false, false),
         };
         let free = view(false, false, false);
         for action in [ControlAction::Walk, ControlAction::Run, ControlAction::Fly] {

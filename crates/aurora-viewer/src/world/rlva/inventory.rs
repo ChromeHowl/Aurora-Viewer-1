@@ -48,6 +48,7 @@ impl FolderLocks {
     pub(super) fn roots(&self, world: &World) -> Vec<Uuid> {
         self.0
             .get_or_init(|| world.rlva_locked_folders())
+            .rules
             .values()
             .flatten()
             .copied()

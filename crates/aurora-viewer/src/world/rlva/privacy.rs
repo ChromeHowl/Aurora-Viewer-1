@@ -279,7 +279,7 @@ impl World {
     /// drops it from the dot (`canShowName(…) ? color : map_avatar_color`);
     /// stricter than the Legacy Viewer on the name tag, which keeps the
     /// mark's colour there (LLVOAvatar::getNameTagColor).
-    pub fn rlva_shown_mark(&self, id: &Uuid) -> Option<super::super::avatar_marks::Rgb> {
+    pub fn rlva_shown_mark(&self, id: &Uuid) -> Option<[u8; 3]> {
         self.avatar_marks.get(id).filter(|_| self.rlva_can_name(*id))
     }
 

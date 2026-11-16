@@ -1370,6 +1370,7 @@ mod tests {
             age: Age::Days(9),
             loaded: true,
             left_behind: false,
+            anonymous: false,
         };
         let mut settings = RadarSettings {
             columns: 0,

@@ -1013,7 +1013,7 @@ mod tests {
         let settings = crate::settings::Settings::default();
         let content = |world: &World| {
             let avatar = world.objects.get(idx).expect("the demo avatar");
-            plate_content(world, idx, avatar, false, None, false, &settings, false, 5.0)
+            plate_content(world, idx, avatar, false, None, false, &settings, false, Vec3::ZERO)
         };
         let shown = content(&world);
         assert!(shown.friend && shown.title.is_some());
@@ -1043,7 +1043,7 @@ mod tests {
             .find(|(_, o)| o.full_id == world.agent_id)
             .expect("our demo avatar");
         assert_eq!(
-            plate_content(&world, idx, avatar, false, None, false, &settings, false, 0.0).role,
+            plate_content(&world, idx, avatar, false, None, false, &settings, false, Vec3::ZERO).role,
             Role::Own
         );
     }
