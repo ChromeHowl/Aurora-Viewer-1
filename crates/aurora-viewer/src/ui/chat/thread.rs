@@ -631,7 +631,7 @@ fn notice(ui: &mut egui::Ui, env: &mut LineEnv, th: &Thread, line: &ChatLine, ma
                 env.emoji,
                 env.world,
                 env.want_names,
-                &line.text,
+                &super::system_text(&line.text),
                 chat_size(ui.ctx(), 12.0),
                 tone,
                 false,

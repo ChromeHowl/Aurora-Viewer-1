@@ -258,7 +258,13 @@ pub(super) fn draw(ui: &mut egui::Ui, env: &mut LineEnv, line: &ChatLine, mark: 
             crate::ui::widgets::paint_on_baseline(ui.painter(), galley, r.left(), baseline, p.muted_dim);
             ui.add_space(GAP);
         }
-        let (text, italics) = if notice { (&line.text[..], false) } else { body(line) };
+        let system;
+        let (text, italics) = if notice {
+            system = super::system_text(&line.text);
+            (&system[..], false)
+        } else {
+            body(line)
+        };
         let color = crate::ui::colors::keyword_color(line)
             .or(tone)
             .unwrap_or_else(|| text_color(line, p));
