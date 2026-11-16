@@ -16429,3 +16429,6 @@ ui-options-first-click-all-faces-help = Also the faces whose media does not ask 
 ui-options-sound-doppler = Doppler effect
 ui-options-sound-doppler-help = A moving sound plays higher as it comes closer and lower as it goes away, like a passing car. 1: as in the Legacy Viewer. 0: off. 2: twice as strong.
 
+beacons-light-boxes = Bounding boxes for lights in scene
+beacons-region-corners = Region corners
+
