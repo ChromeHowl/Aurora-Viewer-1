@@ -120,6 +120,9 @@ pub(super) struct Service {
     pub job: Option<Job>,
     pub ready: bool,
     pub overwrite: Option<Save>,
+    /// Loads that arrived without a job (an inventory animation), applied
+    /// by the next `tick` like the files'.
+    pub(super) injected: Vec<(Uuid, Loaded)>,
     tx: crossbeam_channel::Sender<Output>,
     rx: crossbeam_channel::Receiver<Output>,
 }
@@ -137,6 +140,7 @@ impl Default for Service {
             job: None,
             ready: false,
             overwrite: None,
+            injected: Vec::new(),
             tx,
             rx,
         }
@@ -185,6 +189,9 @@ fn list(root: &Path, rig: &Rig) -> Result<Vec<Entry>, String> {
     Ok(out)
 }
 impl Service {
+    pub(super) fn inject(&mut self, subject: Uuid, loaded: Loaded) {
+        self.injected.push((subject, loaded));
+    }
     pub fn tick(
         &mut self,
         jobs: &Jobs,
@@ -193,7 +200,7 @@ impl Service {
         rig: Arc<Rig>,
         skeleton: Option<&aurora_assets::Skeleton>,
     ) -> Vec<(Uuid, Loaded)> {
-        let mut loaded = Vec::new();
+        let mut loaded = std::mem::take(&mut self.injected);
         while let Ok(output) = self.rx.try_recv() {
             self.busy = false;
             match output {

@@ -470,6 +470,7 @@ impl Editor {
                 actions::request_tree(inv, root);
             }
             self.animations.tick(streamer, inv);
+            self.tick_inventory_load(streamer, inv);
         }
     }
 }

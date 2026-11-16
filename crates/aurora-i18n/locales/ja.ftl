@@ -16639,6 +16639,26 @@ status-share-hide-busy-hint = 取り込み中モードの間は何も共有し�
 status-share-show-others = 他の人のステータスを表示
 status-share-show-others-hint = ステータスを共有しているユーザーのネームプレートの横にチップを表示します。
 
+# Poser: Load › Inventory animation
+poser-inv-menu = インベントリのアニメーション…
+poser-inv-title = インベントリからアニメーションを読み込む
+poser-inv-empty = 表示できるアニメーションがありません。インベントリでAnimationsフォルダーを開くと、ここに読み込まれます。
+poser-inv-hint = グレー表示のアニメーションは、動きをポーザーに読み込む権限がありません（コピー・編集・譲渡のすべてが必要です）。
+poser-inv-right-copy = コピー
+poser-inv-right-modify = 編集
+poser-inv-right-transfer = 譲渡
+poser-inv-refused = ポーザーに読み込めません：このアニメーションの次の権限がありません：{$rights}
+poser-inv-unavailable = このアニメーションは利用できません。
+poser-inv-loading = インベントリから { $name } を読み込み中…
+poser-inv-loaded = インベントリから { $name } を読み込みました。
+poser-inv-failed = アニメーション { $name } を取得できませんでした。しばらくしてからもう一度お試しください。
+poser-inv-note-frame = 最初のフレームだけを読み込みました。ポーザーが持つのは1つのポーズで、タイムラインではありません。
+poser-inv-note-joints = { $count ->
+    [one] このアニメーションの{ $count }個のジョイントはこのスケルトンにないため、スキップしました。
+   *[other] このアニメーションの{ $count }個のジョイントはこのスケルトンにないため、スキップしました。
+    }
+poser-inv-note-extras = ループ、イーズ、優先度、拘束の設定はポーズには引き継がれません。
+
 # Camera mode indicator (camera/mode_status.rs, ui/camera_status.rs)
 camera-mode-normal = 通常のカメラビュー
 camera-mode-object-view = オブジェクトビュー
