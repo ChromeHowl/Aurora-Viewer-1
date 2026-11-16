@@ -942,6 +942,10 @@ pub struct App {
     /// Inventory generation whose Favorites / Landmarks folders were asked for.
     landmark_folders_checked: u64,
     hover_height_ui: ui::hover_height::HoverHeightUi,
+    /// Mark ▸ Custom color… of the radar and mini-map menus, and the last
+    /// colour it gave this session.
+    avatar_mark_ui: Option<ui::avatar_marks::CustomMark>,
+    avatar_mark_last: Option<[u8; 3]>,
     /// Debug Settings (Advanced.ShowDebugSettings).
     debug_settings_ui: ui::debug_settings::DebugSettingsUi,
     debug_settings_demo_done: bool,
@@ -2184,6 +2188,8 @@ impl App {
             experience_profile_ui: Default::default(),
             landmark_folders_checked: u64::MAX,
             hover_height_ui: Default::default(),
+            avatar_mark_ui: None,
+            avatar_mark_last: None,
             debug_settings_ui: Default::default(),
             debug_settings_demo_done: false,
             quick_prefs_ui: Default::default(),
@@ -3667,6 +3673,9 @@ impl App {
         // a parcel's saved preset goes with the session
         self.panels.time_of_day = self.settings.time_of_day;
         self.hover_height_ui = Default::default();
+        // the marks go with the session's World; their window too
+        self.avatar_mark_ui = None;
+        self.avatar_mark_last = None;
         self.follow_ui = Default::default();
         self.portal_ui = Default::default();
         self.object_export = Default::default();
@@ -20873,6 +20882,10 @@ impl App {
                 self.report_abuse_ui(&ctx, &p);
                 self.particle_editor_window(&ctx, &p);
                 self.object_export_window(&ctx, &p);
+                ui::avatar_marks::show(&ctx, &p, &mut self.world, &mut self.avatar_mark_ui);
+                if let Some(mark) = &self.avatar_mark_ui {
+                    self.avatar_mark_last = Some(mark.rgb());
+                }
                 let hover_enabled = self.world.hover_height_available();
                 let automatic_base = self.scene.automatic_hover_base(&self.world);
                 if self.hover_height_ui.show(

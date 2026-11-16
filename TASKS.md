@@ -1,4 +1,5 @@
 # Aurora Viewer — task tracking
+- 🟡 Radar marks: "Markers ▸" gains "Custom color…" (a small colour-picker window) and a marked resident's picture is ringed in the People lists, Aurora and Legacy looks (upstream #3814 hand-ported onto the fork's `world::radar::Marks`, `ui/avatar_marks.rs`; the Shadow Realm red and contact-set colours are untouched). Grid check: marks in a crowd.
 - 🟡 Upstream sync batch 0: picked #3665, #3669, #3670, #3688, #3671, #3686, #3742, #3764, #3760, #3812 (pure picks; docs hunks merged by hand; de, pt-BR and zh catalogues given the English text for new keys; task `up/b0`; tests run on the Desk PC runner)
 - 🟡 Upstream sync batch 1: picked #3698, #3761, #3759, #3691, #3743, #3748, #3729, #3708, #3782; skipped #3777 (the fork already isolates that French offer test by narrowing the card); #3698 merged with the fork's script template, #3708 keeps the fork's colon-emote line (task `up/b1`)
 - 🟡 Upstream sync batch 2: picked #3750 (Doppler) and the media first-click kinds of #3728; the unmute-after-teleport half of #3728 skipped (the fork has it in its teleport settings) (task `up/b2`)
