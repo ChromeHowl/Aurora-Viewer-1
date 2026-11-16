@@ -1622,10 +1622,6 @@ fn poser_library_saves_confirms_overwrite_and_correlates_loads_to_the_original_s
     let ctx = egui::Context::default();
     let mut service = storage::Service::default();
     let tick = |service: &mut storage::Service| service.tick(&jobs, &ctx, owner, rig.clone(), world.avatar_lib.skeleton.as_ref());
-    let mut posed = (*session.pose).clone();
-    let head = rig.names["mHead"];
-    posed.rotations[head] = (posed.rotations[head] * Quat::from_rotation_x(0.4)).normalize();
-    let posed = Arc::new(posed);
     service.filter = "does not match Portrait".into();
     service.job = Some(storage::Job::Save(storage::Save {
         document: document.clone(),

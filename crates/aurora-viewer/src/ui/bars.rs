@@ -1603,41 +1603,52 @@ fn main_menus(ui: &mut egui::Ui, p: &Palette, panels: &mut Panels, st: &StatusIn
         ) {
             *action = BarAction::LookAtLastChatter;
         }
-        // Aurora's camera tools: the lock, the view history, the path
-        let (locked, back, forward) = st.camera_tools;
-        let lock = crate::keybinds::chord_label("KeyL", false, true, true);
-        if menu::check_keys(ui, p, "lock-filled", aurora_i18n::tr!("camtools-lock"), locked, true, &lock) {
-            *action = BarAction::CameraLock;
-        }
-        if menu::item_if(ui, p, "arrow-back-up", aurora_i18n::tr!("camtools-view-previous"), back) {
-            *action = BarAction::ViewStep(true);
-        }
-        if menu::item_if(ui, p, "arrow-forward-up", aurora_i18n::tr!("camtools-view-next"), forward) {
-            *action = BarAction::ViewStep(false);
-        }
-        if menu::item_if(ui, p, "trash-filled", aurora_i18n::tr!("camtools-view-clear"), back || forward) {
-            *action = BarAction::ViewHistoryClear;
-        }
         let photo = crate::keybinds::chord_label("KeyS", true, false, true);
         if menu::item_keys(ui, p, "photo-filled", aurora_i18n::tr!("photo-title"), &photo) {
             super::widgets::toggle_floater(ui.ctx(), super::snapshot::WINDOW, &mut panels.snapshot);
         }
+        // World › Photo and Video › Cameratools (floater_phototools_camera):
+        // the camera settings, with their own icon (the Controls window
+        // keeps the video camera)
         flip_window(
             ui,
             p,
-            "route",
-            aurora_i18n::tr!("camtools-path-title"),
-            super::camera_path::WINDOW,
-            &mut panels.camera_path,
-        );
-        // World › Photo and Video › Cameratools (floater_phototools_camera)
-        flip_window(
-            ui,
-            p,
-            "video-filled",
+            super::options::cameratools::ICON,
             aurora_i18n::tr!("camx-cameratools-title"),
             super::options::cameratools::WINDOW,
             &mut panels.cameratools,
+        );
+        // Aurora's lock, view history and path, under one heading
+        menu::submenu(
+            ui,
+            p,
+            "lock-filled",
+            aurora_i18n::tr!("camera-menu-lock-history-path"),
+            true,
+            |ui| {
+                let (locked, back, forward) = st.camera_tools;
+                let lock = crate::keybinds::chord_label("KeyL", false, true, true);
+                if menu::check_keys(ui, p, "lock-filled", aurora_i18n::tr!("camtools-lock"), locked, true, &lock) {
+                    *action = BarAction::CameraLock;
+                }
+                if menu::item_if(ui, p, "arrow-back-up", aurora_i18n::tr!("camtools-view-previous"), back) {
+                    *action = BarAction::ViewStep(true);
+                }
+                if menu::item_if(ui, p, "arrow-forward-up", aurora_i18n::tr!("camtools-view-next"), forward) {
+                    *action = BarAction::ViewStep(false);
+                }
+                if menu::item_if(ui, p, "trash-filled", aurora_i18n::tr!("camtools-view-clear"), back || forward) {
+                    *action = BarAction::ViewHistoryClear;
+                }
+                flip_window(
+                    ui,
+                    p,
+                    "route",
+                    aurora_i18n::tr!("camtools-path-title"),
+                    super::camera_path::WINDOW,
+                    &mut panels.camera_path,
+                );
+            },
         );
     });
     menu::submenu(ui, p, "box", aurora_i18n::tr!("common-build"), true, |ui| {

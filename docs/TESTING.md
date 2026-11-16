@@ -1084,6 +1084,7 @@ when unfocused") is ignored during a screenshot.
 |---|---|
 | `AURORA_DEMO_CAM="yaw,pitch,dist"` | Places the camera around the avatar |
 | `AURORA_DEMO_CAMERA=<scenario>` | Camera scenario (see Details), including `head-follow`, `pelvis-follow` and `hand-follow` |
+| `AURORA_DEMO_CAMERA_MODE=cycle` | Camera mode indicator scenario (see Details) |
 | `AURORA_DEMO_DIRECTOR=1\|play\|lock\|green\|record\|record-alpha` | The Director open on a track of four keyframes around the avatar, that track playing, the view locked on the avatar's neck, the avatar alone on a green screen, or a second of the track recorded (see Details) |
 | `AURORA_DEMO_DIRECTOR_FILM=<file>` | The Director's recording writes its raw frames to that file, with no encoder (see Details) |
 | `AURORA_DEMO_CROSSHAIR=dot\|cross\|circle\|legacy\|off\|image:<file>` | The mouselook crosshair in that shape for the session (see Details) |
@@ -1426,6 +1427,7 @@ when unfocused") is ignored during a screenshot.
   trigger plain G (snap / guide). Releasing a key first pressed without
   AltGr must always release it, even if AltGr was held in the meantime.
 
+- **`AURORA_DEMO_CAMERA_MODE=cycle`** (with `AURORA_DEMO=1`): every 80 frames from 620: mouselook in (620) and out (700), the free camera on (780) and off (860), the Camera Lock on (880) and off (960), a one-waypoint path captured (1000), played (1040) and stopped (1160). Capture each step with `AURORA_CAPTURE_FRAMES` (for example 640, 720, 800, 900, 1060), also with `AURORA_TEXT_SIZE=2` and `AURORA_UI_SCALE=1.5`. Look for: a pill at the top centre naming the mode and how to leave it, gone after about 1.8 s; a chip in its place while the lock, the free camera or the path lasts (a click leaves the mode); the note after the Controls window's title; long text cut with "..." and the whole text on hover; nothing in the plain view and nothing on the first frame. Preferences › Camera › Show camera mode changes off: no pill and no chip.
 - **`AURORA_DEMO_CAMERA=alt,x,y|altgr,x,y|pan,x,y|zoom,x,y|crouch-alt,x,y|crouch-pan,x,y|crouch-zoom,x,y|close,x,y[,n]|drift,x,y[,n]|spin,x,y[,px]|zoom-resident|zoom-unloaded|tag|ml|ml-alt|ml-zoom|ml-zoom-alt|wheel|wheel-chat|fly|sit|sit-ml|sit-ml-reclined|scripted|scripted-sit|head-follow|pelvis-follow|hand-follow`**:
   scenario logged under `demo camera` — Alt+click at (x, y) then drag and
   return while walking; `altgr`: the same orbit with AltGr alone held, as
