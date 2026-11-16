@@ -1848,8 +1848,8 @@ fn place_row(
     let size = if wide { RowSize::PLACES_WIDE } else { RowSize::PLACES_NARROW };
     let mut starred = false;
     // the people of the place's region, by its name once known and by its
-    // position until then: read only for a row drawn (the wide list's
-    // figure) or under the pointer (the narrow list's tooltip)
+    // position until then: read only for a row drawn (`place_card::row`
+    // skips `trailing` for a clipped one)
     let world = c.world;
     let people = || {
         if place.region.is_empty() {
@@ -1887,13 +1887,17 @@ fn place_row(
             ui.add_space(12.0);
         }
         badge_slot(ui, p, place.rating);
-        if wide {
+        // the people column: the wide list keeps its slot, the narrow one
+        // shows the figure only when there is one (nothing under RLVa
+        // @showloc or with the setting off)
+        let figure = people();
+        if wide || figure.is_some() {
             ui.add_space(8.0);
             ui.allocate_ui_with_layout(
                 Vec2::new(PEOPLE_W, size.height),
                 egui::Layout::right_to_left(egui::Align::Center),
                 |ui| {
-                    if let Some(n) = people() {
+                    if let Some(n) = figure {
                         crate::ui::region_people::figure(ui, p, n);
                     }
                 },
@@ -1905,12 +1909,6 @@ fn place_row(
     } else {
         place_card::row(ui, p, size, &card, trailing).interact(egui::Sense::click_and_drag())
     };
-    if !wide
-        && resp.hovered()
-        && let Some(n) = people()
-    {
-        resp.clone().on_hover_text(n.label());
-    }
     RowOut { resp, star: starred }
 }
 
