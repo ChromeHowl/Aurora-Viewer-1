@@ -11215,35 +11215,34 @@ impl Backend {
                     self.targets.depth_ss_tex.size(),
                 );
             }
-            let under_depth =
-                |encoder: &mut wgpu::CommandEncoder,
-                 label: &'static str,
-                 view: &wgpu::TextureView,
-                 pipes: &SidedPipelines,
-                 particles: Option<&wgpu::RenderPipeline>| {
-                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                        label: Some(label),
-                        color_attachments: &[],
-                        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                            view,
-                            depth_ops: Some(wgpu::Operations {
-                                load: wgpu::LoadOp::Load,
-                                store: wgpu::StoreOp::Store,
-                            }),
-                            stencil_ops: None,
+            let under_depth = |encoder: &mut wgpu::CommandEncoder,
+                               label: &'static str,
+                               view: &wgpu::TextureView,
+                               pipes: &SidedPipelines,
+                               particles: Option<&wgpu::RenderPipeline>| {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some(label),
+                    color_attachments: &[],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
                         }),
-                        timestamp_writes: None,
-                        occlusion_query_set: None,
-                        multiview_mask: None,
-                    });
-                    bind_mesh(&mut pass, &self.groups.a);
-                    draw_under(&mut pass, pipes, rg.blend_under);
-                    if let Some(pipe) = particles.filter(|_| n_part_under > 0) {
-                        // (their order does not matter: the nearest depth stays)
-                        pass.set_vertex_buffer(PARTICLE_SLOT, self.particle_buffer.slice(..));
-                        draw_particles_under(&mut pass, pipe, n_particles..n_particles + n_part_under, &self.groups.a);
-                    }
-                };
+                        stencil_ops: None,
+                    }),
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                bind_mesh(&mut pass, &self.groups.a);
+                draw_under(&mut pass, pipes, rg.blend_under);
+                if let Some(pipe) = particles.filter(|_| n_part_under > 0) {
+                    // (their order does not matter: the nearest depth stays)
+                    pass.set_vertex_buffer(PARTICLE_SLOT, self.particle_buffer.slice(..));
+                    draw_particles_under(&mut pass, pipe, n_particles..n_particles + n_part_under, &self.groups.a);
+                }
+            };
             {
                 let mut pass = begin_scene_b(&mut encoder, &self.targets, "blend under water", false, true);
                 bind_mesh(&mut pass, &self.groups.a);
