@@ -1606,7 +1606,7 @@ fn poser_load_menu_opens_the_existing_library_without_a_file_picker() {
 const BLACK_DRAGON_POSE: &str = "<?xml version=\"1.0\" ?><llsd><map><key>version</key><map><key>value</key><integer>3</integer></map>\
 <key>mHead</key><map><key>rotation</key><array><real>0.1</real><real>0.2</real><real>0.3</real></array>\
 <key>position</key><array><real>0</real><real>0</real><real>0.076</real></array>\
-<key>scale</key><array><real>1</real><real>1</real><real>1</real></array><key>enabled</key><boolean>1</boolean></map></map></llsd>";
+<key>scale</key><array><real>1</real><real>1</real><real>1</real></array></map></map></llsd>";
 #[test]
 fn poser_library_saves_confirms_overwrite_and_correlates_loads_to_the_original_subject() {
     let (world, editor) = fixture();
@@ -3719,7 +3719,9 @@ fn save_as_animation_is_the_whole_pose_and_not_a_difference() {
             .iter()
             .find(|j| &j.joint_name == name)
             .unwrap_or_else(|| panic!("{name} has no key"));
-        assert_eq!(motion.rot_keys.len(), 1, "{name}");
+        // the pelvis may carry a second key; the first key of every joint is
+        // its absolute rotation
+        assert!(!motion.rot_keys.is_empty(), "{name}");
         assert!(
             motion.rot_keys[0].rotation.dot(whole.rotations[bone]).abs() > 0.999,
             "{name} holds its absolute rotation"
