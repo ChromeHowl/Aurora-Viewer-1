@@ -997,7 +997,10 @@ fn entry(ui: &mut egui::Ui, p: &Palette, e: &Entry, rail: bool, id: egui::Id) ->
         rect.center().y
     };
     let sub_y = rect.center().y + gap * 9.0 / LINE_GAP;
-    let cut = crate::ui::widgets::paint_elided(ui, e.name, egui::pos2(x, name_y), right - x, font, name_color);
+    // what is cut shows whole on hover: the name, and the line under it (the
+    // count in earshot and the last message)
+    let mut tips = crate::ui::widgets::CutTips::default();
+    crate::ui::widgets::paint_elided_tip(ui, &mut tips, e.name, egui::pos2(x, name_y), right - x, font, name_color);
     if let Some(sub) = e.sub.as_ref().filter(|s| !s.is_empty()) {
         let mut sx = x;
         if let Some((icon, color)) = e.sub_icon {
@@ -1005,8 +1008,9 @@ fn entry(ui: &mut egui::Ui, p: &Palette, e: &Entry, rail: bool, id: egui::Id) ->
             super::thread::paint_icon(ui.painter(), icon, r, color);
             sx += 14.0;
         }
-        crate::ui::widgets::paint_elided(
+        crate::ui::widgets::paint_elided_tip(
             ui,
+            &mut tips,
             sub,
             egui::pos2(sx, sub_y),
             right - sx,
@@ -1014,7 +1018,7 @@ fn entry(ui: &mut egui::Ui, p: &Palette, e: &Entry, rail: bool, id: egui::Id) ->
             p.muted_dim,
         );
     }
-    let resp = if cut { resp.on_hover_text(tip_name()) } else { resp };
+    let resp = tips.show(resp);
     Picked { resp, close }
 }
 

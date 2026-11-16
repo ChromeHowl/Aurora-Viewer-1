@@ -2465,10 +2465,10 @@ fn find_opens_in_every_style() {
 /// friend's eight at 308.
 #[test]
 fn the_request_button_needs_room_beside_the_picture() {
-    assert!(super::head::request_fits(340.0, 9));
-    assert!(!super::head::request_fits(339.0, 9));
-    assert!(super::head::request_fits(308.0, 8));
-    assert!(!super::head::request_fits(307.0, 8));
+    assert!(super::head::fits(340.0, 9, 0.0));
+    assert!(!super::head::fits(339.0, 9, 0.0));
+    assert!(super::head::fits(308.0, 8, 0.0));
+    assert!(!super::head::fits(307.0, 8, 0.0));
 }
 
 /// A narrow workspace drops the head's button, and its "…" row still asks.

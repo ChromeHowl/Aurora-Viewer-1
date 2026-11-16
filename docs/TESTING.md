@@ -13378,6 +13378,28 @@ What the inventory must show with these scenarios:
   it, a sidebar label and its count, a footer's hint and its buttons),
   initials and the AO glyph inside their tile like the icons beside them,
   windows that keep their size.
+- **Text that does not fit (the Conversations head and entries)**: capture
+  `AURORA_DEMO=1 AURORA_DEMO_CONV=aurora:im:300` (a resident's IM with the
+  window at its 300-point minimum: the head shows the call, the close and
+  the "…" menu; the offer, profile, find, request, poke and friendship rows
+  are in the menu), `aurora:group:300` (group head) and `aurora:local:300`
+  with `AURORA_DEMO_CONV_POPOUT=nearby` (the Nearby chat detached at 394
+  points: drag its edge to its least, 250 points times the text size), also at the default width (960) and `aurora:im:700`. The
+  matrix, each with `AURORA_CAPTURE_FRAMES=760`:
+
+  | `AURORA_TEXT_SIZE` | `AURORA_UI_SCALE` | `AURORA_WINDOW_SIZE` |
+  |---|---|---|
+  | 1, 1.5, 2 | 1 | `1536,864` |
+  | 1, 1.5, 2 | 1.5 | `2304,1296` |
+
+  What to look for: the title keeps at least five characters; no button
+  over the picture or past the window's edge; "…" › lists what the head
+  dropped (call, find, profile, poke…) and each row works; the nearby
+  subtitle starts with the count ("29 people in earshot · parcel"); hover
+  the cut subtitle or entry line: the whole text appears; the window cannot
+  be dragged smaller than its text-size minimum (300 × text size wide).
+  Unit tests: `head::tests` (layout at widths 240–900 and text sizes 1, 1.5
+  and 2).
 - **`AURORA_CHAT_TEXT_SIZE=<size>`**: the chat's text size (0.8 to 2,
   Preferences › Chat › Chat text size) of this launch, never saved, on its
   own or with `AURORA_TEXT_SIZE` to show that each size leaves the other
