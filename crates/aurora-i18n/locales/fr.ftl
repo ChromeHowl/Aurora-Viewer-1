@@ -16749,6 +16749,26 @@ status-share-hide-busy-hint = Ne rien partager en mode ne pas déranger. Rien n'
 status-share-show-others = Afficher le statut des autres
 status-share-show-others-hint = Dessine la pastille à côté des plaques de nom des résidents qui en partagent un.
 
+# Poser: Load › Inventory animation
+poser-inv-menu = Animation de l'inventaire…
+poser-inv-title = Charger une animation de votre inventaire
+poser-inv-empty = Aucune animation à afficher. Ouvrez votre dossier Animations dans l'inventaire pour la charger ici.
+poser-inv-hint = Les animations grisées n'ont pas les droits pour lire leur mouvement dans le poser (copie, modification et transfert sont tous nécessaires).
+poser-inv-right-copy = copie
+poser-inv-right-modify = modification
+poser-inv-right-transfer = transfert
+poser-inv-refused = Impossible de charger dans le poser : il vous manque les droits suivants sur cette animation : {$rights}.
+poser-inv-unavailable = Cette animation n'est pas disponible.
+poser-inv-loading = Chargement de { $name } depuis votre inventaire…
+poser-inv-loaded = { $name } chargée depuis votre inventaire.
+poser-inv-failed = Impossible d'obtenir l'animation { $name }. Réessayez dans un instant.
+poser-inv-note-frame = Seule sa première image a été lue : le poser tient une pose, pas une chronologie.
+poser-inv-note-joints = { $count ->
+    [one] { $count } articulation de cette animation n'est pas sur ce squelette et a été ignorée.
+   *[other] { $count } articulations de cette animation ne sont pas sur ce squelette et ont été ignorées.
+    }
+poser-inv-note-extras = Les réglages de boucle, d'atténuation, de priorité et de contraintes ne passent pas dans une pose.
+
 # Camera mode indicator (camera/mode_status.rs, ui/camera_status.rs)
 camera-mode-normal = Vue normale de la caméra
 camera-mode-object-view = Vue d'objet

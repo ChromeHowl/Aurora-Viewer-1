@@ -15,6 +15,7 @@ mod compact;
 mod controls;
 mod data;
 mod document;
+mod inventory_load;
 mod kinematics;
 mod overlay;
 mod playback;
@@ -234,6 +235,8 @@ pub(super) struct State {
     override_edits: bool,
     /// How the compact window's Load list loads a pose.
     load_mode: document::LoadMode,
+    /// Load › Inventory animation (`inventory_load.rs`).
+    inventory_load: inventory_load::InventoryLoad,
     /// A demo scenario's window mode, for the session only: the saved
     /// `compact` is never written by a scenario. The title bar's button
     /// drops it.
@@ -650,50 +653,55 @@ impl Editor {
             world.avatar_lib.skeleton.as_ref(),
         );
         for (subject, loaded) in loaded {
-            let model = Frame::subject(world, subject).map_or(Mat4::IDENTITY, |f| f.model);
-            let Some(session) = self.poser.sessions.get_mut(&subject) else {
-                continue;
-            };
-            match loaded {
-                storage::Loaded::Pose(document, mode) => {
-                    if document.apply(&world.avatar_lib.rig, session, mode, model) {
-                        self.poser.names.set(subject, &mut self.poser.name, document.name.clone());
-                        self.poser.priority = document.priority;
-                    }
-                }
-                storage::Loaded::Animation(animation, mode, name) => {
-                    if !name.is_empty() {
-                        self.poser.names.set(subject, &mut self.poser.name, name);
-                    }
-                    let start = ik::LocalPose {
-                        rotations: session.pose.rotations.clone(),
-                        positions: session.pose.positions.clone(),
-                    };
-                    let pose = total::load(&world.avatar_lib.rig, animation, start);
-                    let selective = matches!(mode, document::LoadMode::Selective | document::LoadMode::SelectiveRotations);
-                    let rotations = matches!(mode, document::LoadMode::Rotations | document::LoadMode::SelectiveRotations);
-                    let edited: Vec<_> = (0..world.avatar_lib.rig.len()).map(|b| session.edited(b)).collect();
-                    session.checkpoint();
-                    let current = Arc::make_mut(&mut session.pose);
-                    for (bone, edited) in edited.iter().enumerate() {
-                        if selective && *edited {
-                            continue;
-                        }
-                        // a joint the file drives is the file's, not the capture's
-                        if current.rotations[bone].dot(pose.rotations[bone]).abs() < 0.9999999 {
-                            current.origin[bone] = world.avatar_lib.rig.local_rot[bone];
-                        }
-                        current.rotations[bone] = pose.rotations[bone];
-                        if !rotations {
-                            current.positions[bone] = pose.positions[bone];
-                        }
-                        current.locks.remove(&bone);
-                    }
-                    current.keep_offsets(&world.avatar_lib.rig, &session.base);
+            self.apply_loaded(world, subject, loaded);
+        }
+    }
+    /// A load that arrived (a file, or an inventory animation) put on the
+    /// subject's pose: one undo step, the name field, the load mode.
+    fn apply_loaded(&mut self, world: &World, subject: Uuid, loaded: storage::Loaded) {
+        let model = Frame::subject(world, subject).map_or(Mat4::IDENTITY, |f| f.model);
+        let Some(session) = self.poser.sessions.get_mut(&subject) else {
+            return;
+        };
+        match loaded {
+            storage::Loaded::Pose(document, mode) => {
+                if document.apply(&world.avatar_lib.rig, session, mode, model) {
+                    self.poser.names.set(subject, &mut self.poser.name, document.name.clone());
+                    self.poser.priority = document.priority;
                 }
             }
-            self.refresh = true;
+            storage::Loaded::Animation(animation, mode, name) => {
+                if !name.is_empty() {
+                    self.poser.names.set(subject, &mut self.poser.name, name);
+                }
+                let start = ik::LocalPose {
+                    rotations: session.pose.rotations.clone(),
+                    positions: session.pose.positions.clone(),
+                };
+                let pose = total::load(&world.avatar_lib.rig, animation, start);
+                let selective = matches!(mode, document::LoadMode::Selective | document::LoadMode::SelectiveRotations);
+                let rotations = matches!(mode, document::LoadMode::Rotations | document::LoadMode::SelectiveRotations);
+                let edited: Vec<_> = (0..world.avatar_lib.rig.len()).map(|b| session.edited(b)).collect();
+                session.checkpoint();
+                let current = Arc::make_mut(&mut session.pose);
+                for (bone, edited) in edited.iter().enumerate() {
+                    if selective && *edited {
+                        continue;
+                    }
+                    // a joint the file drives is the file's, not the capture's
+                    if current.rotations[bone].dot(pose.rotations[bone]).abs() < 0.9999999 {
+                        current.origin[bone] = world.avatar_lib.rig.local_rot[bone];
+                    }
+                    current.rotations[bone] = pose.rotations[bone];
+                    if !rotations {
+                        current.positions[bone] = pose.positions[bone];
+                    }
+                    current.locks.remove(&bone);
+                }
+                current.keep_offsets(&world.avatar_lib.rig, &session.base);
+            }
         }
+        self.refresh = true;
     }
     fn poser_transform(&mut self, rig: &Rig, frame: &Frame, position: Vec3, rotation: Quat, rotated: bool) {
         let Some(bone) = self.selected else { return };
@@ -793,7 +801,16 @@ impl Editor {
                 self.poser.library_open = true;
             } else if mode == "poser-settings" {
                 self.poser.settings_open = true;
+            } else if mode.ends_with("inventory-load") {
+                self.poser.inventory_load.open = true;
             }
+        }
+        // inventory-load-done: the full-permission animation chosen
+        if frame == 470
+            && mode == "poser-inventory-load-done"
+            && let Err(refusal) = self.start_inventory_load(&world.inventory, Uuid::from_u128(crate::demo::poser::INV_ANIM_FIRST))
+        {
+            log::warn!("demo inventory load refused: {refusal:?}");
         }
         if frame == 480
             && mode == "poser-connected"

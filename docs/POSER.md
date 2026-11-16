@@ -247,6 +247,21 @@ chevron) holds Save as… and the priority. Load's menu holds the four modes, ap
 selected library entry while the library is shown or to a file chosen
 otherwise, and "Open a file".
 
+**Inventory animation.** Load › "Inventory animation…" (both windows) opens a
+picker of the animation items of your inventory (a link counts as its
+original), with a search and the load mode. The motion is read into the poser
+like a `.anim` file: its first frame is the pose, the item's name fills the
+name field, one undo step, the same four load modes. The asset comes through
+the animation streamer (disk cache, then the simulator). Only an animation
+you hold with copy, modify and transfer all granted can be read
+(`actions::content_missing`, the rule that lets an asset UUID be shown;
+stricter than the Legacy Viewer, which has no animation editor to copy and
+plays any animation): the others stay in the list, greyed out, and their tip
+names the rights you lack. No asset id is ever shown. A pose holds no
+timeline, loop, easing, priorities or constraints: the message under the
+window says when only the first frame was read and how many joints the
+skeleton does not have. Demo: `AURORA_DEMO_POSER=inventory-load`.
+
 Load accepts Aurora pose documents, native `.anim` files, `.bvh` files and
 Black Dragon pose files (`.xml`), up to 4 MiB. Animation imports sample their first frame. The four load modes
 are All, Rotations only, Unedited joints and Selective rotations. Selective

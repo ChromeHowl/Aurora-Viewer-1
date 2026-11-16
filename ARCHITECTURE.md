@@ -1505,6 +1505,9 @@ import preview. `poser/storage.rs` returns the successful save path to the UI;
 the refreshed library selects that entry and reports its full path, and native
 file pickers start in the account-local poses directory (#3169). Poser does not
 start IK-project autosaves or object imports.
+`poser/inventory_load.rs` is Load › Inventory animation: the picker, the rights
+rule (`actions::content_missing`), the asset through `AnimStreamer`, and the
+notes on what a pose cannot hold; it loads through `Editor::apply_loaded`, as a file does.
 The poser's part under Ctrl is drawn and picked from the subject's meshes:
 `poser/world_hints.rs` turns the part into a 256-bit palette joint mask
 (collision volumes, attachment points and the inner spine follow their bone;
