@@ -422,14 +422,15 @@ pub fn page(cx: &mut Cx, tab: usize) {
                         (false, tr!("ui-options-aurora-clouds-flat"), false),
                     ],
                 );
-                // also in Graphics › Image › Transparency (aurora-render
-                // oit_stochastic.rs): an opt-in, off by default and left as
-                // the user set it by the two buttons above
-                cx.wide().experimental().choice(
-                    tr!("ui-options-oit"),
-                    tr!("ui-options-aurora-oit-help"),
-                    &field!(oit),
-                    &[(true, aurora, true), (false, tr!("ui-options-aurora-oit-legacy"), false)],
+                // also in Graphics › Image › Transparency: the stochastic
+                // choice (aurora-render oit_stochastic.rs) is left as the
+                // user set it by the two buttons above
+                let p = cx.p;
+                cx.wide().row(
+                    tr!("ui-options-blend-order"),
+                    tr!("ui-options-blend-order-help"),
+                    &field!(blend_order),
+                    |ui, s| super::super::blend_order_choice(ui, &p, &mut s.blend_order),
                 );
             });
             cx.group(tr!("common-interface"), |cx| {
@@ -602,17 +603,18 @@ mod tests {
     }
 
     #[test]
-    fn the_two_buttons_leave_order_independent_transparency_as_set() {
+    fn the_two_buttons_leave_the_order_of_transparent_surfaces_as_set() {
         let mut s = Settings::default();
-        assert!(!s.oit, "an opt-in: off by default");
-        s.oit = true;
+        let stochastic = crate::graphics_presets::BLEND_ORDER_STOCHASTIC;
+        assert_ne!(s.blend_order, stochastic, "the stochastic order is an opt-in");
+        s.blend_order = stochastic;
         set_all(&mut s, Look::Legacy);
-        assert!(s.oit, "turned on, it stays on with every Legacy look");
+        assert_eq!(s.blend_order, stochastic, "chosen, it stays with every Legacy look");
         set_all(&mut s, Look::Aurora);
-        assert!(s.oit);
-        s.oit = false;
+        assert_eq!(s.blend_order, stochastic);
+        s.blend_order = 2;
         set_all(&mut s, Look::Aurora);
-        assert!(!s.oit, "nor does the Aurora look turn it on");
+        assert_eq!(s.blend_order, 2, "nor does the Aurora look choose it");
     }
 
     #[test]
@@ -736,7 +738,11 @@ mod tests {
         assert!(s.water_effects.enabled, "the explicit Aurora bulk choice enables water effects");
         assert!(!fresh.water_effects.enabled, "enhanced water is disabled by default");
         assert!(!fresh.synchronize_animations, "Legacy animation timing is the default");
-        assert!(!fresh.oit, "transparency sorted, as the Legacy Viewer, by default");
+        assert_ne!(
+            fresh.blend_order,
+            crate::graphics_presets::BLEND_ORDER_STOCHASTIC,
+            "the stochastic transparency is an opt-in"
+        );
         assert!(s.plates_friends_only_full);
     }
 
