@@ -133,6 +133,7 @@ struct Frame {
     tex_lod: vec4<f32>,         // x: the material textures' mip bias (FSR drawing the world smaller than the window, fsr.rs mip_bias); 0 otherwise
     soft: vec4<f32>,            // x: 1 = the soft shadows' mask is read (main view), y: share of the light the sun's shadows let through (1 - intensity), z: projectors' light size in metres (0: the 5-tap filter), main view only
     snow_stamp_z: array<vec4<f32>, 4>, // the soles' heights of snow_stamps (m), four to a vec4
+    snow_far: vec4<f32>,        // x how far the snow lying is drawn (m), whatever falls (while it snows and while it melts); yzw unused
 };
 
 // frame.features.x: "HDR and Emissive" off, the Legacy Viewer's G-buffer has
