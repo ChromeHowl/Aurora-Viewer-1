@@ -256,7 +256,9 @@ impl World {
             // original answers like a delete. A copy placed with the Create
             // tool is LLToolPlacer::placeObject, which @interact refuses too.
             BuildCmd::Duplicate { handle, local_ids, .. } | BuildCmd::DuplicateOnRay { handle, local_ids, .. } => {
+                // (the fork also refuses an in-place copy under @interact)
                 !self.rlva.has("rez")
+                    && !self.rlva.has("interact")
                     && (matches!(command, BuildCmd::Duplicate { .. }) || self.rlva_can_rez(None))
                     && local_ids
                         .iter()

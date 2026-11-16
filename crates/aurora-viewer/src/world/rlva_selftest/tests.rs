@@ -596,8 +596,8 @@ fn selftest_phase_1_passes_on_the_demo_world() {
     assert_all_pass(&report);
     assert!(report.count(|v| matches!(v, Verdict::Pass)) >= 40, "{}", report.text());
     assert!(report.notes.is_empty(), "{}", report.text());
-    // the link case is the known gap of this branch
-    assert_eq!(verdict_of(&report, "C4"), &Verdict::Known("#2677, PR #2691"), "{}", report.text());
+    // the link case passes here: the fork carries the link fix (PR #2691)
+    assert_eq!(verdict_of(&report, "C4"), &Verdict::Pass, "{}", report.text());
     assert!(matches!(verdict_of(&report, "B05"), Verdict::Skipped(_)));
     assert!(!report.lines.iter().any(|l| l.id.starts_with('W')), "phase 2 was not chosen");
     // cleaned up: nothing of the test is worn, no rule is left

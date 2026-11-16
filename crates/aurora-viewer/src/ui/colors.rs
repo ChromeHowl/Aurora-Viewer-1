@@ -293,6 +293,11 @@ pub fn map_color(world: &World, id: &Uuid, name: &str) -> Color32 {
     if let Some(red) = shadow_red(world, id) {
         return red;
     }
+    // the mark over the contact set's colour (LLNetMap::getAvatarColor);
+    // none for a resident whose name RLVa hides
+    if let Some([r, g, b]) = world.rlva_shown_mark(id) {
+        return c([r, g, b, 255]);
+    }
     if let Some(color) = world.rlva_contact_appearance(id).minimap {
         return set_color(color);
     }
