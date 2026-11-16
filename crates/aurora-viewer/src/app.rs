@@ -2712,6 +2712,9 @@ impl App {
             return;
         }
         if self.demo {
+            if self.demo_inventory_offer(&cmd) {
+                return;
+            }
             if let Some(demo) = &mut self.outfit_restore_demo
                 && demo.handle(&cmd, &mut self.world, Instant::now())
             {
@@ -11147,6 +11150,7 @@ impl App {
                 break;
             }
         }
+        self.poll_inventory_offers();
         self.net_profile.events_left(self.net.events.len());
         for (id, bytes) in self.world.take_host_images() {
             self.scene.textures.note_host_image(id, bytes);
@@ -23839,6 +23843,11 @@ impl ApplicationHandler for App {
             }
             if let Ok(view) = std::env::var("AURORA_DEMO_INVENTORY") {
                 crate::world::inventory::demo::seed(&mut self.world.inventory, self.world.agent_id);
+                if matches!(view.as_str(), "offer-unsent" | "offer-sent" | "offer-uncertain") {
+                    let original = uuid::Uuid::from_u128(8109);
+                    self.panels.inventory = true;
+                    self.inventory_ui.dialog = Some(ui::inventory::EditDialog::Share(vec![original], vec![crate::demo::DEMO_TESS]));
+                }
                 if matches!(view.as_str(), "calling-card" | "aurora-calling-card") {
                     // the viewer-made card naming the wolf, selected
                     self.panels.inventory = true;
