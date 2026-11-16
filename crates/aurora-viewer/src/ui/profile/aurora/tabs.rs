@@ -317,7 +317,7 @@ fn pick_view(env: &mut Env, w: &mut Window, id: Uuid) -> Option<PickView> {
 
 /// Start a new pick at our position (LLPanelProfilePicks::onClickNewBtn).
 fn start_new_pick(w: &mut Window, world: &World) {
-    if world.rlva.has("showloc") {
+    if world.rlva.has("showloc") || w.pick_save_waits() {
         return;
     }
     w.editing = true;
@@ -386,22 +386,7 @@ pub(in super::super) fn picks(ui: &mut egui::Ui, env: &mut Env, w: &mut Window, 
     }
     // our selected pick is edited in a copy of the server's
     if editing && let Some(i) = world.profiles.picks.get(&sel) {
-        let server = PickEdit {
-            id: i.id,
-            parcel: i.parcel,
-            name: i.name.clone(),
-            desc: i.desc.clone(),
-            snapshot: i.snapshot,
-            pos: i.pos_global,
-            location: None,
-        };
-        let follow = match &w.pick_edit {
-            Some((e, base)) => e.id != i.id || (e == base && *base != server),
-            None => true,
-        };
-        if follow {
-            w.pick_edit = Some((server.clone(), server));
-        }
+        w.follow_pick(i);
     }
     match pick_view(env, w, sel) {
         Some(v) => feature(ui, env, w, &v, editing, compact),
@@ -422,7 +407,8 @@ pub(in super::super) fn picks(ui: &mut egui::Ui, env: &mut Env, w: &mut Window, 
             None => {}
         }
     }
-    let add = editing && !world.rlva.has("showloc") && pr.picks.len() < limit && !items.iter().any(|(id, _)| id.is_nil());
+    let add =
+        editing && !w.pick_save_waits() && !world.rlva.has("showloc") && pr.picks.len() < limit && !items.iter().any(|(id, _)| id.is_nil());
     thumbs(ui, env, w, &items, add.then_some((pr.picks.len(), limit)), compact);
 }
 
