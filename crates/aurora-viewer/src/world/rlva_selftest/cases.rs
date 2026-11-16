@@ -953,8 +953,6 @@ fn round_trips() -> Vec<Case> {
                 ],
             ]),
         ),
-        // (upstream lists C4 as a known gap, #2677: this fork carries PR #2691's
-        // link fix, so it is an ordinary case here)
         case(
             "C4",
             "an object linked from a locked folder is locked",
