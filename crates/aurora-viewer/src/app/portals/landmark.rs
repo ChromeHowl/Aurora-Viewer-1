@@ -171,7 +171,6 @@ impl App {
             "portal-bridge-required" => aurora_i18n::tr!("portal-bridge-required"),
             "portal-landmark-unavailable" => aurora_i18n::tr!("portal-landmark-unavailable"),
             "portal-place-unavailable" => aurora_i18n::tr!("portal-place-unavailable"),
-            "rlva-blocked" => aurora_i18n::tr!("rlva-blocked"),
             _ => aurora_i18n::tr!("rez-no-surface"),
         };
         self.portal_notice(message);
