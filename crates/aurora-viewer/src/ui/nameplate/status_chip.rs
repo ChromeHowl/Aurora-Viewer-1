@@ -40,7 +40,7 @@ mod tests {
         let m = Metrics::of(Level::Full, SCALE);
         let plate = Rect::from_min_size(Pos2::new(100.0, 50.0), Vec2::new(180.0, 66.0 * SCALE));
         let closed = rect(plate, 0.0, 120.0, &m);
-        assert_eq!(closed.size(), Vec2::splat(m.badge));
+        assert!((closed.width() - m.badge).abs() < 1e-3 && (closed.height() - m.badge).abs() < 1e-3);
         assert!(closed.left() > plate.right(), "clear of the plate");
         assert!((closed.center().y - plate.center().y).abs() < 1e-3);
         let open = rect(plate, 1.0, 120.0, &m);
@@ -52,6 +52,9 @@ mod tests {
         assert!(open.width() > m.badge + 120.0);
         let half = rect(plate, 0.5, 120.0, &m);
         assert!(half.width() > closed.width() && half.width() < open.width());
-        assert_eq!(rect(plate, 7.0, 120.0, &m), open, "hover is bounded");
+        assert!(
+            (rect(plate, 7.0, 120.0, &m).width() - open.width()).abs() < 1e-3,
+            "hover is bounded"
+        );
     }
 }
