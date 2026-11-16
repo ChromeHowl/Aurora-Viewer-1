@@ -14,6 +14,9 @@ use crate::ui::widgets::{self, Floater};
 use egui::{Pos2, Vec2};
 
 pub const WINDOW: &str = "cameratools";
+/// The window's icon everywhere (menu, toolbar, title bar, viewfinder): the
+/// camera settings, apart from the Controls window's video camera.
+pub const ICON: &str = "adjustments-horizontal-filled";
 
 #[derive(Default)]
 pub struct CameratoolsUi {

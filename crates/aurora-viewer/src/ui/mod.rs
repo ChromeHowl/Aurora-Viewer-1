@@ -30,6 +30,7 @@ pub mod buy_currency;
 pub mod buy_land;
 pub mod call_invite;
 pub mod camera_path;
+pub mod camera_status;
 pub mod chat;
 pub mod chat_bubbles;
 pub mod click_away_focus;
