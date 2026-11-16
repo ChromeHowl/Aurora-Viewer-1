@@ -1498,7 +1498,6 @@ script-import-skip-too-large = Ignoré : plus de 1 Mo
 script-import-skip-utf8 = Ignoré : pas un fichier texte UTF-8
 script-import-skip-binary = Ignoré : contient des données binaires
 script-import-skip-empty = Ignoré : vide
-script-import-skip-too-many = Ignoré : la liste est pleine
 script-import-skip-too-much = Ignoré : trop de texte dans la liste
 script-import-skip-no-slua = Ignoré : cette région n'exécute pas SLua
 script-import-open = Ouvrir

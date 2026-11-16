@@ -1486,7 +1486,6 @@ script-import-skip-too-large = スキップ：1 MiBを超えています
 script-import-skip-utf8 = スキップ：UTF-8のテキストファイルではありません
 script-import-skip-binary = スキップ：バイナリデータを含んでいます
 script-import-skip-empty = スキップ：空です
-script-import-skip-too-many = スキップ：リストがいっぱいです
 script-import-skip-too-much = スキップ：リストのテキストが多すぎます
 script-import-skip-no-slua = スキップ：このリージョンではSLuaが実行されません
 script-import-open = 開く

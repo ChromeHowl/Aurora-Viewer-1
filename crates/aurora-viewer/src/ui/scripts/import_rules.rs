@@ -72,7 +72,6 @@ pub enum Skip {
     NotUtf8,
     Binary,
     Empty,
-    TooMany,
     TooMuch,
     NoSlua,
 }
@@ -85,7 +84,6 @@ impl Skip {
             Skip::NotUtf8 => aurora_i18n::tr!("script-import-skip-utf8").into(),
             Skip::Binary => aurora_i18n::tr!("script-import-skip-binary").into(),
             Skip::Empty => aurora_i18n::tr!("script-import-skip-empty").into(),
-            Skip::TooMany => aurora_i18n::tr!("script-import-skip-too-many").into(),
             Skip::TooMuch => aurora_i18n::tr!("script-import-skip-too-much").into(),
             Skip::NoSlua => aurora_i18n::tr!("script-import-skip-no-slua").into(),
         }
@@ -160,7 +158,11 @@ pub fn item_name(path: &Path) -> String {
 /// The name an item is created with: "New Script" is created as
 /// "New_Script" and renamed afterwards (fixNewScriptDefaultName).
 pub fn creation_name(name: &str) -> String {
-    if name == NEW_SCRIPT { name.replace(' ', "_") } else { name.to_owned() }
+    if name == NEW_SCRIPT {
+        name.replace(' ', "_")
+    } else {
+        name.to_owned()
+    }
 }
 
 /// The comparison key of a name: item names of one folder differ by more
@@ -206,7 +208,10 @@ pub enum State {
     CompileFailed(Vec<String>),
     /// Not saved. `kept`: an empty script of this name exists in the
     /// inventory (it was created, its text did not reach the grid).
-    Failed { reason: String, kept: bool },
+    Failed {
+        reason: String,
+        kept: bool,
+    },
     Skipped(Skip),
     Cancelled,
 }
@@ -559,7 +564,13 @@ mod tests {
         batch.finish(0, State::Saved);
         assert_eq!(batch.rows[0].source, None, "the text is let go");
         assert_eq!(batch.next(), Some(1));
-        batch.finish(1, State::Failed { reason: "no".into(), kept: false });
+        batch.finish(
+            1,
+            State::Failed {
+                reason: "no".into(),
+                kept: false,
+            },
+        );
         assert_eq!(batch.next(), Some(2));
         assert!(!batch.idle());
         batch.finish(2, State::CompileFailed(vec!["(1, 1) : ERROR : x".into()]));

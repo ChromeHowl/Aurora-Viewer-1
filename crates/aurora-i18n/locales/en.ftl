@@ -1495,7 +1495,6 @@ script-import-skip-too-large = Skipped: larger than 1 MiB
 script-import-skip-utf8 = Skipped: not a UTF-8 text file
 script-import-skip-binary = Skipped: contains binary data
 script-import-skip-empty = Skipped: empty
-script-import-skip-too-many = Skipped: the list is full
 script-import-skip-too-much = Skipped: too much text in the list
 script-import-skip-no-slua = Skipped: this region does not run SLua
 script-import-open = Open

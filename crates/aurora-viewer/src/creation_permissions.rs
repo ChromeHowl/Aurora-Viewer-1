@@ -306,7 +306,11 @@ mod tests {
             panic!("import")
         };
         assert_eq!(permissions, Some(defaults.scripts.permissions()));
-        assert_ne!(permissions.map(|p| p.next_owner & perm::MODIFY), Some(0), "the next owner may modify");
+        assert_ne!(
+            permissions.map(|p| p.next_owner & perm::MODIFY),
+            Some(0),
+            "the next owner may modify"
+        );
         assert_ne!(permissions.map(|p| p.group), Some(0), "shared with the group");
         let explicit = Permissions::default();
         let mut command = import(Some(explicit));

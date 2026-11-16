@@ -172,10 +172,7 @@ impl App {
             Action::Import => self.script_import_start(),
             Action::Stop => self.script_import.form.batch.cancel(),
             Action::Clear => self.script_import.form.batch.clear(true),
-            Action::Open(item) => self.open_script(ScriptTarget {
-                object: Uuid::nil(),
-                item,
-            }),
+            Action::Open(item) => self.open_script(ScriptTarget { object: Uuid::nil(), item }),
         }
     }
 
@@ -335,17 +332,16 @@ impl App {
             self.script_import_fail_queued(contents_drop::reason_text(reason));
             return;
         }
-        let Some(index) = self.script_import.form.batch.next() else { return };
+        let Some(index) = self.script_import.form.batch.next() else {
+            return;
+        };
         let (stem, slua, source) = {
             let row = &mut self.script_import.form.batch.rows[index];
             (row.name.clone(), row.slua, row.source.take())
         };
         let form = &self.script_import.form;
         if slua && !form.lua_region {
-            self.script_import
-                .form
-                .batch
-                .finish(index, State::Skipped(Skip::NoSlua));
+            self.script_import.form.batch.finish(index, State::Skipped(Skip::NoSlua));
             self.script_import_report();
             return;
         }
@@ -404,7 +400,9 @@ impl App {
             return;
         }
         let Some(current) = self.script_import.current.take() else { return };
-        let Some(index) = self.script_import.form.batch.working() else { return };
+        let Some(index) = self.script_import.form.batch.working() else {
+            return;
+        };
         let object = match &self.script_import.form.destination {
             Destination::Object { object, .. } => Some(*object),
             Destination::Folder(_) => None,
@@ -592,7 +590,9 @@ impl App {
     /// the contents of the demo's action object, `slua` on a region that runs
     /// SLua.
     pub(super) fn demo_script_import_steps(&mut self) {
-        let Ok(mode) = std::env::var("AURORA_DEMO_SCRIPT_IMPORT") else { return };
+        let Ok(mode) = std::env::var("AURORA_DEMO_SCRIPT_IMPORT") else {
+            return;
+        };
         match self.frame_count {
             300 => {
                 crate::world::inventory::demo::seed(&mut self.world.inventory, self.world.agent_id);

@@ -104,7 +104,10 @@ fn an_object_of_the_agent_takes_the_script_and_the_run_choice_decides_if_it_runs
     assert_eq!(object_gate(&w, &build, object), Ok(()));
     let running = place_plan(&w, &build, object, item, true).expect("plan");
     assert_eq!(commands(&running), vec![(true, item)]);
-    assert!(running.iter().all(|drop| drop.consume.is_none()), "the script is copyable: nothing leaves the inventory");
+    assert!(
+        running.iter().all(|drop| drop.consume.is_none()),
+        "the script is copyable: nothing leaves the inventory"
+    );
     let stopped = place_plan(&w, &build, object, item, false).expect("plan");
     assert_eq!(commands(&stopped), vec![(false, item)]);
 }
@@ -183,7 +186,11 @@ fn a_worn_object_takes_only_unrestricted_scripts() {
     let avatar = w.objects.index_of_uuid(&w.agent_id).expect("avatar");
     let avatar_id = w.objects.get(avatar).expect("avatar").key.local_id;
     w.objects.get_mut(idx).expect("object").parent_id = avatar_id;
-    assert_eq!(object_gate(&w, &build, object), Ok(()), "a script of full rights goes into an attachment");
+    assert_eq!(
+        object_gate(&w, &build, object),
+        Ok(()),
+        "a script of full rights goes into an attachment"
+    );
     assert!(place_plan(&w, &build, object, full, true).is_ok());
     assert_eq!(
         place_plan(&w, &build, object, no_copy, true).err(),
