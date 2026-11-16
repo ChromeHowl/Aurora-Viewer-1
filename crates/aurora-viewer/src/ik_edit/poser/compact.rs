@@ -948,6 +948,16 @@ impl Editor {
             if menu::item_if(ui, p, "device-floppy-filled", aurora_i18n::text("poser-save-as"), ready) {
                 self.save_pose(rig, frame, true);
             }
+            if menu::item_if(ui, p, "movie", aurora_i18n::text("poser-save-animation"), ready) {
+                self.save_animation(rig, frame);
+            }
+            menu::toggle(
+                ui,
+                p,
+                "repeat",
+                aurora_i18n::text("poser-animation-loop"),
+                &mut self.poser.animation_loop,
+            );
             ui.add_space(4.0);
         });
     }

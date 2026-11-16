@@ -457,13 +457,17 @@ impl Editor {
                     if menu::item_if(ui, p, "device-floppy-filled", aurora_i18n::text("poser-save-as"), can_save) {
                         self.save_pose(rig, frame, true);
                     }
-                    menu::separator(ui, p);
+                    // a complete, uploadable animation of the pose in a file
+                    // of the user's choice; it never uploads
+                    if menu::item_if(ui, p, "movie", aurora_i18n::text("poser-save-animation"), can_save) {
+                        self.save_animation(rig, frame);
+                    }
                     menu::toggle(
                         ui,
                         p,
-                        "file-type-xml",
-                        aurora_i18n::text("wornposer-bd-also-save"),
-                        &mut self.poser.also_black_dragon,
+                        "repeat",
+                        aurora_i18n::text("poser-animation-loop"),
+                        &mut self.poser.animation_loop,
                     );
                     menu::separator(ui, p);
                     ui.horizontal(|ui| {
@@ -541,45 +545,48 @@ impl Editor {
     pub(super) fn follow_name(&mut self) {
         self.poser.names.follow(self.poser.subject, &mut self.poser.name);
     }
-    /// The Save request for the whole current pose of the selected subject:
-    /// every joint, edited or not, as a pose file and as a new animation.
-    /// Nothing is refused for being unchanged, and a loaded animation only
-    /// changes the pose it put on screen.
-    pub(super) fn whole_save(&mut self, rig: &Rig, frame: &Frame, pick: bool) -> Option<storage::Save> {
+    /// The Save request for the whole current pose of the selected subject
+    /// (every joint, edited or not, as a pose file), with the same pose as a
+    /// new animation for Upload. Nothing is refused for being unchanged, and
+    /// a loaded animation only changes the pose it put on screen.
+    pub(super) fn whole_save(&mut self, rig: &Rig, frame: &Frame, pick: bool) -> Option<(storage::Save, Arc<aurora_assets::Animation>)> {
         self.follow_name();
         let session = self.poser.sessions.get(&self.poser.subject)?;
         let built = session.whole(rig, frame.model).and_then(|whole| {
-            let animation = total::whole(rig, &whole, self.poser.priority).ok()?;
+            let animation = total::standalone(rig, &whole, self.poser.priority, self.poser.animation_loop).ok()?;
             let document = document::Document::whole(rig, session, &whole, self.poser.name.clone(), self.poser.priority);
-            Some(storage::Save {
+            let save = storage::Save {
                 document,
-                pose: Arc::new(whole),
-                animation: Some(Arc::new(animation)),
-                black_dragon: self.poser.also_black_dragon,
                 confirm: self.poser.confirm_overwrite,
                 pick,
-            })
+            };
+            Some((save, Arc::new(animation)))
         });
         if built.is_none() {
             self.poser.storage.message = Some(aurora_i18n::text("anim-edit-invalid").to_owned());
         }
         built
     }
-    /// Save: the pose file and the animation, in the library or, with `pick`
+    /// Save: the Aurora pose file only, in the library or, with `pick`
     /// (Save as…), where the system dialog says.
     pub(super) fn save_pose(&mut self, rig: &Rig, frame: &Frame, pick: bool) {
-        if let Some(save) = self.whole_save(rig, frame, pick) {
+        if let Some((save, _)) = self.whole_save(rig, frame, pick) {
             self.poser.storage.job = Some(storage::Job::Save(save));
+        }
+    }
+    /// Save as animation…: the whole pose as a standalone `.anim`, written
+    /// where the system dialog says. Local only: it never uploads and keeps
+    /// no pose file or library entry.
+    pub(super) fn save_animation(&mut self, rig: &Rig, frame: &Frame) {
+        if let Some((save, animation)) = self.whole_save(rig, frame, false) {
+            self.poser.storage.job = Some(storage::Job::SaveAnimation(animation, save.document.name));
         }
     }
     /// Upload: saves the same whole pose first, then stages its animation in
     /// the import inspector, where the upload and its price confirmation stay
     /// the human's action.
     pub(super) fn upload_pose(&mut self, rig: &Rig, frame: &Frame) {
-        let Some(save) = self.whole_save(rig, frame, false) else {
-            return;
-        };
-        let Some(animation) = save.animation.clone() else {
+        let Some((save, animation)) = self.whole_save(rig, frame, false) else {
             return;
         };
         match total::encode(&animation) {
@@ -727,7 +734,7 @@ impl Editor {
         ui.add_space(6.0);
         bones::caption(ui, p, aurora_i18n::text("poser-settings-files"));
         widgets::switch_labeled(ui, p, &mut self.poser.confirm_overwrite, aurora_i18n::tr!("poser-overwrite"));
-        widgets::switch_labeled(ui, p, &mut self.poser.also_black_dragon, aurora_i18n::tr!("wornposer-bd-also-save"));
+        widgets::switch_labeled(ui, p, &mut self.poser.animation_loop, aurora_i18n::tr!("poser-animation-loop"));
         ui.horizontal(|ui| {
             ui.label(aurora_i18n::tr!("poser-priority"));
             ui.add(egui::DragValue::new(&mut self.poser.priority).range(0..=6));

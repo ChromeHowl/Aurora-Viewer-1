@@ -4103,6 +4103,11 @@ That ignored test creates and removes its own isolated profile.
   source/owner metadata. Capture 620: contacts must still apply to the driver
   or observed rider. A simulator chat with a missing owner or known ownership
   conflict remains rejected; worn sources require the chat owner to be their actual wearer.
+- **Poser Save (offline, `AURORA_DEMO=1` and the poser)**: Save writes only
+  `<name>.aurora-pose.json` in the pose library; Save's menu › Save as
+  animation… opens a file dialog and writes `<name>.anim` there (nothing is
+  uploaded); the file opens in Upload animation like any `.anim`. Unit tests:
+  `cargo test --workspace save_as_animation`.
 - **`AURORA_DEMO_IK_EDIT=poser|poser-face|poser-hands`**: open the standalone
   local poser at frame 420 and turn the head at frame 450. The face/hand
   variants select a corresponding Bento joint. Capture 620: grouped bone

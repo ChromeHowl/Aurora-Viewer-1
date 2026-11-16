@@ -1602,6 +1602,11 @@ fn poser_load_menu_opens_the_existing_library_without_a_file_picker() {
         "opening the library must not launch a file picker"
     );
 }
+/// A version 3 Black Dragon pose with one joint (the file format Load reads).
+const BLACK_DRAGON_POSE: &str = "<?xml version=\"1.0\" ?><llsd><map><key>version</key><map><key>value</key><integer>3</integer></map>\
+<key>mHead</key><map><key>rotation</key><array><real>0.1</real><real>0.2</real><real>0.3</real></array>\
+<key>position</key><array><real>0</real><real>0</real><real>0.076</real></array>\
+<key>scale</key><array><real>1</real><real>1</real><real>1</real></array><key>enabled</key><boolean>1</boolean></map></map></llsd>";
 #[test]
 fn poser_library_saves_confirms_overwrite_and_correlates_loads_to_the_original_subject() {
     let (world, editor) = fixture();
@@ -1624,9 +1629,6 @@ fn poser_library_saves_confirms_overwrite_and_correlates_loads_to_the_original_s
     service.filter = "does not match Portrait".into();
     service.job = Some(storage::Job::Save(storage::Save {
         document: document.clone(),
-        pose: posed.clone(),
-        animation: None,
-        black_dragon: true,
         confirm: false,
         pick: false,
     }));
@@ -1646,9 +1648,6 @@ fn poser_library_saves_confirms_overwrite_and_correlates_loads_to_the_original_s
     service.scroll_to_selected = false;
     service.job = Some(storage::Job::Save(storage::Save {
         document: document.clone(),
-        pose: posed,
-        animation: None,
-        black_dragon: true,
         confirm: false,
         pick: false,
     }));
@@ -1686,8 +1685,18 @@ fn poser_library_saves_confirms_overwrite_and_correlates_loads_to_the_original_s
         tick(&mut service);
     }
     assert_eq!(service.selected, None, "a later library refresh must not reuse the saved path");
-    // the Black Dragon copy reads back through the same load
-    let copy = root.join("poses/black_dragon/Portrait.xml");
+    // Save wrote the Aurora pose file and nothing else: no Black Dragon copy,
+    // no animation beside it
+    let library = root.join("poses");
+    let written: Vec<String> = std::fs::read_dir(&library)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(written, ["Portrait.aurora-pose.json"], "Save writes the pose file only");
+    assert!(!library.join("black_dragon").exists());
+    // a Black Dragon file still reads through the same load
+    let copy = library.join("Portrait.xml");
+    std::fs::write(&copy, BLACK_DRAGON_POSE).unwrap();
     service.job = Some(storage::Job::Load(Some(copy), document::LoadMode::Rotations, subject));
     tick(&mut service);
     let loaded = tick(&mut service);
@@ -1697,9 +1706,6 @@ fn poser_library_saves_confirms_overwrite_and_correlates_loads_to_the_original_s
     ));
     service.job = Some(storage::Job::Save(storage::Save {
         document,
-        pose: session.pose.clone(),
-        animation: None,
-        black_dragon: false,
         confirm: true,
         pick: false,
     }));
@@ -3689,6 +3695,98 @@ fn save_animation_holds_every_joint_and_round_trips_the_upload_reader() {
     off.enabled[head] = false;
     let decoded = total::whole(rig, &off, 4).unwrap();
     assert!(!decoded.joints.iter().any(|j| j.joint_name == "mHead"));
+}
+#[test]
+fn save_as_animation_is_the_whole_pose_and_not_a_difference() {
+    let (world, editor) = fixture();
+    let rig = &world.avatar_lib.rig;
+    let mut session = data::Session::new((*editor.poser.sessions[&world.agent_id].base).clone());
+    // a pose that differs from the base in the head and the left elbow only
+    let (head, elbow, knee) = (rig.names["mHead"], rig.names["mElbowLeft"], rig.names["mKneeRight"]);
+    let mut pose = (*session.pose).clone();
+    pose.rotations[head] = (pose.rotations[head] * Quat::from_rotation_x(0.4)).normalize();
+    pose.rotations[elbow] = (pose.rotations[elbow] * Quat::from_rotation_y(-0.6)).normalize();
+    session.pose = Arc::new(pose);
+    let whole = session.whole(rig, Mat4::IDENTITY).unwrap();
+    let animation = total::standalone(rig, &whole, 5, true).unwrap();
+    let decoded = aurora_assets::anim::parse_animation_upload(&total::encode(&animation).unwrap()).unwrap();
+    // every skeleton joint is keyed with its complete rotation, the ones that
+    // were not touched too (a difference would leave them out or hold the
+    // identity)
+    for bone in 0..rig.len() {
+        let name = &rig.canonical_names[bone];
+        if !name.starts_with('m') || !whole.enabled[bone] {
+            continue;
+        }
+        let motion = decoded
+            .joints
+            .iter()
+            .find(|j| &j.joint_name == name)
+            .unwrap_or_else(|| panic!("{name} has no key"));
+        assert_eq!(motion.rot_keys.len(), 1, "{name}");
+        assert!(
+            motion.rot_keys[0].rotation.dot(whole.rotations[bone]).abs() > 0.999,
+            "{name} holds its absolute rotation"
+        );
+    }
+    for bone in [head, elbow, knee] {
+        let key = decoded.joints.iter().find(|j| j.joint_name == rig.canonical_names[bone]).unwrap();
+        assert!(near_loose(key.rot_keys[0].rotation, whole.rotations[bone]));
+    }
+    // priority and loop come from the request
+    assert_eq!(decoded.base_priority, 5);
+    assert!(decoded.looping);
+    let once = total::standalone(rig, &whole, 2, false).unwrap();
+    let once = aurora_assets::anim::parse_animation_upload(&total::encode(&once).unwrap()).unwrap();
+    assert_eq!(once.base_priority, 2);
+    assert!(!once.looping);
+    // the poser models no hand pose and no expression
+    assert_eq!((decoded.hand_pose, decoded.emote_name.as_str()), (0, ""));
+}
+fn near_loose(a: Quat, b: Quat) -> bool {
+    a.dot(b).abs() > 0.999
+}
+#[test]
+fn save_as_animation_writes_a_local_anim_file_the_viewer_reads_back() {
+    let (world, editor) = fixture();
+    let rig = &world.avatar_lib.rig;
+    let session = &editor.poser.sessions[&world.agent_id];
+    let head = rig.names["mHead"];
+    let mut posed = (*session.pose).clone();
+    posed.rotations[head] = (posed.rotations[head] * Quat::from_rotation_z(0.5)).normalize();
+    let mut session = data::Session::new((*session.base).clone());
+    session.pose = Arc::new(posed);
+    let whole = session.whole(rig, Mat4::IDENTITY).unwrap();
+    let animation = total::standalone(rig, &whole, 4, true).unwrap();
+    let dir = std::env::temp_dir().join(format!("aurora-poser-anim-{}", Uuid::new_v4()));
+    // a name without the extension gets `.anim`; nothing else is written
+    let path = storage::write_animation(dir.join("Wave"), &animation).unwrap();
+    assert_eq!(path, dir.join("Wave.anim"));
+    let files: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(files, ["Wave.anim"], "no pose file, no Black Dragon copy, no temporary file");
+    // the viewer's own decoder (the one Upload and Load use) gives the pose back
+    let decoded = aurora_assets::anim::parse_animation_upload(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(decoded.base_priority, 4);
+    let back = total::load(
+        rig,
+        decoded,
+        ik::LocalPose {
+            rotations: rig.local_rot.clone(),
+            positions: rig.local_pos.clone(),
+        },
+    );
+    assert!(near_loose(back.rotations[head], whole.rotations[head]));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+#[test]
+fn the_old_black_dragon_save_setting_is_ignored_when_settings_load() {
+    let config: Config = serde_json::from_str(r#"{"also_black_dragon": true, "markers": false}"#).unwrap();
+    assert!(!config.markers, "the other keys still load");
+    assert_eq!(Config { markers: true, ..config }, Config::default());
+    assert!(Config::default().animation_loop);
 }
 #[test]
 fn a_loaded_animation_does_not_change_what_save_holds() {

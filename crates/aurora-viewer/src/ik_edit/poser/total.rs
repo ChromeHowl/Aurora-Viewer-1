@@ -43,6 +43,17 @@ pub(super) fn whole(rig: &Rig, whole: &data::Pose, priority: i32) -> Result<auro
     document.animation()
 }
 
+/// `whole` as the standalone animation Save as animation… writes: the
+/// whole pose, absolute rotations for every joint the poser controls (never a
+/// difference from a base pose), at `priority`, held while it plays when
+/// `looping` and ending at its 30 s length otherwise. The poser models
+/// neither a hand pose nor an expression, so the file carries neither.
+pub(super) fn standalone(rig: &Rig, pose: &data::Pose, priority: i32, looping: bool) -> Result<aurora_assets::Animation, &'static str> {
+    let mut animation = whole(rig, pose, priority)?;
+    animation.looping = looping;
+    Ok(animation)
+}
+
 /// The bytes of an `.anim` file, checked with the reader the upload preview
 /// uses.
 pub(super) fn encode(animation: &aurora_assets::Animation) -> Result<Vec<u8>, String> {

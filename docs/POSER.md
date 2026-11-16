@@ -243,7 +243,7 @@ world-lock flags, without subject IDs, avatar names or world coordinates.
 The book in the title bar shows the library in the joints column's place
 (the window keeps its size): back arrow, refresh, open folder, search, the
 entries with their date; a double click loads everything. Save's menu (its
-chevron) holds Save as… and the priority. Load's menu holds the four modes, applied to the
+chevron) holds Save as…, Save as animation…, the loop option and the priority. Load's menu holds the four modes, applied to the
 selected library entry while the library is shown or to a file chosen
 otherwise, and "Open a file".
 
@@ -264,13 +264,11 @@ the rest skeleton, so a file made on an avatar whose shape or rigged mesh
 moves joints carries that difference, which the rotations-only modes leave
 out. A joint switched off in the file, a bone this skeleton lacks and a
 duplicate or unreadable entry are skipped; a file with no usable joint is
-refused with a message. Save's menu (and the settings' Files group) has
-**Also a Black Dragon copy (.xml)**, off by default: Save then also writes
-`black_dragon/<pose name>.xml` in the pose library, version 3, to copy into
-Black Dragon's poses folder. The overwrite confirmation covers that copy
-too. The format was implemented from its description and checked by unit
-tests; loading and saving a real Black Dragon file both ways is part of the
-human checks below.
+refused with a message. The format is read only: Aurora writes no Black
+Dragon file (the old "Also a Black Dragon copy" option is gone, and a
+setting left over from it is ignored). It was implemented from its
+description and checked by unit tests; loading a real Black Dragon file is
+part of the human checks below.
 
 Each posed subject (your avatar, a consenting nearby avatar, an owned
 animesh) has its own captured pose, loaded base animation and changes, so Save
@@ -285,26 +283,43 @@ avatar and an owned animesh).
 
 Two actions leave the poser:
 
-1. **Save** writes the whole current pose of the selected subject as a new
-   animation and as a pose file, in the library (or where **Save as…** says).
-   Every joint is written with its complete rotation, edited or not (fingers
-   and Bento joints included), plus the positions you moved; a loaded
-   animation or pose only decides what is on screen, and what is on screen is
-   what is saved. A joint switched off in the poser (the live animation's) is
-   left out of the animation, though its flag stays in the pose file. Nothing
-   needs to be changed or loaded first: an untouched pose saves too. The
-   animation is `<name>.anim`, a one-frame animation that holds the pose
-   (priority from the Save form), written beside `<name>.aurora-pose.json`;
-   it is checked with the same reader as **Upload animation**. The pose file
-   keeps the library's format (complete rotations, so it loads on any avatar
-   with the load modes). The Black Dragon copy, when its option is on, is the
-   same whole pose. The Legacy Viewer's "Save Diff" and loading a Black Dragon
-   diff are not part of this: Aurora no longer writes difference files, and
-   pose files saved as differences before still load.
-2. **Upload** saves the same pose first (same files, same overwrite
-   confirmation) and opens the animation in the upload window, in the
-   "! Created Poses" folder. The upload itself and the simulator's price
-   confirmation are still the human's action there; **Save never uploads**.
+1. **Save** writes the whole current pose of the selected subject as an
+   Aurora pose file (`<name>.aurora-pose.json`), in the library (or where
+   **Save as…** says), and nothing else: no Black Dragon copy and no
+   animation beside it. Every joint is written with its complete rotation,
+   edited or not (fingers and Bento joints included); a loaded animation or
+   pose only decides what is on screen, and what is on screen is what is
+   saved. Nothing needs to be changed or loaded first: an untouched pose
+   saves too. The pose file keeps the library's format (complete rotations,
+   so it loads on any avatar with the load modes). The Legacy Viewer's "Save
+   Diff" and loading a Black Dragon diff are not part of this: Aurora no
+   longer writes difference files, and pose files saved as differences before
+   still load.
+2. **Save as animation…** (Save's menu, in the full and the compact window)
+   writes the whole pose as a new, standalone `<name>.anim` where the system
+   dialog says. It is a real animation, never a difference: the Legacy
+   Viewer's poser has no such file either (its Save writes a pose XML, and
+   optionally a two-frame BVH with every joint), and the Black Dragon /
+   FireDragon sources were not available when this was written, so the
+   choice of `.anim` rather than BVH follows what the viewer imports and
+   uploads natively. Every joint the poser controls gets a rotation key with
+   its complete rotation (fingers and Bento joints included, edited or not;
+   a joint switched off in the poser is the live animation's and gets no
+   key), plus a position key where it was moved (the pelvis always). It is one
+   frame long; **Loop the saved animation** (Save's menu and Settings › Files,
+   on by default) holds the pose for the animation's whole 30 s length
+   instead of ending after it. Priority comes from the Save form (0 to 6,
+   default 4), ease in and out are 0.3 s; the poser models no hand pose and
+   no expression, so the file has none. The name field is the file name the
+   dialog offers (`.anim` is added when missing). The bytes are checked with
+   the reader the upload window uses before they are written, and nothing is
+   uploaded: **Save as animation… stays on the computer.** The file can then
+   be uploaded with the normal Upload animation (Inventory › Upload) like any
+   other `.anim`, and plays as the pose you saved.
+3. **Upload** saves the same pose file first (same overwrite confirmation)
+   and opens the same animation in the upload window, in the "! Created
+   Poses" folder. The upload itself and the simulator's price confirmation
+   are still the human's action there; **Save never uploads**.
 
 A session's end (the Logout bar, the server, a lost link) ends the poser and
 the animation editors too: a pose kept with "Stop posing when the window
@@ -408,9 +423,8 @@ request/answer events exercise the real consent state machine; they are
 not a substitute for two-client LSL transport validation.
 
 Human checks: edit each tab and channel, use presets and undo, save/reload
-each load mode, confirm overwrite, save a pose and open its `.anim` in the upload window, press Upload, switch subjects, and test both close behaviours. Load a
-real Black Dragon pose file of each layout, save a Black Dragon copy and load
-it in Black Dragon; play, pause, seek, apply and stop an inventory animation
+each load mode, confirm overwrite, save a pose (only the `.aurora-pose.json` appears), choose Save as animation…, upload the saved `.anim` on the grid and play it (the pose holds, every joint as in the poser), press Upload, switch subjects, and test both close behaviours. Load a
+real Black Dragon pose file of each layout; play, pause, seek, apply and stop an inventory animation
 in the Animations panel with the override on and off. On a
 grid, use two accounts running this build to verify bridge reprovisioning,
 request/accept/refuse/withdraw, mute/privacy, timeout, region departure and

@@ -39,6 +39,8 @@ enum Output {
     Loaded(Uuid, Loaded),
     Overwrite(Save),
     Saved(PathBuf),
+    /// A standalone `.anim` written by Save as animation…
+    AnimationSaved(PathBuf),
     /// Saved outside the library by Save as…
     SavedTo(PathBuf),
     Failed(String),
@@ -48,6 +50,8 @@ pub(super) enum Job {
     List,
     Load(Option<PathBuf>, LoadMode, Uuid),
     Save(Save),
+    /// Save as animation…: the animation and the name the dialog offers.
+    SaveAnimation(Arc<aurora_assets::Animation>, String),
 }
 /// Whether a library entry named `name` shows under the search `filter`
 /// (case-insensitive, anywhere in the name).
@@ -60,11 +64,6 @@ pub(super) fn filter_matches(name: &str, filter: &str) -> bool {
 #[derive(Clone)]
 pub(super) struct Save {
     pub document: Document,
-    /// The whole pose on the rest skeleton (the Black Dragon copy's source).
-    pub pose: Arc<SubjectPose>,
-    /// The same whole pose as an animation, written beside the pose file.
-    pub animation: Option<Arc<aurora_assets::Animation>>,
-    pub black_dragon: bool,
     pub confirm: bool,
     pub pick: bool,
 }
@@ -81,16 +80,33 @@ fn pose_file(path: PathBuf) -> PathBuf {
         path.with_file_name(name)
     }
 }
-/// The animation written beside a pose file: the same name with `.anim`
-/// in place of `.aurora-pose.json` (or `.json`).
-pub(super) fn anim_file(pose: &Path) -> PathBuf {
-    let name = pose.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let lower = name.to_lowercase();
-    let stem = [".aurora-pose.json", ".json"]
-        .iter()
-        .find(|ext| lower.ends_with(*ext))
-        .map_or(name.as_str(), |ext| &name[..name.len() - ext.len()]);
-    pose.with_file_name(format!("{stem}.anim"))
+/// The file a Save as animation… writes: the chosen name, with `.anim`
+/// added unless it already ends in it.
+fn anim_file(path: PathBuf) -> PathBuf {
+    let name = path.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+    if name.ends_with(".anim") {
+        path
+    } else {
+        let mut name = path.file_name().unwrap_or_default().to_os_string();
+        name.push(".anim");
+        path.with_file_name(name)
+    }
+}
+/// Write the `.anim` of `animation` at `path` (extension added when missing),
+/// checked with the reader the upload window uses, through a temporary file
+/// so that a failure leaves nothing half written. Never uploads.
+pub(super) fn write_animation(path: PathBuf, animation: &aurora_assets::Animation) -> Result<PathBuf, String> {
+    let bytes = total::encode(animation)?;
+    let path = anim_file(path);
+    let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let temp = dir.join(format!("{}.tmp", Uuid::new_v4()));
+    std::fs::write(&temp, bytes).map_err(|e| e.to_string())?;
+    if let Err(e) = std::fs::rename(&temp, &path) {
+        let _ = std::fs::remove_file(&temp);
+        return Err(e.to_string());
+    }
+    Ok(path)
 }
 pub(super) struct Service {
     pub entries: Vec<Entry>,
@@ -206,6 +222,10 @@ impl Service {
                     self.message = Some(aurora_i18n::tr!("poser-saved-to", path = path.display().to_string()).to_string());
                     self.saved_path = Some(path);
                 }
+                Output::AnimationSaved(path) => {
+                    self.message = Some(aurora_i18n::tr!("poser-animation-saved", path = path.display().to_string()).to_string());
+                    self.ready = true;
+                }
                 Output::SavedTo(path) => {
                     self.ready = false;
                     let path = path.display().to_string();
@@ -307,15 +327,8 @@ impl Service {
                         }
                     }
                     Job::Save(save) => {
-                        let Save {
-                            document,
-                            pose,
-                            animation,
-                            black_dragon,
-                            confirm,
-                            pick,
-                        } = &save;
-                        let (black_dragon, confirm, pick) = (*black_dragon, *confirm, *pick);
+                        let Save { document, confirm, pick } = &save;
+                        let (confirm, pick) = (*confirm, *pick);
                         if !document.valid(&rig) {
                             return Err(aurora_i18n::tr!("anim-edit-invalid").to_string());
                         }
@@ -336,25 +349,10 @@ impl Service {
                             root.join(format!("{name}.aurora-pose.json"))
                         };
                         let dir = path.parent().unwrap_or(&root).to_path_buf();
-                        // the Black Dragon copy in its own folder beside the pose
-                        let black_dragon_path = dir.join(bd_pose::FOLDER).join(bd_pose::file_name(&document.name));
-                        let anim_path = anim_file(&path);
-                        if confirm
-                            && !pick
-                            && (path.exists() || animation.is_some() && anim_path.exists() || black_dragon && black_dragon_path.exists())
-                        {
+                        if confirm && !pick && path.exists() {
                             return Ok(Output::Overwrite(save));
                         }
-                        let anim_bytes = animation.as_deref().map(total::encode).transpose()?;
                         let bytes = serde_json::to_vec_pretty(document).map_err(|e| e.to_string())?;
-                        let black_dragon = if black_dragon {
-                            if !pose.valid(&rig) {
-                                return Err(aurora_i18n::tr!("anim-edit-invalid").to_string());
-                            }
-                            Some(bd_pose::encode(&bd_pose::joints_of(&rig, pose)))
-                        } else {
-                            None
-                        };
                         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
                         let temp = dir.join(format!("{}.tmp", Uuid::new_v4()));
                         std::fs::write(&temp, bytes).map_err(|e| e.to_string())?;
@@ -362,18 +360,23 @@ impl Service {
                             let _ = std::fs::remove_file(&temp);
                             return Err(e.to_string());
                         }
-                        if let Some(anim_bytes) = anim_bytes {
-                            std::fs::write(&anim_path, anim_bytes).map_err(|e| e.to_string())?;
-                        }
-                        if let Some(black_dragon) = black_dragon {
-                            std::fs::create_dir_all(dir.join(bd_pose::FOLDER)).map_err(|e| e.to_string())?;
-                            std::fs::write(black_dragon_path, black_dragon).map_err(|e| e.to_string())?;
-                        }
                         if pick && dir != root {
                             Output::SavedTo(path)
                         } else {
                             Output::Saved(path)
                         }
+                    }
+                    Job::SaveAnimation(animation, name) => {
+                        let _ = std::fs::create_dir_all(&root);
+                        let Some(path) = rfd::FileDialog::new()
+                            .set_directory(&root)
+                            .set_file_name(format!("{}.anim", clip::files::basename(&name)))
+                            .add_filter(aurora_i18n::tr!("poser-animation-filter"), &["anim"])
+                            .save_file()
+                        else {
+                            return Ok(Output::Cancelled);
+                        };
+                        Output::AnimationSaved(write_animation(path, &animation)?)
                     }
                 })
             };
@@ -399,9 +402,13 @@ mod save_as_tests {
         assert_eq!(pose_file(PathBuf::from("/d/Wave.JSON")), Path::new("/d/Wave.JSON"));
     }
     #[test]
-    fn anim_file_sits_next_to_the_pose_without_its_extension() {
-        assert_eq!(anim_file(Path::new("/d/Wave.aurora-pose.json")), Path::new("/d/Wave.anim"));
-        assert_eq!(anim_file(Path::new("/d/Wave.JSON")), Path::new("/d/Wave.anim"));
-        assert_eq!(anim_file(Path::new("/d/Wave")), Path::new("/d/Wave.anim"));
+    fn anim_file_adds_the_extension_unless_anim() {
+        assert_eq!(anim_file(PathBuf::from("/d/Wave")), Path::new("/d/Wave.anim"));
+        assert_eq!(anim_file(PathBuf::from("/d/Wave.v2")), Path::new("/d/Wave.v2.anim"));
+        assert_eq!(anim_file(PathBuf::from("/d/Wave.ANIM")), Path::new("/d/Wave.ANIM"));
+        assert_eq!(
+            anim_file(PathBuf::from("/d/Wave.aurora-pose.json")),
+            Path::new("/d/Wave.aurora-pose.json.anim")
+        );
     }
 }

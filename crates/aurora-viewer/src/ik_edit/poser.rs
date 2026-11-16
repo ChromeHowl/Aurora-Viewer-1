@@ -80,8 +80,9 @@ pub struct Config {
     pub dof: bool,
     pub sensitivity: f32,
     pub also_bvh: bool,
-    /// Save also writes a Black Dragon pose file (`.xml`).
-    pub also_black_dragon: bool,
+    /// Save as animation… writes a looping animation (the pose is held for
+    /// its whole length) instead of a one-shot.
+    pub animation_loop: bool,
     pub unlock_pelvis: bool,
     pub confirm_overwrite: bool,
     /// Ask before a close that stops the pose and loses its edited joints.
@@ -103,7 +104,7 @@ impl Default for Config {
             dof: false,
             sensitivity: super::gizmo::DEFAULT_SENSITIVITY,
             also_bvh: false,
-            also_black_dragon: false,
+            animation_loop: true,
             unlock_pelvis: false,
             confirm_overwrite: false,
             confirm_close: true,
