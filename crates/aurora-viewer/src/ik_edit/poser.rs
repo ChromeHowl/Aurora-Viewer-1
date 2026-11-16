@@ -658,7 +658,7 @@ impl Editor {
     }
     /// A load that arrived (a file, or an inventory animation) put on the
     /// subject's pose: one undo step, the name field, the load mode.
-    pub(super) fn apply_loaded(&mut self, world: &World, subject: Uuid, loaded: storage::Loaded) {
+    fn apply_loaded(&mut self, world: &World, subject: Uuid, loaded: storage::Loaded) {
         let model = Frame::subject(world, subject).map_or(Mat4::IDENTITY, |f| f.model);
         let Some(session) = self.poser.sessions.get_mut(&subject) else {
             return;

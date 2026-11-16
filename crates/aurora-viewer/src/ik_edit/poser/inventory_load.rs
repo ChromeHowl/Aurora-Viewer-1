@@ -176,6 +176,7 @@ pub(super) struct InventoryLoad {
 }
 
 impl InventoryLoad {
+    #[cfg(test)]
     pub fn pending(&self) -> bool {
         self.request.is_some()
     }
