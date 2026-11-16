@@ -16434,3 +16434,10 @@ beacons-light-boxes = Bounding boxes for lights in scene
 beacons-region-corners = Region corners
 
 
+build-options-menu = Options
+build-options-locked-only = Select only locked objects
+build-options-copyable-only = Select only copyable objects
+build-options-group-owned = Include group-owned objects
+build-options-hidden-selection = Show hidden selection
+build-options-light-radius = Show light radius for selection
+build-options-probe-volumes = Show reflection probe volumes

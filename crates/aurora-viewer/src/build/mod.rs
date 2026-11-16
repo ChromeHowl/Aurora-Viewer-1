@@ -392,6 +392,55 @@ pub fn copyable_object(world: &World, idx: usize) -> bool {
             .is_some_and(|root| root.update_flags & OBJECT_COPY != 0)
 }
 
+/// The switches of Build > Options (menu_viewer.xml), as the menu shows and
+/// sets them: some live in `BuildSettings`, the rest in its `tools`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MenuOptions {
+    pub owned_only: bool,
+    pub movable_only: bool,
+    pub locked_only: bool,
+    pub copyable_only: bool,
+    pub probes: bool,
+    pub surrounding: bool,
+    pub group_owned: bool,
+    pub highlight: bool,
+    pub hidden_selection: bool,
+    pub light_radius: bool,
+    pub probe_volumes: bool,
+}
+
+impl MenuOptions {
+    pub fn of(s: &BuildSettings) -> Self {
+        Self {
+            owned_only: s.select_owned_only,
+            movable_only: s.select_movable_only,
+            locked_only: s.tools.select_locked,
+            copyable_only: s.tools.select_copyable,
+            probes: s.select_probes,
+            surrounding: s.select_surrounding,
+            group_owned: s.tools.select_group_owned,
+            highlight: s.show_highlight,
+            hidden_selection: s.tools.show_hidden_selection,
+            light_radius: s.tools.light_radius,
+            probe_volumes: s.tools.show_probe_volumes,
+        }
+    }
+
+    pub fn apply(self, s: &mut BuildSettings) {
+        s.select_owned_only = self.owned_only;
+        s.select_movable_only = self.movable_only;
+        s.tools.select_locked = self.locked_only;
+        s.tools.select_copyable = self.copyable_only;
+        s.select_probes = self.probes;
+        s.select_surrounding = self.surrounding;
+        s.tools.select_group_owned = self.group_owned;
+        s.show_highlight = self.highlight;
+        s.tools.show_hidden_selection = self.hidden_selection;
+        s.tools.light_radius = self.light_radius;
+        s.tools.show_probe_volumes = self.probe_volumes;
+    }
+}
+
 /// SelectOwnedOnly / SelectMovableOnly in LLSelectMgr::canSelectObject
 /// (indra/newview/llselectmgr.cpp, originally LGPL 2.1). permYouOwner and
 /// permMove read the root's flags; a permanent (pathfinding) object only
@@ -2733,6 +2782,60 @@ impl BuildTool {
         Some((s.move_hologram, self.manip.move_ghost()?))
     }
 
+    /// RenderLightRadius (LLViewerWindow::renderSelections, while the tools
+    /// are open): around each selected light, a sphere of its radius in its
+    /// colour at half opacity. The Legacy Viewer fills it; here three
+    /// circles outline it, so the prims inside stay readable.
+    fn light_radius_draw(&self, p: &draw::Painter3d, world: &World, now: Instant) {
+        if self.select_type(world) != SelectType::World {
+            return;
+        }
+        for idx in self.sel_prims(world) {
+            let Some(light) = world.objects.get(idx).and_then(|o| o.extra.light) else {
+                continue;
+            };
+            let Some((center, _, false)) = crate::scene::Scene::object_transform(world, idx, now, 0) else {
+                continue;
+            };
+            // getLightSRGBColor: the packed colour is linear
+            let srgb = |c: f32| c.clamp(0.0, 1.0).powf(1.0 / 2.2);
+            let color = draw::rgba(srgb(light.color[0]), srgb(light.color[1]), srgb(light.color[2]), 0.5);
+            for [a, b] in draw::light_radius_circles(center, light.radius) {
+                p.line(a, b, color, 1.5);
+            }
+        }
+    }
+
+    /// RenderReflectionProbeVolumes (LLPipeline::renderDebug), whatever the
+    /// tools show: the reach of every reflection probe. The Legacy Viewer
+    /// shades it with a full-screen debug pass (reflectionProbeDisplay);
+    /// here each probe's volume is outlined (LLReflectionMap::update: a box
+    /// probe fills its prim, a sphere probe reaches half its X scale).
+    pub fn draw_probe_volumes(&self, ctx: &egui::Context, pal: &crate::theme::Palette, world: &World, s: &BuildSettings) {
+        if !s.tools.show_probe_volumes || self.select_type(world) == SelectType::Hud {
+            return;
+        }
+        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::unique("build_probe_volumes")));
+        let cam = self.cam;
+        let p = draw::Painter3d::new(painter, &cam, *pal);
+        let now = Instant::now();
+        for (idx, o) in world.objects.iter() {
+            let Some(probe) = o.extra.reflection_probe else {
+                continue;
+            };
+            if !world.parcel_object_visible(idx) {
+                continue;
+            }
+            let Some((pos, rot, false)) = crate::scene::Scene::object_transform(world, idx, now, 0) else {
+                continue;
+            };
+            let scale = o.visual_scale();
+            for [a, b] in draw::probe_volume_edges(pos, rot, scale, probe.flags & 1 != 0) {
+                p.line(a, b, pal.teal, 1.0);
+            }
+        }
+    }
+
     /// The Edit tool in Select face mode (LLSelectMgr::getTEMode).
     pub fn face_mode(&self) -> bool {
         self.open && self.tool == Tool::Edit && self.edit_mode == EditMode::Face
@@ -2795,13 +2898,16 @@ impl BuildTool {
         let now = Instant::now();
         let prims = self.outlined(world, s);
         if !prims.is_empty() {
-            self.silhouettes.draw(&p, world, scene, &prims);
+            self.silhouettes.draw(&p, world, scene, &prims, s.tools.show_hidden_selection);
         }
         if !self.open && !self.menu_selection {
             return;
         }
         if !self.open || self.replacement_active() || self.ui.color_picker.pipette {
             return;
+        }
+        if s.tools.light_radius {
+            self.light_radius_draw(&p, world, now);
         }
         match self.tool {
             Tool::Edit => {
