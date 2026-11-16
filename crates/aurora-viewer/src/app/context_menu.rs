@@ -243,6 +243,9 @@ impl App {
         let refused = |command: NetCommand| !w.rlva_allows_command(&command, uuid::Uuid::nil());
         f.ground_sit_blocked = refused(NetCommand::OneShotControl(aurora_net::control::SIT_ON_GROUND));
         f.stand_blocked = refused(NetCommand::OneShotControl(aurora_net::control::STAND_UP));
+        // what `toggle_fly` itself answers
+        f.fly_blocked = !w.agent.flying && !crate::autopilot::can_takeoff(w);
+        f.build_blocked = !self.build.open && !w.rlva_can_build();
         if let Some(Target::Object { key, full_id, offset }) = self.context_menu.as_ref().map(|m| &m.target) {
             f.object_sit_blocked = refused(NetCommand::RequestSit {
                 handle: key.region,
@@ -257,6 +260,15 @@ impl App {
                 }
                 if matches!(self.context_menu.as_ref().map(|m| &m.target), Some(Target::Object { .. })) {
                     f.attach_points = self.attach_choices();
+                    if w.rlva.enabled() {
+                        f.wear_default_blocked = !w.rlva_can_attach_object(0);
+                        f.wear_blocked_points = f
+                            .attach_points
+                            .iter()
+                            .map(|c| c.id)
+                            .filter(|&point| !w.rlva_can_attach_object(point))
+                            .collect();
+                    }
                 }
             }
             Some(Target::Avatar { id, .. }) => {
@@ -277,7 +289,7 @@ impl App {
                 f.sound_blocks = w.derender.owner_sound_flags(*id);
                 f.contact_sets = w.contact_sets.set_names();
                 f.im_blocked = !w.rlva_can_start_im(*id);
-                f.pay_blocked = !w.rlva_can_pay();
+                f.pay_blocked = !w.rlva_can_pay() || !w.rlva_can_name(*id);
                 // the friendship itself: no offer to a hidden friend
                 f.friend = w.social.is_friend(id);
                 f.friend_hidden = w.social.is_friend_hidden(id);
@@ -356,6 +368,17 @@ impl App {
             f.hud_move_locked = w.hud_locks.locked(root.full_id);
         }
         self.object_menu_facts(idx, &mut f);
+        // enable_object_touch, enable_attachment_touch, enable_buy_object
+        // and enable_pay_object (indra/newview/llviewermenu.cpp): greyed
+        // out when RLVa would refuse them. Touch asks the send boundary
+        // about what `menu_touch` would send, the surface the right click
+        // picked included, so the entry never disagrees with the send.
+        if w.rlva.enabled() {
+            f.touch &= w.rlva_allows_command(&self.menu_touch_command(o.key), Uuid::nil());
+            let buy = !w.rlva.has("buy");
+            f.pay &= buy;
+            f.buy &= buy;
+        }
         // the right click selected the object (or kept the selection)
         f.save_to_contents = self.build.save_to_contents_target(w).is_some();
         f.local_preview = o.is_editable_preview();
@@ -724,6 +747,9 @@ impl App {
                 }
             }
             CtxAction::Profile(id) => self.profile_ui.open(&mut self.world, id),
+            CtxAction::RosterProfile(id) => {
+                self.profile_ui.open_in(&mut self.world, crate::world::names::NameScope::Roster, id);
+            }
             CtxAction::ToggleBlock(id) => {
                 let name = self.world.legacy_name(&id).unwrap_or_else(|| self.world.social.name_of(&id));
                 if let Err(e) = self.world.toggle_block_avatar(id, &name) {
@@ -903,6 +929,8 @@ impl App {
                 self.settings.save();
                 self.flush_build();
             }
+            // LLToolMgr::canEdit: not under @edit and @rez together
+            CtxAction::Build if !self.build.open && !self.world.rlva_can_build() => {}
             CtxAction::Build => self.build.open_build(crate::build::Tool::Create),
             CtxAction::EditTerrain => self.build.open_build(crate::build::Tool::Land),
             CtxAction::SetRender(id, mode) => {

@@ -404,7 +404,7 @@ impl App {
             // key_to_name_callback: RlvActions::canShowName else RlvStrings::getAnonym
             let answer = cmdline::key_name_answer(!self.world.rlva_can_name(id), self.settings.chat_commands.key_to_name_ignores_rlva);
             let name = match answer {
-                cmdline::KeyNameAnswer::Anonymous => Some(crate::world::rlva::privacy::anonymous(id).display_name.clone()),
+                cmdline::KeyNameAnswer::Anonymous => Some(self.world.rlva_anonymous(id).display_name.clone()),
                 cmdline::KeyNameAnswer::RealName => self
                     .world
                     .social
