@@ -16573,3 +16573,5 @@ director-path-sent = Track sent to the Camera Path: { $count } waypoints.
 director-path-too-many = The Camera Path has more waypoints than a track holds.
 director-path-bad = The track and the Camera Path do not fit: a view or a region is missing.
 ui-bars-aurora-weather = Aurora Weather…
+ui-weather-deep-snow-reach = Deep snow reach
+ui-weather-deep-snow-reach-tip = How far around your avatar deep snow is drawn. Farther costs a little more: its cells grow coarser toward the edge, where it looks the same
