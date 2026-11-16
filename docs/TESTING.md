@@ -1969,7 +1969,7 @@ when unfocused") is ignored during a screenshot.
 | `AURORA_DEMO_OBJECT_EXPORT=collada\|obj\|gltf` | Object › Save as › Collada / OBJ / glTF on a linked lamp, its rights and texture files |
 | `AURORA_DEMO_OBJECT_EXPORT_FILE=<path>` | With the above: Save as writes that file without the file dialog |
 
-**Beacon details.** `AURORA_DEMO_BEACONS=1` adds seven labelled sources, including an invisible scripted cube. `lines`, `highlights` and `off` isolate the two render modes; `hidden-particles` keeps the source marker while hiding emitted particles. `parcels` frames the terrain boundaries and ownership colours. `owned` opens My land with an offline parcel and group contributions. Check each source switch, Scripted versus Touch, width, both master switches off, and closing/reopening the floater without losing the active filters. The grid check compares real sound/particle/media sources, linked children, attachments, neighbouring parcels and the personal holdings list with the Legacy Viewer.
+**Beacon details.** `AURORA_DEMO_BEACONS=1` adds seven labelled sources, including an invisible scripted cube. `lines`, `highlights` and `off` isolate the two render modes; `hidden-particles` keeps the source marker while hiding emitted particles. `parcels` frames the terrain boundaries and ownership colours. `owned` opens My land with an offline parcel and group contributions. `guides` adds a light prim and turns on Bounding boxes for lights and Region corners: look for the white bounds and the yellow radius box of the light, and the labelled amber beacons of the region's far corners. Check each source switch, Scripted versus Touch, width, both master switches off, and closing/reopening the floater without losing the active filters. The grid check compares real sound/particle/media sources, linked children, attachments, neighbouring parcels and the personal holdings list with the Legacy Viewer.
 
 **Rendering types details.** `AURORA_DEMO_RENDER_TYPES` takes the kinds to hide, separated by commas: `terrain`, `water`, `sky`, `clouds`, `objects`, `avatars`, `animesh`, `trees`, `grass`, `particles` (unknown words are left aside). With `AURORA_DEMO_BARS=hidden` and a capture at frame 900: `objects` leaves the avatar on the bare terrain, the plaza's shadows gone; `avatars,animesh` leaves the name tag over an empty spot; `terrain,water` shows the sky under the plaza; `terrain,water,sky` a flat clear colour instead of the sky's gradient. Then open Advanced › Rendering types: the ticks match, and ticking back draws the kind at once. The grid check compares Develop › Rendering Types of the Legacy Viewer in a busy region (Avatars hides worn objects too; Animesh, Trees and Grass apart).
 
@@ -11674,6 +11674,7 @@ What the inventory must show with these scenarios:
 | `AURORA_SOUND_OCCLUSION=0` or `1` | "Muffle sounds behind walls" forced off or on for this launch, without saving it |
 | `AURORA_DEMO_SOUND_HRTF=1`, `circle` or `updown` | A sound circling the listener and one rising above it and falling, for the 3D sound for headphones |
 | `AURORA_SOUND_HRTF=0` or `1` | "3D sound for headphones (HRTF)" forced off or on for this launch, without saving it |
+| `AURORA_DEMO_SOUND_DOPPLER=1` | A sound passing in front of the listener at 20 m/s, back and forth, for the Doppler effect (see Details) |
 | `AURORA_DEMO_SOUND_REVERB=1`, `room` or `hall` | A clapper above our avatar, a small room and a large hall to walk into (or to start in), for the reverb of the surroundings; its estimate in the log |
 | `AURORA_SOUND_REVERB=0` or `1` | "Reverb from the surroundings" forced off or on for this launch, without saving it |
 | `AURORA_DEMO_MINIMIZED_MUTE=1\|off` | Force mute when minimized on or off for an offline run |
@@ -12139,6 +12140,18 @@ What the inventory must show with these scenarios:
 - **`AURORA_SOUND_OCCLUSION=0|1`**: overrides Preferences › Sound, "Muffle
   sounds behind walls", for this launch (demo or grid), without saving it:
   the same build measured with and without the occlusion.
+- **`AURORA_DEMO_SOUND_DOPPLER=1`**: listen with headphones or speakers.
+  Our avatar starts on the open slope west of the plaza (the 3D sound
+  scenario's spot: run the two one at a time) and "Passing sound", a lit
+  orange cube playing a steady buzz, goes back and forth along a straight
+  line 8 m ahead of the start, 50 m to each side, at 20 m/s (5 s a pass).
+  With Preferences › Sound, "Doppler effect" at 1 (the default, as in the
+  Legacy Viewer), the buzz is about a semitone higher while it comes
+  closer and drops by about two semitones as it passes in front (340 / 320
+  then 340 / 360); at 0 its pitch stays the same, only its loudness
+  changes; at 2 the drop doubles. Walking toward it or away from it shifts
+  it too (the agent's velocity, as in the Legacy Viewer). The slider
+  applies at once.
 - **`AURORA_DEMO_SOUND_HRTF=1|circle|updown`**: listen with headphones. Our
   avatar starts on the open slope west of the plaza (the occlusion
   scenario's spot: run the two one at a time) and two looping sources move

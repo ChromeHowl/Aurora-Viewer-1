@@ -21,7 +21,9 @@ use super::{PRESENCE, PRESENCE_FADE};
 use crate::settings::PresencePosition;
 use egui::{Rect, Vec2};
 
-/// Between two toasts, and between the toasts and the chat lines.
+/// Default gap between two toasts, and between the toasts and the chat
+/// lines (the `toast_gap` option replaces it).
+#[cfg(test)]
 pub const GAP: f32 = 6.0;
 /// From Firestorm's full-width bars and from the window's sides (the
 /// islands' room already keeps their 8 px).
@@ -64,7 +66,7 @@ pub fn room(work_area: Rect, classic_bars: bool) -> Rect {
 /// Where each toast of `sizes` (oldest first) stands at `at` in `room`,
 /// above the rectangles of `avoid` that stand across their column; `None`
 /// for those that do not fit (the oldest go first).
-pub fn stack(room: Rect, at: PresencePosition, sizes: &[Vec2], avoid: &[Rect]) -> Vec<Option<Rect>> {
+pub fn stack(room: Rect, at: PresencePosition, sizes: &[Vec2], avoid: &[Rect], gap: f32) -> Vec<Option<Rect>> {
     let x_of = |w: f32| match at {
         PresencePosition::TopLeft | PresencePosition::BottomLeft => room.left(),
         PresencePosition::TopRight | PresencePosition::BottomRight => room.right() - w,
@@ -85,16 +87,16 @@ pub fn stack(room: Rect, at: PresencePosition, sizes: &[Vec2], avoid: &[Rect]) -
         .filter(|r| r.left() < right && r.right() > left && r.top() < whole.bottom() && r.bottom() > whole.top())
     {
         if r.center().y >= whole.center().y {
-            room.max.y = room.max.y.min(r.top() - GAP);
+            room.max.y = room.max.y.min(r.top() - gap);
         } else {
-            room.min.y = room.min.y.max(r.bottom() + GAP);
+            room.min.y = room.min.y.max(r.bottom() + gap);
         }
     }
     // the newest that fit, from the newest back
     let mut first = sizes.len();
     let mut used = 0.0;
     for (i, s) in sizes.iter().enumerate().rev() {
-        let need = used + s.y + if used > 0.0 { GAP } else { 0.0 };
+        let need = used + s.y + if used > 0.0 { gap } else { 0.0 };
         if need > room.height() {
             break;
         }
@@ -106,7 +108,7 @@ pub fn stack(room: Rect, at: PresencePosition, sizes: &[Vec2], avoid: &[Rect]) -
     for (i, s) in sizes.iter().enumerate().skip(first) {
         let top = if at.top() { y } else { y - s.y };
         out[i] = Some(Rect::from_min_size(egui::pos2(x_of(s.x), top), *s));
-        y = if at.top() { y + s.y + GAP } else { y - s.y - GAP };
+        y = if at.top() { y + s.y + gap } else { y - s.y - gap };
     }
     out
 }

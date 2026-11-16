@@ -35,6 +35,13 @@ pub struct BuildTools {
     /// FSSelectIncludeGroupOwned: rectangle selection takes group-owned
     /// objects too (on); off, it leaves them out.
     pub select_group_owned: bool,
+    /// RenderHiddenSelections: the far edges of the selection's outline,
+    /// fainter (Build > Options > Show hidden selection).
+    pub show_hidden_selection: bool,
+    /// RenderReflectionProbeVolumes (Persist=0 in the Legacy Viewer: never
+    /// saved): the reach of every reflection probe.
+    #[serde(skip)]
+    pub show_probe_volumes: bool,
 }
 
 impl Default for BuildTools {
@@ -49,6 +56,8 @@ impl Default for BuildTools {
             select_copyable: false,
             select_locked: false,
             select_group_owned: true,
+            show_hidden_selection: false,
+            show_probe_volumes: false,
         }
     }
 }
@@ -94,6 +103,7 @@ mod tests {
         assert_eq!(t, BuildTools::default());
         assert!(t.unlink_confirm && t.pivot_percent && !t.light_radius && !t.hide_selected);
         assert!(!t.select_copyable && !t.select_locked && t.select_group_owned);
+        assert!(!t.show_hidden_selection && !t.show_probe_volumes);
         assert_eq!(t.pivot, [50.0; 3]);
     }
 
