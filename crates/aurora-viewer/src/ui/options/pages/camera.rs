@@ -226,6 +226,11 @@ pub fn page(cx: &mut Cx, tab: usize) {
                     &field!(camera.reset_view_turns_avatar),
                 );
                 cx.toggle(
+                    tr!("ui-options-camera-show-mode-changes"),
+                    tr!("ui-options-camera-show-mode-changes-tip"),
+                    &field!(camera.show_mode_changes),
+                );
+                cx.toggle(
                     tr!("ui-options-camera-click-my-avatar-keep-camera"),
                     tr!("ui-options-camera-clicking-your-avatar-does-not-return-the-camera-behind"),
                     &field!(camera.click_avatar_keeps_camera),

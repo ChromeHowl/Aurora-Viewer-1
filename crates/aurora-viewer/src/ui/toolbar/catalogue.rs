@@ -122,7 +122,7 @@ pub const COMMANDS: &[Command] = commands![
     "soundexplorer", "music", "toolbar-command-sound-explorer", true;
     "assetblacklist", "shield-off", "toolbar-command-asset-blacklist", true;
     "phototools", "camera-cog", "toolbar-command-phototools", false;
-    "phototools_view", "video-filled", "toolbar-command-phototools-camera", true;
+    "phototools_view", "adjustments-horizontal-filled", "toolbar-command-phototools-camera", true;
     "pose_stand", "man-filled", "toolbar-command-pose-stand", true;
     "conversation_log", "file-text-filled", "toolbar-command-conversation-log", true;
     "movelock", "lock-filled", "movelock-title", true;

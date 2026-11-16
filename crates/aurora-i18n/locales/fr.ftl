@@ -6155,8 +6155,8 @@ controls-pan-tip = Déplacer la caméra en haut, en bas, à gauche et à droite 
 controls-pan = Panoramique
 controls-object-view = Vue objet
 controls-object-view-tip = Un clic dans le monde y centre la caméra, comme avec Alt.
-controls-reset-camera = Réinitialiser la caméra (comme Préférences › Caméra)
-controls-reset-view = Revenir à l'avatar
+controls-reset-camera = Réinitialiser tous les réglages de caméra
+controls-reset-view = Caméra derrière l'avatar
 controls-shots = Presets caméra
 controls-shots-none = Aucun preset caméra
 controls-shot-name = Nom de cette position de caméra
@@ -6290,8 +6290,8 @@ ui-environment-inventory-settings = Réglage de l'inventaire
 ui-land-environment-day-settings = Réglages de la journée
 build-ui-contents-reset-scripts = Réinit. scripts
 common-reset = Réinitialiser
-ui-context-reset-camera = Réinitialiser la caméra
-ui-bars-reset-camera-esc = Réinitialiser la caméra (Échap)
+ui-context-reset-camera = Caméra derrière l'avatar
+ui-bars-reset-camera-esc = Caméra derrière l'avatar (Échap)
 ui-context-reset-mesh-lod = Réinitialiser le LOD du maillage
 ui-context-reset-mesh-lod-2 = Réinitialiser le LOD du mesh
 ui-context-reset-skeleton = Réinitialiser le squelette
@@ -10262,7 +10262,7 @@ world-status-invisible-off = { $count ->
     }
 radar-col-seen-short = Vu
 radar-col-range-short = Dist.
-ui-options-camera-reset-all = Réinitialiser la caméra
+ui-options-camera-reset-all = Réinitialiser tous les réglages de caméra
 ui-options-camera-reset-all-tip = Remet tous les réglages de cette page à leur valeur par défaut : vue arrière, position et point visé, angle de vue, distance, lissage, limites et vue subjective.
 ui-chat-close-conversation = Fermer la conversation
 ui-chat-close-conversation-leave = Fermer la conversation (quitte la session)
@@ -16768,3 +16768,26 @@ poser-inv-note-joints = { $count ->
    *[other] { $count } articulations de cette animation ne sont pas sur ce squelette et ont été ignorées.
     }
 poser-inv-note-extras = Les réglages de boucle, d'atténuation, de priorité et de contraintes ne passent pas dans une pose.
+
+# Camera mode indicator (camera/mode_status.rs, ui/camera_status.rs)
+camera-mode-normal = Vue normale de la caméra
+camera-mode-object-view = Vue d'objet
+camera-mode-mouselook = Vue subjective
+camera-mode-follow = Caméra d'un script
+camera-mode-seated = Caméra du siège
+camera-mode-free = Caméra libre
+camera-mode-flycam = Flycam
+camera-mode-locked = Caméra verrouillée
+camera-mode-path-playing = Trajet de caméra en lecture
+camera-mode-path-recording = Enregistrement du trajet de caméra
+camera-mode-director = Director
+camera-mode-line = { $name } · { $how }
+camera-mode-leave-key = { $key } pour quitter
+camera-mode-leave-back = Retour dans les contrôles de la caméra
+camera-mode-leave-lock-menu = Verrou de caméra dans le menu
+camera-mode-leave-path-window = Arrêt dans la fenêtre Trajet de caméra
+camera-mode-leave-director = Arrêt dans la fenêtre Director
+camera-mode-click-to-leave = { $mode } (cliquer pour quitter)
+camera-menu-lock-history-path = Verrou, historique et trajet
+ui-options-camera-show-mode-changes = Indiquer les changements de mode de caméra
+ui-options-camera-show-mode-changes-tip = Une courte note en haut du monde donne le mode de caméra où vous entrez et comment en sortir ; une petite pastille reste tant que la caméra est verrouillée, sur un trajet, libre ou pilotée par un script
