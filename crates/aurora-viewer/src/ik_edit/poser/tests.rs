@@ -3816,7 +3816,10 @@ fn hand_presets_turn_each_finger_as_the_legacy_viewer_does() {
 mod inventory_load_tests {
     use super::*;
     use crate::scene::anim::{AnimStreamer, BoundAnim};
-    use crate::world::inventory::{Inventory, actions::{COPY, FULL, MODIFY, TRANSFER}};
+    use crate::world::inventory::{
+        Inventory,
+        actions::{COPY, FULL, MODIFY, TRANSFER},
+    };
     use aurora_net::inventory::InvItem;
     use inventory_load::{Refusal, Source};
 

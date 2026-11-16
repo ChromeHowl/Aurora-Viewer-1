@@ -1330,7 +1330,11 @@ fn an_items_content_needs_full_rights_by_what_the_agent_holds() {
         ("group-owned counts by everyone", item(agent, true, FULL, 0), FULL),
         ("someone else's", item(other, false, FULL, COPY), MODIFY | TRANSFER),
         ("a Library item, full for everyone", item(library, false, 0, FULL), 0),
-        ("a Library item, copy and transfer", item(library, false, FULL, COPY | TRANSFER), MODIFY),
+        (
+            "a Library item, copy and transfer",
+            item(library, false, FULL, COPY | TRANSFER),
+            MODIFY,
+        ),
     ];
     for (what, item, missing) in cases {
         assert_eq!(content_missing(&inv, &item), missing, "{what}");

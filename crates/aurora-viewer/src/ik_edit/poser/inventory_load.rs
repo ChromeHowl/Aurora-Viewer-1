@@ -135,11 +135,7 @@ impl Ignored {
     pub fn of(animation: &BoundAnim) -> Self {
         Self {
             unknown_joints: animation.joints.iter().filter(|j| j.is_none()).count(),
-            more_frames: animation
-                .anim
-                .joints
-                .iter()
-                .any(|j| j.rot_keys.len() > 1 || j.pos_keys.len() > 1),
+            more_frames: animation.anim.joints.iter().any(|j| j.rot_keys.len() > 1 || j.pos_keys.len() > 1),
         }
     }
     /// The notes shown under the window, after the loaded line.
@@ -233,8 +229,7 @@ impl Editor {
                 );
             }
             None if streamer.asset_settled(&source.asset) || request.since.elapsed() > PATIENCE => {
-                self.poser.storage.message =
-                    Some(aurora_i18n::tr!("poser-inv-failed", name = field_name(&source.name)).to_string());
+                self.poser.storage.message = Some(aurora_i18n::tr!("poser-inv-failed", name = field_name(&source.name)).to_string());
             }
             None => self.poser.inventory_load.request = Some(Request { source, ..request }),
         }
@@ -250,11 +245,7 @@ impl Editor {
         let mut cancel = false;
         let response = widgets::Modal::new(egui::Id::new("poser-inventory-load")).show(ctx, |ui| {
             ui.set_width(380.0);
-            ui.label(
-                egui::RichText::new(aurora_i18n::tr!("poser-inv-title"))
-                    .size(17.0)
-                    .color(p.ink),
-            );
+            ui.label(egui::RichText::new(aurora_i18n::tr!("poser-inv-title")).size(17.0).color(p.ink));
             ui.add_space(6.0);
             let load = &mut self.poser.inventory_load;
             widgets::search_text_edit(ui, p, &mut load.filter, |edit| {
@@ -292,9 +283,7 @@ impl Editor {
                     |ui, range| {
                         for candidate in &load.candidates[range] {
                             let allowed = candidate.refusal.is_none();
-                            let row = ui
-                                .add_enabled_ui(allowed, |ui| ui.selectable_label(false, &candidate.name))
-                                .inner;
+                            let row = ui.add_enabled_ui(allowed, |ui| ui.selectable_label(false, &candidate.name)).inner;
                             match candidate.refusal {
                                 None if row.clicked() => chosen = Some(candidate.item),
                                 Some(refusal) => {
