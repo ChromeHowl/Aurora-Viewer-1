@@ -17,6 +17,7 @@
 //! 6 / 7; MSAA 8x at 3440 x 1369 and the rest of the boost wanted about
 //! 1.4 GB more, and the GPU was lost 1.4 s later). See [`plan`].
 
+use super::tune::Tune;
 use crate::graphics_presets::{Preset, Values};
 use crate::scene::texture_budget::MAX_PRESSURE;
 use crate::settings::Settings;
@@ -35,6 +36,8 @@ pub struct Held {
     /// The settings the user changed while the boost is on: theirs, never
     /// moved by the video memory's steps (`Held::retarget`).
     adopted: BTreeSet<&'static str>,
+    /// The photo-only choices the boost was made with (`tune`).
+    tune: Tune,
 }
 
 /// Every field of `Values`, for `Held::sync`.
@@ -114,6 +117,11 @@ impl Held {
         }
     }
 
+    /// The photo-only choices the boost was made with.
+    pub fn tune(&self) -> Tune {
+        self.tune
+    }
+
     /// The user's own values (with what they changed meanwhile, once
     /// `sync` has run).
     pub fn user(&self) -> Values {
@@ -131,7 +139,8 @@ impl Held {
         next.write(s);
         s.shadows = if self.adopted.contains("shadows") {
             shadows
-        } else if s.shadow_quality == self.values.shadow_quality && s.shadow_quality != boosted(self.values).shadow_quality {
+        } else if s.shadow_quality == self.values.shadow_quality && s.shadow_quality != boosted_with(self.values, self.tune).shadow_quality
+        {
             // lowered back to the user's own level: their own switch with it
             self.shadows
         } else {
@@ -206,6 +215,11 @@ pub fn boosted(user: Values) -> Values {
         anisotropy: user.anisotropy.max(top.anisotropy),
         ..user
     }
+}
+
+/// [`boosted`] held to the photo-only choices of `tune`.
+pub fn boosted_with(user: Values, tune: Tune) -> Values {
+    tune.apply(boosted(user), user)
 }
 
 /// What the photo quality does on its own, the supersampling left Off: the
@@ -302,17 +316,18 @@ pub fn reduce_into(photo: &mut [u8], photo_width: u32, keep: super::Tile, pixels
 /// before the photo is taken anyway.
 pub const DETAIL_WAIT: std::time::Duration = std::time::Duration::from_secs(20);
 
-/// Raise `s`, returning what to restore.
-pub fn boost(s: &mut Settings) -> Held {
+/// Raise `s` as far as `tune` allows, returning what to restore.
+pub fn boost(s: &mut Settings, tune: Tune) -> Held {
     let values = Values::read(s);
     let shadows = s.shadows;
-    boosted(values).write(s);
+    boosted_with(values, tune).write(s);
     Held {
         values,
         shadows,
         boosted: Values::read(s),
         boosted_shadows: s.shadows,
         adopted: BTreeSet::new(),
+        tune,
     }
 }
 
@@ -337,8 +352,8 @@ pub fn samples(antialiasing: u8) -> u32 {
 /// a quarter of level 4's atlas, then the user's), then everything else
 /// (reflections, probes, details). Never below the user's own: a step that
 /// would change nothing is left out.
-pub fn ladder(user: Values) -> Vec<Values> {
-    let mut steps = vec![boosted(user)];
+pub fn ladder(user: Values, tune: Tune) -> Vec<Values> {
+    let mut steps = vec![boosted_with(user, tune)];
     let mut then = |change: &dyn Fn(&mut Values)| {
         let mut v = *steps.last().expect("the ladder starts with the boost");
         change(&mut v);
@@ -346,20 +361,25 @@ pub fn ladder(user: Values) -> Vec<Values> {
             steps.push(v);
         }
     };
+    // (a step only lowers: the photo-only choices may start below it)
     for aa in [MSAA_4X, MSAA_2X] {
         if samples(aa) > samples(user.antialiasing) {
-            then(&|v| v.antialiasing = aa);
+            then(&|v| {
+                if samples(aa) < samples(v.antialiasing) {
+                    v.antialiasing = aa;
+                }
+            });
         }
     }
     then(&|v| v.antialiasing = user.antialiasing);
     for d in [384.0, 256.0, 128.0] {
         if d > user.draw_distance {
-            then(&|v| v.draw_distance = d);
+            then(&|v| v.draw_distance = v.draw_distance.min(d));
         }
     }
     then(&|v| v.draw_distance = user.draw_distance);
     if user.shadow_quality < 3 {
-        then(&|v| v.shadow_quality = 3);
+        then(&|v| v.shadow_quality = v.shadow_quality.min(3));
     }
     then(&|v| v.shadow_quality = user.shadow_quality);
     then(&|v| *v = user);
@@ -547,8 +567,8 @@ impl Plan {
 }
 
 /// [`choose`] over the [`ladder`] of the user's values on this screen.
-pub fn plan(memory: Option<Memory>, user: Values, screen: Screen, current: Option<usize>, may_raise: bool) -> Plan {
-    let steps = ladder(user);
+pub fn plan(memory: Option<Memory>, user: Values, tune: Tune, screen: Screen, current: Option<usize>, may_raise: bool) -> Plan {
+    let steps = ladder(user, tune);
     let costs: Vec<u64> = steps.iter().map(|v| extra_bytes(&user, v, screen)).collect();
     let made = |from: usize, to: usize| made_bytes(&steps[from], &steps[to], screen);
     let step = choose(memory, &costs, made, current, may_raise);
@@ -576,7 +596,7 @@ mod tests {
             ..Settings::default()
         };
         let before = s.clone();
-        let held = boost(&mut s);
+        let held = boost(&mut s, Tune::default());
         assert_eq!((s.draw_distance, s.lod_factor, s.max_avatars), (512.0, 4.0, 100));
         assert_eq!((s.shadow_quality, s.water_reflections, s.mirrors), (4, 4, 4));
         assert!(s.shadows);
@@ -595,7 +615,7 @@ mod tests {
             antialiasing: 3,
             ..Settings::default()
         };
-        let mut held = boost(&mut s);
+        let mut held = boost(&mut s, Tune::default());
         // the user lowers the draw distance and changes the anti-aliasing
         s.draw_distance = 128.0;
         s.antialiasing = 6;
@@ -761,9 +781,40 @@ mod tests {
     }
 
     #[test]
+    fn the_photo_only_choices_start_the_ladder_lower_and_it_never_climbs_back() {
+        use super::super::tune::{Antialiasing, Reach, Shadows};
+        let user = user();
+        let tune = Tune {
+            antialiasing: Antialiasing::X2,
+            shadows: Shadows::High,
+            reach: Reach::Mid,
+        };
+        let steps = ladder(user, tune);
+        assert_eq!(steps[0], boosted_with(user, tune));
+        assert_eq!(
+            (steps[0].antialiasing, steps[0].shadow_quality, steps[0].draw_distance),
+            (MSAA_2X, 3, 256.0)
+        );
+        assert_eq!(*steps.last().expect("steps"), user);
+        for pair in steps.windows(2) {
+            let (a, b) = (&pair[0], &pair[1]);
+            assert!(samples(b.antialiasing) <= samples(a.antialiasing), "the anti-aliasing never rises");
+            assert!(b.draw_distance <= a.draw_distance && b.shadow_quality <= a.shadow_quality);
+        }
+        // the boost made with them restores exactly
+        let mut s = Settings::default();
+        let before = s.clone();
+        let held = boost(&mut s, tune);
+        assert_eq!((s.antialiasing, s.shadow_quality, s.draw_distance), (MSAA_2X, 3, 256.0));
+        assert_eq!(held.tune(), tune);
+        held.restore(&mut s);
+        assert_eq!(Values::read(&s), Values::read(&before));
+    }
+
+    #[test]
     fn the_ladder_lowers_one_thing_at_a_time_down_to_the_users_own() {
         let user = user();
-        let steps = ladder(user);
+        let steps = ladder(user, Tune::default());
         assert_eq!(steps[0], boosted(user));
         assert_eq!(*steps.last().expect("steps"), user);
         // MSAA 8x, 4x, 2x, SMAA; 512, 384, 256, 128, 96 m; shadows 4, 3 (the
@@ -785,7 +836,7 @@ mod tests {
             shadow_quality: 1,
             ..user
         };
-        let steps = ladder(mine);
+        let steps = ladder(mine, Tune::default());
         let aa: Vec<u8> = steps.iter().map(|v| v.antialiasing).collect();
         assert!(!aa.contains(&MSAA_2X));
         assert!(steps.iter().all(|v| v.draw_distance >= 256.0 && v.antialiasing >= MSAA_4X));
@@ -836,13 +887,20 @@ mod tests {
     #[test]
     fn memory_to_spare_keeps_the_whole_boost() {
         // a 24 GB card in a busy region, or one with no figures from the driver
-        let p = plan(memory(23_370, 9_000, 0), user(), screen(2560, 1368), None, false);
+        let p = plan(memory(23_370, 9_000, 0), user(), Tune::default(), screen(2560, 1368), None, false);
         assert_eq!(p.step, 0);
         assert!(!p.reduced());
         assert_eq!(p.values, boosted(user()));
-        assert_eq!(plan(None, user(), screen(7680, 4320), None, false).step, 0);
+        assert_eq!(plan(None, user(), Tune::default(), screen(7680, 4320), None, false).step, 0);
         // under pressure there, the textures cycling with the full resolution
-        let p = plan(memory(22_233, 19_500, 1), user(), screen(2560, 1368), Some(0), false);
+        let p = plan(
+            memory(22_233, 19_500, 1),
+            user(),
+            Tune::default(),
+            screen(2560, 1368),
+            Some(0),
+            false,
+        );
         assert_eq!(p.step, 0);
     }
 
@@ -850,27 +908,27 @@ mod tests {
     fn the_reports_cases_fall_back_to_the_users_own() {
         let user = user();
         // #1374's report: 4,431 MB of a budget fallen to 5,280, pressure 6
-        let p = plan(memory(5_280, 4_431, 6), user, screen(3440, 1369), None, false);
+        let p = plan(memory(5_280, 4_431, 6), user, Tune::default(), screen(3440, 1369), None, false);
         assert_eq!(p.step, p.steps - 1);
         assert_eq!((p.values, p.extra), (user, 0));
         // #1374: already over the budget
-        let p = plan(memory(10_312, 10_415, 7), user, screen(1920, 1080), None, false);
+        let p = plan(memory(10_312, 10_415, 7), user, Tune::default(), screen(1920, 1080), None, false);
         assert_eq!(p.values, user);
         // the same card earlier, budget still 7,249 MB and the textures
         // fine: 724 MB of room, not enough for a step with its estimate
         // doubled at once; it climbs to part of the boost, the MSAA first
         let (m, s) = (memory(7_249, 5_800, 0), screen(3440, 1369));
-        let mut step = plan(m, user, s, None, false).step;
+        let mut step = plan(m, user, Tune::default(), s, None, false).step;
         for _ in 0..10 {
-            let held = plan(m, user, s, Some(step), false).extra;
+            let held = plan(m, user, Tune::default(), s, Some(step), false).extra;
             let reading = memory(7_249, 5_800 + (held >> 20), 0);
-            let next = plan(reading, user, s, Some(step), true).step;
+            let next = plan(reading, user, Tune::default(), s, Some(step), true).step;
             if next == step {
                 break;
             }
             step = next;
         }
-        let p = plan(m, user, s, Some(step), false);
+        let p = plan(m, user, Tune::default(), s, Some(step), false);
         assert!(p.reduced() && p.step < p.steps - 1, "{p:?}");
         assert!(p.values.antialiasing != MSAA_8X);
         assert!(p.extra <= 7_249 * MB - margin(m.expect("m")) - 5_800 * MB);
@@ -927,7 +985,7 @@ mod tests {
         let user = user();
         let s = screen(3840, 2054);
         let m = memory(9_025, 6_436, 0);
-        let p = plan(m, user, s, None, false);
+        let p = plan(m, user, Tune::default(), s, None, false);
         assert!(p.step > 0, "the whole boost at once lost the GPU there: {p:?}");
         assert_ne!(p.values.antialiasing, MSAA_8X);
         // then a step at a time, never two, while the readings (the user's
@@ -941,8 +999,8 @@ mod tests {
         };
         let mut step = p.step;
         for _ in 0..p.steps {
-            let held = plan(m, user, s, Some(step), false).extra;
-            let next = plan(reading(6_436 * MB + held), user, s, Some(step), true).step;
+            let held = plan(m, user, Tune::default(), s, Some(step), false).extra;
+            let next = plan(reading(6_436 * MB + held), user, Tune::default(), s, Some(step), true).step;
             assert!(next + 1 >= step, "{step} -> {next}");
             if next == step {
                 break;
@@ -952,7 +1010,7 @@ mod tests {
         // where it settles, the step fits under the budget with its margin,
         // and the whole boost is not reached on this card
         assert!(step > 0);
-        let usage = 6_436 * MB + plan(m, user, s, Some(step), false).extra;
+        let usage = 6_436 * MB + plan(m, user, Tune::default(), s, Some(step), false).extra;
         assert!(usage <= 9_025 * MB - margin(reading(usage).expect("a reading")), "{step}");
     }
 
@@ -966,12 +1024,12 @@ mod tests {
             ..Settings::default()
         };
         let before = s.clone();
-        let mut held = boost(&mut s);
+        let mut held = boost(&mut s, Tune::default());
         // the user picks MSAA 4x in Preferences meanwhile
         s.antialiasing = MSAA_4X;
         held.sync(&s);
         // the memory lowers the boost to its last step
-        let steps = ladder(held.user());
+        let steps = ladder(held.user(), Tune::default());
         held.retarget(&mut s, *steps.last().expect("steps"));
         assert_eq!((s.draw_distance, s.shadow_quality, s.antialiasing), (96.0, 2, MSAA_4X));
         assert!(s.shadows);
@@ -989,7 +1047,7 @@ mod tests {
             shadows: false,
             ..Settings::default()
         };
-        let mut held = boost(&mut s);
+        let mut held = boost(&mut s, Tune::default());
         assert!(s.shadows);
         held.retarget(&mut s, held.user());
         assert!(!s.shadows);
@@ -1001,7 +1059,7 @@ mod tests {
             draw_distance: 96.0,
             ..Settings::default()
         };
-        s.photo_held = Some(boost(&mut s));
+        s.photo_held = Some(boost(&mut s, Tune::default()));
         assert_eq!(s.draw_distance, 512.0);
         let saved = s.to_saved();
         assert_eq!(saved.draw_distance, 96.0);

@@ -17,7 +17,9 @@ use crate::theme::Palette;
 use egui::{Align2, Color32, FontId, Id, Order, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2};
 
 mod controls;
+mod extras;
 mod isolate;
+mod keylist;
 mod light;
 mod looks;
 mod modes;
@@ -26,6 +28,7 @@ mod presets;
 mod sheets;
 mod style;
 pub use controls::{CamMode, Pad, roll_text};
+pub use extras::{ExtraEdit, ExtrasView};
 pub use isolate::{Isolate, IsolateRow};
 pub use modes::refused_text;
 pub use path::{PathFrame, SavedPath, WorldPath};
@@ -62,6 +65,12 @@ pub enum Sheet {
     /// The Path mode's sheet: the path's name, the saved paths, import and
     /// export (`path`).
     Path,
+    /// The render extras as sliders (`extras`).
+    Extras,
+    /// The photo-only quality choices (`extras`).
+    Quality,
+    /// The keys of the shot mode now chosen (`keylist`).
+    Keys,
 }
 
 /// The viewfinder's state for the session (its settings are
@@ -257,6 +266,8 @@ pub struct Frame<'a> {
     /// the joint the camera follows; the camera held by Camera lock.
     pub lens_extras: (bool, f32),
     pub deband: f32,
+    /// Preferences' render extras, for the Camera extras sheet.
+    pub extras: ExtrasView,
     pub follow: crate::camera::extra::FollowJoint,
     pub camera_locked: bool,
     /// The Camera Path being edited, for the Path mode (`path`).
@@ -279,6 +290,8 @@ pub struct Keys<'a> {
     pub menu: &'a str,
     pub af_mode: &'a str,
     pub first_person: Option<&'a str>,
+    /// The first person view's binding, for the key list's cap.
+    pub first_binding: Option<crate::keybinds::Binding>,
 }
 
 /// What the viewfinder asks of the app.
@@ -318,6 +331,9 @@ pub enum Out {
     /// Preferences' debanding, lens options and followed joint (global).
     Deband(f32),
     Lens(LensEdit),
+    /// The Camera extras sheet's sliders (Preferences' global settings); true
+    /// once the value is final, to write the settings.
+    Extras(ExtraEdit, bool),
     Follow(crate::camera::extra::FollowJoint),
     /// Camera lock on or off; the Camera Path and Cameratools windows.
     CameraLock,
@@ -875,6 +891,12 @@ impl Viewfinder {
             Some(Sheet::Guide) => self.guide_sheet(ctx, p, screen, s),
             Some(Sheet::Lens) => self.lens_sheet(ctx, p, screen, f, &mut out),
             Some(Sheet::Path) => self.path_sheet(ctx, p, screen, f, &mut out),
+            Some(Sheet::Extras) => self.extras_sheet(ctx, p, screen, f, &mut out),
+            Some(Sheet::Quality) => self.quality_sheet(ctx, p, screen, s),
+            Some(Sheet::Keys) => {
+                let mode = vf::shown(panel.shot, panel.depth, panel.bank);
+                self.keys_sheet(ctx, p, screen, mode, f.keys.menu, f.keys.first_binding.clone());
+            }
             Some(Sheet::Bank(i)) => {
                 let bank = f.banks[usize::from(i.min(2))].clone();
                 self.bank_sheet(ctx, p, screen, i, s, &bank, &mut out);
@@ -2921,6 +2943,21 @@ fn tiles(s: &Settings, panel: &SnapshotUi, f: &Frame) -> Vec<(&'static str, Stri
         Box::new(move |_, _| Some(Out::Deband(sheets::next_preset(deband, &sheets::DEBANDS)))),
     ));
     v.push((
+        aurora_i18n::tr!("vfx-extras-title"),
+        aurora_i18n::tr!("pcu-open").to_owned(),
+        Box::new(|_, _| Some(Out::Sheet(Sheet::Extras))),
+    ));
+    v.push((
+        aurora_i18n::tr!("vfx-quality-title"),
+        yes_no(s.quality),
+        Box::new(|_, _| Some(Out::Sheet(Sheet::Quality))),
+    ));
+    v.push((
+        aurora_i18n::tr!("vfx-keys-title"),
+        modes::label(vf::shown(panel.shot, panel.depth, panel.bank)).0,
+        Box::new(|_, _| Some(Out::Sheet(Sheet::Keys))),
+    ));
+    v.push((
         aurora_i18n::tr!("photo-huds"),
         on_off(s.huds, aurora_i18n::tr!("photo-vf-visible"), aurora_i18n::tr!("photo-vf-hidden")).to_owned(),
         Box::new(|s, _| {
@@ -3111,7 +3148,16 @@ mod sheet_tests {
 
     #[test]
     fn escape_closes_a_sheet_first_and_alone() {
-        for sheet in [Sheet::Modes, Sheet::Style, Sheet::Guide, Sheet::Lens, Sheet::Bank(1)] {
+        for sheet in [
+            Sheet::Modes,
+            Sheet::Style,
+            Sheet::Guide,
+            Sheet::Lens,
+            Sheet::Bank(1),
+            Sheet::Extras,
+            Sheet::Quality,
+            Sheet::Keys,
+        ] {
             let mut v = Viewfinder {
                 sheet: Some(sheet),
                 ..Viewfinder::default()

@@ -1,4 +1,5 @@
-//! `AURORA_DEMO_PHOTO_CAMERA=<what>[:down=<n>][:turn=<n>]`, with the
+//! `AURORA_DEMO_PHOTO_CAMERA=<what>[:down=<n>][:turn=<n>]` (also
+//! `AURORA_DEMO_VF_EXTRAS`, for the same scenario), with the
 //! viewfinder open (`AURORA_DEMO_SNAPSHOT=viewfinder`): the photo camera's
 //! quick menu, mode list or one of its sheets opens at frame 600, then the
 //! arrow keys go through the viewfinder's own key path (`viewfinder_key`):
@@ -7,7 +8,10 @@
 //! shows the camera pad with the right hand followed (in the demo's own
 //! settings, never the user's): with `AURORA_UI_FONT=OpenDyslexic` the
 //! Follow rows' labels must stay inside their cells. The log gives what is
-//! open and the row the keys are on at frame 700.
+//! open and the row the keys are on at frame 700. The viewfinder extras:
+//! `extras` (the render extras' sliders), `quality` (the photo-only
+//! quality choices) and `keys` (the key list of the Photo mode) or
+//! `keys-path` (the Path mode's, chosen first).
 
 use super::App;
 use crate::ui::viewfinder::Sheet;
@@ -22,6 +26,8 @@ enum Open {
     GuideSpiral,
     /// The camera pad, the right hand followed.
     Follow,
+    /// The key list with the Path mode chosen.
+    KeysPath,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,6 +54,10 @@ fn parse(value: &str) -> Option<Scenario> {
         "lens" => Open::Sheet(Sheet::Lens),
         "bank" => Open::Sheet(Sheet::Bank(0)),
         "follow" => Open::Follow,
+        "extras" => Open::Sheet(Sheet::Extras),
+        "quality" => Open::Sheet(Sheet::Quality),
+        "keys" => Open::Sheet(Sheet::Keys),
+        "keys-path" => Open::KeysPath,
         _ => return None,
     };
     let mut scenario = Scenario { open, down: 0, turn: 0 };
@@ -94,11 +104,19 @@ impl App {
         if !self.demo || !(OPEN_AT..=LOG_AT).contains(&self.frame_count) || !self.viewfinder_on() {
             return;
         }
-        let Some(s) = std::env::var("AURORA_DEMO_PHOTO_CAMERA").ok().as_deref().and_then(parse) else {
+        let Some(s) = std::env::var("AURORA_DEMO_PHOTO_CAMERA")
+            .or_else(|_| std::env::var("AURORA_DEMO_VF_EXTRAS"))
+            .ok()
+            .as_deref()
+            .and_then(parse)
+        else {
             return;
         };
         if self.frame_count == OPEN_AT {
             let mut out = Vec::new();
+            if s.open == Open::KeysPath {
+                self.vf_shot(crate::snapshot::viewfinder::ShotChoice::Path);
+            }
             let vf = &mut self.snapshots.vf;
             match s.open {
                 Open::Menu => vf.menu = true,
@@ -107,6 +125,7 @@ impl App {
                     self.settings.snapshot.guide = crate::snapshot::Guide::Spiral;
                     vf.open_sheet(Sheet::Guide, &mut out);
                 }
+                Open::KeysPath => vf.open_sheet(Sheet::Keys, &mut out),
                 Open::Follow => {
                     self.settings.snapshot.viewfinder.pad = true;
                     self.settings.camera.extra.follow_joint = crate::camera::extra::FollowJoint::RightHand;
@@ -149,6 +168,9 @@ mod tests {
         );
         assert_eq!(parse("bank").map(|s| s.open), Some(Open::Sheet(Sheet::Bank(0))));
         assert_eq!(parse("follow").map(|s| s.open), Some(Open::Follow));
+        assert_eq!(parse("extras").map(|s| s.open), Some(Open::Sheet(Sheet::Extras)));
+        assert_eq!(parse("quality:down=2:turn=1").map(|s| s.down), Some(2));
+        assert_eq!(parse("keys-path").map(|s| s.open), Some(Open::KeysPath));
         assert_eq!(parse("menu:down=99").map(|s| s.down), Some(20), "a bounded walk");
         assert_eq!(parse("nothing"), None);
         assert_eq!(parse("lens:up=1"), None);

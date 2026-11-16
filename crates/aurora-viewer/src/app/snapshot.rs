@@ -3520,17 +3520,35 @@ LUT_3D_SIZE {n}
             self.snapshots.quality_ask = true;
         }
         let want = self.panels.snapshot && self.settings.snapshot.quality;
+        // another photo-only choice (the viewfinder's Photo-only quality
+        // sheet): the user's values back, the boost made again below with it
+        // (never while a photo is being drawn)
+        let retune = want
+            && self.snapshots.job.is_none()
+            && self
+                .settings
+                .photo_held
+                .as_ref()
+                .is_some_and(|h| h.tune() != self.settings.snapshot.quality_tune);
+        if retune && let Some(mut held) = self.settings.photo_held.take() {
+            held.sync(&self.settings);
+            held.restore(&mut self.settings);
+            log::info!("photo quality: the photo-only choices changed, the boost is made again");
+            self.snapshots.fit = None;
+            self.snapshots.settings_changed = true;
+        }
         match (&self.settings.photo_held, want) {
             (None, true) => {
                 // marked before the boost: a crash while it is drawn turns
                 // the switch off at the next start
                 crate::crash::photo_quality(true);
-                let mut held = snapshot::quality::boost(&mut self.settings);
+                let tune = self.settings.snapshot.quality_tune;
+                let mut held = snapshot::quality::boost(&mut self.settings, tune);
                 // within what the video memory leaves, from the start, and
                 // with room for what the estimate leaves out: the whole
                 // boost is never drawn first on a card short of it, it
                 // climbs there a step at a time (`photo_quality_fit`)
-                let plan = self.photo_quality_plan(renderer, held.user(), None, false);
+                let plan = self.photo_quality_plan(renderer, held.user(), held.tune(), None, false);
                 if plan.reduced() {
                     held.retarget(&mut self.settings, plan.values);
                 }
@@ -3645,7 +3663,7 @@ LUT_3D_SIZE {n}
         // which the readings must hold
         let wait = if fit.climbing { FIT_SETTLE } else { FIT_RAISE_AFTER };
         let (current, may_raise) = (fit.step, now.duration_since(fit.changed) >= wait && renderer.settings_applied());
-        let plan = self.photo_quality_plan(renderer, held.user(), Some(current), may_raise);
+        let plan = self.photo_quality_plan(renderer, held.user(), held.tune(), Some(current), may_raise);
         let Some(fit) = &mut self.snapshots.fit else {
             return;
         };
@@ -3682,6 +3700,7 @@ LUT_3D_SIZE {n}
         &mut self,
         renderer: &Renderer,
         user: crate::graphics_presets::Values,
+        tune: snapshot::tune::Tune,
         current: Option<usize>,
         may_raise: bool,
     ) -> snapshot::quality::Plan {
@@ -3694,7 +3713,7 @@ LUT_3D_SIZE {n}
             target_bytes: snapshot::pass_bytes_per_pixel(self.snapshots.target_bytes, samples) - snapshot::PASS_OUTPUT_BYTES,
         };
         let memory = self.photo_memory(renderer);
-        snapshot::quality::plan(memory, user, screen, current, may_raise)
+        snapshot::quality::plan(memory, user, tune, screen, current, may_raise)
     }
 
     /// The video memory as the photo quality reads it: the driver's

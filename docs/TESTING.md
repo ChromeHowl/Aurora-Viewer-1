@@ -499,6 +499,7 @@ the background still applies outside screenshots.
 | `AURORA_DEMO_CONTROLS=camera\|roll\|movement\|compact\|compact-move\|classic\|views\|classic-views\|free\|free-compact` | The Controls window open on a tab, the Legacy Viewer's two windows, a view saved and given back, or driving the photo window's free camera |
 | `AURORA_DEMO_CAMERA_PRESETS=save\|apply\|object\|pick[-…]` | The viewfinder's camera presets: saved on the avatar, a place and an object, applied, or the object chosen in the scene |
 | `AURORA_DEMO_PHOTO_CAMERA=<what>[:down=<n>][:turn=<n>]` | The photo camera's quick menu, mode list or a sheet walked with the arrow keys (the row the keys are on lit), or the camera pad's Follow rows |
+| `AURORA_DEMO_VF_EXTRAS=<what>[:down=<n>][:turn=<n>]` | The viewfinder's extras, same scenario and keys as `AURORA_DEMO_PHOTO_CAMERA`: `extras` (render extras as sliders), `quality` (photo-only quality), `keys` (key list of the Photo mode), `keys-path` (the Path mode's) |
 | `AURORA_DEMO_VF_PATH=<what>[:<what>…]` | The viewfinder's Path mode (camera movie): a four-waypoint demo path, its timeline strip, dock buttons, sheet, playback or recording |
 
 `AURORA_DEMO_RENDER_TEXTURE`: with demo mode and `AURORA_CAPTURE`, the capture
@@ -1023,6 +1024,20 @@ row …`. With `follow` and `AURORA_UI_FONT=OpenDyslexic`, the pad's Follow
 labels shrink to their cells (an ellipsis past 9 points, the whole name in
 the tip); with the default font they keep their size. `follow` changes the
 demo profile's settings only.
+
+`AURORA_DEMO_VF_EXTRAS` (with `AURORA_DEMO_SNAPSHOT=viewfinder`): the same scenario as `AURORA_DEMO_PHOTO_CAMERA`
+(`down` presses of Down, then `turn` presses of Right or Left on the row reached), for the sheets of the viewfinder's
+extras. `extras`: Camera extras, the render extras of Preferences › Graphics as a switch (scene lights) and sliders (lamp
+power 0 to 4, shadow detail 1 to 4×, ground texture 1 to 24 m, anti-banding 0 to 2); a slider moved by hand writes
+Preferences' value at once and the settings once it is let go, the arrow keys step it (0.25, 0.25, 1 m, 0.25). Check
+that Preferences › Graphics shows the same values afterwards. `quality`: Photo-only quality, the anti-aliasing (Max 8x,
+4x, 2x, Mine), shadows (Max, High, Mine), draw distance (512 m, 256 m, Mine) of the Photo quality boost and the render
+scale; with the quick menu's Photo quality on, a choice remakes the boost (the log says `photo quality: the photo-only
+choices changed, the boost is made again`, then the new `photo quality: on` line with the chosen MSAA, shadows and draw
+distance); with it off the sheet says its choices apply once it is on. Close the photo window: Preferences shows the
+user's own values again. `keys`: the key list of the Photo mode as keycaps (Enter, N, V, L, B, T, 1 to 5, P, the menu,
+G, I, K, H, Escape); `keys-path`: the Path mode's (Enter says "Add a waypoint", no focus, exposure, white balance, style
+or focal keys). The K key and the quick menu's Keys tile open it, and it follows the mode when P is pressed.
 
 `AURORA_DEMO_VF_PATH` (with `AURORA_DEMO_SNAPSHOT=viewfinder`): at frame 600 the Path shot mode is chosen
 and a demo path of four waypoints (Smooth, Ease, Smooth, Linear) is placed in front of the camera, the second selected

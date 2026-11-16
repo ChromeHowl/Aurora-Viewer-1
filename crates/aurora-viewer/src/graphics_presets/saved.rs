@@ -278,7 +278,7 @@ mod tests {
         let mut s = Settings::default();
         Preset::Low.apply(&mut s);
         let user = Saved::read(&s);
-        s.photo_held = Some(crate::snapshot::quality::boost(&mut s));
+        s.photo_held = Some(crate::snapshot::quality::boost(&mut s, Default::default()));
         assert_ne!(Saved::read(&s), user);
         assert_eq!(Saved::capture(&s), user);
         s.graphics_saved.insert("My quality".into(), user);

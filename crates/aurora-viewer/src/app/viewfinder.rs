@@ -519,7 +519,7 @@ impl App {
 
     /// A shot mode chosen (the list, its tile, the P key): Full set, 360°
     /// and Depth write to the disk.
-    fn vf_shot(&mut self, choice: vf::ShotChoice) {
+    pub(super) fn vf_shot(&mut self, choice: vf::ShotChoice) {
         let now = self.vf_now();
         if let Some((_, Some(why))) = self.vf_shot_list().into_iter().find(|(c, _)| *c == choice) {
             self.snapshots.vf.say(crate::ui::viewfinder::refused_text(why), true, now);
@@ -946,7 +946,7 @@ impl App {
             _ if free => letter
                 .chars()
                 .next()
-                .filter(|c| matches!(c, 'q' | 'i' | 'n' | 'v' | 'g' | 'h' | 'l' | 'p' | 'b' | 't')),
+                .filter(|c| matches!(c, 'q' | 'i' | 'n' | 'v' | 'g' | 'h' | 'l' | 'p' | 'b' | 't' | 'k')),
             _ => None,
         };
         let Some(which) = which else {
@@ -978,9 +978,10 @@ impl App {
             }
             'n' => self.vf_cycle_af(),
             'b' => v.toggle_wb_dial(),
-            't' => {
+            't' | 'k' => {
                 let mut ignored = Vec::new();
-                v.toggle_sheet(Sheet::Style, &mut ignored);
+                // (T: the picture style, K: the keys of the mode)
+                v.toggle_sheet(if which == 't' { Sheet::Style } else { Sheet::Keys }, &mut ignored);
                 // (the isolation panel closed by the one-panel rule)
                 for o in ignored {
                     if let Out::Isolate(o) = o {
@@ -1233,6 +1234,7 @@ impl App {
                 menu: &menu_key,
                 af_mode: &af_key,
                 first_person: first_key.as_deref().filter(|_| first_allowed),
+                first_binding: self.settings.keybinds.get(Bind::Mouselook)[0].clone().filter(|_| first_allowed),
             },
             isolation: &self.world.photo_isolation,
             isolate_rows: &isolate_rows,
@@ -1253,6 +1255,7 @@ impl App {
                 self.settings.render_extras.dof_dispersion,
             ),
             deband: self.settings.render_extras.deband,
+            extras: crate::ui::viewfinder::ExtrasView::of(&self.settings.render_extras),
             follow: self.settings.camera.extra.follow_joint,
             camera_locked: self.camera.locked(),
             path: self.camera_tools.viewfinder_frame(path_world),
@@ -1335,6 +1338,14 @@ impl App {
                 Out::Lens(crate::ui::viewfinder::LensEdit::Fringe(v)) => {
                     self.settings.render_extras.dof_dispersion = v.clamp(0.0, 1.0);
                     self.settings.save();
+                }
+                // the Camera extras sheet's sliders: Preferences' own, written
+                // to disk once the value is final
+                Out::Extras(edit, commit) => {
+                    edit.apply(&mut self.settings.render_extras);
+                    if commit {
+                        self.settings.save();
+                    }
                 }
                 Out::Follow(joint) => {
                     self.settings.camera.extra.follow_joint = joint;

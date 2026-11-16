@@ -32,6 +32,7 @@ pub mod reel;
 pub mod save;
 pub mod saved;
 pub mod style;
+pub mod tune;
 pub mod viewfinder;
 
 use glam::{Mat4, Vec4};
@@ -358,6 +359,9 @@ pub struct Settings {
     /// "Photo quality" turned off at the next start when the viewer crashed
     /// or was stopped while it was on (`crash::take_photo_quality_crash`).
     pub quality_off_after_crash: bool,
+    /// How much of the boost a photo takes (the viewfinder's Photo-only
+    /// quality sheet, `tune`).
+    pub quality_tune: tune::Tune,
     /// The viewfinder's display, AF area, peaking and beep.
     pub viewfinder: viewfinder::Prefs,
     /// The photo's looks, the first one drawn first (`looks`); none: the
@@ -407,6 +411,7 @@ impl Default for Settings {
             supersampling: Default::default(),
             quality_warned: false,
             quality_off_after_crash: true,
+            quality_tune: tune::Tune::default(),
             viewfinder: Default::default(),
             looks: Vec::new(),
             look_settings: Default::default(),
