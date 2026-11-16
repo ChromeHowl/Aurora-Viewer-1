@@ -32,7 +32,7 @@ impl App {
         (wanted || self.world.rlva_has_locked_hud()) && (!self.viewfinder_on() || self.settings.snapshot.huds)
     }
 
-    fn vf_now(&self) -> f64 {
+    pub(super) fn vf_now(&self) -> f64 {
         self.egui_ctx.input(|i| i.time)
     }
 
@@ -52,6 +52,7 @@ impl App {
     pub(super) fn viewfinder_frame(&mut self, renderer: &mut Renderer) {
         self.camera_presets_demo(renderer.size());
         self.photo_camera_demo();
+        self.viewfinder_path_demo();
         // the focal length is the photo's: the view's own comes back when
         // the viewfinder closes
         // the depth of field on, once, for the profiles that saved it off
@@ -433,15 +434,21 @@ impl App {
 
     /// The photo, with the shutter's blackout.
     fn vf_fire(&mut self, renderer: &Renderer) {
+        // the shot mode: the shutter button, Enter, a shot waiting for the
+        // focus and the self-timer all come here
+        let ui = &self.snapshots.ui;
+        let fire = vf::shutter_action(ui.shot, ui.depth);
+        // (the Path mode places a waypoint: no photo, no blackout)
+        if fire == vf::Fire::Waypoint {
+            self.vf_waypoint();
+            return;
+        }
         let now = self.vf_now();
         let v = &mut self.snapshots.vf;
         v.flash_at = Some(now);
         v.hinted = true;
-        // the shot mode: the shutter button, Enter, a shot waiting for the
-        // focus and the self-timer all come here
-        let ui = &self.snapshots.ui;
-        let action = match vf::shutter_action(ui.shot, ui.depth) {
-            vf::Fire::Take => Action::Take,
+        let action = match fire {
+            vf::Fire::Take | vf::Fire::Waypoint => Action::Take,
             vf::Fire::FullSave => Action::FullSave,
             vf::Fire::Pano => Action::Pano,
         };
@@ -547,6 +554,10 @@ impl App {
             return;
         }
         self.snapshots.vf.pressed = true;
+        // (a waypoint needs no focus: it is placed as the shutter is released)
+        if self.vf_path_mode() {
+            return;
+        }
         if self.settings.snapshot.dof.focus != PhotoFocus::Click {
             return;
         }
@@ -566,6 +577,10 @@ impl App {
     /// locked (focus priority); none after a failed focus.
     fn vf_release(&mut self, renderer: &Renderer) {
         if !std::mem::take(&mut self.snapshots.vf.pressed) {
+            return;
+        }
+        if self.vf_path_mode() {
+            self.vf_waypoint();
             return;
         }
         let v = &mut self.snapshots.vf;
@@ -1184,6 +1199,8 @@ impl App {
         }
         let preset_object = self.snapshots.vf.preset_form.object.map(|id| self.photo_isolate_name(&id).0);
         let first_allowed = self.settings.camera.enable_mouselook;
+        // (the Path mode: the path in the world view, put on the screen)
+        let path_world = self.vf_path_world(projector);
         // (the stack only opens the quick view: no destination, no clock)
         let no_time = |_: i64| String::new();
         let reel = self.snapshots.reel.view(&[], &no_time);
@@ -1235,6 +1252,7 @@ impl App {
             deband: self.settings.render_extras.deband,
             follow: self.settings.camera.extra.follow_joint,
             camera_locked: self.camera.locked(),
+            path: self.camera_tools.viewfinder_frame(path_world),
         };
         // the demo aims at the own avatar's face, then shoots
         let (aim, shoot) = self.photo_demo_viewfinder();
@@ -1324,6 +1342,8 @@ impl App {
                 Out::Cameratools => {
                     crate::ui::widgets::toggle_floater(ctx, crate::ui::options::cameratools::WINDOW, &mut self.panels.cameratools)
                 }
+                Out::Path(action) => self.vf_path_action(action),
+                Out::PathSelect(index) => self.camera_tools.select(index),
                 Out::Exit => self.panels.snapshot = false,
             }
         }
