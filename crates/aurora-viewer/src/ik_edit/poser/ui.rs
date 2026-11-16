@@ -111,6 +111,7 @@ impl Editor {
             session.history(redo);
             self.refresh = true;
         }
+        self.inventory_picker_ui(ctx, p, &world.inventory);
         if let Some(save) = self.poser.storage.overwrite.clone() {
             widgets::Modal::new(egui::Id::unique("poser-overwrite-confirm")).show(ctx, |ui| {
                 ui.heading(aurora_i18n::tr!("poser-overwrite"));
@@ -500,6 +501,9 @@ impl Editor {
                 menu::separator(ui, p);
                 if menu::item(ui, p, "folder-filled", aurora_i18n::text("wornposer-open-file")) {
                     self.poser.storage.job = Some(storage::Job::Load(None, LoadMode::All, self.poser.subject));
+                }
+                if menu::item(ui, p, "archive-filled", aurora_i18n::text("poser-inv-menu")) {
+                    self.poser.inventory_load.open = true;
                 }
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

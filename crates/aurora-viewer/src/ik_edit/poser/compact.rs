@@ -1009,6 +1009,9 @@ impl Editor {
             if menu::item(ui, p, "folder-filled", aurora_i18n::text("poser-open-file")) {
                 load = Some(None);
             }
+            if menu::item(ui, p, "archive-filled", aurora_i18n::text("poser-inv-menu")) {
+                self.poser.inventory_load.open = true;
+            }
             if let Some(path) = load {
                 // another file loads whole, as the full window's Open file
                 let mode = if path.is_some() { self.poser.load_mode } else { LoadMode::All };

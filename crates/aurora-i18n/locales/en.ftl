@@ -16744,3 +16744,23 @@ status-share-hide-busy = Not while busy
 status-share-hide-busy-hint = Share nothing while you are in do not disturb. Nothing is ever shared while you are invisible.
 status-share-show-others = Show the status of others
 status-share-show-others-hint = Draw the chip beside the name plates of residents who share one.
+
+# Poser: Load › Inventory animation
+poser-inv-menu = Inventory animation…
+poser-inv-title = Load an animation from your inventory
+poser-inv-empty = No animation to show. Open your Animations folder in Inventory to load it here.
+poser-inv-hint = Greyed-out animations lack the rights to read their motion into the poser (copy, modify and transfer are all needed).
+poser-inv-right-copy = copy
+poser-inv-right-modify = modify
+poser-inv-right-transfer = transfer
+poser-inv-refused = Cannot be loaded into the poser: you lack the {$rights} permission(s) on this animation.
+poser-inv-unavailable = This animation is not available.
+poser-inv-loading = Loading { $name } from your inventory…
+poser-inv-loaded = Loaded { $name } from your inventory.
+poser-inv-failed = Could not get the animation { $name }. Try again in a moment.
+poser-inv-note-frame = Only its first frame was read: the poser holds one pose, not a timeline.
+poser-inv-note-joints = { $count ->
+    [one] { $count } joint of this animation is not on this skeleton and was skipped.
+   *[other] { $count } joints of this animation are not on this skeleton and were skipped.
+    }
+poser-inv-note-extras = Loop, easing, priority and constraint settings do not carry into a pose.

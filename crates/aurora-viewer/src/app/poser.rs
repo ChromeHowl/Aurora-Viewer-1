@@ -16,6 +16,20 @@ impl App {
                 objects: vec![crate::demo::action_avatar(false)],
             });
         }
+        // inventory-load: demo animations in the Animations folder, the
+        // full-permission one known to the animation streamer
+        if self.frame_count == 300 && mode.contains("inventory-load") {
+            let inv = &mut self.world.inventory;
+            let parent = crate::world::inventory::actions::system(inv, 20).unwrap_or(inv.root);
+            inv.add_items(crate::demo::poser::inventory_animations(self.world.agent_id, parent));
+            self.scene.anims.insert(
+                uuid::Uuid::from_u128(0x727_d001),
+                std::sync::Arc::new(crate::scene::anim::BoundAnim::bind(
+                    crate::demo::poser::inventory_animation(),
+                    &self.world.avatar_lib.rig,
+                )),
+            );
+        }
         // square-head: our shape's Head Shape slider at 100, which turns the
         // forehead joints' scale negative on one axis (#1249)
         if mode == "square-head" && self.frame_count == 300 {

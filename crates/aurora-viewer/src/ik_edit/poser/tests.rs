@@ -3812,3 +3812,227 @@ fn hand_presets_turn_each_finger_as_the_legacy_viewer_does() {
         }
     }
 }
+
+mod inventory_load_tests {
+    use super::*;
+    use crate::scene::anim::{AnimStreamer, BoundAnim};
+    use crate::world::inventory::{Inventory, actions::{COPY, FULL, MODIFY, TRANSFER}};
+    use aurora_net::inventory::InvItem;
+    use inventory_load::{Refusal, Source};
+
+    const AGENT: u128 = 0x1001;
+    fn id(n: u128) -> Uuid {
+        Uuid::from_u128(0x7000 + n)
+    }
+    fn inventory() -> Inventory {
+        Inventory {
+            owner: Uuid::from_u128(AGENT),
+            ..Default::default()
+        }
+    }
+    fn animation(n: u128, owner: u128, owner_mask: u32, everyone_mask: u32, group_owned: bool) -> InvItem {
+        InvItem {
+            id: id(n),
+            name: format!("Animation {n}"),
+            asset_type: 20,
+            inv_type: 19,
+            asset_id: id(100 + n),
+            owner: Uuid::from_u128(owner),
+            group_owned,
+            owner_mask,
+            everyone_mask,
+            ..Default::default()
+        }
+    }
+    fn with(items: Vec<InvItem>) -> Inventory {
+        let mut inv = inventory();
+        for item in items {
+            inv.items.insert(item.id, item);
+        }
+        inv
+    }
+
+    #[test]
+    fn the_rule_reads_the_rights_the_agent_holds_on_each_kind_of_item() {
+        let library = 0x2002;
+        let inv = with(vec![
+            animation(1, AGENT, FULL, 0, false),
+            animation(2, AGENT, FULL & !COPY, 0, false),
+            animation(3, AGENT, FULL & !MODIFY, 0, false),
+            animation(4, AGENT, FULL & !TRANSFER, 0, false),
+            animation(5, AGENT, FULL, 0, true),
+            animation(6, 0x3003, FULL, COPY, false),
+            animation(7, library, 0, FULL, false),
+            animation(8, library, FULL, COPY | TRANSFER, false),
+        ]);
+        let expected = |n, asset_ok: Result<(), Refusal>| {
+            let got = inventory_load::source(&inv, id(n));
+            match asset_ok {
+                Ok(()) => assert_eq!(
+                    got,
+                    Ok(Source {
+                        item: id(n),
+                        asset: id(100 + n),
+                        name: format!("Animation {n}")
+                    }),
+                    "item {n}"
+                ),
+                Err(refusal) => assert_eq!(got, Err(refusal), "item {n}"),
+            }
+        };
+        expected(1, Ok(()));
+        expected(2, Err(Refusal::Rights(COPY)));
+        expected(3, Err(Refusal::Rights(MODIFY)));
+        expected(4, Err(Refusal::Rights(TRANSFER)));
+        expected(5, Err(Refusal::Rights(FULL)));
+        expected(6, Err(Refusal::Rights(MODIFY | TRANSFER)));
+        expected(7, Ok(()));
+        expected(8, Err(Refusal::Rights(MODIFY)));
+    }
+
+    #[test]
+    fn what_is_no_animation_or_has_no_asset_is_unavailable_and_a_link_follows_its_original() {
+        let mut texture = animation(1, AGENT, FULL, 0, false);
+        texture.asset_type = 0;
+        let mut no_asset = animation(2, AGENT, FULL, 0, false);
+        no_asset.asset_id = Uuid::nil();
+        let mut link = animation(4, AGENT, FULL, 0, false);
+        link.asset_type = 24;
+        link.asset_id = id(3);
+        let mut link_to_refused = animation(6, AGENT, FULL, 0, false);
+        link_to_refused.asset_type = 24;
+        link_to_refused.asset_id = id(5);
+        let inv = with(vec![
+            texture,
+            no_asset,
+            animation(3, AGENT, FULL, 0, false),
+            link,
+            animation(5, AGENT, FULL & !MODIFY, 0, false),
+            link_to_refused,
+        ]);
+        assert_eq!(inventory_load::source(&inv, id(1)), Err(Refusal::Unavailable));
+        assert_eq!(inventory_load::source(&inv, id(2)), Err(Refusal::Unavailable));
+        assert_eq!(inventory_load::source(&inv, id(99)), Err(Refusal::Unavailable));
+        assert_eq!(inventory_load::source(&inv, id(4)).map(|s| s.item), Ok(id(3)));
+        assert_eq!(inventory_load::source(&inv, id(6)), Err(Refusal::Rights(MODIFY)));
+    }
+
+    #[test]
+    fn the_picker_lists_allowed_animations_first_counts_a_link_once_and_filters_by_name() {
+        let mut link = animation(9, AGENT, FULL, 0, false);
+        link.asset_type = 24;
+        link.asset_id = id(1);
+        link.name = "Link to Animation 1".into();
+        let inv = with(vec![
+            animation(1, AGENT, FULL, 0, false),
+            animation(2, AGENT, FULL & !COPY, 0, false),
+            animation(3, AGENT, FULL, 0, false),
+            link,
+        ]);
+        let all = inventory_load::candidates(&inv, "");
+        let names: Vec<_> = all.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["Animation 1", "Animation 3", "Animation 2"]);
+        assert_eq!(all[2].refusal, Some(Refusal::Rights(COPY)));
+        assert!(all[0].refusal.is_none());
+        let found = inventory_load::candidates(&inv, "ANIMATION 2");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].item, id(2));
+    }
+
+    #[test]
+    fn the_rights_are_named_in_the_text_and_no_id_is_in_it() {
+        let text = inventory_load::rights_text(COPY | TRANSFER);
+        assert!(text.contains(aurora_i18n::text("poser-inv-right-copy")));
+        assert!(text.contains(aurora_i18n::text("poser-inv-right-transfer")));
+        assert!(!text.contains(aurora_i18n::text("poser-inv-right-modify")));
+        assert_eq!(inventory_load::rights_text(0), "");
+    }
+
+    fn demo_clip(rig: &Rig) -> Arc<BoundAnim> {
+        Arc::new(BoundAnim::bind(demo::poser::inventory_animation(), rig))
+    }
+
+    #[test]
+    fn the_notes_tell_what_a_pose_cannot_hold() {
+        let (world, _) = fixture();
+        let clip = demo_clip(&world.avatar_lib.rig);
+        let ignored = inventory_load::Ignored::of(&clip);
+        assert_eq!(ignored.unknown_joints, 1, "mNotARealJoint is on no skeleton");
+        assert!(ignored.more_frames);
+        assert!(!ignored.text().is_empty());
+        let mut still = demo::poser::inventory_animation();
+        still.joints.truncate(1);
+        still.joints[0].rot_keys.truncate(1);
+        let still = BoundAnim::bind(still, &world.avatar_lib.rig);
+        let ignored = inventory_load::Ignored::of(&still);
+        assert_eq!((ignored.unknown_joints, ignored.more_frames), (0, false));
+    }
+
+    #[test]
+    fn the_field_name_is_cleaned_like_a_files_name() {
+        assert_eq!(inventory_load::field_name("A|b\nc"), "Abc");
+        assert_eq!(inventory_load::field_name(&"x".repeat(300)).chars().count(), 100);
+    }
+
+    fn streamer() -> (AnimStreamer, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("aurora-poser-inv-{}", Uuid::new_v4()));
+        (AnimStreamer::new(dir.clone()), dir)
+    }
+
+    #[test]
+    fn an_allowed_animation_loads_as_a_file_does_with_its_name_and_one_undo_step() {
+        let (world, mut editor) = fixture();
+        let rig = &world.avatar_lib.rig;
+        let mut inv = with(vec![animation(1, AGENT, FULL, 0, false)]);
+        let (mut streamer, dir) = streamer();
+        // still on its way: nothing is loaded yet, and the request waits
+        editor.start_inventory_load(&inv, id(1)).expect("allowed");
+        editor.tick_inventory_load(&mut streamer, &mut inv);
+        assert!(editor.poser.inventory_load.pending());
+        assert!(editor.poser.storage.injected.is_empty());
+        streamer.insert(id(101), demo_clip(rig));
+        editor.tick_inventory_load(&mut streamer, &mut inv);
+        assert!(!editor.poser.inventory_load.pending());
+        let subject = editor.poser.subject;
+        let undo = editor.poser.sessions[&subject].undo.len();
+        let injected = std::mem::take(&mut editor.poser.storage.injected);
+        assert_eq!(injected.len(), 1);
+        for (subject, loaded) in injected {
+            editor.apply_loaded(&world, subject, loaded);
+        }
+        let session = &editor.poser.sessions[&subject];
+        assert_eq!(session.undo.len(), undo + 1, "one undo step");
+        let head = session.pose.rotations[rig.names["mHead"]];
+        assert!(near(head, Quat::from_rotation_z(0.6)), "the first frame is the pose");
+        assert_eq!(editor.poser.name, "Animation 1", "the item's name");
+        let message = editor.poser.storage.message.clone().unwrap_or_default();
+        assert!(message.contains("Animation 1"), "{message}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_refused_animation_never_starts_and_rights_lost_on_the_way_stop_the_load() {
+        let (world, mut editor) = fixture();
+        let rig = &world.avatar_lib.rig;
+        let mut inv = with(vec![
+            animation(1, AGENT, FULL, 0, false),
+            animation(2, AGENT, FULL & !MODIFY, 0, false),
+        ]);
+        let (mut streamer, dir) = streamer();
+        streamer.insert(id(101), demo_clip(rig));
+        streamer.insert(id(102), demo_clip(rig));
+        assert_eq!(editor.start_inventory_load(&inv, id(2)), Err(Refusal::Rights(MODIFY)));
+        assert!(!editor.poser.inventory_load.pending());
+        editor.tick_inventory_load(&mut streamer, &mut inv);
+        assert!(editor.poser.storage.injected.is_empty(), "nothing read for a refused item");
+        // allowed at the click, refused when the asset arrives
+        editor.start_inventory_load(&inv, id(1)).expect("allowed");
+        inv.items.get_mut(&id(1)).expect("item").owner_mask = FULL & !TRANSFER;
+        editor.tick_inventory_load(&mut streamer, &mut inv);
+        assert!(editor.poser.storage.injected.is_empty());
+        assert!(!editor.poser.inventory_load.pending());
+        let message = editor.poser.storage.message.clone().unwrap_or_default();
+        assert!(message.contains(aurora_i18n::text("poser-inv-right-transfer")), "{message}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
