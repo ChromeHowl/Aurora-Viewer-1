@@ -163,8 +163,10 @@ mod tests {
 
     #[test]
     fn sequence_numbers_wrap() {
-        let mut s = Sender::default();
-        s.seq = 255;
+        let mut s = Sender {
+            seq: 255,
+            ..Sender::default()
+        };
         assert_eq!(s.poll(0.0, Some(&payload("a")), 0).map(|x| x.seq), Some(0));
     }
 }
