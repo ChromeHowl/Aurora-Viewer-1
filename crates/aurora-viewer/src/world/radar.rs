@@ -610,6 +610,7 @@ impl Marks {
         self.map.is_empty()
     }
 
+    #[cfg(test)]
     pub fn contains(&self, id: &Uuid) -> bool {
         self.map.contains_key(id)
     }
