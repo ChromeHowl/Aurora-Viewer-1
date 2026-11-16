@@ -24,6 +24,9 @@ pub const WIDTH: f32 = 360.0;
 /// What the panel's overlay adds around its content: 6 px of margin and the
 /// 1 px border on each side.
 const PANEL_FRAME: f32 = 14.0;
+/// Spacing between the rows inside one card (the gap between cards is the
+/// `toast_gap` option).
+const CARD_ROW_SPACING: f32 = 6.0;
 /// Seconds a card stays rolled out: information / waiting for an answer.
 pub const SHOW_INFO: f64 = 6.0;
 pub const SHOW_ANSWER: f64 = 12.0;
@@ -507,7 +510,7 @@ fn rolled_out(
     now: f64,
     answers: &mut Vec<(u64, Response)>,
 ) {
-    ui.spacing_mut().item_spacing.y = 6.0;
+    ui.spacing_mut().item_spacing.y = list.options.toast_gap;
     let (shown, behind) = visible(&nui.center);
     // newest on top
     for peek in shown.iter().rev() {
@@ -520,6 +523,8 @@ fn rolled_out(
         let top = ui.cursor().min;
         let width = nui.center.inner_width;
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(Rect::from_min_size(top, Vec2::new(width, 4000.0))));
+        // the card's own rows keep their spacing whatever the gap between cards
+        child.spacing_mut().item_spacing.y = CARD_ROW_SPACING;
         if fold > 0.0 {
             child.set_clip_rect(Rect::from_min_size(top, Vec2::new(width + 12.0, full_h * keep)).intersect(ui.clip_rect()));
             child.multiply_opacity(keep);
@@ -877,7 +882,7 @@ fn presence_toasts(
         .collect();
     let avoid: Vec<Rect> = chat_lines(ctx).into_iter().collect();
     let only: Vec<Vec2> = sizes.iter().map(|(s, _)| *s).collect();
-    let rects = presence::stack(room, env.presence_at, &only, &avoid);
+    let rects = presence::stack(room, env.presence_at, &only, &avoid, list.options.toast_gap);
     let Some(min) = rects.iter().flatten().map(|r| r.min).reduce(|a, b| a.min(b)) else {
         return;
     };

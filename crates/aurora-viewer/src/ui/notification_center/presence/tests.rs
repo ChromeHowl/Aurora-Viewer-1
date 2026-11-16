@@ -24,7 +24,7 @@ fn sizes(n: usize) -> Vec<Vec2> {
 fn toasts_start_from_their_edge_and_stack_away_from_it() {
     let s = sizes(3);
     for at in PresencePosition::ALL {
-        let rects: Vec<Rect> = stack(ROOM, at, &s, &[]).into_iter().map(|r| r.expect("fits")).collect();
+        let rects: Vec<Rect> = stack(ROOM, at, &s, &[], GAP).into_iter().map(|r| r.expect("fits")).collect();
         for (r, size) in rects.iter().zip(&s) {
             assert_eq!(r.size(), *size, "{at:?}");
             assert!(ROOM.contains_rect(*r), "{at:?} {r:?}");
@@ -52,12 +52,26 @@ fn toasts_start_from_their_edge_and_stack_away_from_it() {
 fn the_chat_lines_shorten_the_room_from_below() {
     let chat = Rect::from_min_max(Pos2::new(8.0, 560.0), Pos2::new(560.0, 674.0));
     let s = sizes(2);
-    let left = stack(ROOM, PresencePosition::BottomLeft, &s, &[chat]);
+    let left = stack(ROOM, PresencePosition::BottomLeft, &s, &[chat], GAP);
     let first = left[0].expect("fits");
     assert_eq!(first.bottom(), chat.top() - GAP);
     assert!(left.iter().flatten().all(|r| !overlaps(*r, chat)));
-    let right = stack(ROOM, PresencePosition::BottomRight, &s, &[chat]);
+    let right = stack(ROOM, PresencePosition::BottomRight, &s, &[chat], GAP);
     assert_eq!(right[0].expect("fits").bottom(), ROOM.bottom());
+}
+
+/// The gap option spaces the toasts and the chat lines alike, from none to
+/// the widest the option allows.
+#[test]
+fn the_toast_gap_spaces_the_stack_and_the_chat_lines() {
+    let chat = Rect::from_min_max(Pos2::new(8.0, 560.0), Pos2::new(560.0, 674.0));
+    let s = sizes(2);
+    for gap in [0.0, GAP, *crate::settings::notification_options::GAP.end()] {
+        let r = stack(ROOM, PresencePosition::BottomLeft, &s, &[chat], gap);
+        let (a, b) = (r[0].expect("fits"), r[1].expect("fits"));
+        assert_eq!(a.bottom(), chat.top() - gap);
+        assert_eq!(b.bottom(), a.top() - gap);
+    }
 }
 
 /// A room lower than the stack keeps the newest toasts that fit, never
@@ -66,7 +80,7 @@ fn the_chat_lines_shorten_the_room_from_below() {
 fn a_low_room_keeps_the_newest_that_fit() {
     let low = Rect::from_min_max(Pos2::new(8.0, 56.0), Pos2::new(1272.0, 160.0));
     for at in PresencePosition::ALL {
-        let rects = stack(low, at, &sizes(4), &[]);
+        let rects = stack(low, at, &sizes(4), &[], GAP);
         assert_eq!(
             rects.iter().map(Option::is_some).collect::<Vec<_>>(),
             [false, false, true, true],
@@ -75,7 +89,11 @@ fn a_low_room_keeps_the_newest_that_fit() {
         assert!(rects.iter().flatten().all(|r| low.contains_rect(*r)), "{at:?}");
     }
     let tiny = Rect::from_min_max(Pos2::new(8.0, 56.0), Pos2::new(1272.0, 90.0));
-    assert!(stack(tiny, PresencePosition::TopRight, &sizes(2), &[]).iter().all(Option::is_none));
+    assert!(
+        stack(tiny, PresencePosition::TopRight, &sizes(2), &[], GAP)
+            .iter()
+            .all(Option::is_none)
+    );
 }
 
 /// While busy a new toast waits; it shows when the place is free if it
