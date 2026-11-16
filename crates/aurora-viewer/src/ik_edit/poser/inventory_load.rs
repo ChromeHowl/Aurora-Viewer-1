@@ -200,7 +200,7 @@ impl Editor {
 
     /// Fetches the animation of a pending load and hands it to the storage's
     /// loads when it arrives (`tick_animations`, which has the streamer).
-    pub(super) fn tick_inventory_load(&mut self, streamer: &mut AnimStreamer, inv: &mut Inventory) {
+    pub(in crate::ik_edit) fn tick_inventory_load(&mut self, streamer: &mut AnimStreamer, inv: &mut Inventory) {
         if self.poser.inventory_load.open
             && let Some(root) = actions::system(inv, 20)
         {
@@ -243,7 +243,7 @@ impl Editor {
         }
         let mut chosen = None;
         let mut cancel = false;
-        let response = widgets::Modal::new(egui::Id::new("poser-inventory-load")).show(ctx, |ui| {
+        let response = widgets::Modal::new(egui::Id::unique("poser-inventory-load")).show(ctx, |ui| {
             ui.set_width(380.0);
             ui.label(egui::RichText::new(aurora_i18n::tr!("poser-inv-title")).size(17.0).color(p.ink));
             ui.add_space(6.0);
