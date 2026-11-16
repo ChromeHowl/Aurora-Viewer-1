@@ -964,7 +964,10 @@ impl World {
         if let Some(path) = &self.region_tracker_path
             && let Err(error) = self.region_tracker.save(path)
         {
-            log::warn!("region tracker: could not save {}: {error}", path.display());
+            log::warn!(
+                "region tracker: could not save {} ({error}); kept, tried again later",
+                path.display()
+            );
         }
     }
 

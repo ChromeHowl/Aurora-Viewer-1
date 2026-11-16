@@ -93,6 +93,7 @@ mod pose_stand;
 mod raw_mouse;
 mod recorder;
 mod report_abuse;
+mod save_retry;
 mod scene;
 mod screen_rate;
 mod script_ws;
