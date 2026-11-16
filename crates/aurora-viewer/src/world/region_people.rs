@@ -785,4 +785,19 @@ mod tests {
         assert_eq!(w.people_on_map((10, 20)), None);
         assert!(w.take_map_commands().is_empty());
     }
+
+    #[test]
+    fn the_setting_off_hides_the_column_of_every_list_and_asks_nothing() {
+        let mut w = crate::world::World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
+        w.map.sims.insert((10, 20), sim("Ahern"));
+        w.map.agents.insert((10, 20), vec![(2560, 5120, 4)]);
+        w.show_region_people = false;
+        w.take_map_commands();
+        // the landmarks' and the history's lists read by position
+        assert_eq!(w.people_at_global(2570.0, 5130.0), None);
+        assert_eq!(w.people_in_region("Ahern"), None);
+        assert!(w.take_map_commands().is_empty());
+        w.show_region_people = true;
+        assert_eq!(w.people_at_global(2570.0, 5130.0), Some(People::Count(4)));
+    }
 }

@@ -10256,7 +10256,13 @@ Human grid validation: remember MFA for account A and B, restart the viewer, the
   `:classic` shows the Legacy Viewer's three tabs for the run, whatever
   Preferences › Aurora › Places says (not saved): the Teleport / Map /
   Profile bar stays whole at the bottom, down to the window's minimum size
-  and at any interface scale (#2641).
+  and at any interface scale (#2641). In the Legacy tabs, the Landmarks,
+  Favorites and Teleport History rows show the people of their region
+  (the users icon and a figure, `…` while asked, `?` when unanswered) at
+  the right end; Aurora's narrow list shows it too, after the rating badge.
+  The demo answers the requests for the plaza and the lagoon. Off in
+  Preferences › Aurora (People in region) or under RLVa `@showloc`, the
+  column is gone.
   `:narrow` opens the window 260 points wide (its least width at text
   size 1): with `:classic` and `AURORA_TEXT_SIZE=2`, the window widens to
   the three buttons, each whole.
