@@ -2973,6 +2973,8 @@ The same questions an hour long, **the most rewarding first**. Reading taken by 
 
 - ✅ Move tool guide depth ([#1785](https://github.com/Aurora-Viewer/Aurora-Viewer/issues/1785); task `move-guide-depth-1785`; validated by the human on the grid on 2026-11-05): draw world-axis guides through the existing GPU scene-depth path, following LLManipTranslate::render; retain HUD guides and overlay handles. Linux workspace tests pass (7,357 passed, zero failures, 47 ignored; three documented baseline exclusions), strict Clippy (1.99.1) and dev build pass; native depth captures checked.
 
+- ✅ Move tool guide depth ([#1785](https://github.com/Aurora-Viewer/Aurora-Viewer/issues/1785); task `move-guide-depth-1785`; validated by the human on the grid on 2026-11-05): draw world-axis guides through the existing GPU scene-depth path, following LLManipTranslate::render; retain HUD guides and overlay handles. Linux workspace tests pass (7,357 passed, zero failures, 47 ignored; three documented baseline exclusions), strict Clippy (1.99.1) and dev build pass; native depth captures checked.
+
 ## Interface
 
 - ✅ Clicking our own name tag opens our profile or menu (no issue; feedback board [post 154](https://feedback.aurora-viewer.org/posts/154/add-an-option-to-pull-up-your-own-profile-by-left-click-or-right-clicking-your-n); task `own-nametag-click`): the Preferences › Avatars name-tag click actions Profile and Menu now work on our own name tag too (our profile, our self menu); IM and Offer Teleport still do nothing there. Regression `own_plate_allows_profile_and_menu_but_not_im_or_teleport`. Validated by the human on the grid on 2026-11-05 (Linux).

@@ -18990,6 +18990,19 @@ impl App {
                     );
                 }
                 self.director_world(&ctx, &p, projector);
+                if !held {
+                    self.build.draw_world_guides(
+                        &ctx,
+                        &p,
+                        &self.world,
+                        &self.settings.build,
+                        crate::build::Mods {
+                            shift: self.shift,
+                            ctrl: self.ctrl,
+                            alt: self.alt,
+                        },
+                    );
+                }
                 aurora_render::end_world_labels(&ctx);
                 ui::hud::draw_attachments(&ctx, &self.world, &self.scene);
                 if self.demo && crate::demo::floating_text::scenario() {
