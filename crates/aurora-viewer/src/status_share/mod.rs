@@ -73,12 +73,6 @@ pub const PROGRAMS: &[Program] = &[
         game: false,
     },
     Program {
-        id: 7,
-        name: "Firestorm",
-        exes: &["Firestorm-Releasex64.exe", "firestorm-bin"],
-        game: false,
-    },
-    Program {
         id: 100,
         name: "Elden Ring",
         exes: &["eldenring.exe"],
