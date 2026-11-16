@@ -3906,9 +3906,13 @@ impl App {
             }
             return;
         }
-        if let NetEvent::ScriptTeleportRequest { .. } = ev {
-            // llMapDestination asked for the map (BEACON_SHOW_MAP)
-            if !self.panels.world_map {
+        if let NetEvent::ScriptTeleportRequest { flags, .. } = ev {
+            // llMapDestination asked for the map (BEACON_SHOW_MAP). Its search
+            // takes the keyboard only with BEACON_FOCUS_MAP, which the server
+            // sets by default: process_script_teleport_request sets the
+            // floater's auto-focus from it before openFloater
+            // (indra/newview/llviewermessage.cpp).
+            if !self.panels.world_map && flags & aurora_net::beacon::FOCUS_MAP == 0 {
                 self.worldmap_ui.open_for_script();
             }
             self.panels.world_map = true;
@@ -5808,6 +5812,7 @@ impl App {
                     mods,
                     true,
                     Some(idx),
+                    &self.interactions.props,
                 ) {
                     return;
                 }
@@ -5915,10 +5920,17 @@ impl App {
                     shift: self.shift,
                     command: self.command,
                 };
-                if self
-                    .media
-                    .on_click(&self.world, &self.scene, ray, depth_t, &self.settings.media, mods, false, None)
-                {
+                if self.media.on_click(
+                    &self.world,
+                    &self.scene,
+                    ray,
+                    depth_t,
+                    &self.settings.media,
+                    mods,
+                    false,
+                    None,
+                    &self.interactions.props,
+                ) {
                     return;
                 }
             }
@@ -6690,6 +6702,12 @@ impl App {
             binaural,
         );
         let now = Instant::now();
+        // the Doppler shift: the agent's velocity, wherever the ear is
+        // (audio_update_listener, llvieweraudio.cpp)
+        sounds.doppler = crate::scene::sounds::doppler::Doppler {
+            factor: self.settings.audio.doppler,
+            listener_velocity: self.world.agent.velocity,
+        };
         sounds.update(engine, &self.world, &listener, now);
         // what stands between each sound and the listener (Aurora's own)
         let occlusion = crate::scene::sound_occlusion::forced().unwrap_or(self.settings.audio.sound_occlusion);
@@ -8290,6 +8308,9 @@ impl App {
                 self.world.apply(NetEvent::ObjectsKilled { handle, local_ids });
             }
             self.world.apply(crate::demo::beacons::events());
+            if mode == "guides" {
+                self.world.apply(crate::demo::beacons::guide_events());
+            }
             if mode == "parcels" {
                 for event in crate::demo::beacons::overlay_events() {
                     self.world.apply(event);
@@ -11109,6 +11130,10 @@ impl App {
             if let Some(e) = crate::demo::sound_hrtf::tick(self.camera.position).and_then(|ev| self.world.apply(ev)) {
                 self.on_app_event(e);
             }
+            // AURORA_DEMO_SOUND_DOPPLER: the sound passing in front
+            if let Some(e) = crate::demo::sound_doppler::tick().and_then(|ev| self.world.apply(ev)) {
+                self.on_app_event(e);
+            }
             // AURORA_DEMO_SOUND_REVERB: the clapper above our avatar
             if let Some(e) = crate::demo::sound_reverb::tick(self.world.agent.position).and_then(|ev| self.world.apply(ev)) {
                 self.on_app_event(e);
@@ -13753,6 +13778,18 @@ impl App {
                     hovered.and_then(|idx| self.world.objects.get(idx)).map(|o| o.key.local_id),
                     hovered.and_then(|idx| crate::interaction::cursor_action(&self.world, idx, &self.interactions.props)),
                 );
+            }
+            // MediaFirstClickInteract reads the owner of a media object
+            // before the click: LLSelectMgr::setHoverObject asks its
+            // properties as the pointer comes on it
+            if let Some(idx) = hovered
+                && self.settings.media.first_click_interact
+                && self.media.has_media(&self.world, idx)
+                && let Some((root, _)) = crate::interaction::root(&self.world, idx)
+                && let Some(o) = self.world.objects.get(root)
+                && let Some(cmd) = self.interactions.tip_request(o.key.region, o.full_id)
+            {
+                self.send(cmd);
             }
             if let Some(idx) = hovered
                 && let Some(target) = crate::interaction::target(&self.world, idx, &std::collections::HashMap::new())
@@ -18286,6 +18323,8 @@ impl App {
     fn draw_ui(&mut self, ui: &mut egui::Ui, projector: &ui::hud::Projector, renderer: &Renderer) -> UiActions {
         ui.ctx()
             .data_mut(|data| data.insert_temp(egui::Id::unique("vr-active"), renderer.vr_engaged()));
+        // the Avatar Welcome Pack's page, worked out once for the toolbar and the window
+        let avatar_welcome_page = self.avatar_welcome_page();
         // the toolbar's Sit / Stand button, greyed when RLVa would refuse it
         // (RlvActions::canStand / canGroundSit, the same check as the send)
         let sit = if self.world.agent.is_sitting() {
@@ -18754,6 +18793,7 @@ impl App {
                     [self.settings.sun_beacon, self.settings.moon_beacon],
                 );
                 ui::beacons::draw(&ctx, &p, projector, &self.scene.beacon_markers, &self.settings.beacons);
+                ui::beacons::draw_guides(&ctx, &p, &self.world, projector, &self.scene.light_boxes, &self.settings.beacons);
                 ui::portals::labels(&ctx, &p, &self.world, projector);
                 if !held {
                     self.build.draw_world_guides(
@@ -18924,7 +18964,7 @@ impl App {
                     grid_help: self.grid_help(),
                     marketplace: self.marketplace_home().is_some()
                         || (self.demo && crate::world::marketplace::demo::Mode::from_env().is_some()),
-                    avatar_welcome: self.avatar_welcome_page().is_some(),
+                    avatar_welcome: avatar_welcome_page.is_some(),
                     destinations: self.destination_guide().is_some() || self.destination_feed().is_some(),
                     parcel_icons: match (self.world.main().and_then(|r| r.info.as_ref()), self.world.parcel.as_deref()) {
                         (Some(region), Some(parcel)) => ui::parcel_icons::parcel_icons(&ui::parcel_icons::ParcelState {
@@ -20964,7 +21004,6 @@ impl App {
                 );
                 // the Avatar Welcome Pack: the same plugins and browser
                 // settings, and the OpenID cookie on Second Life only
-                let pack = self.avatar_welcome_page();
                 let pack_cookie = cookie
                     .as_ref()
                     .filter(|_| !self.demo && self.settings.grid != crate::settings::GridChoice::Custom);
@@ -20976,11 +21015,11 @@ impl App {
                         paths: paths.as_ref(),
                         browser: &browser,
                         cookie: pack_cookie,
-                        url: pack.as_deref(),
+                        url: avatar_welcome_page.as_deref(),
                     },
                 );
-                self.welcome_wears.push(wears);
-                self.toolbar_ui.avatar_welcome = pack.is_some();
+                self.welcome_wears.push(wears, Instant::now());
+                self.toolbar_ui.avatar_welcome = avatar_welcome_page.is_some();
                 // the Destination Guide: the same plugins and browser
                 // settings, and the OpenID cookie on Second Life
                 // (LLFloaterDestinations::postBuild, getOpenIDCookie)
@@ -22263,6 +22302,8 @@ impl ApplicationHandler for App {
                     sound: true,
                     particles: true,
                     media: true,
+                    light_boxes: mode == "guides",
+                    region_corners: mode == "guides",
                     ..Default::default()
                 };
                 self.settings.world_overlays.property_lines = mode == "parcels";
@@ -24371,6 +24412,19 @@ impl ApplicationHandler for App {
                     self.scene.sounds.insert(id, clip);
                 }
                 for ev in crate::demo::sound_hrtf::events() {
+                    if let Some(e) = self.world.apply(ev) {
+                        self.on_app_event(e);
+                    }
+                }
+            }
+            // AURORA_DEMO_SOUND_DOPPLER=1: a sound passing in front of the
+            // listener, back and forth (moved by `demo::sound_doppler::tick`)
+            if crate::demo::sound_doppler::active() {
+                self.world.agent.get_off(crate::demo::sound_doppler::start());
+                for (id, clip) in crate::demo::sound_doppler::sounds() {
+                    self.scene.sounds.insert(id, clip);
+                }
+                for ev in crate::demo::sound_doppler::events() {
                     if let Some(e) = self.world.apply(ev) {
                         self.on_app_event(e);
                     }
