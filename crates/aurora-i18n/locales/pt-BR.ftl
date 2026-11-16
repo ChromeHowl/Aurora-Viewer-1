@@ -16392,6 +16392,17 @@ beacons-light-boxes = Bounding boxes for lights in scene
 beacons-region-corners = Region corners
 
 
+ui-minimap-custom-marker = Custom color…
+ui-avatar-mark-title = Marker color
+ui-avatar-mark-many = { $count } residents
+ui-avatar-mark-private = Only you see markers. They last until you log out.
+build-options-menu = Options
+build-options-locked-only = Select only locked objects
+build-options-copyable-only = Select only copyable objects
+build-options-group-owned = Include group-owned objects
+build-options-hidden-selection = Show hidden selection
+build-options-light-radius = Show light radius for selection
+build-options-probe-volumes = Show reflection probe volumes
 ui-options-blocked-chat = Blocked residents' chat
 ui-options-blocked-chat-hint = What the nearby chat shows when a resident you blocked talks. Never above the chat bar, in a bubble, a sound or an unread count.
 ui-options-blocked-chat-hidden = Hidden

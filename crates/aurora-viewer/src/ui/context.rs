@@ -52,8 +52,8 @@ pub mod flags {
     /// FLAGS_AFFECTS_NAVMESH: flagObjectPermanent.
     pub const AFFECTS_NAVMESH: u32 = 1 << 12;
     pub const OBJECT_TRANSFER: u32 = 1 << 17;
-    /// FLAGS_OBJECT_GROUP_OWNED: permGroupOwner.
-    pub const OBJECT_GROUP_OWNED: u32 = 1 << 22;
+    /// FLAGS_OBJECT_GROUP_OWNED (0x00040000): permGroupOwner.
+    pub const OBJECT_GROUP_OWNED: u32 = 1 << 18;
 }
 
 #[derive(Debug, Clone)]
@@ -344,6 +344,8 @@ pub enum CtxAction {
     MarkAvatars(Vec<Uuid>, Option<[u8; 3]>),
     /// "Clear all Marks" (LLNetMap::clearAvatarMarkColors()).
     ClearAllMarks,
+    /// "Custom color…" of the Mark menu: opens the colour window for them.
+    MarkCustom(Vec<Uuid>),
     /// Avatar.Kick / Avatar.TeleportHome / Avatar.EstateBan of the estate's
     /// owner and managers: asked first (LLAvatarActions::estateKick,
     /// estateTeleportHome, estateBan).
@@ -665,6 +667,9 @@ pub fn mark_submenu(ui: &mut egui::Ui, p: &Palette, world: &World, ids: &[Uuid])
             if menu::swatch(ui, p, egui::Color32::from_rgb(r, g, b), name) {
                 act(CtxAction::MarkAvatars(ids.to_vec(), Some([r, g, b])));
             }
+        }
+        if menu::item(ui, p, "palette-filled", aurora_i18n::tr!("ui-minimap-custom-marker")) {
+            act(CtxAction::MarkCustom(ids.to_vec()));
         }
         menu::separator(ui, p);
         let marked = ids.iter().any(|id| world.avatar_marks.get(id).is_some());

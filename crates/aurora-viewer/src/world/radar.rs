@@ -609,6 +609,17 @@ impl Marks {
     pub fn is_empty(&self) -> bool {
         self.map.is_empty()
     }
+
+    #[cfg(test)]
+    pub fn contains(&self, id: &Uuid) -> bool {
+        self.map.contains_key(id)
+    }
+
+    /// The colour every one of `ids` is marked with, if they share one.
+    pub fn shared(&self, ids: &[Uuid]) -> Option<[u8; 3]> {
+        let first = self.get(ids.first()?)?;
+        ids.iter().all(|id| self.get(id) == Some(first)).then_some(first)
+    }
 }
 
 /// LLTracker's DESTINATION_REACHED_RADIUS.
@@ -975,6 +986,10 @@ mod tests {
         m.set(&[a], None);
         assert_eq!(m.get(&a), None);
         assert_eq!(m.get(&b), Some(MARK_COLORS[0]));
+        assert!(!m.contains(&a) && m.contains(&b));
+        assert_eq!(m.shared(&[a, b]), None);
+        m.set(&[a], Some(MARK_COLORS[0]));
+        assert_eq!(m.shared(&[a, b]), Some(MARK_COLORS[0]));
         m.clear_all();
         assert!(m.is_empty());
     }
