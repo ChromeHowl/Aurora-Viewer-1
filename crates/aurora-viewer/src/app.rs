@@ -181,6 +181,7 @@ mod uninstall;
 mod update_notice;
 mod viewer_stats;
 mod viewfinder;
+mod viewfinder_path;
 mod water_volumes;
 mod wearable_editor;
 mod wearable_favorites;
