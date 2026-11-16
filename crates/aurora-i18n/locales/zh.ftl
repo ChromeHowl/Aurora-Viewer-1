@@ -16382,6 +16382,23 @@ anti-spam-blocked-burst = { $count ->
    *[other] { $count } sources blocked by the anti-spam for this session ({ $kinds }). Manage blocks in Preferences > Protections > Anti-spam.
 }
 
+demo-sound-doppler-source = Passing sound
+ui-options-first-click-hud = Worn HUDs
+ui-options-first-click-own = My objects
+ui-options-first-click-friend = Friends' objects
+ui-options-first-click-group = Group objects
+ui-options-first-click-land = Landowner's objects
+ui-options-first-click-land-help = Objects of the parcel's owner or group, on the parcel you stand on
+ui-options-first-click-any = Anyone's objects
+ui-options-first-click-all-faces = Every media face
+ui-options-first-click-all-faces-help = Also the faces whose media does not ask for the first click
+ui-options-sound-doppler = Doppler effect
+ui-options-sound-doppler-help = A moving sound plays higher as it comes closer and lower as it goes away, like a passing car. 1: as in the Legacy Viewer. 0: off. 2: twice as strong.
+
+beacons-light-boxes = Bounding boxes for lights in scene
+beacons-region-corners = Region corners
+
+
 ui-options-blocked-chat = Blocked residents' chat
 ui-options-blocked-chat-hint = What the nearby chat shows when a resident you blocked talks. Never above the chat bar, in a bubble, a sound or an unread count.
 ui-options-blocked-chat-hidden = Hidden
