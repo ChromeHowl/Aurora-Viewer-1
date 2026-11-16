@@ -1422,10 +1422,7 @@ fn list_row(
         let galley = painter.layout_no_wrap(n.figure(), egui::FontId::proportional(11.5), p.muted);
         let icon = 13.0;
         let width = galley.size().x + icon + 2.0;
-        let slot = egui::Rect::from_min_size(
-            egui::pos2(right - width, rect.center().y - 8.0),
-            Vec2::new(width, 16.0),
-        );
+        let slot = egui::Rect::from_min_size(egui::pos2(right - width, rect.center().y - 8.0), Vec2::new(width, 16.0));
         // the name keeps at least a third of the row
         if slot.left() > x + (right - x) / 3.0 {
             painter.galley(egui::pos2(slot.left(), rect.center().y - galley.size().y * 0.5), galley, p.muted);
