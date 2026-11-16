@@ -453,7 +453,7 @@ impl World {
     /// restriction or imported. Display only: the log keeps the real name.
     pub fn conversation_display_name(&self, c: &Conversation) -> String {
         if c.kind == Kind::Private && !c.participant.is_nil() && !self.rlva_can_name(c.participant) {
-            return super::rlva::privacy::anonymous(c.participant).display_name.clone();
+            return self.rlva_anonymous(c.participant).display_name.clone();
         }
         c.name.clone()
     }

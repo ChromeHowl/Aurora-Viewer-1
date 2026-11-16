@@ -155,6 +155,7 @@ mod reset_skeleton;
 mod restart_evacuation;
 mod revoke_on_sit;
 mod rlva;
+mod rlva_selftest;
 mod safe_graphics;
 mod script_clicks;
 mod script_recovery;
@@ -470,6 +471,8 @@ pub struct App {
     window_icon: Option<winit::window::Icon>,
     world: World,
     bridge_runtime: crate::world::bridge::Bridge,
+    /// The RLVa self-test (Dev Toolbox T1, development builds only).
+    rlva_selftest: rlva_selftest::SelfTest,
     native_anchor: crate::movement::movelock::Controller,
     anchor_stands: crate::ao::anchor::StandCheck,
     /// Keep the verified standing set through an asynchronous stand-up reply.
@@ -874,6 +877,7 @@ pub struct App {
     frame_count: u64,
     demo_rlva_frame: Option<u64>,
     rlva_login: crate::world::rlva::login::State,
+    rlva_minimap: rlva::HiddenMinimap,
     named_teleport: teleport_lookup::NamedTeleport,
     /// Refresh rate of the screen the window is on, followed while it runs.
     screen_rate: crate::screen_rate::ScreenRate,
@@ -1935,6 +1939,7 @@ impl App {
                 w
             },
             bridge_runtime: Default::default(),
+            rlva_selftest: Default::default(),
             native_anchor: Default::default(),
             anchor_stands: Default::default(),
             anchor_pose: None,
@@ -2149,6 +2154,7 @@ impl App {
             loading_target: 0.0,
             frame_count: 0,
             demo_rlva_frame: None,
+            rlva_minimap: Default::default(),
             rlva_login: if std::env::var("AURORA_DEMO").as_deref() == Ok("1") {
                 Default::default()
             } else {
@@ -2515,18 +2521,17 @@ impl App {
                 return;
             }
         }
-        self.world.rlva_prepare_outfit(&mut cmd, actor);
-        if !actor.is_nil() && !self.world.rlva_normalize_teleport(&mut cmd) {
-            return;
-        }
-        if let NetCommand::OfferTeleport { to, .. } = &mut cmd {
-            self.world.rlva_filter_teleport_offer(to);
-        }
-        let im_placeholder = actor.is_nil() && self.world.rlva_prepare_outgoing_im(&mut cmd);
-        if !im_placeholder && !self.world.rlva_allows_command(&cmd, actor) {
-            self.world
-                .system_notice(aurora_i18n::tr!("rlva-blocked"), crate::world::notice_topics::Topic::Warning);
-            return;
+        let outcome = self.world.rlva_send_boundary(&mut cmd, actor);
+        // (the self-test reads the answer to the command it just sent)
+        self.rlva_selftest.runner.boundary(outcome, &cmd);
+        match outcome {
+            crate::world::rlva::Boundary::Send => {}
+            crate::world::rlva::Boundary::Dropped => return,
+            crate::world::rlva::Boundary::Refused => {
+                self.world
+                    .system_notice(aurora_i18n::tr!("rlva-blocked"), crate::world::notice_topics::Topic::Warning);
+                return;
+            }
         }
         if self.demo
             && let NetCommand::SetAlwaysRun(run) = cmd
@@ -2540,16 +2545,7 @@ impl App {
         if let NetCommand::Build(aurora_net::build::BuildCmd::Transform { handle, updates }) = &cmd {
             self.world.objects.note_sent_transforms(*handle, updates, Instant::now());
         }
-        self.world.rlva_note_attachment_command(&cmd, actor, Instant::now());
-        self.world.note_outfit_command(&cmd);
-        self.world.rlva_note_sit_command(&cmd, actor);
-        if self.world.rlva.enabled()
-            && let NetCommand::RezAttachments(items) = &mut cmd
-        {
-            for item in items {
-                item.add = true;
-            }
-        }
+        self.world.rlva_note_sent(&mut cmd, actor, Instant::now());
         self.world.rlva_filter_lure(&mut cmd);
         let cmd = if let NetCommand::Chat {
             message,
@@ -2581,7 +2577,7 @@ impl App {
                 }
             }
         }
-        if self.demo && self.bridge_demo_command(&cmd) {
+        if self.demo && (self.rlva_selftest_demo_command(&cmd) || self.bridge_demo_command(&cmd)) {
             return;
         }
         // AURORA_DEMO_TELEPORT_FAILED: the region refuses every teleport
@@ -3870,6 +3866,11 @@ impl App {
             if let Some(message) = self.bridge_services.reply(request, result, Instant::now()) {
                 self.world.system_message(message);
             }
+            return;
+        }
+        // (demo mode hands the answers to the app directly: the self-test's
+        // own are seen here too)
+        if self.rlva_selftest.runner.event(&mut self.world, &ev) {
             return;
         }
         if self.bridge_runtime.event(&mut self.world, &ev, Instant::now()) {
@@ -5565,6 +5566,7 @@ impl App {
             return;
         };
         match action {
+            _ if self.rlva_refuses_shortcut(action) => {}
             Action::Fly => self.toggle_fly(),
             Action::FlyOverride => self.toggle_fly_override(),
             Action::Flycam => self.toggle_joystick_flycam(),
@@ -8011,9 +8013,14 @@ impl App {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0.0, |d| d.as_secs_f64());
             let profiles = &self.world.profiles;
-            events.extend(self.radar.age_alerts(i64::from(s.age_alert_days), |id| {
+            let alerts = self.radar.age_alerts(i64::from(s.age_alert_days), |id| {
                 profiles.get(id).and_then(|p| ui::people::age_days(p, today))
-            }));
+            });
+            // FSRadarEntry::checkAge (fsradarentry.cpp): under @shownames an
+            // age that gets known counts as alerted, and says nothing
+            if !self.world.rlva.has("shownames") {
+                events.extend(alerts);
+            }
         }
         // the alerts to scripts: ScriptDialogReply from ourselves, a chat on
         // a negative channel that reaches our attachments
@@ -9990,6 +9997,9 @@ impl App {
                 self.open_conversation_to_type(id);
             }
             ContactsAction::Profile(id) => self.profile_ui.open(&mut self.world, id),
+            ContactsAction::RosterProfile(id) => {
+                self.profile_ui.open_in(&mut self.world, crate::world::names::NameScope::Roster, id);
+            }
             ContactsAction::OfferTeleport(id) => a.offer_tp.push(id),
             ContactsAction::SendTeleportOffer { to, message } => {
                 let cmd = self.world.offer_teleport(to, &message);
@@ -11082,9 +11092,7 @@ impl App {
         while !still && let Ok((sent, ev)) = self.net.events.try_recv() {
             // (`sent`: when the session read the datagram, the time its
             // motion starts from)
-            if let Some(app_ev) = self.bridge_runtime.receive(&mut self.world, ev, Instant::now(), sent) {
-                self.on_app_event(app_ev);
-            }
+            self.receive_event(ev, sent);
             let now = Instant::now();
             self.net_profile.event_applied(sent, now);
             if now.duration_since(t_ev) > Duration::from_millis(8) {
@@ -11747,6 +11755,7 @@ impl App {
         self.update_voice();
         self.update_radar();
         self.update_bridge();
+        self.update_rlva_selftest();
         self.update_region_restart();
         self.update_restart_evacuation();
         self.auto_relogin_in_world();
@@ -13855,7 +13864,10 @@ impl App {
                 if let Some(cmd) = self.interactions.hover_request(target) {
                     self.send(cmd);
                 }
-                if let Some(action) = crate::interaction::cursor_action(&self.world, idx, &self.interactions.props) {
+                // less what RLVa refuses, measured at the hovered point
+                let point = self.look_hover.map(|(_, p)| p);
+                let ray = gfx.renderer.cursor_ray(self.cursor_pos.0, self.cursor_pos.1);
+                if let Some(action) = self.hover_cursor_action(idx, point, ray) {
                     if self.demo && self.frame_count == 722 && std::env::var_os("AURORA_DEMO_ACTIONS").is_some() {
                         log::info!("demo action hover: {action:?}, prim={}", target.clicked.local_id);
                     }
@@ -16747,7 +16759,7 @@ impl App {
                     self.settings.save();
                 }
             }
-            BarAction::HudZoom(zoom) => self.world.hud_zoom = zoom.clamp(0.1, 1.0),
+            BarAction::HudZoom(zoom) => self.world.hud_zoom = zoom.clamp(self.world.hud_zoom_min(), 1.0),
             BarAction::None => {}
             BarAction::IkEdit => {
                 self.ik_editor.toggle();
@@ -16772,6 +16784,9 @@ impl App {
             }
             BarAction::Build(t) => {
                 match t {
+                    // LLToolMgr::buildEnabledOrActive: under @edit and @rez
+                    // the window does not open; an open one still closes
+                    _ if !self.build.open && !self.world.rlva_can_build() => {}
                     1 => self.build.open_build(crate::build::Tool::Edit),
                     2 => self.build.open_build(crate::build::Tool::Create),
                     3 => self.build.open_build(crate::build::Tool::Land),
@@ -16920,7 +16935,10 @@ impl App {
                 self.settings.world_overlays = overlays;
                 self.settings.save();
             }
-            BarAction::ShowTransparency => self.settings.debug.show_alpha = !self.settings.debug.show_alpha,
+            // LLViewHighlightTransparent (llviewermenu.cpp): off stays off under a restriction
+            BarAction::ShowTransparency => {
+                self.settings.debug.show_alpha = !self.settings.debug.show_alpha && self.rlva_can_highlight_transparent()
+            }
             BarAction::RenderTypes(hidden, particles) => {
                 self.settings.debug.hidden_types = hidden;
                 if self.settings.world_overlays.hide_particles != particles {
@@ -16953,6 +16971,8 @@ impl App {
                     }
                 }
             }
+            // LLLocationInputCtrl::onAddLandmarkButtonClicked: nothing under @showloc
+            BarAction::LandmarkStar(_) if self.world.rlva.has("showloc") => {}
             BarAction::LandmarkStar(star) => self.landmark_star(star),
             BarAction::PlaceBar { stretch, rights_text } => {
                 self.settings.place_bar_stretch = stretch;
@@ -18414,6 +18434,17 @@ impl App {
         let sit_locked = !self.world.rlva_allows_command(&NetCommand::OneShotControl(sit), uuid::Uuid::nil());
         ui.ctx()
             .data_mut(|data| data.insert_temp(ui::bars::rlva_sit_locked_id(), sit_locked));
+        let build_locked = !self.build.open && !self.world.rlva_can_build();
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(ui::bars::rlva_build_locked_id(), build_locked));
+        // the Fly button and menu entry: `toggle_fly`'s own answer on the
+        // ground; World › Environment while @setenv holds the environment
+        let fly_locked = !self.world.agent.flying && !crate::autopilot::can_takeoff(&self.world);
+        let env_locked = self.world.rlva.has("setenv");
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(ui::bars::fly_locked_id(), fly_locked);
+            data.insert_temp(ui::bars::rlva_env_locked_id(), env_locked);
+        });
         self.world.refresh_rlva_privacy();
         self.notif_ui.privacy = self.world.rlva_privacy.clone();
         let mut a = UiActions::default();
@@ -18617,7 +18648,8 @@ impl App {
             }
             Screen::Loading { since } => {
                 let stats = self.scene.textures.stats;
-                let region = self.world.region_name();
+                // (hidden if a restriction restored at login asks for it: @showloc)
+                let region = self.world.rlva_region_label();
                 let terrain = self.world.terrain_progress();
                 let base = if self.world.movement_complete { 0.55 } else { 0.35 };
                 let raw = base + terrain * 0.35 + (stats.loaded as f32 / stats.total.max(1) as f32) * 0.1;
@@ -18906,7 +18938,8 @@ impl App {
                     crate::demo::floating_text::guides(&ctx, &self.world, &self.scene);
                 }
                 t = self.ui_parts.lap(Part::UiTags, t);
-                let parcel_landmark = self.parcel_landmark();
+                // (no landmark of this parcel under @showloc: its name is the place's)
+                let parcel_landmark = self.parcel_landmark().filter(|_| !self.world.rlva.has("showloc"));
                 self.follow_favorites_access();
                 let favorites_shown = ui::bars::favorites::take_shown(&ctx);
                 let here = parcel_landmark.as_ref().is_some_and(|lm| lm.favorite);
@@ -19023,8 +19056,8 @@ impl App {
                     } else {
                         crate::slurl::make(&self.world.region_name(), self.world.agent.position)
                     },
-                    tp_back: self.world.tp_history.previous().map(|e| e.region.clone()),
-                    tp_forward: self.world.tp_history.next().map(|e| e.region.clone()),
+                    tp_back: self.world.tp_history.back_name(),
+                    tp_forward: self.world.tp_history.forward_name(),
                     tp_session: self.world.tp_history.session(),
                     landmarks: location_landmarks,
                     status: self.world.status.modes(),
@@ -19440,6 +19473,8 @@ impl App {
                     sides,
                 );
                 area = room;
+                // a bar's button or menu entry opens its window this very frame
+                rlva::keep_windows_closed(&self.world.rlva, &mut self.panels);
                 // without the bars, the windows keep the room they left
                 if chrome.top && chrome.bottom {
                     self.interface.last_room = Some((area, bottom_top));
@@ -20320,6 +20355,9 @@ impl App {
                         }
                         ui::people::PeopleAction::OfferTeleport(id) => a.offer_tp.push(id),
                         ui::people::PeopleAction::Profile(id) => self.profile_ui.open(&mut self.world, id),
+                        ui::people::PeopleAction::RosterProfile(id) => {
+                            self.profile_ui.open_in(&mut self.world, crate::world::names::NameScope::Roster, id);
+                        }
                         ui::people::PeopleAction::ZoomRefused { name, why } => {
                             let meters = |d: f32| aurora_i18n::number(f64::from(d), 0);
                             let text = match why {
@@ -21422,7 +21460,8 @@ impl App {
                         ui::minimap::MiniMapAction::Teleport { x, y, z } => self.world.map.track_location(x, y, z, true),
                         ui::minimap::MiniMapAction::Track { x, y, z } => self.world.map.track_location(x, y, z, false),
                         ui::minimap::MiniMapAction::StopTracking => self.world.map.clear_track(),
-                        ui::minimap::MiniMapAction::OpenWorldMap => self.panels.world_map = true,
+                        // LLNetMap::handleRightMouseDown (llnetmap.cpp): no World Map under @showworldmap
+                        ui::minimap::MiniMapAction::OpenWorldMap => self.panels.world_map |= !self.world.rlva.has("showworldmap"),
                         ui::minimap::MiniMapAction::Profile(id) => self.profile_ui.open(&mut self.world, id),
                         ui::minimap::MiniMapAction::AboutLand(gx, gy) => {
                             ui::land::LandUi::select_at_global(&mut self.world, gx, gy);
@@ -21483,6 +21522,7 @@ impl App {
                 self.panels.perf = open;
                 self.monitor_actions(monitor_actions);
                 self.dev_toolbox_window(&ctx, &p, renderer);
+                self.rlva_selftest_window(&ctx, &p);
                 self.about_window(&ctx, &p, renderer);
                 self.sysinfo_window(&ctx, &p, renderer);
                 let region = self.world.region_name();
@@ -21524,6 +21564,7 @@ impl App {
                 }
                 let mut open = self.panels.environment;
                 let mut lighting = self.panels.personal_lighting;
+                self.env_ui.rlva_locked = self.world.rlva.has("setenv") || self.world.rlva.has("setsphere");
                 let env_actions = self.env_ui.show_selector(
                     &ctx,
                     &p,
@@ -21590,13 +21631,8 @@ impl App {
                     // a screen fading out says what it said when the fade began
                     let text = o.leaving.take().unwrap_or_else(|| {
                         // the banner names the region; its arrival point is one of its facts
-                        let (dest, point) = ui::loading::split_destination(&o.dest);
-                        let arrived = o.loading_end || o.arrived.is_some() || dest.is_empty();
-                        let name = if dest.is_empty() {
-                            self.world.region_name()
-                        } else {
-                            dest.to_owned()
-                        };
+                        let arrived = o.loading_end || o.arrived.is_some() || ui::loading::split_destination(&o.dest).0.is_empty();
+                        let (name, point) = ui::loading::banner_place(&self.world, &o.dest);
                         let stage = if o.loading_end {
                             // the line the loading screen ended on
                             let stats = self.scene.textures.stats;

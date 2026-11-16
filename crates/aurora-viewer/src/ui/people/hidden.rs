@@ -11,6 +11,7 @@ use crate::theme::Palette;
 use crate::ui::context::{self, CtxAction};
 use crate::ui::{menu, widgets};
 use crate::world::World;
+use crate::world::names::NameScope;
 use egui::{FontId, Pos2, Rect, RichText, Sense, Vec2};
 use uuid::Uuid;
 
@@ -21,7 +22,7 @@ pub(super) fn entries(world: &World, filter: &str) -> Vec<(Uuid, String)> {
         .social
         .hidden_friends()
         .map(|f| (f.id, world.social.name_of(&f.id)))
-        .filter(|(id, name)| super::matches_name(world, id, name, filter))
+        .filter(|(id, name)| super::matches_name(world, NameScope::Roster, id, name, filter))
         .collect();
     out.sort_by_cached_key(|(_, name)| crate::natural_order::key(name));
     out

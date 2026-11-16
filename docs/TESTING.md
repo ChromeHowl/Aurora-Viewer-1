@@ -1710,7 +1710,8 @@ when unfocused") is ignored during a screenshot.
   Preferences › Camera keeps the interface there.
   `locked` sits on the ground and adds RLVa `@unsit=n` at 300: Stand stays
   shown but greyed (capture at 460). `fly-rlva` takes off and adds
-  `@fly=n` at 300 (the log at 470 tells whether the flight went on).
+  `@fly=n` at 300: the avatar lands (the log at 470 says `flying false`)
+  and "Stop flying" is gone.
   Preferences › Layout › Bars has a switch that hides the panel.
 - **`AURORA_DEMO_MMO="x,y[,1|2|3]"`**: left press on the avatar then right
   button held (steering with the mouse); `1`: right arrow instead (the
@@ -6401,6 +6402,7 @@ before (`amis`, `groupes`, `repere`, `historique`…) are still accepted.
 | `AURORA_DEMO_PEOPLE_FILTER=<text>` | Initial name filter for a People demo scenario |
 | `AURORA_DEMO_ANTI_SPAM=1\|off\|global\|text\|burst` | Synthetic offer, script prompt and sound floods with Protections controls; `burst` many sources at once, one grouped notice |
 | `AURORA_DEMO_RLVA=enabled` | Scripted restrictions and the global opt-in in Preferences > RLVa |
+| `AURORA_DEMO_RLVA=selftest` | Runs the RLVa self-test (Dev Toolbox T1), both phases, against the demo's simulated region |
 | `AURORA_DEMO_OPTIONS=<page>[/<tab>][:<what>]` | Opens preferences on a page, search, modified settings, open cogs, the system font list, reset, or a graphics profile dialog/list |
 | `AURORA_DEMO_GRIDS=1\|pages` | Opens the grid manager with synthetic metadata |
 | `AURORA_DEMO_TOOLBOX=1`, `edit` or `<target>:<tool>` | Opens the Dev Toolbox (Customize, or a target and a tool pressed) |
@@ -6720,6 +6722,21 @@ before (`amis`, `groupes`, `repere`, `historique`…) are still accepted.
   run; `run-late` stops at 730 with a `SetAlwaysRun(false)`. `run-autopilot`
   runs to a point from frame 720 instead, with @temprun set at 730 and
   released at 745: `SetAlwaysRun` goes true, false, then true.
+  `selftest` runs the RLVa self-test of the Dev Toolbox (T1,
+  [docs/DEV_TOOLBOX.md](DEV_TOOLBOX.md#the-rlva-self-test)): its
+  confirmation dialog opens at frame 300 with the in-world cases ticked and
+  is answered at frame 420 (capture it at 360). It is the one start that no
+  human pressed, in demo mode only. Both phases run against the demo's
+  simulated region; the relay scripts are simulated (no script engine), so
+  each command arrives as the owner-say of the worn test object. RLVa is
+  turned on for the run. The tool's window shows the progress, then the
+  report; the same lines are in the log with the prefix `rlva-selftest:`.
+  The run's waits are in seconds, not in frames (about fifteen seconds in
+  all), so capture late: `AURORA_FPS_LIMIT=60` and
+  `AURORA_CAPTURE_FRAMES=360,2400`, or read the log. Expected: 60 `PASS`,
+  C4 `KNOWN`, B05 `SKIPPED` (the demo avatar wears no bridge). The refusal
+  notices that pile up during the run are the cases' own refused attempts;
+  the avatar ends beside where its seat was. No grid is contacted.
 
 - **`AURORA_DEMO_GRIDS=1|pages`** opens the grid manager with synthetic metadata
   without contacting a grid; `pages` selects its Web pages tab. Combine with

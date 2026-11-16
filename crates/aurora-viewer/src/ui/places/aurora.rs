@@ -1021,7 +1021,10 @@ impl PlacesUi {
         ) {
             self.teleport(key, place, inv, history);
         }
-        if menu::item_if(ui, p, "map", aurora_i18n::tr!("common-show-on-map"), place.global.is_some())
+        // LLLandmarksPanel / LLTeleportHistoryPanel::isActionEnabled
+        // ("show_on_map"): not under @showworldmap
+        let mappable = place.global.is_some() && crate::ui::context::can_show_on_map(world);
+        if menu::item_if(ui, p, "map", aurora_i18n::tr!("common-show-on-map"), mappable)
             && let Some(g) = place.global
         {
             actions.push(PlacesAction::ShowOnMap(g));
@@ -1242,7 +1245,7 @@ impl PlacesUi {
                 }
             }
             if ui
-                .add_enabled_ui(place.global.is_some(), |ui| {
+                .add_enabled_ui(place.global.is_some() && crate::ui::context::can_show_on_map(world), |ui| {
                     widgets::action_button(
                         ui,
                         p,
@@ -1662,7 +1665,7 @@ impl PlacesUi {
             }
             let mw = widgets::action_button_fit(ui, "map", aurora_i18n::tr!("common-map"));
             if ui
-                .add_enabled_ui(place.global.is_some(), |ui| {
+                .add_enabled_ui(place.global.is_some() && crate::ui::context::can_show_on_map(world), |ui| {
                     widgets::action_button(
                         ui,
                         p,

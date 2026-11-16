@@ -2626,7 +2626,7 @@ pub(crate) fn sender_name(world: &World, own_name: &str, line: &crate::world::Ch
         return aurora_i18n::tr!("chat-extras-no-name").to_owned();
     }
     if !line.source.is_nil() && !matches!(line.kind, ChatKind::Object(_) | ChatKind::ObjectIm) && !world.rlva_can_name(line.source) {
-        return crate::world::rlva::privacy::anonymous(line.source).display_name.clone();
+        return world.rlva_anonymous(line.source).display_name.clone();
     }
     let logged = line.origin != Origin::Live;
     let own = line.kind.is_own();

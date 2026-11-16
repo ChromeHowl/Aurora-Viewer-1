@@ -141,7 +141,7 @@ pub fn crosshair_name(ctx: &egui::Context, p: &Palette, world: &World, eye: Vec3
         .complete(&id)
         .unwrap_or_else(|| aurora_i18n::tr!("l2s-crosshair-unknown").to_owned());
     let color = super::colors::map_color(world, &id, &name);
-    let color = world.avatar_marks.get(&id).map_or(color, |[r, g, b]| Color32::from_rgb(r, g, b));
+    let color = world.rlva_shown_mark(&id).map_or(color, |[r, g, b]| Color32::from_rgb(r, g, b));
     let color = super::colors::shadow_red(world, &id).unwrap_or(color);
     let text = aurora_i18n::tr!(
         "l2s-crosshair-name",
@@ -178,7 +178,7 @@ pub fn mouselook_markers(ctx: &egui::Context, p: &Palette, world: &World, proj: 
         };
         let name = world.social.name_of(&s.id);
         let color = super::colors::map_color(world, &s.id, &name);
-        let color = world.avatar_marks.get(&s.id).map_or(color, |[r, g, b]| Color32::from_rgb(r, g, b));
+        let color = world.rlva_shown_mark(&s.id).map_or(color, |[r, g, b]| Color32::from_rgb(r, g, b));
         let color = super::colors::shadow_red(world, &s.id).unwrap_or(color);
         arrow(&painter, p, at, direction, color);
     }
