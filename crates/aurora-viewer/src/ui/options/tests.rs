@@ -457,11 +457,11 @@ fn a_setting_has_one_page() {
     let paths = collected();
     for (page, path) in &paths {
         // the push-to-talk keys: Sound and voice and Shortcuts, as before;
-        // the colored sky ambient and order-independent transparency:
+        // the colored sky ambient and the order of transparent surfaces:
         // Graphics, and Aurora with the other differences from the Legacy
         // Viewer;
         // inventory delete confirm: Confirmations and Inventory (#2344)
-        if path == "keybinds" || path == "colored_sky_ambient" || path == "oit" || path == "inventory.confirm_delete" {
+        if path == "keybinds" || path == "colored_sky_ambient" || path == "blend_order" || path == "inventory.confirm_delete" {
             continue;
         }
         let elsewhere: Vec<_> = paths

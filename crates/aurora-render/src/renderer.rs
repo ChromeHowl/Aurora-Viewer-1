@@ -3363,6 +3363,16 @@ impl Impostors {
         (self.capture_opaque, self.capture_blend, self.sprite, self.sprite_depth) = p;
     }
 
+    /// The pictures are drawn with the scene's own shaders.
+    fn shader_source(features: wgpu::Features, soft: bool) -> String {
+        format!(
+            "{}\n{}\n{}",
+            common_shader_for(soft),
+            crate::object_shader_source(features),
+            crate::water_shader_source(&["env.wgsl"], include_str!("shaders/env.wgsl"))
+        )
+    }
+
     fn make_pipelines(
         device: &wgpu::Device,
         layout: &wgpu::BindGroupLayout,
@@ -3373,15 +3383,9 @@ impl Impostors {
         ssr: bool,
         soft: bool,
     ) -> ImpostorPipelines {
-        let src = format!(
-            "{}\n{}\n{}",
-            common_shader_for(soft),
-            crate::water_shader_source(&["object.wgsl"], include_str!("shaders/object.wgsl")),
-            crate::water_shader_source(&["env.wgsl"], include_str!("shaders/env.wgsl"))
-        );
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("impostors"),
-            source: wgpu::ShaderSource::Wgsl(src.into()),
+            source: wgpu::ShaderSource::Wgsl(Self::shader_source(device.features(), soft).into()),
         });
         let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("impostors"),
@@ -4799,19 +4803,19 @@ impl Backend {
             a2c: false,
             samples,
             format: Some(HDR_FORMAT),
+            range: None,
             gbuf: false,
             depth_format: Some(DEPTH_FORMAT),
             depth_bias: Default::default(),
             constants: &[],
             polygon_line: false,
             unclipped_depth: false,
-            range: None,
         };
         // the stochastic depth and the accumulation at the passes' own
         // count (oit_stochastic.rs `pass_samples`), the total alpha at the
-        // scene's with MSAA, at the passes' without
+        // scene's
         let pass_samples = st.pass_samples(samples);
-        let alpha_samples = crate::oit_stochastic::trans_samples(samples, pass_samples);
+        let alpha_samples = samples;
         let additive = wgpu::BlendState {
             color: wgpu::BlendComponent {
                 src_factor: wgpu::BlendFactor::One,
@@ -4972,7 +4976,7 @@ impl Backend {
         let src = format!(
             "{}\n{}\n{}",
             common_shader_for(soft),
-            crate::oit_stochastic::without_st(&crate::water_shader_source(&["object.wgsl"], include_str!("shaders/object.wgsl"))),
+            crate::oit_stochastic::without_st(&crate::object_shader_source(device.features())),
             crate::water_shader_source(&["env.wgsl"], include_str!("shaders/env.wgsl"))
         );
         let src = crate::blend_exact::scene_source(src, device.features());
@@ -11408,13 +11412,16 @@ impl Backend {
         // or a snapshot (its memory is planned without them), and after a
         // while without a blended face
         if let Some(s) = &mut self.st {
-            if method != crate::oit_stochastic::Method::Stochastic || !plain_view {
+            if method != crate::oit_stochastic::Method::Stochastic && plain_view && crate::oit_stochastic::alternates() {
+                s.pause();
+            } else if method != crate::oit_stochastic::Method::Stochastic || !plain_view {
                 s.release();
             } else if !st_on {
                 s.unused_frame();
             }
         }
-        // every blended face in the true order of its fragments
+        // (without the stochastic method:) every blended face in the true
+        // order of its fragments
         // (blend_exact.rs), in passes of their own like the rigged ones
         // (not with MSAA yet: the pass of the blended faces has targets of
         // its own, of one sample)
@@ -11643,13 +11650,6 @@ impl Backend {
             let rigged = (b0, n_depth);
             let others = (b0 + u64::from(n_depth) * stride, bn - n_depth);
             mark(&mut encoder, MARK_ST_BEGIN);
-            // without MSAA the total alpha is tested against the opaque
-            // depth spread over the passes' samples: the copy of it comes
-            // first
-            let early = st.alpha_on_pass_depth();
-            if early {
-                st.begin_iteration(&self.device, &mut encoder, (scene_depth_tex, scene_depth), resolve, true);
-            }
             // 2. the total alpha of every sample
             if let Some(mut pass) = st.begin_alpha(&mut encoder, scene_depth) {
                 bind_mesh(&mut pass, &self.groups.b);
@@ -11659,9 +11659,7 @@ impl Backend {
             }
             mark(&mut encoder, MARK_ST_ALPHA_END);
             // 3 and 4: the stochastic depth, then the accumulation
-            if !early {
-                st.begin_iteration(&self.device, &mut encoder, (scene_depth_tex, scene_depth), resolve, true);
-            }
+            st.begin_iteration(&self.device, &mut encoder, (scene_depth_tex, scene_depth), resolve, true);
             if let Some(mut pass) = st.begin_depth(&mut encoder) {
                 bind_mesh(&mut pass, &self.groups.b);
                 pass.set_bind_group(3, st.face_group(), &[]);
@@ -11713,7 +11711,11 @@ impl Backend {
             let mut pass = begin_scene_b(&mut encoder, &self.targets, "scene b blend", true, false);
             bind_mesh(&mut pass, &self.groups.b);
             rest(&mut pass);
-        } else if let Some(order) = exact {
+        }
+        // `Exact`: every blended face once, lit and filed pixel by pixel,
+        // into the targets of the haze, against the depth of the opaque
+        // scene
+        if let Some(order) = exact {
             let t = &self.targets;
             order.set_faint(&self.queue, lists.blend_precision.faint());
             order.clear(&mut encoder);
@@ -13362,6 +13364,24 @@ mod tests {
         assert_eq!(blend_runs(&sides, 2..2).count(), 0);
     }
 
+    /// The impostors' module on a device without the early depth test, as
+    /// on Metal: naga refused all of it there, at every start (#3751).
+    #[test]
+    fn impostor_shader_is_valid_without_the_early_depth_test() {
+        use naga::valid::{Capabilities, ValidationFlags, Validator};
+        let valid = |src: &str| {
+            let module = naga::front::wgsl::parse_str(src).unwrap_or_else(|e| panic!("{}", e.emit_to_string(src)));
+            Validator::new(ValidationFlags::all(), Capabilities::all() - Capabilities::EARLY_DEPTH_TEST)
+                .validate(&module)
+                .map_err(|e| e.emit_to_string(src))
+        };
+        if let Err(e) = valid(&Impostors::shader_source(wgpu::Features::empty(), false)) {
+            panic!("{e}");
+        }
+        // the source a device with the test takes is refused there
+        assert!(valid(&Impostors::shader_source(crate::blend_exact::EARLY_TEST, false)).is_err());
+    }
+
     #[test]
     #[ignore = "requires a GPU"]
     fn gpu_impostor_atlas_growth_preserves_pictures_and_separates_pages() {
@@ -13817,7 +13837,7 @@ mod tests {
                 format!(
                     "{}\n{}\n{}",
                     crate::common_shader_source(),
-                    crate::water_shader_source(&["object.wgsl"], include_str!("shaders/object.wgsl")),
+                    crate::object_shader_source(device.features()),
                     crate::water_shader_source(&["env.wgsl"], include_str!("shaders/env.wgsl"))
                 )
                 .into(),

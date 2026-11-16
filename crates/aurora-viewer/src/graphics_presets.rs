@@ -322,7 +322,10 @@ impl Preset {
     /// The level whose settings are exactly those of `s`, if any.
     pub fn matching(s: &Settings) -> Option<Preset> {
         let current = Values::read(s).as_shown();
-        Preset::ALL.into_iter().find(|p| p.values().as_shown() == current)
+        Preset::ALL.into_iter().find(|p| {
+            let level = p.values().as_shown();
+            level == current.with_order_of(&level)
+        })
     }
 }
 
@@ -363,7 +366,8 @@ pub(crate) mod mac_mid_high {
 
     /// Whether the profile is exactly the Mac default.
     pub(crate) fn matches(s: &Settings) -> bool {
-        Values::read(s).as_shown() == values().as_shown()
+        let level = values().as_shown();
+        Values::read(s).as_shown().with_order_of(&level) == level
     }
 
     #[cfg(test)]
@@ -767,9 +771,44 @@ fn all_lights() -> u32 {
 
 /// `Settings::blend_order`: the exact order at its finest precision.
 pub(crate) const BLEND_ORDER_FULL: u8 = 4;
+/// `Settings::blend_order`: the stochastic transparency (aurora-render
+/// oit_stochastic.rs), an estimate of the exact order that is also drawn
+/// under MSAA.
+pub(crate) const BLEND_ORDER_STOCHASTIC: u8 = 5;
 
 fn blend_order_full() -> u8 {
     BLEND_ORDER_FULL
+}
+
+/// The method behind a `Settings::blend_order`, as the preferences show it:
+/// one choice for the exact order, whose precision (1 fast to 4 full) is
+/// set beside it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum BlendMethod {
+    Standard,
+    Exact,
+    Stochastic,
+}
+
+impl BlendMethod {
+    pub(crate) fn of(order: u8) -> Self {
+        match order {
+            0 => Self::Standard,
+            BLEND_ORDER_STOCHASTIC => Self::Stochastic,
+            _ => Self::Exact,
+        }
+    }
+
+    /// `Settings::blend_order` for this method; `precision`: the exact
+    /// order's (the full one when it is none of them).
+    pub(crate) fn order(self, precision: u8) -> u8 {
+        match self {
+            Self::Standard => 0,
+            Self::Exact if (1..=BLEND_ORDER_FULL).contains(&precision) => precision,
+            Self::Exact => BLEND_ORDER_FULL,
+            Self::Stochastic => BLEND_ORDER_STOCHASTIC,
+        }
+    }
 }
 
 fn default_projector_shadow_limit() -> u8 {
@@ -887,6 +926,16 @@ impl Values {
         }
     }
 
+    /// These values with `level`'s order of the blended faces where this
+    /// one is the stochastic transparency: no level sets it, so choosing it
+    /// keeps the level lit instead of "Custom" (as the former `oit` switch).
+    fn with_order_of(mut self, level: &Values) -> Values {
+        if self.blend_order == BLEND_ORDER_STOCHASTIC {
+            self.blend_order = level.blend_order;
+        }
+        self
+    }
+
     pub(crate) fn write(self, s: &mut Settings) {
         s.draw_distance = self.draw_distance;
         s.lod_factor = self.lod_factor;
@@ -909,7 +958,10 @@ impl Values {
         s.reflection_probes = self.reflection_probes;
         s.probe_count = self.probe_count;
         s.antialiasing = self.antialiasing;
-        s.blend_order = self.blend_order;
+        // (the stochastic transparency is no level's: a level leaves it)
+        if s.blend_order != BLEND_ORDER_STOCHASTIC {
+            s.blend_order = self.blend_order;
+        }
         s.anisotropy = self.anisotropy;
         s.sharpen = self.sharpen;
         s.glow = self.glow;
@@ -1002,6 +1054,45 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn a_level_leaves_the_stochastic_order_alone() {
+        for level in Preset::ALL {
+            // chosen over the stochastic transparency: it stays, the level stays lit
+            let mut s = Settings {
+                blend_order: BLEND_ORDER_STOCHASTIC,
+                ..Settings::default()
+            };
+            level.values().write(&mut s);
+            assert_eq!(s.blend_order, BLEND_ORDER_STOCHASTIC, "{level:?}");
+            assert_eq!(Preset::matching(&s), Some(level), "{level:?}");
+            // over any other order: the level's own, as before
+            for order in 0..=BLEND_ORDER_FULL {
+                let mut s = Settings {
+                    blend_order: order,
+                    ..Settings::default()
+                };
+                level.values().write(&mut s);
+                assert_eq!(s.blend_order, level.values().blend_order, "{level:?} over {order}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_exact_order_is_one_choice_that_keeps_its_precision() {
+        // every saved value comes back from its method and its own precision
+        for order in 0..=BLEND_ORDER_STOCHASTIC {
+            assert_eq!(BlendMethod::of(order).order(order), order);
+        }
+        assert_eq!(BlendMethod::of(2), BlendMethod::Exact);
+        // chosen again after another method: the precision it was left at
+        assert_eq!(BlendMethod::Exact.order(2), 2);
+        // or the full one, the default, when none was
+        assert_eq!(BlendMethod::Exact.order(0), BLEND_ORDER_FULL);
+        assert_eq!(BlendMethod::Exact.order(BLEND_ORDER_STOCHASTIC), BLEND_ORDER_FULL);
+        assert_eq!(BlendMethod::Standard.order(3), 0);
+        assert_eq!(BlendMethod::Stochastic.order(3), BLEND_ORDER_STOCHASTIC);
+    }
 
     #[test]
     fn levels_set_the_weather_quality_and_choosing_it_keeps_the_level() {

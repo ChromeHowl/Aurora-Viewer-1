@@ -1725,7 +1725,9 @@ pub struct Settings {
     /// the true order of their fragments at each pixel, beyond the Legacy
     /// Viewer, from its lightest precision to its finest
     /// (`aurora_render::BlendPrecision`: 1 fast, 2 balanced, 3 high, 4 full,
-    /// the default). Sorted under MSAA.
+    /// the default), sorted under MSAA; 5 the stochastic transparency
+    /// (aurora-render oit_stochastic.rs), an estimate of that order from 8
+    /// random samples per pixel, under MSAA too.
     pub blend_order: u8,
     /// With FSR, its quality mode: 0 native AA, 1 quality (the default),
     /// 2 balanced, 3 performance, 4 ultra performance.
@@ -1896,11 +1898,11 @@ pub struct Settings {
     pub display_name_notices: bool,
     /// Screen-space reflections.
     pub ssr: bool,
-    /// Order-independent transparency (aurora-render oit_stochastic.rs):
-    /// the blended faces drawn with depth-based stochastic transparency
-    /// rather than in the sorted order. An Aurora addition, off by
-    /// default (an opt-in); in every anti-aliasing mode.
-    pub oit: bool,
+    /// The former switch "Order-independent transparency", read once: on is
+    /// `blend_order` 5, the stochastic transparency (an earlier build kept
+    /// it apart from the order of the blended faces).
+    #[serde(rename = "oit", skip_serializing)]
+    pub(crate) former_oit: Option<bool>,
     /// Anisotropic filtering: 1 (off), 2, 4, 8, 16.
     pub anisotropy: u16,
     /// Disk cache size (MB) for textures, meshes, animations, objects and inventory.
@@ -2905,9 +2907,7 @@ impl Default for Settings {
             render_extras: Default::default(),
             render_photo: Default::default(),
             ssr: false,
-            // an opt-in: the Legacy Viewer sorts its blended faces, and the
-            // method's targets take video memory while it is on
-            oit: false,
+            former_oit: None,
             anisotropy: 8,
             cache_size_mb: 20480,
             cache_location: String::new(),
@@ -3631,6 +3631,14 @@ impl Settings {
             // sorted order of these levels
             crate::graphics_presets::upgrade_blend_order(&mut self);
         }
+        // the switch "Order-independent transparency" became a choice of the
+        // order of the blended faces (the stochastic one, `blend_order` 5):
+        // a file that had it on keeps its transparency. Read at every load,
+        // not once by version: an earlier build sharing the file can write
+        // it back, and the switch never sets a file it is off in
+        if self.former_oit.take() == Some(true) {
+            self.blend_order = crate::graphics_presets::BLEND_ORDER_STOCHASTIC;
+        }
         if self.settings_version < 40 {
             // the letter shortcuts of version 12 (or older defaults moved
             // then) were placed for the first layout of a Wayland keymap,
@@ -3828,7 +3836,9 @@ impl Settings {
             .projector_shadow_limit
             .clamp(1, aurora_render::projector_shadows::MAX_PROJECTOR_SHADOWS as u8);
         self.antialiasing = self.antialiasing.min(7);
-        self.blend_order = self.blend_order.min(4);
+        if self.blend_order > crate::graphics_presets::BLEND_ORDER_STOCHASTIC {
+            self.blend_order = crate::graphics_presets::BLEND_ORDER_FULL;
+        }
         self.fsr_quality = self.fsr_quality.min(4);
         self.fsr_sharpness = self.fsr_sharpness.min(100);
         self.render_scale_percent = self.render_scale_percent.clamp(50, 100);
@@ -4132,7 +4142,8 @@ impl Settings {
             rain_surfaces: false,
             anisotropy: self.anisotropy,
             occlusion: self.occlusion_culling,
-            oit: self.oit,
+            // the stochastic choice of the order of the blended faces
+            oit: self.blend_order == crate::graphics_presets::BLEND_ORDER_STOCHASTIC,
         }
     }
 
@@ -6113,6 +6124,45 @@ mod tests {
             ..Settings::default()
         };
         assert_eq!(odd.sanitized().blend_order, 4);
+        // the stochastic transparency is a choice of the same setting
+        let stochastic = Settings {
+            blend_order: 5,
+            ..Settings::default()
+        };
+        assert_eq!(stochastic.clone().sanitized().blend_order, 5);
+        assert!(stochastic.render_settings().oit);
+        assert!((0..=4).all(|order| {
+            !Settings {
+                blend_order: order,
+                ..Settings::default()
+            }
+            .render_settings()
+            .oit
+        }));
+    }
+
+    #[test]
+    fn the_former_oit_switch_becomes_the_stochastic_order() {
+        let read = |oit: Option<bool>, order: u8| {
+            let mut value = serde_json::to_value(Settings::default()).expect("settings JSON");
+            let object = value.as_object_mut().expect("object");
+            object.insert("blend_order".into(), order.into());
+            if let Some(oit) = oit {
+                object.insert("oit".into(), oit.into());
+            }
+            let loaded: Settings = serde_json::from_value(value).expect("settings JSON");
+            loaded.sanitized()
+        };
+        // on: the stochastic order, whatever the exact precision beside it
+        assert_eq!(read(Some(true), 4).blend_order, 5);
+        assert_eq!(read(Some(true), 0).blend_order, 5);
+        // off, or from a file without the switch: the order the file had
+        assert_eq!(read(Some(false), 2).blend_order, 2);
+        assert_eq!(read(None, 3).blend_order, 3);
+        assert_eq!(read(None, 5).blend_order, 5);
+        // the switch is no longer written
+        let saved = serde_json::to_value(read(Some(true), 4)).expect("settings JSON");
+        assert!(saved.get("oit").is_none());
     }
 
     #[test]
