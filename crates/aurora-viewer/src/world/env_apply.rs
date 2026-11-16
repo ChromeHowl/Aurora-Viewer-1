@@ -100,7 +100,7 @@ pub fn day_around(current: &Llsd, frame: &SettingsDoc) -> Option<DayDoc> {
     Some(day)
 }
 
-/// Why "Apply to parcel / region" of Personal lighting sends nothing.
+/// Why "Apply To Parcel / Region" of Personal lighting sends nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LightingRefusal {
     /// The light shown has rights that do not let it be saved (its own
