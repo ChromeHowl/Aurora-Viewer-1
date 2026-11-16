@@ -17,6 +17,7 @@ mod focus;
 pub(crate) mod follow;
 pub mod free;
 pub mod history;
+pub mod mode_status;
 mod mouselook_zoom;
 pub mod path;
 pub mod path_file;
@@ -1405,6 +1406,11 @@ impl Camera {
             self.smoothing_stop = true;
             self.start_animation(s);
         }
+    }
+
+    /// The Director's track holds the view (playing, scrubbed or held).
+    pub fn track_active(&self) -> bool {
+        self.track.is_some()
     }
 
     /// The Director's track takes the view (`Some`: its pose at the
