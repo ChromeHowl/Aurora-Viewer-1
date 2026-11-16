@@ -158,6 +158,7 @@ impl Default for Profile {
                             "play-world",
                             "play-local",
                             "play-sound",
+                            "play-sound-world",
                             "apply-environment",
                             "apply-save-parcel",
                             "apply-parcel",
@@ -223,6 +224,7 @@ impl Profile {
             "card-request-teleport",
             "card-conference",
             "folder-im-all",
+            "play-sound-world",
             "apply-parcel",
             "gesture-deactivate",
             "refresh-attachment-textures",
@@ -298,6 +300,7 @@ impl Preferences {
                 ("card-request-teleport", "card-offer-teleport", TEXT),
                 ("card-conference", "card-request-teleport", TEXT),
                 ("folder-im-all", "card-conference", TEXT),
+                ("play-sound-world", "play-sound", TEXT),
                 ("apply-save-parcel", "apply-environment", TEXT),
                 ("apply-parcel", "apply-save-parcel", TEXT),
                 ("gesture-deactivate", "gesture-active", TEXT),
@@ -916,6 +919,36 @@ impl Layout {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn saved_sound_menus_gain_world_playback_immediately_after_local_playback() {
+        let mut profile = Profile::default();
+        let order = profile.layout.orders.get_mut(TEXT).expect("text order");
+        order.retain(|id| id != "play-sound-world");
+        let mut expected = order.clone();
+        let local = expected.iter().position(|id| id == "play-sound").expect("local playback");
+        expected.insert(local + 1, "play-sound-world".into());
+        assert!(!profile.customized(), "an older default menu is not a user customization");
+        let mut prefs = Preferences {
+            profiles: [(SHARED.into(), profile)].into(),
+        };
+        prefs.unify();
+        assert_eq!(prefs.profiles[SHARED].layout.orders[TEXT], expected);
+        prefs.unify();
+        assert_eq!(
+            prefs.profiles[SHARED].layout.orders[TEXT], expected,
+            "loading again must not duplicate the action"
+        );
+        prefs
+            .profiles
+            .get_mut(SHARED)
+            .expect("shared profile")
+            .layout
+            .placements
+            .insert("play-sound-world".into(), HIDDEN.into());
+        prefs.unify();
+        assert_eq!(prefs.profiles[SHARED].layout.placements["play-sound-world"], HIDDEN);
+    }
+
+    #[test]
     fn folder_uuid_migration_starts_hidden_and_preserves_a_later_user_choice() {
         let mut profile = Profile::default();
         profile.layout.placements.remove("folder-uuid");
@@ -1106,6 +1139,7 @@ mod tests {
             "card-request-teleport",
             "card-conference",
             "folder-im-all",
+            "play-sound-world",
             "apply-parcel",
             "gesture-deactivate",
             "refresh-attachment-textures",
