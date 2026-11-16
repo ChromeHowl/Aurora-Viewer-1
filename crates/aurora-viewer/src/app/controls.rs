@@ -70,7 +70,7 @@ impl App {
         );
     }
 
-    fn control_action(&mut self, action: ControlAction) {
+    pub(super) fn control_action(&mut self, action: ControlAction) {
         if self.world.rlva.camera_preset_locked(uuid::Uuid::nil())
             && matches!(
                 action,

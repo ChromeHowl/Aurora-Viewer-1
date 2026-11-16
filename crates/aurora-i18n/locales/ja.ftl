@@ -6158,8 +6158,8 @@ controls-pan-tip = カメラを上下左右に移動：押して引きます。
 controls-pan = パン
 controls-object-view = オブジェクトビュー
 controls-object-view-tip = ワールド内をクリックすると、Altと同様にそこへカメラの焦点を合わせます。
-controls-reset-camera = カメラをリセット（初期設定 › カメラと同様）
-controls-reset-view = アバターに戻る
+controls-reset-camera = カメラ設定をすべてリセット
+controls-reset-view = カメラをアバターの後ろへ
 controls-shots = カメラのプリセット
 controls-shots-none = カメラのプリセットはありません
 controls-shot-name = このカメラ位置の名前
@@ -6293,8 +6293,8 @@ ui-environment-inventory-settings = インベントリ設定
 ui-land-environment-day-settings = 一日の設定
 build-ui-contents-reset-scripts = スクリプトのリセット
 common-reset = リセット
-ui-context-reset-camera = カメラをリセット
-ui-bars-reset-camera-esc = カメラをリセット（Esc）
+ui-context-reset-camera = カメラをアバターの後ろへ
+ui-bars-reset-camera-esc = カメラをアバターの後ろへ（Esc）
 ui-context-reset-mesh-lod = メッシュのＬＯＤをリセット
 ui-context-reset-mesh-lod-2 = メッシュのＬＯＤをリセット
 ui-context-reset-skeleton = スケルトンをリセット
@@ -10240,7 +10240,7 @@ world-status-invisible-off = { $count ->
     }
 radar-col-seen-short = 最終確認
 radar-col-range-short = 距離
-ui-options-camera-reset-all = カメラをリセット
+ui-options-camera-reset-all = カメラ設定をすべてリセット
 ui-options-camera-reset-all-tip = このページのすべての設定をデフォルトに戻します：後方ビュー、カメラの位置と注視点、視野角、距離、平滑化、制限、マウスルック。
 ui-chat-close-conversation = 会話を終える
 ui-chat-close-conversation-leave = 会話を閉じる（セッションから退出）
@@ -16677,3 +16677,46 @@ status-share-hide-busy = 取り込み中は共有しない
 status-share-hide-busy-hint = 取り込み中モードの間は何も共有しません。非表示の間は常に何も共有しません。
 status-share-show-others = 他の人のステータスを表示
 status-share-show-others-hint = ステータスを共有しているユーザーのネームプレートの横にチップを表示します。
+
+# Poser: Load › Inventory animation
+poser-inv-menu = インベントリのアニメーション…
+poser-inv-title = インベントリからアニメーションを読み込む
+poser-inv-empty = 表示できるアニメーションがありません。インベントリでAnimationsフォルダーを開くと、ここに読み込まれます。
+poser-inv-hint = グレー表示のアニメーションは、動きをポーザーに読み込む権限がありません（コピー・編集・譲渡のすべてが必要です）。
+poser-inv-right-copy = コピー
+poser-inv-right-modify = 編集
+poser-inv-right-transfer = 譲渡
+poser-inv-refused = ポーザーに読み込めません：このアニメーションの次の権限がありません：{$rights}
+poser-inv-unavailable = このアニメーションは利用できません。
+poser-inv-loading = インベントリから { $name } を読み込み中…
+poser-inv-loaded = インベントリから { $name } を読み込みました。
+poser-inv-failed = アニメーション { $name } を取得できませんでした。しばらくしてからもう一度お試しください。
+poser-inv-note-frame = 最初のフレームだけを読み込みました。ポーザーが持つのは1つのポーズで、タイムラインではありません。
+poser-inv-note-joints = { $count ->
+    [one] このアニメーションの{ $count }個のジョイントはこのスケルトンにないため、スキップしました。
+   *[other] このアニメーションの{ $count }個のジョイントはこのスケルトンにないため、スキップしました。
+    }
+poser-inv-note-extras = ループ、イーズ、優先度、拘束の設定はポーズには引き継がれません。
+
+# Camera mode indicator (camera/mode_status.rs, ui/camera_status.rs)
+camera-mode-normal = 通常のカメラビュー
+camera-mode-object-view = オブジェクトビュー
+camera-mode-mouselook = マウスルック
+camera-mode-follow = スクリプトカメラ
+camera-mode-seated = 座席カメラ
+camera-mode-free = フリーカメラ
+camera-mode-flycam = フライカム
+camera-mode-locked = カメラロック中
+camera-mode-path-playing = カメラパス再生中
+camera-mode-path-recording = カメラパス記録中
+camera-mode-director = ディレクター
+camera-mode-line = { $name } · { $how }
+camera-mode-leave-key = { $key } で解除
+camera-mode-leave-back = カメラ操作の「戻る」
+camera-mode-leave-lock-menu = メニューのカメラロック
+camera-mode-leave-path-window = カメラパスのウィンドウで停止
+camera-mode-leave-director = ディレクターのウィンドウで停止
+camera-mode-click-to-leave = { $mode }（クリックで解除）
+camera-menu-lock-history-path = ロック・履歴・パス
+ui-options-camera-show-mode-changes = カメラモードの変更を表示
+ui-options-camera-show-mode-changes-tip = 入ったカメラモードと解除方法を画面上部に短く表示します。カメラがロック中、パス上、フリー、またはスクリプト操作の間は小さなチップが残ります

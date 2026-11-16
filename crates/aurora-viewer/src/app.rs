@@ -53,6 +53,7 @@ mod blender_shape;
 mod buy_currency;
 mod buy_land;
 mod camera_presets;
+mod camera_status;
 mod camera_tools;
 mod capture_360;
 mod character_tests;
@@ -691,6 +692,8 @@ pub struct App {
     /// Its free camera joysticks this frame: move, look.
     controls_free: (egui::Vec2, egui::Vec2),
     object_view: bool,
+    /// The camera mode pill and chip (app/camera_status.rs).
+    camera_status: camera_status::State,
     /// Double click on the ground (src/autopilot.rs): the presses of the
     /// left button on the world, whether the one being handled is the
     /// second of a double click, and the walk it may have started.
@@ -2072,6 +2075,7 @@ impl App {
             rlva_temprun: false,
             always_run: false,
             controls_ui: Default::default(),
+            camera_status: Default::default(),
             controls_held: Vec::new(),
             controls_free: (egui::Vec2::ZERO, egui::Vec2::ZERO),
             object_view: false,
@@ -21036,6 +21040,7 @@ impl App {
                 }
                 ui::remote_object::show(&ctx, &p, &self.world, &mut self.remote_object);
                 self.photo_ui(&ctx, &p, projector, renderer);
+                self.camera_status_ui(&ctx, &p);
                 self.controls_window(&ctx, &p);
                 self.movelock_window(&ctx, &p);
                 self.window_size_window(&ctx, &p);

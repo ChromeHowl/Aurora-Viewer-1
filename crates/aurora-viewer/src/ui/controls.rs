@@ -89,6 +89,10 @@ pub struct ControlsUi {
     /// The name being typed for a new camera position.
     shot_name: String,
     naming: bool,
+    /// The camera mode in force, as the header's note and its tooltip
+    /// (`app/camera_status.rs` sets it each frame): the name, and the name
+    /// with how to leave.
+    pub mode: Option<(String, String)>,
 }
 
 /// What the window shows of the world.
@@ -187,14 +191,17 @@ impl ControlsUi {
         if classic && view.free.is_none() {
             if *camera {
                 let size = Vec2::new(250.0, 210.0);
-                Floater::new(
+                let mut floater = Floater::new(
                     CLASSIC_CAMERA,
                     aurora_i18n::tr!("controls-camera-title"),
                     Pos2::new(60.0, 160.0),
                     size,
                 )
-                .auto_height()
-                .show(ctx, p, camera, |ui| {
+                .auto_height();
+                if let Some((name, tip)) = self.mode.clone() {
+                    floater = floater.title_note(name).title_note_tooltip(tip);
+                }
+                floater.show(ctx, p, camera, |ui| {
                     classic_camera(ui, p, view, (&mut self.naming, &mut self.shot_name), &mut out)
                 });
             }
@@ -225,7 +232,7 @@ impl ControlsUi {
                 Some(_) if minimized => aurora_i18n::tr!("controls-free-title"),
                 _ => aurora_i18n::tr!("controls-title"),
             };
-            Floater::new(
+            let mut floater = Floater::new(
                 WINDOW,
                 title,
                 Pos2::new(screen.left() + 24.0, screen.bottom() - 460.0),
@@ -233,8 +240,12 @@ impl ControlsUi {
             )
             .fixed()
             .auto_height()
-            .compact_when_minimized(COMPACT_WIDTH + 20.0)
-            .show(ctx, p, &mut open, |ui| {
+            .compact_when_minimized(COMPACT_WIDTH + 20.0);
+            // the mode in force, in the header (elided, whole on hover)
+            if let Some((name, tip)) = self.mode.clone() {
+                floater = floater.title_note(name).title_note_tooltip(tip);
+            }
+            floater.show(ctx, p, &mut open, |ui| {
                 // minimized: the joysticks and the zoom only (the mockup's
                 // compact window), or the free camera's joysticks, speed
                 // and way back

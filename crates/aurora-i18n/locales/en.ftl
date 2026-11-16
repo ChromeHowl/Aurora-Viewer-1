@@ -6189,8 +6189,8 @@ controls-pan-tip = Move the camera up, down, left and right: press and pull.
 controls-pan = Pan
 controls-object-view = Object view
 controls-object-view-tip = A click in the world focuses the camera there, as with Alt.
-controls-reset-camera = Reset the camera (like Preferences › Camera)
-controls-reset-view = Back to the avatar
+controls-reset-camera = Reset all camera settings
+controls-reset-view = Camera behind avatar
 controls-shots = Camera presets
 controls-shots-none = No camera preset
 controls-shot-name = Name of this camera position
@@ -6324,8 +6324,8 @@ ui-environment-inventory-settings = Inventory settings
 ui-land-environment-day-settings = Day settings
 build-ui-contents-reset-scripts = Reset scripts
 common-reset = Reset
-ui-context-reset-camera = Reset camera
-ui-bars-reset-camera-esc = Reset camera (Esc)
+ui-context-reset-camera = Camera behind avatar
+ui-bars-reset-camera-esc = Camera behind avatar (Esc)
 ui-context-reset-mesh-lod = Reset mesh LOD
 ui-context-reset-mesh-lod-2 = Reset mesh LOD
 ui-context-reset-skeleton = Reset skeleton
@@ -10302,7 +10302,7 @@ world-status-invisible-off = { $count ->
     }
 radar-col-seen-short = Seen
 radar-col-range-short = Dist.
-ui-options-camera-reset-all = Reset the camera
+ui-options-camera-reset-all = Reset all camera settings
 ui-options-camera-reset-all-tip = Puts every setting of this page back to its default: rear view, camera position and focus point, viewing angle, distance, smoothing, limits and mouselook.
 ui-chat-close-conversation = Close conversation
 ui-chat-close-conversation-leave = Close conversation (leaves the session)
@@ -16786,3 +16786,46 @@ status-share-hide-busy = Not while busy
 status-share-hide-busy-hint = Share nothing while you are in do not disturb. Nothing is ever shared while you are invisible.
 status-share-show-others = Show the status of others
 status-share-show-others-hint = Draw the chip beside the name plates of residents who share one.
+
+# Poser: Load › Inventory animation
+poser-inv-menu = Inventory animation…
+poser-inv-title = Load an animation from your inventory
+poser-inv-empty = No animation to show. Open your Animations folder in Inventory to load it here.
+poser-inv-hint = Greyed-out animations lack the rights to read their motion into the poser (copy, modify and transfer are all needed).
+poser-inv-right-copy = copy
+poser-inv-right-modify = modify
+poser-inv-right-transfer = transfer
+poser-inv-refused = Cannot be loaded into the poser: you lack the {$rights} permission(s) on this animation.
+poser-inv-unavailable = This animation is not available.
+poser-inv-loading = Loading { $name } from your inventory…
+poser-inv-loaded = Loaded { $name } from your inventory.
+poser-inv-failed = Could not get the animation { $name }. Try again in a moment.
+poser-inv-note-frame = Only its first frame was read: the poser holds one pose, not a timeline.
+poser-inv-note-joints = { $count ->
+    [one] { $count } joint of this animation is not on this skeleton and was skipped.
+   *[other] { $count } joints of this animation are not on this skeleton and were skipped.
+    }
+poser-inv-note-extras = Loop, easing, priority and constraint settings do not carry into a pose.
+
+# Camera mode indicator (camera/mode_status.rs, ui/camera_status.rs)
+camera-mode-normal = Normal camera view
+camera-mode-object-view = Object view
+camera-mode-mouselook = Mouselook
+camera-mode-follow = Script camera
+camera-mode-seated = Seat camera
+camera-mode-free = Free camera
+camera-mode-flycam = Flycam
+camera-mode-locked = Camera locked
+camera-mode-path-playing = Camera path playing
+camera-mode-path-recording = Recording camera path
+camera-mode-director = Director
+camera-mode-line = { $name } · { $how }
+camera-mode-leave-key = { $key } to leave
+camera-mode-leave-back = Back in Camera controls
+camera-mode-leave-lock-menu = Camera lock in the menu
+camera-mode-leave-path-window = Stop in the Camera path window
+camera-mode-leave-director = Stop in the Director window
+camera-mode-click-to-leave = { $mode } (click to leave)
+camera-menu-lock-history-path = Lock, history and path
+ui-options-camera-show-mode-changes = Show camera mode changes
+ui-options-camera-show-mode-changes-tip = A short note at the top of the world names the camera mode you enter and how to leave it; a small chip stays while the camera is locked, on a path, free or moved by a script

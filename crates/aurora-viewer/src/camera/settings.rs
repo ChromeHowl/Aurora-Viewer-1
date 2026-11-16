@@ -437,6 +437,9 @@ pub struct CameraSettings {
     pub mouselook_alt_right_menu: bool,
     /// FSShowMouselookInstructions: "Press Esc to return to world view".
     pub show_mouselook_instructions: bool,
+    /// Aurora's own: a short pill at the top of the world names the camera
+    /// mode just entered and how to leave it (`camera/mode_status.rs`).
+    pub show_mode_changes: bool,
     /// FSShowInterfaceInMouselook (FIRE-8868, off): the bars stay in
     /// mouselook; otherwise they go (LLAgent::changeCameraToMouselook) and
     /// the chat bar only shows with text in it.
@@ -528,6 +531,7 @@ impl Default for CameraSettings {
             mouselook_zoom_fov: None,
             mouselook_alt_right_menu: false,
             show_mouselook_instructions: true,
+            show_mode_changes: true,
             show_interface_in_mouselook: false,
             vr_at_start: false,
             extra: Default::default(),

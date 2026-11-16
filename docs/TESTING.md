@@ -1084,6 +1084,7 @@ when unfocused") is ignored during a screenshot.
 |---|---|
 | `AURORA_DEMO_CAM="yaw,pitch,dist"` | Places the camera around the avatar |
 | `AURORA_DEMO_CAMERA=<scenario>` | Camera scenario (see Details), including `head-follow`, `pelvis-follow` and `hand-follow` |
+| `AURORA_DEMO_CAMERA_MODE=cycle` | Camera mode indicator scenario (see Details) |
 | `AURORA_DEMO_DIRECTOR=1\|play\|lock\|green\|record\|record-alpha` | The Director open on a track of four keyframes around the avatar, that track playing, the view locked on the avatar's neck, the avatar alone on a green screen, or a second of the track recorded (see Details) |
 | `AURORA_DEMO_DIRECTOR_FILM=<file>` | The Director's recording writes its raw frames to that file, with no encoder (see Details) |
 | `AURORA_DEMO_CROSSHAIR=dot\|cross\|circle\|legacy\|off\|image:<file>` | The mouselook crosshair in that shape for the session (see Details) |
@@ -1426,6 +1427,7 @@ when unfocused") is ignored during a screenshot.
   trigger plain G (snap / guide). Releasing a key first pressed without
   AltGr must always release it, even if AltGr was held in the meantime.
 
+- **`AURORA_DEMO_CAMERA_MODE=cycle`** (with `AURORA_DEMO=1`): every 80 frames from 620: mouselook in (620) and out (700), the free camera on (780) and off (860), the Camera Lock on (880) and off (960), a one-waypoint path captured (1000), played (1040) and stopped (1160). Capture each step with `AURORA_CAPTURE_FRAMES` (for example 640, 720, 800, 900, 1060), also with `AURORA_TEXT_SIZE=2` and `AURORA_UI_SCALE=1.5`. Look for: a pill at the top centre naming the mode and how to leave it, gone after about 1.8 s; a chip in its place while the lock, the free camera or the path lasts (a click leaves the mode); the note after the Controls window's title; long text cut with "..." and the whole text on hover; nothing in the plain view and nothing on the first frame. Preferences › Camera › Show camera mode changes off: no pill and no chip.
 - **`AURORA_DEMO_CAMERA=alt,x,y|altgr,x,y|pan,x,y|zoom,x,y|crouch-alt,x,y|crouch-pan,x,y|crouch-zoom,x,y|close,x,y[,n]|drift,x,y[,n]|spin,x,y[,px]|zoom-resident|zoom-unloaded|tag|ml|ml-alt|ml-zoom|ml-zoom-alt|wheel|wheel-chat|fly|sit|sit-ml|sit-ml-reclined|scripted|scripted-sit|head-follow|pelvis-follow|hand-follow`**:
   scenario logged under `demo camera` — Alt+click at (x, y) then drag and
   return while walking; `altgr`: the same orbit with AltGr alone held, as
@@ -3925,7 +3927,7 @@ To check with these scenarios:
 | `AURORA_DEMO_ANIMESH_TRIS=<n>` | Triangles added to the demo's rigged mesh |
 | `AURORA_DEMO_HAND_IK=<mode>` | Local or observed motorcycle contacts on linked targets |
 | `AURORA_DEMO_IK_EDIT=<mode>` | Local pose/animation editor and target-prim contact export |
-| `AURORA_DEMO_POSER=<mode>` | Photo poser, consent and per-joint animation switches (`joint-off`, `finger-off`) |
+| `AURORA_DEMO_POSER=<mode>` | Photo poser, consent, per-joint animation switches (`joint-off`, `finger-off`) and Inventory load (`inventory-load`) |
 | `AURORA_DEMO_CLOUD=1` | Avatar loading clouds |
 | `AURORA_DEMO_CLASSIC=1` | Classic avatars: shapes and bakes with alpha |
 | `AURORA_DEMO_SHAPE_MORPH=1` | The Wolf and the crowd change shape every 200 frames, gliding over 0.65 s (see Details) |
@@ -4129,7 +4131,7 @@ That ignored test creates and removes its own isolated profile.
   list, parent-local numeric controls, markers and native save/load/import
   actions. No motorcycle, contacts or IK-project draft is loaded or written.
   Prefer the dedicated `AURORA_DEMO_POSER` scenarios below. See [Poser](POSER.md).
-- **`AURORA_DEMO_POSER=self|connected|camera|scale|hands|joint-off|finger-off|face|together|misc|physics|library|settings|close|square-head|shape-change|animesh|consent-accept|consent-refuse|consent-timeout|consent-withdraw|consent-request|consent-reminder|consent-reply|bridge-starting|bridge-silent|bridge-failed|bridge-off|compact|compact-invite|compact-accept|compact-long|compact-crowd|compact-wings|compact-tail|compact-sliders|compact-options|compact-save|compact-face|compact-together|compact-body`**:
+- **`AURORA_DEMO_POSER=self|connected|camera|scale|hands|joint-off|finger-off|face|together|misc|physics|library|settings|close|square-head|shape-change|animesh|consent-accept|consent-refuse|consent-timeout|consent-withdraw|consent-request|consent-reminder|consent-reply|bridge-starting|bridge-silent|bridge-failed|bridge-off|compact|compact-invite|compact-accept|compact-long|compact-crowd|compact-wings|compact-tail|compact-sliders|compact-options|compact-save|compact-face|compact-together|compact-body|inventory-load|inventory-load-done|compact-inventory-load`**:
   the full handoff trial, with the real local pose layer and consent state
   machine, on a standing avatar without motorcycle contacts or bone bindings.
   The additional `connected` mode restores a T-pose at 450 and moves the
@@ -4140,6 +4142,13 @@ That ignored test creates and removes its own isolated profile.
   eye, adds the right eye with Shift + click and turns the left eye at 450:
   capture 620 shows both eyes looking the same way (not mirrored), both
   markers ringed, and "+ 1 joint moves with it" under the joint's name.
+  `inventory-load` (also `compact-inventory-load`) opens Load › Inventory
+  animation over five demo animations: the full-permission one is
+  selectable, the four others (no copy, no modify, no transfer, someone
+  else's) are greyed out with a tip naming the missing rights;
+  `inventory-load-done` loads the full-permission one at 470: capture 620
+  shows the head turned and the right arm raised, with the loaded line and
+  its notes under the window.
   `scale` shows the head's local
   scale handles; `physics` shows the collision volume scale handles. All
   body-part scenarios display only the selected tab's joints and shafts.
@@ -10269,7 +10278,13 @@ Human grid validation: remember MFA for account A and B, restart the viewer, the
   `:classic` shows the Legacy Viewer's three tabs for the run, whatever
   Preferences › Aurora › Places says (not saved): the Teleport / Map /
   Profile bar stays whole at the bottom, down to the window's minimum size
-  and at any interface scale (#2641).
+  and at any interface scale (#2641). In the Legacy tabs, the Landmarks,
+  Favorites and Teleport History rows show the people of their region
+  (the users icon and a figure, `…` while asked, `?` when unanswered) at
+  the right end; Aurora's narrow list shows it too, after the rating badge.
+  The demo answers the requests for the plaza and the lagoon. Off in
+  Preferences › Aurora (People in region) or under RLVa `@showloc`, the
+  column is gone.
   `:narrow` opens the window 260 points wide (its least width at text
   size 1): with `:classic` and `AURORA_TEXT_SIZE=2`, the window widens to
   the three buttons, each whole.
