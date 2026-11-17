@@ -16858,3 +16858,4 @@ director-key-aim-clear-tip = This keyframe looks where its camera was laid, even
 director-key-aim-follow = Follow the lock
 director-key-aim-follow-tip = This keyframe looks at the lock's target while the view is locked, and where its camera was laid when it is not.
 inventory-dual-panel = Dual-panel inventory
+photo-vf-pad-tilt-value-tip = The tilt in degrees, positive clockwise: click to type it, or drag across it
