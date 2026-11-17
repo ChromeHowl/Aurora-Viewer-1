@@ -70,9 +70,12 @@ pub struct Social {
     pub focus_im: Option<Uuid>,
     /// The session of `focus_im` takes the keyboard too, not only the view:
     /// a conversation the user opened or started, as the Legacy Viewer's
-    /// FSFloaterIM::show → setFocus(true) → focusFirstItem. A call leaves it
+    /// FSFloaterIM::show -> setFocus(true) -> focusFirstItem. A call leaves it
     /// false, so the keyboard stays where it was.
     pub focus_im_to_type: bool,
+    /// Server-assigned IDs of conferences we started. The UI keeps the same
+    /// window and draft when its temporary ID is replaced.
+    pub conference_rekeys: Vec<(Uuid, Uuid)>,
     /// Residents whose last word was an automatic response
     /// (IM_DO_NOT_DISTURB_AUTO_RESPONSE), until their next ordinary IM: a
     /// hint of do not disturb for their status dot (`ui/presence.rs`).

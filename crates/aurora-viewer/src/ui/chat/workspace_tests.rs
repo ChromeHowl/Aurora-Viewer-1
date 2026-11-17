@@ -2911,8 +2911,132 @@ fn a_conference_made_from_a_p2p_chat_takes_the_keyboard() {
             "{style:?}: the server's id keeps the keyboard"
         );
         h.frame(vec![egui::Event::Text("!".into())]);
-        assert_eq!(h.st.draft_mut(Some(real)), "!", "{style:?}: typing stays in the conference");
+        assert_eq!(
+            h.st.draft_mut(Some(real)),
+            "hi!",
+            "{style:?}: the draft and caret stay in the conference"
+        );
+        assert!(!h.st.drafts.contains_key(&Some(temp)), "the temporary editor is gone");
         assert!(h.st.draft_mut(None).is_empty(), "{style:?}: not in the nearby chat");
+    }
+}
+
+/// The server may acknowledge a new conference after the user has started
+/// writing elsewhere. The server ID follows the draft, not the keyboard.
+#[test]
+fn a_voice_conference_takes_focus_once_and_keeps_its_draft_after_switching_chats() {
+    for detached in [false, true] {
+        let mut h = Harness::new(ChatStyle::Aurora);
+        h.st.own_windows = detached;
+        h.world.calls.voice_enabled = true;
+        h.world.start_conference(vec![JANE, BOB]);
+        let temp = h.world.social.focus_im.expect("outgoing voice conference");
+        h.settle();
+        let field = |c| egui::Id::unique(("conv_input", Some(c)));
+        assert!(h.frames.ctx.memory(|m| m.has_focus(field(temp))));
+        h.frame(vec![egui::Event::Text("conference draft".into())]);
+        h.world.focus_conversation(JANE, true);
+        h.settle();
+        h.frame(vec![egui::Event::Text("to Jane".into())]);
+        assert!(h.frames.ctx.memory(|m| m.has_focus(field(JANE))));
+        let real = Uuid::from_u128(0xC0FFEE);
+        h.world.apply(aurora_net::NetEvent::SessionStarted {
+            temp_session: temp,
+            session: real,
+            success: true,
+            error: String::new(),
+            agents: Vec::new(),
+        });
+        assert!(h.world.social.focus_im.is_none(), "the reply does not open a conversation");
+        h.settle();
+        assert!(h.frames.ctx.memory(|m| m.has_focus(field(JANE))));
+        h.frame(vec![egui::Event::Text("!".into())]);
+        assert_eq!(h.st.draft_mut(Some(JANE)), "to Jane!");
+        assert_eq!(h.st.draft_mut(Some(real)), "conference draft");
+        assert!(!h.st.popped.contains(Some(temp)));
+        assert_eq!(h.st.popped.contains(Some(real)), detached);
+        assert!(!h.st.drafts.contains_key(&Some(temp)));
+        assert!(h.st.draft_mut(None).is_empty());
+    }
+}
+
+#[test]
+fn conference_ack_keeps_the_picker_in_its_own_window() {
+    let ctx = egui::Context::default();
+    let unrelated = Uuid::from_u128(17);
+    for (before, after) in [
+        (None, None),
+        (Some(None), Some(None)),
+        (Some(Some(None)), Some(Some(None))),
+        (Some(Some(Some(unrelated))), Some(Some(Some(unrelated)))),
+        (Some(Some(Some(JANE))), Some(Some(Some(BOB)))),
+    ] {
+        let mut st = ChatUi {
+            picker_window: before,
+            ..Default::default()
+        };
+        st.rekey_conference(&ctx, JANE, BOB);
+        assert_eq!(st.picker_window, after);
+    }
+}
+
+#[test]
+fn conference_ack_keeps_the_active_search_or_filter_editor() {
+    use super::super::find;
+
+    let (temp, real) = (Some(JANE), Some(BOB));
+    for field in [find::field_id, find::filter_id] {
+        let ctx = egui::Context::default();
+        let mut st = ChatUi::default();
+        ctx.memory_mut(|m| m.request_focus(field(temp)));
+        st.rekey_conference(&ctx, JANE, BOB);
+        assert!(ctx.memory(|m| m.has_focus(field(real))));
+    }
+}
+
+#[test]
+fn enter_returns_to_the_last_editor_after_a_conference_ack_with_the_keyboard_in_world() {
+    let field = |id| egui::Id::unique(("conv_input", Some(id)));
+    for switch_first in [false, true] {
+        let mut h = Harness::new(ChatStyle::Aurora);
+        h.st.enter_last_field = true;
+        h.world.start_text_conference(vec![JANE, BOB]);
+        let temp = h.world.social.focus_im.expect("outgoing conference");
+        h.settle();
+        h.frame(vec![egui::Event::Text("a draft".into())]);
+        let last = if switch_first {
+            h.world.focus_conversation(JANE, true);
+            h.settle();
+            h.frame(vec![egui::Event::Text("private".into())]);
+            JANE
+        } else {
+            temp
+        };
+        assert!(h.frames.ctx.memory(|m| m.has_focus(field(last))));
+        h.frames.ctx.memory_mut(|m| m.surrender_focus(field(last)));
+        h.st.let_keyboard_go();
+        let real = Uuid::from_u128(0xC0FFEE);
+        h.world.apply(aurora_net::NetEvent::SessionStarted {
+            temp_session: temp,
+            session: real,
+            success: true,
+            error: String::new(),
+            agents: Vec::new(),
+        });
+        h.settle();
+        assert!(
+            h.frames.ctx.memory(|m| m.focused()).is_none(),
+            "the reply leaves the keyboard in the world"
+        );
+        let world = &h.world;
+        h.st.start_chat(&h.frames.ctx, h.open, |id| {
+            world.social.has_session(id) || world.groups.sessions.contains_key(id)
+        });
+        h.settle();
+        let expected = if switch_first { JANE } else { real };
+        assert!(h.frames.ctx.memory(|m| m.has_focus(field(expected))));
+        h.frame(vec![egui::Event::Text("!".into())]);
+        assert_eq!(h.st.draft_mut(Some(expected)), if switch_first { "private!" } else { "a draft!" });
     }
 }
 

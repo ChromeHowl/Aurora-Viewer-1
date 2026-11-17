@@ -78,6 +78,8 @@ pub struct CallMember {
 /// not the proximal one).
 #[derive(Debug, Clone)]
 pub struct Call {
+    /// Stable across the simulator assigning a conference its permanent session.
+    pub initial_session: Uuid,
     /// The IM session (P2P: agent XOR other, group: the group id).
     pub session: Uuid,
     pub kind: CallKind,
@@ -411,6 +413,7 @@ impl World {
         }
         self.ui_sounds.push(crate::ui_sound::UiSound::StartIm);
         self.calls.active = Some(Call {
+            initial_session: session,
             session,
             kind,
             name,
@@ -443,6 +446,7 @@ impl World {
         let session = self.open_conference(agents, true);
         let name = aurora_i18n::tr!("world-groups-conference").to_owned();
         self.calls.active = Some(Call {
+            initial_session: session,
             session,
             kind: CallKind::AdHoc,
             name,
@@ -502,7 +506,9 @@ impl World {
             agents.len(),
             if voice { ", with a call" } else { "" }
         );
-        self.info_mut(session, &name).started_by_us = true;
+        let info = self.info_mut(session, &name);
+        info.started_by_us = true;
+        info.unconfirmed_invitees.extend(agents.iter().copied());
         self.session_lines(session);
         self.focus_conversation(session, true);
         self.calls.conferences.insert(session, agents.clone());
@@ -516,7 +522,7 @@ impl World {
     /// IM_SESSION_CONFERENCE_START to the first resident, every invited id
     /// in the binary bucket); another failure ends there.
     fn on_conference_reply(&mut self, session: Uuid, result: &Result<Llsd, u16>) {
-        let Some(agents) = self.calls.conferences.get(&session).cloned() else {
+        let Some(agents) = self.calls.conferences.get(&session) else {
             return;
         };
         match result {
@@ -535,6 +541,14 @@ impl World {
             Err(status) => {
                 log::warn!("conference: start failed ({status})");
                 self.calls.conferences.remove(&session);
+                if let Some(info) = self.groups.sessions.get_mut(&session) {
+                    info.closed = true;
+                    info.failed_conference_start = true;
+                    if !info.pending_messages.is_empty() {
+                        info.pending_messages.clear();
+                        self.session_system(session, aurora_i18n::tr!("world-groups-message-not-sent"));
+                    }
+                }
                 if self.calls.active.as_ref().is_some_and(|c| c.session == session) {
                     let name = aurora_i18n::tr!("world-groups-conference");
                     self.call_failed(aurora_i18n::tr!("world-calls-generic-error", name = name));
@@ -694,14 +708,24 @@ impl World {
     /// conference's temporary id becomes the server's
     /// (processSessionInitializedReply).
     pub(super) fn call_session_started(&mut self, temp: Uuid, session: Uuid, success: bool) {
-        // a conference we started: its conversation follows it to its id,
-        // and keeps the keyboard the user gave it (`open_conference`)
-        let mut to_type = false;
-        if self.calls.conferences.remove(&temp).is_some() && success && !session.is_nil() && session != temp {
-            to_type = true;
-            self.focus_conversation(session, true);
-            if let Some(invited) = self.calls.invited.remove(&temp) {
-                self.calls.invited.insert(session, invited);
+        // Retarget an opening request only if it is still pending. A server
+        // reply is not a new user action: they may already be typing elsewhere.
+        if success && !temp.is_nil() && !session.is_nil() && temp != session && self.social.focus_im == Some(temp) {
+            self.social.focus_im = Some(session);
+        }
+        if self.calls.conferences.remove(&temp).is_some() && success && !session.is_nil() {
+            if session != temp {
+                self.social.conference_rekeys.push((temp, session));
+                if let Some(invited) = self.calls.invited.remove(&temp) {
+                    self.calls.invited.insert(session, invited);
+                }
+            }
+            // The permanent ID and its roster are in place. Each message goes
+            // through the normal send path again, including its current RLVa rules.
+            if let Some(info) = self.groups.sessions.get_mut(&session) {
+                for text in std::mem::take(&mut info.pending_messages) {
+                    self.send_session_im(session, &text);
+                }
             }
         }
         let Some(c) = self
@@ -718,10 +742,6 @@ impl World {
             c.session = session;
         }
         let (session, name) = (c.session, c.name.clone());
-        if moved {
-            // the conversation shown follows the conference to its new id
-            self.focus_conversation(session, to_type);
-        }
         if success {
             self.call_request(CallMethod::Call, session);
         } else {
@@ -1026,6 +1046,7 @@ impl World {
         }
         let session = inv.session;
         let call = self.calls.active.get_or_insert_with(|| Call {
+            initial_session: session,
             session,
             kind,
             name,
@@ -1066,9 +1087,12 @@ impl World {
     /// "Start IM" of a P2P invitation (processCallResponse 2): the
     /// conversation without the call, which is declined.
     pub(super) fn answer_voice_invite_by_im(&mut self, inv: &VoiceInvite) {
-        self.social.session_mut(inv.from);
-        // "Reply by text": the user asked for the conversation, ready to type
-        self.focus_conversation(inv.from, true);
+        // LLIncomingCallDialog::processCallResponse goes through startIM,
+        // which checks canStartIM again before opening the text conversation.
+        if self.rlva_start_ims(&[inv.from]) {
+            self.social.session_mut(inv.from);
+            self.focus_conversation(inv.from, true);
+        }
         self.decline_voice_invite(inv);
     }
 }
@@ -1529,6 +1553,94 @@ mod tests {
         assert!(!w.calls.invited.contains_key(&session));
     }
 
+    fn conference_ack(temp: Uuid, real: Uuid, success: bool) -> NetEvent {
+        NetEvent::SessionStarted {
+            temp_session: temp,
+            session: real,
+            success,
+            error: String::new(),
+            agents: Vec::new(),
+        }
+    }
+
+    fn conference_sends(w: &mut World) -> Vec<(Uuid, Uuid, String)> {
+        w.groups
+            .take_commands()
+            .into_iter()
+            .filter_map(|cmd| match cmd {
+                NetCommand::SendImDialog {
+                    dialog: 17,
+                    to,
+                    id,
+                    message,
+                    ..
+                } => Some((to, id, message)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn conference_messages_wait_for_their_own_real_id_in_order_and_only_once() {
+        let mut w = world();
+        let (a, b) = (Uuid::from_u128(2), Uuid::from_u128(3));
+        w.start_text_conference(vec![a, b]);
+        let first = w.social.focus_im.unwrap();
+        w.start_text_conference(vec![a, b]);
+        let second = w.social.focus_im.unwrap();
+        let (x, y) = (Uuid::from_u128(100), Uuid::from_u128(101));
+        w.send_session_im(first, "one");
+        w.send_session_im(second, "separate");
+        w.send_session_im(first, "two");
+        assert!(conference_sends(&mut w).is_empty());
+        w.apply(conference_ack(second, y, true));
+        assert_eq!(conference_sends(&mut w), [(y, y, "separate".into())]);
+        w.apply(conference_ack(first, x, true));
+        assert_eq!(conference_sends(&mut w), [(x, x, "one".into()), (x, x, "two".into())]);
+        w.apply(conference_ack(first, x, true));
+        assert!(conference_sends(&mut w).is_empty());
+    }
+
+    #[test]
+    fn failed_closed_or_previous_login_conferences_never_replay_pending_text() {
+        let (a, b) = (Uuid::from_u128(2), Uuid::from_u128(3));
+        for case in ["refused", "unavailable", "closed", "logout", "occupied", "nil"] {
+            let mut w = world();
+            w.start_text_conference(vec![a, b]);
+            let temp = w.social.focus_im.unwrap();
+            let real = Uuid::from_u128(101);
+            w.send_session_im(temp, "must stay local");
+            match case {
+                "refused" => {
+                    w.apply(conference_ack(temp, real, false));
+                }
+                "unavailable" => {
+                    w.apply(NetEvent::CallReply {
+                        session: temp,
+                        method: CallMethod::StartConference { agents: vec![a, b] },
+                        result: Err(403),
+                    });
+                }
+                "closed" => w.leave_session(temp),
+                "logout" => w.reset(),
+                "occupied" => {
+                    w.start_group_chat(real, false);
+                    w.info_mut(real, "unrelated").group = true;
+                    w.apply(conference_ack(temp, real, true));
+                }
+                "nil" => {
+                    w.apply(conference_ack(temp, Uuid::nil(), true));
+                }
+                _ => unreachable!(),
+            }
+            if matches!(case, "refused" | "unavailable" | "occupied" | "nil") {
+                w.send_session_im(temp, "still no valid destination");
+            }
+            w.apply(conference_ack(temp, real, true));
+            assert!(conference_sends(&mut w).is_empty(), "{case}");
+        }
+    }
+
     #[test]
     fn a_conference_starts_its_call_under_the_servers_session_id() {
         let mut w = world();
@@ -1547,7 +1659,7 @@ mod tests {
             error: String::new(),
             agents: Vec::new(),
         });
-        assert_eq!(w.calls.active.as_ref().map(|c| c.session), Some(real));
+        assert_eq!(w.calls.active.as_ref().map(|c| (c.initial_session, c.session)), Some((temp, real)));
         assert_eq!(w.social.focus_im, Some(real));
         assert!(w.social.focus_im_to_type, "the server's id keeps the keyboard");
         assert_eq!(calls_sent(&mut w), vec![(CallMethod::Call, real)]);
