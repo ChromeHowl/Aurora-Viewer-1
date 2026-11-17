@@ -16803,3 +16803,5 @@ ui-options-reset-windows-button = Reset windows…
 ui-options-reset-windows-title = Reset the windows?
 ui-options-reset-windows-text = Every window goes back to its default place and size, and a minimized window opens expanded. Your settings are kept. You can still undo for a few seconds.
 ui-options-windows-were-reset = The windows are back to their default places
+blender-live-addon-outdated = The Blender plug-in is out of date and cannot connect. Update it in the Plugins tab, then restart Blender.
+blender-live-token-refused = A program tried to connect without this preview's key. Only the Aurora plug-in in Blender can connect.
