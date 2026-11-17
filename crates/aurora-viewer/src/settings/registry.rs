@@ -232,6 +232,7 @@ impl Settings {
     fn keep_session(&mut self, current: &Settings) {
         self.debug = current.debug;
         self.hover_height_account = current.hover_height_account;
+        self.autoresponse_account = current.autoresponse_account;
         self.photo_held = current.photo_held.clone();
         self.draw_stepping = current.draw_stepping;
         self.newer_file = current.newer_file.clone();

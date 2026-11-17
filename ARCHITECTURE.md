@@ -2842,6 +2842,13 @@ updates; every settings save snapshots the active account. Former shared
 options migrate once to the first account, including across pre-login saves;
 other new accounts use defaults. Reset keeps other accounts' options.
 Standing and both sitting heights remain in each account's `hover_height.json`.
+
+`settings/autoresponse_account.rs` does the same for the auto-response block
+(away, do-not-disturb, auto-response, muted, rejection messages and their
+switches, the away timers, friends-only calls) in
+`Settings::autoresponse_accounts`: the Legacy Viewer keeps them per account.
+The former shared block goes to the first account that logs in; another new
+account starts from the defaults; a settings save snapshots the active account.
 The account's Hover Height window remains accessible while region support is
 unavailable, so its automatic and camera options are still editable. Manual
 height editing follows the region's feature; only server writes additionally

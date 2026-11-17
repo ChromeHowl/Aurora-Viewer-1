@@ -303,6 +303,9 @@ impl Settings {
         if let Some(account) = current.hover_height_account {
             self.select_hover_account(account);
         }
+        if let Some(account) = current.autoresponse_account {
+            self.select_autoresponse_account(account);
+        }
     }
 }
 

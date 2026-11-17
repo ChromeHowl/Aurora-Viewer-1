@@ -4577,6 +4577,7 @@ impl App {
                         root,
                     );
                     self.settings.select_hover_account(l.agent_id);
+                    self.settings.select_autoresponse_account(l.agent_id);
                     self.settings.save();
                 }
                 self.bridge_runtime = Default::default();

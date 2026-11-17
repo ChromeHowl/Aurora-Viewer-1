@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 pub mod area_search;
+mod autoresponse_account;
 pub mod avatar_motion;
 pub mod backup;
 pub mod build_extras;
@@ -626,6 +627,13 @@ pub struct Settings {
     /// Runtime hover options belong to this account after login.
     #[serde(skip)]
     pub(crate) hover_height_account: Option<uuid::Uuid>,
+    /// The auto-response block of each account (the Legacy Viewer keeps it per
+    /// account); None keeps the former shared block until the first login.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) autoresponse_accounts: Option<std::collections::HashMap<uuid::Uuid, crate::world::status::AutoResponse>>,
+    /// The account whose block `autoresponse` holds after login.
+    #[serde(skip)]
+    pub(crate) autoresponse_account: Option<uuid::Uuid>,
     /// Contacts window (Friends / Groups / Contact sets).
     pub contacts: crate::ui::contacts::ContactsSettings,
     /// Radar of the People window.
@@ -2463,6 +2471,8 @@ impl Default for Settings {
             auto_hover_offset: 0.0,
             hover_height_accounts: None,
             hover_height_account: None,
+            autoresponse_accounts: None,
+            autoresponse_account: None,
             contacts: Default::default(),
             radar: Default::default(),
             people: Default::default(),
@@ -3980,6 +3990,9 @@ impl Settings {
             // Reset this avatar's hover options while keeping other accounts.
             hover_height_accounts: old.hover_height_accounts,
             hover_height_account: old.hover_height_account,
+            // Same for the auto-response messages of each account.
+            autoresponse_accounts: old.autoresponse_accounts,
+            autoresponse_account: old.autoresponse_account,
             ..Settings::default()
         };
     }
@@ -4006,6 +4019,7 @@ impl Settings {
     pub(crate) fn to_saved(&self) -> Settings {
         let mut copy = self.clone();
         copy.remember_hover_account();
+        copy.remember_autoresponse_account();
         if let Some(mut held) = copy.photo_held.take() {
             // a setting changed since the last frame is the user's too
             held.sync(&copy);
