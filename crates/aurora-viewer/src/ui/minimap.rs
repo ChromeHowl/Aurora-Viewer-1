@@ -250,27 +250,64 @@ fn formatted_avatar_name(
     options: &crate::world::names::NameOptions,
     format: MiniAvatarNameFormat,
 ) -> String {
-    let legacy = name.user_name_for_display(options);
+    if !options.use_display_names {
+        return name.display(options);
+    }
+    let account = if options.legacy_format || name.username.is_empty() {
+        name.user_name_for_display(options)
+    } else {
+        name.username.clone()
+    };
     match format {
-        MiniAvatarNameFormat::Display => name.display_name.clone(),
-        MiniAvatarNameFormat::Legacy => legacy,
-        MiniAvatarNameFormat::DisplayAndLegacy => {
-            if name.is_default || name.display_name == legacy {
-                name.display_name.clone()
-            } else {
-                format!("{} ({})", name.display_name, legacy)
-            }
+        MiniAvatarNameFormat::Display => name.display(options),
+        MiniAvatarNameFormat::Legacy => account,
+        _ if name.display_name == account => account,
+        // LLNetMap::handleToolTipAgent uses getCompleteName in the Legacy Viewer.
+        MiniAvatarNameFormat::DisplayAndLegacy => name.complete(options),
+        MiniAvatarNameFormat::LegacyAndDisplay if name.is_default => account,
+        MiniAvatarNameFormat::LegacyAndDisplay if options.legacy_format || options.show_usernames => {
+            format!("{account} ({})", name.display_name)
         }
+        MiniAvatarNameFormat::LegacyAndDisplay => name.display(options),
     }
 }
 
-pub fn avatar_name(world: &World, id: &Uuid, format: MiniAvatarNameFormat) -> String {
-    if let Some(name) = world.social.avatar_names.get(id) {
-        return formatted_avatar_name(name, &world.social.avatar_names.options, format);
+/// A coarse position alone is not evidence that the resident is visible.
+/// A name kept from an earlier encounter cannot establish that either.
+fn visible_avatar<'w>(world: &'w World, id: &Uuid) -> Option<&'w crate::world::objects::Object> {
+    let index = world.objects.index_of_uuid(id)?;
+    let object = world.objects.get(index)?;
+    (object.is_avatar() && world.parcel_object_visible(index)).then_some(object)
+}
+
+fn fallback_name(world: &World, object: &crate::world::objects::Object) -> Option<String> {
+    object
+        .display_name()
+        .filter(|name| !name.is_empty())
+        .or_else(|| world.social.names.get(&object.full_id).filter(|name| !name.is_empty()).cloned())
+}
+
+fn names_allowed(world: &World, id: &Uuid) -> bool {
+    world.rlva_can_name(*id) && world.social.avatar_names.shows(crate::world::names::NameScope::World, id)
+}
+
+/// A saved mark, even its presence in a menu, can identify an anonymous dot.
+pub(super) fn can_mark(world: &World, id: &Uuid) -> bool {
+    names_allowed(world, id) && visible_avatar(world, id).is_some()
+}
+
+fn avatar_name(world: &World, id: &Uuid, format: MiniAvatarNameFormat) -> String {
+    let Some(object) = visible_avatar(world, id) else {
+        return "…".into();
+    };
+    let names = &world.social.avatar_names;
+    if !names_allowed(world, id) {
+        return names.anonymous(id).display_name.clone();
     }
-    world
-        .avatar_name(id)
-        .or_else(|| world.social.names.get(id).cloned())
+    names
+        .get(id)
+        .map(|name| formatted_avatar_name(name, &names.options, format))
+        .or_else(|| fallback_name(world, object))
         .unwrap_or_else(|| "…".into())
 }
 
@@ -278,6 +315,25 @@ pub fn avatar_name(world: &World, id: &Uuid, format: MiniAvatarNameFormat) -> St
 mod name_format_tests {
     use super::*;
     use crate::world::names::{AvatarName, NameOptions};
+
+    const FORMATS: [MiniAvatarNameFormat; 4] = [
+        MiniAvatarNameFormat::Display,
+        MiniAvatarNameFormat::Legacy,
+        MiniAvatarNameFormat::DisplayAndLegacy,
+        MiniAvatarNameFormat::LegacyAndDisplay,
+    ];
+
+    #[test]
+    fn existing_map_preferences_default_to_the_complete_name_and_all_formats_round_trip() {
+        let mut options: MapSettings = serde_json::from_str(r#"{"mini_scale":256.0}"#).unwrap();
+        assert_eq!(options.mini_scale, 256.0);
+        assert_eq!(options.mini_avatar_name_format, MiniAvatarNameFormat::DisplayAndLegacy);
+        for format in FORMATS {
+            options.mini_avatar_name_format = format;
+            let saved = serde_json::to_string(&options).unwrap();
+            assert_eq!(serde_json::from_str::<MapSettings>(&saved).unwrap(), options);
+        }
+    }
 
     fn example_name() -> AvatarName {
         AvatarName {
@@ -302,6 +358,10 @@ mod name_format_tests {
             formatted_avatar_name(&name, &options, MiniAvatarNameFormat::DisplayAndLegacy),
             "Captain Jack (John Smith)"
         );
+        assert_eq!(
+            formatted_avatar_name(&name, &options, MiniAvatarNameFormat::LegacyAndDisplay),
+            "John Smith (Captain Jack)"
+        );
     }
 
     #[test]
@@ -313,19 +373,109 @@ mod name_format_tests {
             formatted_avatar_name(&name, &options, MiniAvatarNameFormat::DisplayAndLegacy),
             "Captain Jack"
         );
+        assert_eq!(
+            formatted_avatar_name(&name, &options, MiniAvatarNameFormat::LegacyAndDisplay),
+            "John Smith"
+        );
         name.is_default = false;
         name.display_name = "John Smith".into();
         assert_eq!(
             formatted_avatar_name(&name, &options, MiniAvatarNameFormat::DisplayAndLegacy),
             "John Smith"
         );
+        assert_eq!(
+            formatted_avatar_name(&name, &options, MiniAvatarNameFormat::LegacyAndDisplay),
+            "John Smith"
+        );
+    }
+
+    #[test]
+    fn minimap_formats_follow_the_global_display_name_preferences() {
+        let name = example_name();
+        let mut options = NameOptions {
+            legacy_format: false,
+            ..Default::default()
+        };
+        assert_eq!(
+            formatted_avatar_name(&name, &options, MiniAvatarNameFormat::DisplayAndLegacy),
+            "Captain Jack (john.smith)"
+        );
+        assert_eq!(
+            formatted_avatar_name(&name, &options, MiniAvatarNameFormat::LegacyAndDisplay),
+            "john.smith (Captain Jack)"
+        );
+        options.show_usernames = false;
+        assert_eq!(
+            formatted_avatar_name(&name, &options, MiniAvatarNameFormat::DisplayAndLegacy),
+            "Captain Jack"
+        );
+        assert_eq!(
+            formatted_avatar_name(&name, &options, MiniAvatarNameFormat::LegacyAndDisplay),
+            "Captain Jack"
+        );
+        options.use_display_names = false;
+        for format in FORMATS {
+            assert_eq!(formatted_avatar_name(&name, &options, format), "John Smith");
+        }
+    }
+
+    fn visible_resident(world: &mut World, id: Uuid, local: u32, first: &str, last: &str) -> usize {
+        let mut object = crate::demo::hud::object(32, false);
+        object.pcode = aurora_prim::params::LL_PCODE_LEGACY_AVATAR;
+        object.parent_id = 0;
+        object.full_id = id;
+        object.local_id = local;
+        object.name_values = if first.is_empty() {
+            String::new()
+        } else {
+            format!("FirstName STRING RW SV {first}\nLastName STRING RW SV {last}")
+        };
+        world.objects.upsert(1, object)
+    }
+
+    #[test]
+    fn a_visible_avatar_can_receive_its_cached_display_name_before_the_object_name_values() {
+        let mut world = World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
+        let (first, second) = (Uuid::from_u128(41), Uuid::from_u128(42));
+        let name = |id| aurora_net::AvatarNameData {
+            id,
+            username: "john.smith".into(),
+            display_name: "Captain Jack".into(),
+            legacy_first: "John".into(),
+            legacy_last: "Smith".into(),
+            ..Default::default()
+        };
+        let format = MiniAvatarNameFormat::DisplayAndLegacy;
+        world.social.avatar_names.on_display_names(&[name(first)], &[], Some(3600));
+        assert_eq!(avatar_name(&world, &first, format), "…");
+        assert!(!can_mark(&world, &first));
+        visible_resident(&mut world, first, 1, "", "");
+        visible_resident(&mut world, second, 2, "", "");
+        assert_eq!(avatar_name(&world, &second, format), "…");
+        assert_eq!(world.social.avatar_names.take_asks(), vec![second]);
+        world.social.avatar_names.on_display_names(&[name(second)], &[], Some(3600));
+        for id in [first, second] {
+            assert!(can_mark(&world, &id));
+            assert_eq!(avatar_name(&world, &id, format), "Captain Jack (John Smith)");
+        }
+        world.social.avatar_names.set_rlva_privacy(true, Default::default());
+        for id in [first, second] {
+            assert!(!can_mark(&world, &id));
+            assert_eq!(
+                avatar_name(&world, &id, format),
+                world.social.avatar_names.anonymous(&id).display_name
+            );
+        }
     }
 
     #[test]
     fn minimap_names_honor_rlva_privacy_in_all_formats() {
         let mut world = World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
+        world.agent_id = Uuid::from_u128(1);
         let known = Uuid::from_u128(42);
         let not_cached = Uuid::from_u128(43);
+        let known_index = visible_resident(&mut world, known, 1, "John", "Smith");
+        visible_resident(&mut world, not_cached, 2, "", "");
         world.social.avatar_names.on_display_names(
             &[aurora_net::AvatarNameData {
                 id: known,
@@ -341,13 +491,13 @@ mod name_format_tests {
         // The legacy fallback has a real name even though the display cache does not.
         world.social.names.insert(not_cached, "Other Resident".into());
 
-        let formats = [
-            MiniAvatarNameFormat::Display,
-            MiniAvatarNameFormat::Legacy,
-            MiniAvatarNameFormat::DisplayAndLegacy,
+        let expected = [
+            "Captain Jack",
+            "John Smith",
+            "Captain Jack (John Smith)",
+            "John Smith (Captain Jack)",
         ];
-        let expected = ["Captain Jack", "John Smith", "Captain Jack (John Smith)"];
-        for (format, name) in formats.into_iter().zip(expected) {
+        for (format, name) in FORMATS.into_iter().zip(expected) {
             assert_eq!(avatar_name(&world, &known, format), name);
         }
 
@@ -355,7 +505,7 @@ mod name_format_tests {
         world.social.avatar_names.set_rlva_privacy(true, Default::default());
         for id in [known, not_cached] {
             let anonymous = world.social.avatar_names.anonymous(&id).display_name.as_str();
-            for format in formats {
+            for format in FORMATS {
                 assert_eq!(avatar_name(&world, &id, format), anonymous, "privacy leak for {id} in {format:?}");
             }
         }
@@ -365,20 +515,57 @@ mod name_format_tests {
             .social
             .avatar_names
             .set_rlva_privacy(true, std::collections::HashSet::from([known]));
-        for (format, name) in formats.into_iter().zip(expected) {
+        for (format, name) in FORMATS.into_iter().zip(expected) {
             assert_eq!(avatar_name(&world, &known, format), name);
             assert_eq!(
                 avatar_name(&world, &not_cached, format),
-                world.social.avatar_names.anonymous(&not_cached).display_name
+                crate::world::rlva::privacy::anonymous(not_cached).display_name
             );
         }
 
         // Removing the restriction restores the normal formatting and fallback.
         world.social.avatar_names.set_rlva_privacy(false, Default::default());
-        for (format, name) in formats.into_iter().zip(expected) {
+        for (format, name) in FORMATS.into_iter().zip(expected) {
             assert_eq!(avatar_name(&world, &known, format), name);
             assert_eq!(avatar_name(&world, &not_cached, format), "Other Resident");
         }
+
+        // The live restriction takes effect even before the cache updates its scope.
+        world.rlva_configure(true);
+        assert!(world.rlva.receive(&aurora_net::ChatMessage {
+            from_name: "Name fixture".into(),
+            source_id: Uuid::from_u128(4),
+            owner_id: world.agent_id,
+            source_type: aurora_net::ChatSourceType::Object,
+            chat_type: aurora_net::ChatType::OwnerSay,
+            region: None,
+            position: Vec3::ZERO,
+            message: "@shownames=n".into(),
+        }));
+        for format in FORMATS {
+            assert_eq!(
+                avatar_name(&world, &known, format),
+                world.social.avatar_names.anonymous(&known).display_name
+            );
+        }
+
+        // The simulator no longer draws this resident. Neither an earlier
+        // display name nor a UUIDNameReply may identify their coarse dot.
+        world.objects.remove_idx(known_index);
+        world.social.names.insert(known, "John Smith".into());
+        world.coarse.insert(1, vec![(known, Vec3::new(1.0, 2.0, 3.0))]);
+        for format in FORMATS {
+            assert_eq!(avatar_name(&world, &known, format), "…");
+        }
+        assert!(visible_avatar(&world, &known).is_none());
+        // An unseen resident with no cached name must not start a lookup.
+        let unseen = Uuid::from_u128(44);
+        let _ = world.social.avatar_names.take_asks();
+        world.social.names.insert(unseen, "Earlier acquaintance".into());
+        for format in FORMATS {
+            assert_eq!(avatar_name(&world, &unseen, format), "…");
+        }
+        assert!(world.social.avatar_names.take_asks().is_empty());
     }
 }
 
@@ -797,6 +984,7 @@ impl MiniMap {
         // --- avatars ---
         let dot_r = (DOT_SCALE * ppm).max(MIN_DOT_RADIUS);
         let pointer = resp.hover_pos();
+        let k = super::colors::get();
         let mut closest: Option<(f32, Uuid, Vec3, bool)> = None;
         let mut under: Vec<Uuid> = Vec::new();
         for (id, pos, known) in avatars(world) {
@@ -816,18 +1004,25 @@ impl MiniMap {
             };
             // the mark first, then the contact set, then the relation
             // (LLNetMap::getAvatarColor): the same in every mini-map; the
-            // others' colour for a resident whose name RLVa hides
-            let name = avatar_name(world, &id, opts.mini_avatar_name_format);
-            let col = super::colors::map_color(world, &id, &name);
-            let col = world
-                .rlva_contact_appearance(&id)
-                .minimap
-                .map(super::colors::set_color)
-                .unwrap_or(col);
-            // a mark from the radar's or this menu wins (LLNetMap::getAvatarColor)
-            let col = world.rlva_shown_mark(&id).map_or(col, |[r, g, b]| Color32::from_rgb(r, g, b));
-            // the Shadow Realm's red over a mark
-            let col = super::colors::shadow_red(world, &id).unwrap_or(col);
+            // others' colour for a resident whose name RLVa hides, and for a
+            // coarse position alone, which does not show the resident is
+            // visible (a private parcel's visibility rule, #3277)
+            let visible = visible_avatar(world, &id);
+            let col = match visible {
+                Some(object) if names_allowed(world, &id) => {
+                    let col = super::colors::map_color(world, &id, &fallback_name(world, object).unwrap_or_default());
+                    let col = world
+                        .rlva_contact_appearance(&id)
+                        .minimap
+                        .map(super::colors::set_color)
+                        .unwrap_or(col);
+                    // a mark from the radar's or this menu wins (LLNetMap::getAvatarColor)
+                    let col = world.rlva_shown_mark(&id).map_or(col, |[r, g, b]| Color32::from_rgb(r, g, b));
+                    // the Shadow Realm's red over a mark
+                    super::colors::shadow_red(world, &id).unwrap_or(col)
+                }
+                _ => super::colors::c(k.map_other),
+            };
             // unknown height: shown above while the camera is under 1020 m
             let dz = if known {
                 Some(pos.z - cam.pos.z)
@@ -851,7 +1046,9 @@ impl MiniMap {
             if let Some(m) = pointer {
                 let d = sp.distance(m);
                 if d < dot_r * PICK_SCALE {
-                    under.push(id);
+                    if visible.is_some() {
+                        under.push(id);
+                    }
                     if closest.as_ref().is_none_or(|c| d < c.0) {
                         closest = Some((d, id, pos, known));
                     }
@@ -866,7 +1063,6 @@ impl MiniMap {
         }
 
         // --- self ---
-        let k = super::colors::get();
         let me = world.agent.position;
         let gme = to_global(world, me);
         draw_self(&painter, view.to_screen(gme.0, gme.1), dot_r, super::colors::c(k.map_me));
@@ -993,14 +1189,16 @@ impl MiniMap {
             self.popup = Some((view.to_global(m), under.clone()));
         }
         menu::context_menu(&resp, p, |ui| {
-            let Some(((px, py), avs)) = self.popup.clone() else {
+            let Some(((px, py), mut avs)) = self.popup.clone() else {
                 ui.close();
                 return;
             };
+            // Recheck the picked avatars while their menu is open: visibility can change.
+            avs.retain(|id| visible_avatar(world, id).is_some());
             // LLNetMap::handleRightMouseDown (llnetmap.cpp): RLVa @shownames
             // greys the entries that lead to a resident's identity, for
             // everyone under the pointer, excepted or not
-            let can_show_names = !world.rlva.has("shownames");
+            let can_show_names = !world.rlva.has("shownames") && avs.iter().all(|id| names_allowed(world, id));
             if let Some(&first) = avs.first() {
                 if avs.len() == 1 {
                     if menu::item_if(ui, p, "user-filled", aurora_i18n::tr!("common-view-profile"), can_show_names) {
@@ -1028,7 +1226,9 @@ impl MiniMap {
                     context::request(ui.ctx(), CtxAction::ZoomAvatar(first));
                 }
                 menu::todo(ui, p, "eye-filled", aurora_i18n::tr!("common-look-toward-avatar"));
-                context::mark_submenu(ui, p, world, &avs);
+                // a saved mark, even the menu's presence, can identify an anonymous dot
+                let markable: &[Uuid] = if avs.iter().all(|id| can_mark(world, id)) { &avs } else { &[] };
+                context::mark_submenu(ui, p, world, markable);
                 // "More…": the radar menu of the nearest avatar
                 menu::submenu(ui, p, "dots-filled", aurora_i18n::tr!("ui-minimap-more"), can_show_names, |ui| {
                     context::avatar_list_menu(ui, p, world, first, AvatarList::Nearby)
@@ -1111,27 +1311,26 @@ impl MiniMap {
                     &mut opts.mini_collision,
                 );
             });
-            menu::submenu(
-                ui,
-                p,
-                "user-filled",
-                aurora_i18n::tr!("ui-minimap-avatar-name-format"),
-                true,
-                |ui| {
-                    for (label, choice) in [
-                        (aurora_i18n::tr!("ui-minimap-name-display"), MiniAvatarNameFormat::Display),
-                        (aurora_i18n::tr!("ui-minimap-name-legacy"), MiniAvatarNameFormat::Legacy),
-                        (
-                            aurora_i18n::tr!("ui-minimap-name-display-legacy"),
-                            MiniAvatarNameFormat::DisplayAndLegacy,
-                        ),
-                    ] {
-                        if menu::check(ui, p, "user-filled", label, opts.mini_avatar_name_format == choice, true) {
-                            opts.mini_avatar_name_format = choice;
-                        }
+            menu::submenu(ui, p, "id-filled", aurora_i18n::tr!("radar-opt-name-format"), true, |ui| {
+                for (label, icon, choice) in [
+                    (aurora_i18n::tr!("radar-name-display"), "user-filled", MiniAvatarNameFormat::Display),
+                    (aurora_i18n::tr!("radar-name-user"), "at", MiniAvatarNameFormat::Legacy),
+                    (
+                        aurora_i18n::tr!("radar-name-display-user"),
+                        "id-filled",
+                        MiniAvatarNameFormat::DisplayAndLegacy,
+                    ),
+                    (
+                        aurora_i18n::tr!("radar-name-user-display"),
+                        "user-square",
+                        MiniAvatarNameFormat::LegacyAndDisplay,
+                    ),
+                ] {
+                    if menu::check(ui, p, icon, label, opts.mini_avatar_name_format == choice, true) {
+                        opts.mini_avatar_name_format = choice;
                     }
-                },
-            );
+                }
+            });
             if menu::check(
                 ui,
                 p,
