@@ -29,6 +29,7 @@ mod dof;
 mod drawn_pick;
 mod equirect;
 mod exposure;
+mod film_readback;
 pub mod frame_priority;
 mod fsr;
 pub mod gpu_alloc;
@@ -82,6 +83,7 @@ pub mod textures;
 pub mod thread_cpu;
 #[cfg(test)]
 mod tone_curves;
+pub mod thumbnail;
 pub mod types;
 mod ui_blur;
 mod ui_frame;
@@ -95,6 +97,7 @@ pub mod vulkan_layers;
 pub mod water_effects;
 mod water_optics;
 mod water_wake;
+pub use thumbnail::{THUMBNAIL_MAX, Thumbnail};
 pub use vr_control::{HeadPose, VrState};
 /// Whether a VR headset is ready now (`xr_device::headset_ready`), for the
 /// restart that brings VR when the headset came after startup; not probed
@@ -128,6 +131,7 @@ pub use contact_shadows::tile_reach as contact_tile_reach;
 pub use dof::tile_reach as dof_tile_reach;
 pub use drawn_pick::{Drawn, DrawnFace, DrawnMode};
 pub use equirect::{Answer as EquirectAnswer, CAPTURE_CAMERAS, CaptureCamera, EquirectJob, pixel_direction};
+pub use film_readback::{FilmFrame, FilmRequest, overlay_rect};
 pub use gpu_cull::set_whole_chunk_uploads;
 pub use histogram::HISTOGRAM_BINS;
 pub use hud::HudView;
