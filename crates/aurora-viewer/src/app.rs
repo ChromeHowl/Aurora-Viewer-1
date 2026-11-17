@@ -25686,6 +25686,10 @@ impl ApplicationHandler for App {
                             m.surrender_focus(id);
                         }
                     });
+                    // a left press also puts away the typing-only chat bar
+                    if *button == MouseButton::Left {
+                        self.chat_ui.dismiss_typing_bar(&self.egui_ctx);
+                    }
                     // the field commits first, to what it was typed for
                     if typing {
                         self.press_while_typing();
