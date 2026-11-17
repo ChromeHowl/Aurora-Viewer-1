@@ -1049,7 +1049,15 @@ pub fn settings_list(
             && let Some(popup) = egui::AreaState::load(ui.ctx(), popup_id).and_then(|a| a.size)
         {
             let full = height.map_or(0.0, |(full, _)| full);
-            let full = if query.trim().is_empty() { full.max(popup.y) } else { full };
+            // unfiltered, the names are the whole list: it grows when inventory
+            // arrives after the list opened (upstream #2228), never past the
+            // list's own limit or the screen
+            let limit = (LIST_H + 40.0 + margins).min(ui.ctx().content_rect().height());
+            let full = if query.trim().is_empty() {
+                full.max(popup.y).max(content + margins).min(limit)
+            } else {
+                full
+            };
             ui.data_mut(|d| d.insert_temp(height_id, (full, content + margins)));
         }
         ui.data_mut(|d| d.insert_temp(query_id, query));

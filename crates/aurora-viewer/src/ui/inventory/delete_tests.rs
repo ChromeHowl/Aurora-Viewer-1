@@ -415,6 +415,7 @@ fn a_delete_from_another_window_follows_do_not_show_again() {
         &mut actions,
         ids.clone()
     ));
-    assert!(matches!(&st.dialog, Some(EditDialog::Delete(d, false)) if *d == ids));
+    // the fork asks the Legacy Viewer's "DeleteWornItems" question here (Detach and Delete)
+    assert!(matches!(&st.dialog, Some(EditDialog::DetachDelete(d)) if *d == ids));
     assert!(actions.is_empty());
 }
