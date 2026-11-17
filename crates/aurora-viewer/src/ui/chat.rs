@@ -34,6 +34,7 @@ mod payment_card;
 mod popout;
 pub mod previews;
 mod reorder;
+pub(crate) mod shortcuts;
 pub use reorder::Demo as ReorderDemo;
 pub(crate) mod select;
 pub(crate) mod sidebar;
@@ -95,6 +96,9 @@ pub struct ChatUi {
     /// and an empty Enter leaves it there (Preferences › Chat; the Legacy
     /// Viewer's CloseChatOnReturn off, FSNearbyChatControl::autohide).
     pub keep_focus: bool,
+    /// No button back to the latest messages (Preferences › Chat ›
+    /// Conversations, `Settings::chat_latest_button` off): `latest.rs`.
+    pub hide_latest: bool,
     /// Enter on an empty field gives the keyboard back in every
     /// conversation, not only the nearby chat (Preferences › Chat, Aurora's).
     pub enter_toggles: bool,
@@ -923,28 +927,40 @@ impl SendKey {
     }
 }
 
-/// Classify one Enter. Releasing a modifier later in the same frame must
-/// change neither permission to send, OOC wrapping nor volume.
-/// FSNearbyChatControl / FSFloaterIM::handleKeyHere (indra/newview) read
-/// the event's mask; Alt alone is OOC, other Alt chords stay unclaimed.
-fn classify_enter(modifiers: &egui::Modifiers) -> Option<SendKey> {
-    if modifiers.alt {
-        ooc_key(modifiers).then_some(SendKey::Ooc)
-    } else if modifiers.ctrl {
+/// Classify a key event as a send key, once: releasing a modifier later in
+/// the same frame must change neither permission to send, OOC wrapping nor
+/// volume. FSNearbyChatControl / FSFloaterIM::handleKeyHere (indra/newview)
+/// read the event's mask. The ((OOC)), shout and whisper keys are the user's
+/// (`shortcuts.rs`: Alt+Enter, then none by default); Enter otherwise sends
+/// at the selected volume, an Alt chord left unclaimed (AltGr). The New line
+/// key never comes here: `input::prepare` made it a line break.
+fn classify_send(
+    keys: &shortcuts::ChatKeys,
+    key: egui::Key,
+    physical_key: Option<egui::Key>,
+    modifiers: egui::Modifiers,
+) -> Option<SendKey> {
+    use crate::keybinds::Action;
+    let hit = |a| keys.hit(a, key, physical_key, modifiers);
+    if hit(Action::ChatOoc) {
+        Some(SendKey::Ooc)
+    } else if hit(Action::ChatShout) {
         Some(SendKey::Shout)
-    } else if modifiers.shift {
+    } else if hit(Action::ChatWhisper) {
         Some(SendKey::Whisper)
-    } else {
+    } else if key == egui::Key::Enter && !modifiers.alt {
         Some(SendKey::Normal)
+    } else {
+        None
     }
 }
 
-/// The first Enter of the pass. Conversations send once per frame.
-fn send_enter(i: &egui::InputState) -> Option<SendKey> {
-    enter_pass(i).keys.into_iter().next()
+/// The first send key of the pass. Conversations send once per frame.
+fn send_enter(i: &egui::InputState, keys: &shortcuts::ChatKeys) -> Option<SendKey> {
+    enter_pass(i, keys).keys.into_iter().next()
 }
 
-/// Every Enter of this pass, in order, and the characters inserted after
+/// Every send key of this pass, in order, and the characters inserted after
 /// the first one. The editor has already applied the whole pass
 /// (`return_key(None)` leaves Enter in the queue). Return is one key at a
 /// time (LLViewerWindow::handleUnicodeChar); a second Enter, and letters
@@ -954,20 +970,21 @@ struct EnterPass {
     after: String,
 }
 
-fn enter_pass(i: &egui::InputState) -> EnterPass {
+fn enter_pass(i: &egui::InputState, send_keys: &shortcuts::ChatKeys) -> EnterPass {
     let mut keys = Vec::new();
     let mut after = String::new();
     let mut seen = false;
     for event in &i.events {
         match event {
             egui::Event::Key {
-                key: egui::Key::Enter,
+                key,
+                physical_key,
                 pressed: true,
                 modifiers,
                 ..
             } => {
-                if let Some(key) = classify_enter(modifiers) {
-                    keys.push(key);
+                if let Some(send) = classify_send(send_keys, *key, *physical_key, *modifiers) {
+                    keys.push(send);
                     seen = true;
                 }
             }
@@ -990,11 +1007,6 @@ fn split_on_enter(field: &str, after: &str) -> (String, String) {
     } else {
         (field.to_owned(), String::new())
     }
-}
-
-/// Alt+Enter alone sends ((OOC)) chat (FSUseAltOOC, on by default).
-fn ooc_key(m: &egui::Modifiers) -> bool {
-    m.alt && !m.ctrl && !m.shift && !m.mac_cmd
 }
 
 /// An OOC line as FSNearbyChat::sendChat (fsnearbychathub.cpp) and
@@ -3115,7 +3127,7 @@ fn conversation_lines(ui: &mut egui::Ui, p: &Palette, l: Lines, st: &mut ChatUi,
         })
     });
     let latest_id = ui.scope_id().with(("latest", st.selected));
-    if resume || (!ui.is_sizing_pass() && latest::show(ui, p, latest_id, out.inner_rect, arrived)) {
+    if resume || (!st.hide_latest && !ui.is_sizing_pass() && latest::show(ui, p, latest_id, out.inner_rect, arrived)) {
         // past the end: the scroll area stops there and sticks to it again
         offset.y = out.content_size.y;
         store = true;
@@ -3416,6 +3428,9 @@ fn list_entry(
     // it drags out of the window (the nearby chat's, #910); a closable
     // entry drags anyway, to its place too
     drags: bool,
+    // drawn this far from its place, which keeps the pointer: it slides
+    // while another is dragged and glides in once dropped (`reorder.rs`)
+    offset: egui::Vec2,
 ) -> ListEntry {
     // narrower beside the list's scroll bar, when it shows
     let width = ENTRY_W.min(ui.available_width());
@@ -3424,10 +3439,11 @@ fn list_entry(
     } else {
         egui::Sense::click()
     };
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, LIST_ENTRY_H), sense);
+    let (place, resp) = ui.allocate_exact_size(egui::vec2(width, LIST_ENTRY_H), sense);
     // the close button stands over the entry and takes its hover: the entry
     // keeps its hovered face while the pointer is on the button
-    let over = resp.hovered() || (close.is_some() && ui.rect_contains_pointer(rect));
+    let over = resp.hovered() || (close.is_some() && ui.rect_contains_pointer(place));
+    let rect = place.translate(offset);
     let fill = if sel {
         p.violet.gamma_multiply(0.22)
     } else if over {
@@ -3549,7 +3565,19 @@ fn list_ghost(
         // the list's colour under it, which the entry's own face washes
         let face = egui::Rect::from_min_size(ui.cursor().min, g.size);
         ui.painter().rect_filled(face, 0.0, p.bar);
-        let entry = list_entry(ui, p, label, pic.map(|t| (t, label)), status, true, 0, None, 0.0, false);
+        let entry = list_entry(
+            ui,
+            p,
+            label,
+            pic.map(|t| (t, label)),
+            status,
+            true,
+            0,
+            None,
+            0.0,
+            false,
+            egui::Vec2::ZERO,
+        );
         if g.out {
             popout::paint_mark(ui, p, trailing_slot(entry.resp.rect));
         }
@@ -3766,6 +3794,7 @@ pub fn show(
                         None,
                         0.0,
                         false,
+                        egui::Vec2::ZERO,
                     )
                     .resp
                     .clicked()
@@ -3785,6 +3814,7 @@ pub fn show(
                         None,
                         0.0,
                         true,
+                        egui::Vec2::ZERO,
                     )
                     .resp;
                     conv_menu::demo_mark(ui.ctx(), world, st, None, local.rect);
@@ -3835,20 +3865,25 @@ pub fn show(
                             .then(|| typing::text(&[world.social.display_name_of(&other)]))
                             .flatten()
                             .map(|t| if st.typing_chevron { format!("> {t}") } else { t });
-                        st.reorder.space_before(ui, other);
                         let status = (!world.is_group_session(&other)).then(|| presence::of(world, &other));
-                        let entry = list_entry(
-                            ui,
-                            p,
-                            typing.as_deref().unwrap_or(&name),
-                            Some((pics.get(&other), &name)),
-                            status,
-                            shown,
-                            unread,
-                            Some(close_tip(world, &other)),
-                            flash,
-                            true,
-                        );
+                        let offset = st.reorder.slide(ui, other);
+                        let entry = st.reorder.draw(ui, p, other, offset, None, |ui| {
+                            let entry = list_entry(
+                                ui,
+                                p,
+                                typing.as_deref().unwrap_or(&name),
+                                Some((pics.get(&other), &name)),
+                                status,
+                                shown,
+                                unread,
+                                Some(close_tip(world, &other)),
+                                flash,
+                                true,
+                                offset,
+                            );
+                            let place = entry.resp.rect;
+                            (entry, place)
+                        });
                         if reveal == Some(other) {
                             entry.resp.scroll_to_me(None);
                             st.reveal = None;
@@ -3856,7 +3891,6 @@ pub fn show(
                         conv_menu::demo_mark(ui.ctx(), world, st, Some(other), entry.resp.rect);
                         conv_menu::attach(&entry.resp, p, world, &mut actions, Some(other));
                         st.reorder.row(world, other, &entry.resp);
-                        st.reorder.space_after(ui, other);
                         if st.reorder.dragging(Some(other))
                             && let Some(g) = st.reorder.ghost(ui.ctx())
                         {
@@ -4076,13 +4110,10 @@ fn classic_pane(
     let strip_top = ui.min_rect().bottom();
     ui.add_space(4.0);
     // input + emoji
-    let hint = input::hint(
-        ui,
-        match st.selected {
-            None => aurora_i18n::tr!("ui-chat-to-local-chat").to_owned(),
-            Some(id) => aurora_i18n::tr!("ui-chat-at", value0 = world.session_title(&id).to_string()),
-        },
-    );
+    let hint_text = match st.selected {
+        None => aurora_i18n::tr!("ui-chat-to-local-chat").to_owned(),
+        Some(id) => aurora_i18n::tr!("ui-chat-at", value0 = world.session_title(&id).to_string()),
+    };
     let mut emoji_btn = None;
     let mut send_clicked = false;
     let display = display::get();
@@ -4124,6 +4155,7 @@ fn classic_pane(
                 0.0
             };
             let field_w = (ui.available_width() - send_w - channel_w).floor().max(40.0);
+            let hint = input::hint(ui, conv_input, hint_text, field_w, true);
             input::prepare(ui, conv_input, st.selected.is_none());
             let recalled = st.input_history.entry(st.selected).or_default().recall(ui, conv_input, &mut draft);
             let nav = super::emoji::codes::keys(ui, conv_input);
@@ -4148,12 +4180,15 @@ fn classic_pane(
             }
             let has_text = !draft.trim().is_empty();
             send_clicked = send_shown && send_button(ui, p, icons, has_text).clicked() && has_text;
+            let local = st.selected.is_none();
             let field = output.response.response;
             // the hint of the keys hides the last line while typing (#3211)
             if has_text && field.has_focus() {
                 field
             } else {
-                field.on_hover_text(aurora_i18n::tr!("ui-chat-compose-shortcuts"))
+                field.on_hover_ui(|ui| {
+                    ui.label(shortcuts::tip(&shortcuts::get(ui.ctx()), local, false));
+                })
             }
         })
         .inner;
@@ -4221,7 +4256,8 @@ fn classic_pane(
     let send = if send_clicked {
         Some(SendKey::Normal)
     } else if !focusing && (resp.has_focus() || resp.lost_focus()) {
-        ui.input(send_enter)
+        let keys = shortcuts::get(ui.ctx());
+        ui.input(|i| send_enter(i, &keys))
     } else {
         None
     };
@@ -5046,7 +5082,8 @@ pub(crate) fn cursor_to_end(ctx: &egui::Context, id: egui::Id, text: &str) {
 }
 
 /// The local chat's field, the Legacy Viewer's chat bar (LLFloaterIMNearbyChat):
-/// Enter says, Ctrl+Enter shouts, Shift+Enter whispers, Alt+Enter sends ((OOC)), `/channel` and the
+/// Enter says, the Shout and Whisper keys (`shortcuts.rs`, none by
+/// default) shout and whisper, Alt+Enter sends ((OOC)), `/channel` and the
 /// gestures' completion. With `keep_focus` (CloseChatOnReturn off,
 /// FSNearbyChatControl::autohide), Enter on an empty field leaves the
 /// keyboard there; without it, that Enter returns to movement. A second
@@ -5097,10 +5134,9 @@ pub(crate) fn bar_input(
             output
         })
         .inner;
-    let resp = output
-        .response
-        .response
-        .on_hover_text(aurora_i18n::tr!("ui-chat-enter-to-talk-ctrl-enter-to-shout-shift-enter"));
+    let resp = output.response.response.on_hover_ui(|ui| {
+        ui.label(shortcuts::tip(&shortcuts::get(ui.ctx()), true, true));
+    });
     // the Enter that asked for the keyboard (start_chat) is not one typed
     // in the field: taken as Enter on an empty bar, it handed the keyboard
     // straight back to the world
@@ -5122,7 +5158,8 @@ pub(crate) fn bar_input(
     // The editor leaves ordinary Enter to this send path. The Enter that
     // asked for the keyboard is not one of them (`focusing`).
     let pass = if !focusing && (resp.has_focus() || resp.lost_focus()) {
-        ui.input(enter_pass)
+        let keys = shortcuts::get(ui.ctx());
+        ui.input(|i| enter_pass(i, &keys))
     } else {
         EnterPass {
             keys: Vec::new(),
@@ -5185,11 +5222,30 @@ mod tests {
 
     #[test]
     fn alt_enter_alone_sends_ooc_before_the_channel_is_read() {
+        let send_with = |keys: &super::shortcuts::ChatKeys, modifiers: egui::Modifiers| {
+            let mut input = egui::InputState::default();
+            input.events.push(egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers,
+            });
+            super::send_enter(&input, keys)
+        };
+        let keys = super::shortcuts::ChatKeys::of(&crate::keybinds::KeyBindings::default());
+        let send = |modifiers| send_with(&keys, modifiers);
         let alt = egui::Modifiers::ALT;
-        assert!(super::ooc_key(&alt));
+        assert_eq!(send(alt), Some(super::SendKey::Ooc));
         // AltGr (Ctrl+Alt) and other Alt chords stay unclaimed
-        assert!(!super::ooc_key(&(alt | egui::Modifiers::CTRL)));
-        assert!(!super::ooc_key(&(alt | egui::Modifiers::SHIFT)));
+        assert_eq!(send(alt | egui::Modifiers::CTRL), None);
+        assert_eq!(send(alt | egui::Modifiers::SHIFT), None);
+        // no Shout key by default: Ctrl+Enter sends at the volume chosen
+        assert_eq!(send(egui::Modifiers::CTRL), Some(super::SendKey::Normal));
+        let shout = super::shortcuts::ChatKeys::of(&super::shortcuts::ctrl_enter_shout());
+        assert_eq!(send_with(&shout, egui::Modifiers::CTRL), Some(super::SendKey::Shout));
+        assert_eq!(send_with(&shout, alt), Some(super::SendKey::Ooc));
+        assert_eq!(send(egui::Modifiers::NONE), Some(super::SendKey::Normal));
         assert_eq!(super::ooc("brb"), "(( brb ))");
         assert_eq!(super::ooc(""), "");
         // like the Legacy Viewer, a channel typed after Alt+Enter stays text on channel 0
@@ -7034,7 +7090,19 @@ mod tests {
     fn entry(ui: &mut egui::Ui, label: &str, pic: bool, sel: bool, unread: usize, closable: bool) -> ListEntry {
         let p = crate::theme::Theme::default().palette();
         let close = closable.then_some(CLOSE_TIP);
-        list_entry(ui, &p, label, pic.then_some((None, label)), None, sel, unread, close, 0.0, false)
+        list_entry(
+            ui,
+            &p,
+            label,
+            pic.then_some((None, label)),
+            None,
+            sel,
+            unread,
+            close,
+            0.0,
+            false,
+            egui::Vec2::ZERO,
+        )
     }
 
     #[test]
