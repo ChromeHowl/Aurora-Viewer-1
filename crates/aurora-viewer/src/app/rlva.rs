@@ -207,7 +207,7 @@ impl App {
         let ended = temprun && self.temp_run.take().is_some();
         let changed = temprun != std::mem::replace(&mut self.rlva_temprun, temprun);
         if temprun_resync(ended, changed, self.autopilot.as_ref().is_some_and(|a| a.run)) {
-            self.send(NetCommand::SetAlwaysRun(self.running() || self.joystick.running));
+            self.send(NetCommand::SetAlwaysRun(self.walk_run()));
         }
         // RlvUIEnabler::onToggleMovement (rlvui.cpp): @fly lands a flight
         // under way (gAgent.setFlying(false)), not only refuses a takeoff.

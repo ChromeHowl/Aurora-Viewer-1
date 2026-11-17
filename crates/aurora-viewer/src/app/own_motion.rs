@@ -30,6 +30,12 @@ impl App {
         )
     }
 
+    /// What SetAlwaysRun carries (LLAgent::sendWalkRun): `running` or a
+    /// joystick run; `send_from_origin` masks it while VR walking overrides it.
+    pub(super) fn walk_run(&self) -> bool {
+        self.running() || self.joystick.running
+    }
+
     /// Offline with AURORA_DEMO_LINK: the keys go to the stand-in simulator
     /// and its reports come back through the world, as on a grid.
     pub(super) fn drive_demo_link(&mut self, mouselook: bool, dt: f32) {

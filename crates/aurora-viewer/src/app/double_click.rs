@@ -378,7 +378,7 @@ impl App {
             self.input.nudge_fb = step.flags & control::FAST_AT == 0;
             self.input.up |= step.flags & control::UP_POS != 0;
             self.input.down |= step.flags & control::UP_NEG != 0;
-            self.input.run |= run;
+            self.input.run |= run && !self.world.rlva.has("temprun");
         }
     }
 

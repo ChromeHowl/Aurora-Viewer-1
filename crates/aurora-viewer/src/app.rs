@@ -4777,9 +4777,7 @@ impl App {
                 // New region must learn walk/run again (LLAgent::sendWalkRun
                 // after RegionHandshake, llviewermessage.cpp). Without this
                 // Always run stays lit in Controls while the sim walks (#3041).
-                self.send(NetCommand::SetAlwaysRun(
-                    self.always_run || self.temp_run.is_some() || self.joystick.running,
-                ));
+                self.send(NetCommand::SetAlwaysRun(self.walk_run()));
                 // (a border crossing leaves the camera where it is)
                 if !self.world.arrived_by_crossing {
                     self.vr_rebase_after_travel();
@@ -9306,9 +9304,8 @@ impl App {
             return;
         }
         self.always_run = on;
-        self.send(NetCommand::SetAlwaysRun(
-            (self.always_run || self.temp_run.is_some() || self.joystick.running) && !self.vr_walk_override.active(),
-        ));
+        // an autopilot run @alwaysrun allows keeps running (`walk_run`)
+        self.send(NetCommand::SetAlwaysRun(self.walk_run()));
         self.world.system_message(if self.always_run {
             aurora_i18n::tr!("app-always-run-enabled")
         } else {
