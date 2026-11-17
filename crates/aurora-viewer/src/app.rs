@@ -12404,16 +12404,17 @@ impl App {
             // build selection, wire outlines and edits stay untouched; its
             // ordinary face overlay returns when the mode is switched off.
             let revealing = self.imports.local_status.revealing();
-            let build_faces = if revealing {
-                Default::default()
-            } else {
-                self.build.face_selection(&self.world, &self.settings.build)
-            };
-            // (TE mode's faces also show the face-select pattern)
+            // (TE mode's faces show the face-select pattern, and the halo
+            // with "Show highlight": the picks are gathered once)
             let pattern = if revealing {
                 Default::default()
             } else {
                 self.build.face_picks(&self.world)
+            };
+            let build_faces = if revealing {
+                Default::default()
+            } else {
+                crate::build::BuildTool::halo_faces(|| pattern.clone(), &self.settings.build)
             };
             let mut selected_faces = if revealing {
                 self.imports.appearance_status(&self.world.objects).faces
@@ -12432,7 +12433,7 @@ impl App {
                 *selected_faces.entry(idx).or_default() |= mask;
             }
             self.scene.set_face_selection(&mut self.world, selected_faces);
-            self.scene.set_face_pattern(&pattern);
+            self.scene.set_face_pattern(&mut self.world, &pattern);
             if std::mem::take(&mut self.build.ui.reveal_faces) {
                 self.scene.reveal_selected_faces();
             }
@@ -16214,6 +16215,7 @@ impl App {
                             self.build.toggle_place(&self.world);
                         }
                     }
+                    crate::build::demo::Step::Highlight(on) => self.settings.build.show_highlight = on,
                     crate::build::demo::Step::Linked(on) => {
                         self.build.set_edit_linked(&mut self.world, &mut self.settings.build, on);
                         self.flush_build();
