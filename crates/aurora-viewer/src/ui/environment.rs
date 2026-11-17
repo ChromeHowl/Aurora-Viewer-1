@@ -939,11 +939,11 @@ pub fn settings_list(
             ui.ctx().memory_mut(|m| m.areas_mut().set_state(layer, area));
         }
         let margins = egui::Frame::popup(ui.style()).total_margin().sum().y;
-        // No ComboBox `.height`: that wraps the popup in its own scroll and
-        // stacked with the list's ScrollArea as a double scrollbar (#3109).
         let mut content_height = None;
         egui::ComboBox::from_id_salt(salt)
             .width(width)
+            // the list's own ScrollArea stops at LIST_H, so this never adds a second bar
+            .height(LIST_H + 40.0)
             .selected_text(tagged_name(p, &text, selected_weather, Some(p.ink)))
             .truncate()
             // a click in the search field must not close the list
