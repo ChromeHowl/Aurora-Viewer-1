@@ -100,7 +100,7 @@ pub(super) fn wear_toggle(it: &aurora_net::inventory::InvItem, worn: bool, prefs
 /// llinventoryfunctions.cpp): nothing wearable is opened, so worn, from the
 /// listings, active or not. The Legacy Viewer checks it on "open" only, and
 /// a double-click there still wears the item: here neither does.
-fn listing_wear(inv: &Inventory, id: Uuid, st: &mut InventoryUi) -> bool {
+pub(super) fn listing_wear(inv: &Inventory, id: Uuid, st: &mut InventoryUi) -> bool {
     let wearable = rules::original(inv, id)
         .and_then(|original| inv.items.get(&original))
         .is_some_and(|it| matches!(it.asset_type, 5 | 6 | 13));
