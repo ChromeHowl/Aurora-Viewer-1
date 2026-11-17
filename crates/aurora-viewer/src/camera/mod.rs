@@ -1451,6 +1451,12 @@ impl Camera {
         self.target = point;
     }
 
+    /// Whether the camera has computed its view since the last `snap` (its
+    /// `forward` is the view's, not a starting one).
+    pub fn initialized(&self) -> bool {
+        self.initialized
+    }
+
     /// Back to the default view without animation (login, teleport).
     pub fn snap(&mut self) {
         self.initialized = false;
