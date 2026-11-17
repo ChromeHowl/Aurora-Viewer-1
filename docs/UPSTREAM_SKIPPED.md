@@ -117,3 +117,17 @@ Taken: see the "Upstream sync batch 14" line of TASKS.md. Not taken:
   - #3975 Director: the fork's rule that the track's view makes a Camera Path or the Camera Lock give the camera up is kept over upstream's per-keyframe targets; the world guides were drawn twice in `app.rs` and are drawn once now.
   - #3989: `widgets::search_box` stays out of the re-export (the fork's own list), `chip_row` is added; the Director keys the lock rework replaced are dropped from the de, pt-BR and zh catalogues.
   - #3123 Environment labels: upstream's version of the fix replaces the fork's earlier one (#3109).
+
+## Batch 15 (upstream commits up to 3704a8182)
+
+Taken: see the "Upstream sync batch 15" line of TASKS.md. Not taken:
+
+- #4035 WebSocket sync with outside script editors: the fork has its own (`script_ws.rs`, TASKS.md "script editor link": JSON-RPC on 127.0.0.1, off by default, the Legacy protocol). Upstream's is a new crate (`aurora-editor-sync`, with tokio-tungstenite 0.30 and sha1 0.11, so a `Cargo.lock` and `THIRD-PARTY-LICENSES.md` change) and rewrites five files of the scripts window that the fork changed for Import scripts. Left for the owner: port it as a dedicated batch, or keep the fork's.
+- #3805 shadow quality and ambient occlusion in the viewfinder: the fork keeps its own photo light (`snapshot::light` softness and intensity of the sun's shadows, `render_settings_with`, `render_settings_now`, the photo effects list); upstream's `photo_render_settings`, `drawn_levels` and the new View fields conflict in about fifteen places across `app.rs`, `app/snapshot.rs`, `snapshot/light.rs`, `ui/snapshot.rs` and `gpu_recovery.rs`. Left for a dedicated port, if the owner wants those two controls.
+- Conflicts resolved with the fork's structure kept:
+  - #3920 dual-panel inventory: `InvAction::Notice`, `ImportScripts`, `EnvironmentSaveParcel` and the fork's script template stay beside `InvAction::Panel` and `DualPanel`; the fork's `open_script` and `open_document` (no `owner` argument) are kept, now called on the pane the action came from; the toolbar catalogue count is 99.
+  - #4036 poser import: the fork's `Joint` has an `enabled` flag, so `Joint::new` sets it and `from_joints` sets `channels: Aurora`; a `.xml` file is tried as a Black Dragon pose first and read as a Legacy Viewer pose when it is not one; the fork's removed `Prepared` / `Import` job is not brought back; the fork's `wornposer-*` keys stay.
+  - #4037 photo tilt: the fork's follow-joint rows stay above the tilt row.
+  - #4055 Recent filters: applies to the dual pane and the extra windows as upstream does.
+- Upstream TASKS.md text of every taken change is not copied except its own line.
+
