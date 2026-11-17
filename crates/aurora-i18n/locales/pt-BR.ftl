@@ -16850,3 +16850,4 @@ director-key-aim-clear = Clear the target
 director-key-aim-clear-tip = This keyframe looks where its camera was laid, even while the view is locked.
 director-key-aim-follow = Follow the lock
 director-key-aim-follow-tip = This keyframe looks at the lock's target while the view is locked, and where its camera was laid when it is not.
+inventory-dual-panel = Dual-panel inventory

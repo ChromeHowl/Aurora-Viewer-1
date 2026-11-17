@@ -922,6 +922,7 @@ mod tests {
                         &Icons::default(),
                         &mut self.world,
                         &mut self.st,
+                        None,
                         &mut self.prefs,
                         &mut true,
                         false,

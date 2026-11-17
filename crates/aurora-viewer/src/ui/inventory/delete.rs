@@ -779,6 +779,12 @@ pub(crate) struct DeleteSelection {
     advance: bool,
 }
 
+impl DeleteSelection {
+    pub(crate) fn window(&self) -> Uuid {
+        self.window
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DeleteView {
     list: Option<ListKey>,
