@@ -3363,9 +3363,6 @@ pub fn demo_reply(cmd: &aurora_net::NetCommand) -> Vec<NetEvent> {
                         if let Some((first, last, _)) = share::name(id) {
                             return (*id, first, last);
                         }
-                        if let Some(name) = minimap_name_for(id) {
-                            return (*id, name.legacy_first, name.legacy_last);
-                        }
                         if let Some((first, last, _)) = group::member_name(id) {
                             return (*id, first.to_owned(), last.to_owned());
                         }

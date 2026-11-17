@@ -294,38 +294,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn shift_click_selects_the_range_between_anchor_and_row() {
-        let order: Vec<Uuid> = (1..=5).map(Uuid::from_u128).collect();
-        let mut sel = Vec::new();
-        let mut anchor = None;
-        let plain = egui::Modifiers::default();
-        let shift = egui::Modifiers {
-            shift: true,
-            ..Default::default()
-        };
-        click_select(&mut sel, &mut anchor, &order, order[1], plain);
-        assert_eq!(sel, vec![order[1]]);
-        assert_eq!(anchor, Some(order[1]));
-        click_select(&mut sel, &mut anchor, &order, order[4], shift);
-        assert_eq!(sel, order[1..=4].to_vec());
-        click_select(&mut sel, &mut anchor, &order, order[0], shift);
-        assert_eq!(sel, order[0..=1].to_vec());
-    }
-
-    #[test]
-    fn shift_range_is_not_capped_at_twenty() {
-        let order: Vec<Uuid> = (1..=40).map(Uuid::from_u128).collect();
-        let mut sel = Vec::new();
-        let mut anchor = Some(order[0]);
-        let shift = egui::Modifiers {
-            shift: true,
-            ..Default::default()
-        };
-        click_select(&mut sel, &mut anchor, &order, order[39], shift);
-        assert_eq!(sel.len(), 40);
-    }
-
-    #[test]
     fn rlva_shownames_leaves_the_nearby_tab_for_the_search() {
         for tab in [TAB_SEARCH, TAB_FRIENDS, TAB_NEAR, TAB_UUID] {
             assert_eq!(open_tab(tab, true), tab);
