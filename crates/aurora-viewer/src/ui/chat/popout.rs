@@ -426,6 +426,7 @@ pub(super) fn show(ctx: &egui::Context, env: Env, world: &mut World, st: &mut Ch
             .chat()
             .action("login-2", aurora_i18n::tr!("ui-chat-attach-to-conversations"), &mut dock)
             .attention(unread > 0)
+            .min_size_for_text()
             .steady_size();
         // Nearby chat has one stable instance across sessions. A new
         // conversation's cascade would overwrite its saved position/size.
