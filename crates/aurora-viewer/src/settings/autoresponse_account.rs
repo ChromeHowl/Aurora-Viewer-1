@@ -74,14 +74,16 @@ mod tests {
     }
 
     #[test]
-    fn a_reset_keeps_the_accounts_blocks() {
-        let account = Uuid::from_u128(5);
+    fn a_reset_clears_this_accounts_block_and_keeps_the_others() {
+        let (other, mine) = (Uuid::from_u128(5), Uuid::from_u128(6));
         let mut settings = Settings::default();
-        settings.select_autoresponse_account(account);
+        settings.select_autoresponse_account(other);
         settings.autoresponse.dnd_text = "busy".into();
-        settings.remember_autoresponse_account();
+        settings.select_autoresponse_account(mine);
+        settings.autoresponse.dnd_text = "mine".into();
         settings.reset_keeping_account();
-        settings.select_autoresponse_account(account);
+        assert_eq!(settings.autoresponse, Default::default());
+        settings.select_autoresponse_account(other);
         assert_eq!(settings.autoresponse.dnd_text, "busy");
     }
 
