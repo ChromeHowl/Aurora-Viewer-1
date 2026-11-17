@@ -18,7 +18,7 @@ struct Row {
 }
 
 #[derive(Default)]
-pub(in crate::imports) struct Picker {
+pub(crate) struct Picker {
     order: Option<Arc<view::PickerOrder>>,
     rows: Vec<Row>,
     expanded: HashSet<Uuid>,
@@ -129,7 +129,7 @@ impl Picker {
         self.filter = Some(query);
     }
 
-    pub(super) fn show(&mut self, ui: &mut egui::Ui, p: &Palette, inventory: &Inventory, selected: &mut Uuid) {
+    pub(crate) fn show(&mut self, ui: &mut egui::Ui, p: &Palette, inventory: &Inventory, selected: &mut Uuid) {
         let current = if inventory.folders.contains_key(selected) {
             inventory_ui::folder_name(inventory, *selected)
         } else {

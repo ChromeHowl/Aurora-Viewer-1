@@ -88,6 +88,10 @@ pub enum Request {
     /// 2 rotation); shared by Aurora's actions and the Legacy "p" button.
     PasteVector(usize),
     CopyKeys,
+    /// Build > Contents > Import scripts: the object's id.
+    ImportScripts {
+        object: Uuid,
+    },
     Script {
         object: Uuid,
         item: Uuid,

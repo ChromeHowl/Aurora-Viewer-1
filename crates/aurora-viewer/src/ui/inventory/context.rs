@@ -186,6 +186,16 @@ pub(super) fn new_menu(
             actions,
         );
     }
+    // Aurora addition: several script files of the disk at once
+    entry(
+        ui,
+        p,
+        "file-import",
+        aurora_i18n::tr!("script-import-menu"),
+        enabled,
+        InvAction::ImportScripts { parent: id },
+        actions,
+    );
     menu::submenu(
         ui,
         p,

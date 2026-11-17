@@ -134,6 +134,10 @@ pub fn show_document(
 
 pub enum InvAction {
     DefaultPermissions,
+    /// "Import scripts..." of a folder's New menu: the folder.
+    ImportScripts {
+        parent: Uuid,
+    },
     ExportMenuNotecard {
         name: String,
         text: String,

@@ -113,6 +113,13 @@ impl Defaults {
                     *permissions = self.for_item(NewItem::Wearable(*kind));
                 }
             }
+            // an imported script (Aurora addition): the Scripts defaults, like
+            // a new script (create_new_item)
+            NetCommand::ImportScriptItem { permissions, .. } => {
+                if permissions.is_none() {
+                    *permissions = self.for_item(NewItem::Script);
+                }
+            }
             NetCommand::CreateNotecardItem { permissions, .. } => {
                 if permissions.is_none() {
                     *permissions = self.for_item(NewItem::Note);
@@ -277,5 +284,40 @@ mod tests {
                 (rights.next_owner, rights.group, rights.everyone)
             );
         }
+    }
+
+    #[test]
+    fn an_imported_script_takes_the_scripts_defaults_and_keeps_explicit_rights() {
+        let mut defaults = Defaults::default();
+        defaults.scripts.modify = true;
+        defaults.scripts.share_group = true;
+        let import = |permissions| NetCommand::ImportScriptItem {
+            request: uuid::Uuid::from_u128(1),
+            parent: uuid::Uuid::from_u128(2),
+            name: "Door".into(),
+            description: String::new(),
+            source: "default{}".into(),
+            compile: aurora_net::scripts::CompileTarget::Mono,
+            permissions,
+        };
+        let mut command = import(None);
+        defaults.prepare(&mut command);
+        let NetCommand::ImportScriptItem { permissions, .. } = command else {
+            panic!("import")
+        };
+        assert_eq!(permissions, Some(defaults.scripts.permissions()));
+        assert_ne!(
+            permissions.map(|p| p.next_owner & perm::MODIFY),
+            Some(0),
+            "the next owner may modify"
+        );
+        assert_ne!(permissions.map(|p| p.group), Some(0), "shared with the group");
+        let explicit = Permissions::default();
+        let mut command = import(Some(explicit));
+        defaults.prepare(&mut command);
+        let NetCommand::ImportScriptItem { permissions, .. } = command else {
+            panic!("import")
+        };
+        assert_eq!(permissions, Some(explicit));
     }
 }

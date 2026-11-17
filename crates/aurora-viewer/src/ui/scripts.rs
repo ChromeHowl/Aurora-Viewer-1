@@ -18,6 +18,8 @@ mod experiences;
 pub(crate) mod files;
 mod focus;
 mod folding;
+pub mod import;
+pub mod import_rules;
 mod indent;
 mod preprocessor;
 pub mod recovery;
