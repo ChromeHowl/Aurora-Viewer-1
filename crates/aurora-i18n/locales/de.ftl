@@ -16810,3 +16810,7 @@ ui-options-camera-show-mode-changes = Kameramodus-Wechsel anzeigen
 ui-options-camera-show-mode-changes-tip = Ein kurzer Hinweis oben in der Welt nennt den Kameramodus, den Sie betreten, und wie man ihn verlässt; ein kleiner Chip bleibt, solange die Kamera gesperrt, auf einem Pfad, frei oder von einem Skript bewegt ist
 ui-chat-applink-unblock-confirm = A link asks to unblock { $name }. Do you want to remove this block?
 ui-chat-applink-unblock-object-confirm = A link asks to unblock the object { $name }. Do you want to remove this block?
+common-play-in-world = Play in world
+wearable-favorites-sort-custom = Custom order (drag the rows)
+wearable-favorites-wearing = Wearing { $name }
+wearable-favorites-taking-off = Taking off { $name }
