@@ -64,23 +64,36 @@ const SLIDER_SCALE_GLOW_B: f32 = -5.0;
 /// F_APPROXIMATELY_ZERO (llmath.h).
 const APPROXIMATELY_ZERO: f32 = 0.00001;
 
-/// Fallback when fonts are not ready yet; real width comes from
-/// [`label_column_w`] so "Sky environment" / "Water environment" are not
-/// painted over the combo (#3109).
+/// The least width of the selector's label column; the real one comes from
+/// [`label_column_w`], so that "Sky environment" / "Water environment" are
+/// not painted over their lists (#3109).
 const LABEL_W: f32 = 74.0;
 const COMBO_W: f32 = 216.0;
 /// Height of a list's entries under its search field.
 const LIST_H: f32 = 420.0;
 const LABEL_FONT: f32 = 12.5;
+/// Width of the Environment window with a label column of [`LABEL_W`]; a
+/// wider column widens the window by as much.
+const SELECTOR_W: f32 = 440.0;
+
+/// The labels of the selector's rows: sky, water, day cycle and time of day.
+fn selector_labels() -> [&'static str; 4] {
+    [
+        aurora_i18n::tr!("ui-environment-sky-environment"),
+        aurora_i18n::tr!("ui-environment-water-environment"),
+        aurora_i18n::tr!("extra-day-night"),
+        aurora_i18n::tr!("ui-environment-time"),
+    ]
+}
 
 /// Widest of `labels` at the selector's label size, so the column fits the
 /// current language instead of a fixed English guess.
-fn label_column_w(ui: &egui::Ui, labels: &[&str]) -> f32 {
+fn label_column_w(ctx: &egui::Context, labels: &[&str]) -> f32 {
     let font = egui::FontId::proportional(LABEL_FONT);
     labels
         .iter()
         .map(|label| {
-            ui.fonts_mut(|f| {
+            ctx.fonts_mut(|f| {
                 f.layout_no_wrap((*label).to_owned(), font.clone(), egui::Color32::PLACEHOLDER)
                     .size()
                     .x
@@ -90,10 +103,13 @@ fn label_column_w(ui: &egui::Ui, labels: &[&str]) -> f32 {
         .ceil()
 }
 
-/// Label in a fixed column, clipped so a long string cannot cover the combo.
+/// Label in a fixed column, cut at the column's width so a long string
+/// cannot cover the list (on the width only: a large text size is taller
+/// than the row's 20 px and keeps its descenders).
 fn paint_selector_label(ui: &mut egui::Ui, p: &Palette, label: &str, tip: &str, label_w: f32) {
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(label_w, 20.0), egui::Sense::hover());
-    ui.painter().with_clip_rect(rect.intersect(ui.clip_rect())).text(
+    let clip = egui::Rect::from_x_y_ranges(rect.x_range(), ui.clip_rect().y_range()).intersect(ui.clip_rect());
+    ui.painter().with_clip_rect(clip).text(
         rect.left_center(),
         egui::Align2::LEFT_CENTER,
         label,
@@ -214,11 +230,14 @@ impl EnvironmentUi {
         let screen = ctx.content_rect();
         // left of the notification toasts (top right)
         let pos = egui::pos2(screen.right() - 740.0, screen.top() + 90.0);
+        // as wide as its labels ask: English needs more than French or
+        // Japanese, whose labels fit the least column
+        let label_w = label_column_w(ctx, &selector_labels());
         Floater::new(
             "environment_selector",
             aurora_i18n::tr!("common-environment"),
             pos,
-            Vec2::new(480.0, 300.0),
+            Vec2::new(SELECTOR_W + label_w - LABEL_W, 300.0),
         )
         .fixed()
         .help(aurora_i18n::tr!("ui-environment-choose-a-sky-water-or-day-cycle-from-your"))
@@ -305,13 +324,10 @@ impl EnvironmentUi {
         out: &mut Vec<EnvAction>,
     ) {
         ui.spacing_mut().item_spacing = Vec2::new(4.0, 6.0);
-        let sky = aurora_i18n::tr!("ui-environment-sky-environment");
-        let water = aurora_i18n::tr!("ui-environment-water-environment");
-        let day = aurora_i18n::tr!("extra-day-night");
-        let time = aurora_i18n::tr!("ui-environment-time");
+        let [sky, water, day, time] = selector_labels();
         // Quick preferences passes a wide column; the Environment window's
         // 74 px was too narrow for English "Water environment" (#3109).
-        let label_w = label_w.max(label_column_w(ui, &[sky, water, day, time]));
+        let label_w = label_w.max(label_column_w(ui.ctx(), &[sky, water, day, time]));
         let free = !self.rlva_locked;
         let rows = [
             (SettingsKind::Sky, sky, aurora_i18n::tr!("ui-environment-sky-settings"), view.sky),
@@ -923,11 +939,11 @@ pub fn settings_list(
             ui.ctx().memory_mut(|m| m.areas_mut().set_state(layer, area));
         }
         let margins = egui::Frame::popup(ui.style()).total_margin().sum().y;
-        // No ComboBox `.height`: that wraps the popup in its own scroll and
-        // stacked with the list's ScrollArea as a double scrollbar (#3109).
         let mut content_height = None;
         egui::ComboBox::from_id_salt(salt)
             .width(width)
+            // the list's own ScrollArea stops at LIST_H, so this never adds a second bar
+            .height(LIST_H + 40.0)
             .selected_text(tagged_name(p, &text, selected_weather, Some(p.ink)))
             .truncate()
             // a click in the search field must not close the list
@@ -1033,7 +1049,15 @@ pub fn settings_list(
             && let Some(popup) = egui::AreaState::load(ui.ctx(), popup_id).and_then(|a| a.size)
         {
             let full = height.map_or(0.0, |(full, _)| full);
-            let full = if query.trim().is_empty() { full.max(popup.y) } else { full };
+            // unfiltered, the names are the whole list: it grows when inventory
+            // arrives after the list opened (upstream #2228), never past the
+            // list's own limit or the screen
+            let limit = (LIST_H + 40.0 + margins).min(ui.ctx().content_rect().height());
+            let full = if query.trim().is_empty() {
+                full.max(popup.y).max(content + margins).min(limit)
+            } else {
+                full
+            };
             ui.data_mut(|d| d.insert_temp(height_id, (full, content + margins)));
         }
         ui.data_mut(|d| d.insert_temp(query_id, query));
@@ -1624,14 +1648,16 @@ mod tests {
                 ..Default::default()
             },
             |ctx| {
+                // English whatever the language of the PC running the test
+                // (`tr!` follows it: "Env. eau" fits the old column)
                 egui::CentralPanel::default().show(ctx, |ui| {
                     width = label_column_w(
-                        ui,
+                        ui.ctx(),
                         &[
-                            aurora_i18n::tr!("ui-environment-sky-environment"),
-                            aurora_i18n::tr!("ui-environment-water-environment"),
-                            aurora_i18n::tr!("extra-day-night"),
-                            aurora_i18n::tr!("ui-environment-time"),
+                            aurora_i18n::text_in("en", "ui-environment-sky-environment"),
+                            aurora_i18n::text_in("en", "ui-environment-water-environment"),
+                            aurora_i18n::text_in("en", "extra-day-night"),
+                            aurora_i18n::text_in("en", "ui-environment-time"),
                         ],
                     );
                 });
@@ -1644,13 +1670,63 @@ mod tests {
             width > LABEL_W,
             "English Water environment needs more than the old {LABEL_W} px column, got {width}"
         );
-        let water = aurora_i18n::tr!("ui-environment-water-environment");
+        let water = aurora_i18n::text_in("en", "ui-environment-water-environment");
         let water_w = ctx.fonts_mut(|f| {
-            f.layout_no_wrap(water.to_owned(), egui::FontId::proportional(LABEL_FONT), egui::Color32::WHITE)
+            f.layout_no_wrap(water.to_owned(), egui::FontId::proportional(LABEL_FONT), egui::Color32::PLACEHOLDER)
                 .size()
                 .x
         });
         assert!(width + 0.5 >= water_w, "column {width} must cover {water} ({water_w})");
+    }
+
+    #[test]
+    fn an_open_list_grows_as_inventory_arrives_and_stays_anchored_after_filtering() {
+        let theme = crate::theme::Theme::default();
+        let palette = theme.palette();
+        let empty = SettingsCatalog::default();
+        let loaded = SettingsCatalog {
+            sky: (0..30)
+                .map(|n| env_select::SettingsChoice {
+                    item: Uuid::from_u128(n + 1),
+                    asset: Uuid::from_u128(n + 101),
+                    name: format!("Sky {n}"),
+                    weather: false,
+                })
+                .collect(),
+            ..Default::default()
+        };
+        for below in [true, false] {
+            let ctx = egui::Context::default();
+            theme.apply(&ctx, 1.0);
+            let salt = "streaming_environment_list";
+            let frame = |catalog: &SettingsCatalog, search: Option<&str>| {
+                if let Some(search) = search {
+                    ctx.data_mut(|d| d.insert_temp(demo_open_id(&salt), search.to_owned()));
+                }
+                for _ in 0..4 {
+                    let input = egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(800.0, 800.0))),
+                        ..Default::default()
+                    };
+                    let mut output = ctx.run_ui(input, |ui| {
+                        ui.add_space(if below { 20.0 } else { 740.0 });
+                        settings_list(ui, &palette, catalog, SettingsKind::Sky, Shown::Shared, salt, COMBO_W);
+                    });
+                    output.textures_delta.clear();
+                }
+                let popup = ctx.memory(|m| m.areas().top_layer_id(egui::Order::Foreground)).expect("open popup");
+                egui::AreaState::load(&ctx, popup.id).expect("popup area").rect()
+            };
+            let initial = frame(&empty, Some(""));
+            let full = frame(&loaded, None);
+            assert!(full.height() > initial.height() + 180.0, "new inventory: {initial:?} -> {full:?}");
+            let filtered = frame(&loaded, Some("no such sky"));
+            let restored = frame(&loaded, Some(""));
+            assert!(filtered.height() + 180.0 < full.height());
+            assert!((restored.height() - full.height()).abs() < 2.0);
+            let edge = |r: egui::Rect| if below { r.top() } else { r.bottom() };
+            assert!((edge(initial) - edge(full)).abs() < 2.0 && (edge(filtered) - edge(restored)).abs() < 2.0);
+        }
     }
 
     #[test]

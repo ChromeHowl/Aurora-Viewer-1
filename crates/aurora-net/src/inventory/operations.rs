@@ -1285,14 +1285,14 @@ mod tests {
             let (url, task) = notecard_server(false, false, false, task_save).await;
             if task_save {
                 assert_eq!(
-                    save_task_notecard(&reqwest::Client::new(), &url, id(90), id(3), data.clone())
+                    save_task_notecard(&crate::test_http_client(), &url, id(90), id(3), data.clone())
                         .await
                         .expect("task note save"),
                     id(40)
                 );
             } else {
                 let saved = save_content(
-                    &reqwest::Client::new(),
+                    &crate::test_http_client(),
                     &url,
                     &format!("{url}/fetch"),
                     id(2),
@@ -1316,7 +1316,7 @@ mod tests {
         for replace in [false, true] {
             let (url, task) = notecard_server(false, false, replace, false).await;
             let saved = save_content(
-                &reqwest::Client::new(),
+                &crate::test_http_client(),
                 &url,
                 &format!("{url}/fetch"),
                 id(2),
@@ -1348,7 +1348,7 @@ mod tests {
             .expect("asset");
         for (missing_asset, reject) in [(false, false), (false, true), (true, false)] {
             let (url, task) = notecard_server(missing_asset, reject, false, true).await;
-            let result = save_task_notecard(&reqwest::Client::new(), &url, id(90), id(3), data.clone()).await;
+            let result = save_task_notecard(&crate::test_http_client(), &url, id(90), id(3), data.clone()).await;
             assert_eq!(result.is_ok(), !missing_asset && !reject);
             if let Ok(asset) = result {
                 assert_eq!(asset, id(40));
@@ -1362,7 +1362,7 @@ mod tests {
             assert_eq!(requests[1].1, data);
         }
         assert!(
-            save_task_notecard(&reqwest::Client::new(), "http://127.0.0.1:1", Uuid::nil(), id(3), data)
+            save_task_notecard(&crate::test_http_client(), "http://127.0.0.1:1", Uuid::nil(), id(3), data)
                 .await
                 .is_err()
         );
@@ -1374,7 +1374,7 @@ mod tests {
         for (stale, reject) in [(true, false), (false, true)] {
             let (url, task) = notecard_server(stale, reject, false, false).await;
             assert!(
-                save_content(&reqwest::Client::new(), &url, &url, id(2), id(3), 7, data.clone())
+                save_content(&crate::test_http_client(), &url, &url, id(2), id(3), 7, data.clone())
                     .await
                     .is_err()
             );
@@ -1390,7 +1390,7 @@ mod tests {
             vec![b'a'; super::super::notecard::MAX_TEXT_BYTES + 1],
         ] {
             assert!(
-                save_content(&reqwest::Client::new(), "invalid", "invalid", id(2), id(3), 7, data)
+                save_content(&crate::test_http_client(), "invalid", "invalid", id(2), id(3), 7, data)
                     .await
                     .is_err()
             );
@@ -1486,7 +1486,7 @@ mod tests {
 
     #[tokio::test]
     async fn parent_changes_use_udp_instead_of_the_ais_patch_rejected_with_http_400() {
-        let http = reqwest::Client::new();
+        let http = crate::test_http_client();
         let (url, task) = move_server(vec![Llsd::new_map()]).await;
         let error = crate::outfits::send(http.patch(format!("{url}/item/{}", id(3))), &llsd_map! { "parent_id" => id(4) })
             .await
@@ -1527,7 +1527,7 @@ mod tests {
     async fn move_readback_waits_for_storage_without_sending_the_move_twice() {
         let (url, task) = move_server(vec![move_readback(false), move_readback(true)]).await;
         let mut moves = Vec::new();
-        let reply = mutate_with_moves(&reqwest::Client::new(), &url, &url, id(2), move_change(), |movement| {
+        let reply = mutate_with_moves(&crate::test_http_client(), &url, &url, id(2), move_change(), |movement| {
             moves.push(movement);
             std::future::ready(Ok(()))
         })
@@ -1542,7 +1542,7 @@ mod tests {
     async fn an_unconfirmed_move_never_succeeds_and_stops_retrying() {
         let (url, task) = move_server(vec![move_readback(false); 6]).await;
         let mut sent = 0;
-        let result = mutate_with_moves(&reqwest::Client::new(), &url, &url, id(2), move_change(), |_| {
+        let result = mutate_with_moves(&crate::test_http_client(), &url, &url, id(2), move_change(), |_| {
             sent += 1;
             std::future::ready(Ok(()))
         })
@@ -1555,7 +1555,7 @@ mod tests {
     #[tokio::test]
     async fn a_move_without_a_region_connection_fails_before_http_requests() {
         let mut sent = 0;
-        let result = mutate_with_moves(&reqwest::Client::new(), "invalid", "invalid", id(2), move_change(), |_| {
+        let result = mutate_with_moves(&crate::test_http_client(), "invalid", "invalid", id(2), move_change(), |_| {
             sent += 1;
             std::future::ready(Err("closed session".into()))
         })
@@ -1631,7 +1631,7 @@ mod tests {
             )
             .await;
             let reply = mutate_with_progress(
-                &reqwest::Client::new(),
+                &crate::test_http_client(),
                 &url,
                 "invalid fetch capability must not be used",
                 id(2),
@@ -1666,7 +1666,7 @@ mod tests {
         ])
         .await;
         let reply = mutate(
-            &reqwest::Client::new(),
+            &crate::test_http_client(),
             &url,
             &url,
             id(2),
@@ -1688,9 +1688,15 @@ mod tests {
             folder_readback(name, true),
         ])
         .await;
-        let reply = mutate(&reqwest::Client::new(), &url, &format!("{url}/fetch"), id(2), folder_change(name))
-            .await
-            .expect("eventual creation confirmation");
+        let reply = mutate(
+            &crate::test_http_client(),
+            &url,
+            &format!("{url}/fetch"),
+            id(2),
+            folder_change(name),
+        )
+        .await
+        .expect("eventual creation confirmation");
         assert_eq!(reply.created[&id(100)], id(200));
         let requests = task.await.expect("requests");
         assert_eq!(requests.len(), 3);
@@ -1704,7 +1710,7 @@ mod tests {
         replies.extend(vec![folder_readback("Wrong folder", true); 6]);
         let (url, task) = move_server(replies).await;
         assert!(
-            mutate(&reqwest::Client::new(), &url, &url, id(2), folder_change("Expected folder"))
+            mutate(&crate::test_http_client(), &url, &url, id(2), folder_change("Expected folder"))
                 .await
                 .is_err()
         );
@@ -1740,7 +1746,7 @@ mod tests {
             ..Default::default()
         };
         let mut moves = Vec::new();
-        mutate_with_moves(&reqwest::Client::new(), &url, &url, id(2), change, |movement| {
+        mutate_with_moves(&crate::test_http_client(), &url, &url, id(2), change, |movement| {
             moves.push(movement);
             std::future::ready(Ok(()))
         })
@@ -1770,7 +1776,7 @@ mod tests {
             ..Default::default()
         };
         let mut moves = Vec::new();
-        mutate_with_moves(&reqwest::Client::new(), &url, &url, id(2), change, |movement| {
+        mutate_with_moves(&crate::test_http_client(), &url, &url, id(2), change, |movement| {
             moves.push(movement);
             std::future::ready(Ok(()))
         })
@@ -1791,7 +1797,7 @@ mod tests {
             ])
             .await;
             let result = mutate(
-                &reqwest::Client::new(),
+                &crate::test_http_client(),
                 &url,
                 "invalid",
                 id(2),
@@ -1843,7 +1849,7 @@ mod tests {
     #[tokio::test]
     async fn item_copies_are_sent_without_waiting_for_an_empty_http_snapshot() {
         let reply = mutate(
-            &reqwest::Client::new(),
+            &crate::test_http_client(),
             "invalid",
             "invalid",
             id(2),
@@ -1907,7 +1913,7 @@ mod tests {
             panic!("favorite patch");
         };
         body.insert("name", "New sound");
-        assert!(mutate(&reqwest::Client::new(), &url, &url, id(2), change).await.is_err());
+        assert!(mutate(&crate::test_http_client(), &url, &url, id(2), change).await.is_err());
         assert_eq!(task.await.expect("bounded readback").len(), 7);
     }
 
@@ -1922,7 +1928,7 @@ mod tests {
                 ])
                 .await;
                 let reply = mutate(
-                    &reqwest::Client::new(),
+                    &crate::test_http_client(),
                     &url,
                     &format!("{url}/fetch"),
                     id(2),
@@ -1964,7 +1970,7 @@ mod tests {
                 ])
                 .await;
                 let change = super::super::thumbnail::patch(id(3), folder, id(1), asset);
-                let reply = mutate(&reqwest::Client::new(), &url, &format!("{url}/legacy"), id(2), change)
+                let reply = mutate(&crate::test_http_client(), &url, &format!("{url}/legacy"), id(2), change)
                     .await
                     .expect("eventual thumbnail confirmation");
                 let snapshot = &reply.contents[0];
@@ -2004,7 +2010,7 @@ mod tests {
             responses.extend(vec![snapshot; 6]);
             let (url, task) = move_server(responses).await;
             let error = mutate(
-                &reqwest::Client::new(),
+                &crate::test_http_client(),
                 &url,
                 &format!("{url}/legacy"),
                 id(2),
@@ -2084,7 +2090,7 @@ mod tests {
         let (url, task) = move_server(responses).await;
         assert!(
             mutate(
-                &reqwest::Client::new(),
+                &crate::test_http_client(),
                 &url,
                 &format!("{url}/fetch"),
                 id(2),
@@ -2106,7 +2112,7 @@ mod tests {
         let (url, task) = server(vec![(403, Llsd::new_map())]).await;
         assert!(
             mutate(
-                &reqwest::Client::new(),
+                &crate::test_http_client(),
                 &url,
                 "invalid fetch capability",
                 id(2),
@@ -2126,7 +2132,7 @@ mod tests {
         };
         let (url, task) = server(vec![(400, reply)]).await;
         let refusal = crate::outfits::send_detailed(
-            reqwest::Client::new().patch(format!("{url}/item/{}", id(3))),
+            crate::test_http_client().patch(format!("{url}/item/{}", id(3))),
             &llsd_map! { "desc" => "2" },
         )
         .await
@@ -2149,7 +2155,7 @@ mod tests {
         let doc = llsd_map! { "folders" => Llsd::Array(vec![llsd_map! { "folder_id" => id(1), "version" => 2, "items" => Llsd::Array(vec![llsd_map! { "item_id" => id(3), "parent_id" => id(1), "name" => "Ancien" }]) }]) };
         let (url, task) = server(vec![(200, Llsd::new_map()), (200, doc)]).await;
         let result = mutate(
-            &reqwest::Client::new(),
+            &crate::test_http_client(),
             &url,
             &url,
             id(2),
@@ -2172,7 +2178,7 @@ mod tests {
         let (url, task) = server(vec![(403, Llsd::new_map())]).await;
         assert!(
             mutate(
-                &reqwest::Client::new(),
+                &crate::test_http_client(),
                 &url,
                 &url,
                 id(2),
@@ -2245,7 +2251,7 @@ mod tests {
             removed: vec![id(10)],
             ..Default::default()
         };
-        mutate(&reqwest::Client::new(), &url, &url, id(2), change)
+        mutate(&crate::test_http_client(), &url, &url, id(2), change)
             .await
             .expect("replaced link");
         let requests = task.await.expect("requests");
@@ -2273,7 +2279,7 @@ mod tests {
             refresh: vec![id(1)],
             ..Default::default()
         };
-        assert!(mutate(&reqwest::Client::new(), &url, &url, id(2), change).await.is_err());
+        assert!(mutate(&crate::test_http_client(), &url, &url, id(2), change).await.is_err());
         assert_eq!(task.await.expect("requests").len(), 1);
     }
 }
@@ -2379,7 +2385,7 @@ mod udp_tests {
             ..Default::default()
         };
         let reply = mutate_udp(
-            &reqwest::Client::new(),
+            &crate::test_http_client(),
             Some(&format!("{url}/create")),
             &format!("{url}/fetch"),
             Uuid::nil(),

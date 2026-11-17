@@ -727,7 +727,7 @@ fn number(ui: &mut egui::Ui, value: &mut f32, max: f32, speed: f32, decimals: us
     // (floater_color_picker.xml), so they take the wheel like the build
     // spinners; not while the number is typed or dragged.
     let protect = response.has_focus() || response.dragged() || response.drag_stopped();
-    let wheel = widgets::spin_wheel(ui, row_rect, response.id, !protect);
+    let wheel = widgets::spin_wheel(ui, row_rect, response.id, true, !protect);
     if step != 0 || wheel.scaled != 0.0 {
         *value = (*value + increment * (scale * step as f32 + wheel.scaled)).clamp(0.0, max);
         response.mark_changed();
