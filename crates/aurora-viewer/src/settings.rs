@@ -22,7 +22,6 @@ pub mod people;
 pub mod registry;
 pub mod render_extras;
 pub mod render_photo;
-mod saver;
 pub mod shadow_realm;
 pub mod socks_proxy;
 pub mod status_share;
@@ -953,6 +952,9 @@ pub struct Settings {
     pub appearance_fill_previews: bool,
     /// The order of the Favorite Wearables list (FSWearableFavoritesSortOrder).
     pub wearable_favorites_sort: crate::world::wearable_favorites::SortOrder,
+    /// The Favorite Wearables' custom orders (`SortOrder::Custom`), per
+    /// account: for each view, its originals in the order dragged.
+    pub wearable_favorites_order: std::collections::HashMap<uuid::Uuid, crate::world::wearable_favorites::Orders>,
     /// The Appearance tab shown at exit (gallery, outfit list, worn), shown
     /// again at the next start, as the Legacy Viewer's `LastAppearanceTab`.
     pub appearance_tab: u8,
@@ -2586,6 +2588,7 @@ impl Default for Settings {
             show_appearance: false,
             appearance_fill_previews: false,
             wearable_favorites_sort: Default::default(),
+            wearable_favorites_order: Default::default(),
             appearance_tab: 0,
             appearance_outfit_sort: Default::default(),
             show_ao: false,
@@ -3968,12 +3971,13 @@ impl Settings {
         };
     }
 
-    /// The settings as they are now, written by the save thread
-    /// (settings/saver.rs): the frame thread does not wait for the disk.
+    /// The settings as they are now, written by a save thread (saves.rs):
+    /// the frame thread does not wait for the disk, and a save not started
+    /// yet is replaced by the newer one.
     pub fn save(&self) {
         let copy = self.to_saved();
         let path = Self::path();
-        saver::get().queue(Box::new(move || {
+        crate::saves::replace(path.clone(), move || {
             if let Some(dir) = path.parent()
                 && let Err(e) = std::fs::create_dir_all(dir)
             {
@@ -3981,15 +3985,7 @@ impl Settings {
                 return;
             }
             copy.write_saved(&path);
-        }));
-    }
-
-    /// Until the saves asked for are written, `timeout` at most: before
-    /// the viewer ends.
-    pub fn wait_saved(timeout: std::time::Duration) {
-        if !saver::get().wait(timeout) {
-            log::warn!("settings: the last save was not written within {timeout:?}");
-        }
+        });
     }
 
     /// What is written to the file: the user's own graphics values while

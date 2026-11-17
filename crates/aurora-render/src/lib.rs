@@ -131,7 +131,7 @@ pub use equirect::{Answer as EquirectAnswer, CAPTURE_CAMERAS, CaptureCamera, Equ
 pub use gpu_cull::set_whole_chunk_uploads;
 pub use histogram::HISTOGRAM_BINS;
 pub use hud::HudView;
-pub use label_depth::{world_label_at, world_line_at};
+pub use label_depth::{WORLD_OVERLAY_NEAR_W, clip_world_line, world_label_at, world_line_at};
 pub use main_thread::{GpuInfo, Renderer, VulkanLimits};
 pub use renderer::{CASCADES, RenderError};
 // What a tile of a photo draws around what it keeps for the soft shadows.
