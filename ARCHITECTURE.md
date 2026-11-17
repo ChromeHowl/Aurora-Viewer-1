@@ -1521,7 +1521,10 @@ documents, bounded file I/O and BVH export on the background pool. Native
 animation preparation reuses the existing document/codec and human-controlled
 import preview. `poser/storage.rs` returns the successful save path to the UI;
 the refreshed library selects that entry and reports its full path, and native
-file pickers start in the account-local poses directory (#3169). Poser does not
+file pickers start in the account-local poses directory (#3169).
+`poser/legacy_pose.rs` reads the Legacy Viewer's (and Alchemy's) `.xml` pose
+files into those documents, from Open a file or a whole folder converted into
+the library; the animation ids such a file records are not kept. Poser does not
 start IK-project autosaves or object imports.
 `poser/inventory_load.rs` is Load › Inventory animation: the picker, the rights
 rule (`actions::content_missing`), the asset through `AnimStreamer`, and the

@@ -43,6 +43,8 @@ enum Output {
     AnimationSaved(PathBuf),
     /// Saved outside the library by Save as…
     SavedTo(PathBuf),
+    /// A folder of Legacy Viewer poses converted into the library.
+    ImportedFolder(legacy_pose::Imported),
     Failed(String),
     Cancelled,
 }
@@ -52,6 +54,9 @@ pub(super) enum Job {
     Save(Save),
     /// Save as animation…: the animation and the name the dialog offers.
     SaveAnimation(Arc<aurora_assets::Animation>, String),
+    /// Convert a folder of Legacy Viewer or Alchemy poses into the library:
+    /// the one given, or the one chosen in the folder dialog.
+    ImportLegacyFolder(Option<PathBuf>),
 }
 /// Whether a library entry named `name` shows under the search `filter`
 /// (case-insensitive, anywhere in the name).
@@ -146,7 +151,18 @@ impl Default for Service {
         }
     }
 }
-fn read(path: &Path) -> Result<Vec<u8>, String> {
+/// Write `bytes` to `path` in `dir` through a temporary file, so that a
+/// failure leaves no half-written pose in the library.
+pub(super) fn write_atomic(dir: &Path, path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let temp = dir.join(format!("{}.tmp", Uuid::new_v4()));
+    std::fs::write(&temp, bytes).map_err(|e| e.to_string())?;
+    if let Err(e) = std::fs::rename(&temp, path) {
+        let _ = std::fs::remove_file(&temp);
+        return Err(e.to_string());
+    }
+    Ok(())
+}
+pub(super) fn read(path: &Path) -> Result<Vec<u8>, String> {
     let mut bytes = Vec::new();
     std::fs::File::open(path)
         .map_err(|e| e.to_string())?
@@ -163,7 +179,8 @@ fn list(root: &Path, rig: &Rig) -> Result<Vec<Entry>, String> {
     if !root.exists() {
         return Ok(out);
     }
-    for entry in std::fs::read_dir(root).map_err(|e| e.to_string())?.take(512) {
+    // the library of a long-time Legacy Viewer user can hold thousands of poses
+    for entry in std::fs::read_dir(root).map_err(|e| e.to_string())?.take(4096) {
         let path = entry.map_err(|e| e.to_string())?.path();
         if path.is_file()
             && path.file_name().is_some_and(|n| n.to_string_lossy().ends_with(".aurora-pose.json"))
@@ -238,6 +255,18 @@ impl Service {
                     let path = path.display().to_string();
                     self.message = Some(aurora_i18n::tr!("poser-saved-to", path = path.as_str()).to_string());
                 }
+                Output::ImportedFolder(imported) => {
+                    self.ready = false;
+                    self.message = Some(
+                        aurora_i18n::tr!(
+                            "poser-imported",
+                            added = imported.added,
+                            kept = imported.kept,
+                            unreadable = imported.unreadable
+                        )
+                        .to_string(),
+                    );
+                }
                 Output::Failed(message) => {
                     self.message = Some(message);
                     self.ready = true;
@@ -308,22 +337,33 @@ impl Service {
                                     stem,
                                 ),
                             )
-                        } else if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("xml")) || bd_pose::looks_like(&bytes) {
-                            // a Black Dragon pose, named after its file
-                            let joints = bd_pose::document_joints(&rig, &bd_pose::parse(&bytes)?);
+                        } else if legacy_pose::is_pose_file(&path) || bd_pose::looks_like(&bytes) {
                             let name: String = path
                                 .file_stem()
                                 .map(|n| n.to_string_lossy().chars().filter(|c| !c.is_control()).take(100).collect())
                                 .unwrap_or_default();
-                            let name = if name.trim().is_empty() {
-                                aurora_i18n::tr!("wornposer-bd-unnamed").to_string()
-                            } else {
-                                name
+                            let document = match bd_pose::parse(&bytes) {
+                                // a Black Dragon pose, named after its file
+                                Ok(entries) => {
+                                    let joints = bd_pose::document_joints(&rig, &entries);
+                                    let name = if name.trim().is_empty() {
+                                        aurora_i18n::tr!("wornposer-bd-unnamed").to_string()
+                                    } else {
+                                        name
+                                    };
+                                    let document = Document::from_joints(name, 4, joints);
+                                    if !document.valid(&rig) {
+                                        return Err(aurora_i18n::tr!("wornposer-bd-invalid").to_string());
+                                    }
+                                    document
+                                }
+                                // the Legacy Viewer's and Alchemy's own poser files,
+                                // which are not read as Black Dragon's
+                                Err(_) if legacy_pose::is_pose_file(&path) => {
+                                    legacy_pose::document(&bytes, legacy_pose::pose_name(&path), &rig)?
+                                }
+                                Err(e) => return Err(e),
                             };
-                            let document = Document::from_joints(name, 4, joints);
-                            if !document.valid(&rig) {
-                                return Err(aurora_i18n::tr!("wornposer-bd-invalid").to_string());
-                            }
                             Output::Loaded(subject, Loaded::Pose(document, mode))
                         } else {
                             let document: Document = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
@@ -384,6 +424,22 @@ impl Service {
                             return Ok(Output::Cancelled);
                         };
                         Output::AnimationSaved(write_animation(path, &animation)?)
+                    }
+                    Job::ImportLegacyFolder(folder) => {
+                        let folder = match folder {
+                            Some(folder) => folder,
+                            None => {
+                                let mut dialog = rfd::FileDialog::new().set_title(aurora_i18n::tr!("poser-import-legacy-title"));
+                                if let Some(dir) = legacy_pose::default_folder() {
+                                    dialog = dialog.set_directory(dir);
+                                }
+                                let Some(folder) = dialog.pick_folder() else {
+                                    return Ok(Output::Cancelled);
+                                };
+                                folder
+                            }
+                        };
+                        Output::ImportedFolder(legacy_pose::import_folder(&folder, &root, &rig)?)
                     }
                 })
             };

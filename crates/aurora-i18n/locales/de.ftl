@@ -16892,3 +16892,7 @@ director-key-aim-follow = Follow the lock
 director-key-aim-follow-tip = This keyframe looks at the lock's target while the view is locked, and where its camera was laid when it is not.
 inventory-dual-panel = Dual-panel inventory
 photo-vf-pad-tilt-value-tip = The tilt in degrees, positive clockwise: click to type it, or drag across it
+poser-import-legacy = Import Legacy Viewer or Alchemy poses…
+poser-import-legacy-title = Folder of Legacy Viewer or Alchemy poses
+poser-legacy-invalid = This file is not a Legacy Viewer or Alchemy pose.
+poser-imported = Poses added to the library: { $added }. Already there, kept: { $kept }. Unreadable: { $unreadable }.

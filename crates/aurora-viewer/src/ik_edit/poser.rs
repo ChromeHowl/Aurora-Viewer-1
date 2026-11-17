@@ -17,6 +17,7 @@ mod data;
 mod document;
 mod inventory_load;
 mod kinematics;
+mod legacy_pose;
 mod overlay;
 mod playback;
 mod scale_gizmo;
