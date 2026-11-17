@@ -6044,12 +6044,8 @@ impl Scene {
                 continue;
             }
             // where it looks (LLHUDEffectLookAt::update / calcTargetPosition)
-            let (target, ahead) = if owner == world.agent_id {
-                let (target, ahead) = world.look_at.own_gaze();
-                (Some(target), ahead)
-            } else {
-                (world.look_at.remote.get(&owner).copied(), false)
-            };
+            let (target, ahead) = world.look_at.gaze_of(owner, world.agent_id);
+            let photo_look = world.look_at.photo.at(owner, world.agent_id).is_some();
             use crate::world::lookat::Gaze;
             let look = match crate::world::lookat::gaze(target, ahead) {
                 Gaze::Unknown | Gaze::Ahead => Some((false, None)),
@@ -6118,8 +6114,8 @@ impl Scene {
             motions.legacy_ground = self.legacy_grounding_frame(world, idx, now);
             motions.aurora_feet = self.ground_avatar_feet;
             motions.look_limits = (owner == world.agent_id).then_some(self.own_look_limits);
-            motions.look_over_animations = owner == world.agent_id && world.look_at.own_over_animations;
-            motions.look_glance = if owner == world.agent_id { world.look_at.own_glance } else { 0.0 };
+            motions.look_over_animations = photo_look;
+            motions.look_glance = if photo_look { world.look_at.photo.glance } else { 0.0 };
             match look {
                 Some((true, _)) => motions.look_cleared = true,
                 Some((false, None)) => {

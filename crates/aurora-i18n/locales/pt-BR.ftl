@@ -16813,3 +16813,5 @@ photo-look-intensity-hint = How far the head turns to the camera; the eyes do th
 photo-turn-to-camera = Turn to camera
 photo-turn-to-camera-tip = Your avatar turns once to face the camera
 photo-turn-now = Turn now
+photo-look-others = Others look at camera
+photo-look-others-hint = Nearby people who accepted your posing request look at the camera too, in your view and photos only. Ask them from the poser
