@@ -345,9 +345,10 @@ impl HistoryStorage {
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => Arc::default(),
                 Err(e) => {
                     log::warn!("teleport history: can't read the saved history ({e}); it is left as it is and not saved this session");
-                    let mut storage = HistoryStorage::default();
-                    storage.unreadable = true;
-                    return storage;
+                    return HistoryStorage {
+                        unreadable: true,
+                        ..Default::default()
+                    };
                 }
             },
         };

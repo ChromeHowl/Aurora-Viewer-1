@@ -1086,11 +1086,22 @@ fn blender_live_shape_transport_requires_negotiation_and_confirms_import_separat
 fn blender_lods_transport_accepts_compressed_lods() {
     let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("port");
     let port = listener.local_addr().expect("address").port();
-    let shared = transport::start_listener(listener, supported(), Default::default(), egui::Context::default(), None).expect("server");
-    let owner = Server { shared: shared.clone() };
+    let shared = transport::start_listener(
+        listener,
+        TEST_KEY.to_owned(),
+        supported(),
+        Default::default(),
+        egui::Context::default(),
+        None,
+    )
+    .expect("server");
+    let owner = Server {
+        shared: shared.clone(),
+        _token: None,
+    };
     let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).expect("connect");
     stream.set_read_timeout(Some(Duration::from_secs(5))).expect("timeout");
-    stream.write_all(b"AURBLD1\n").expect("hello");
+    stream.write_all(&greeting()).expect("hello");
     let mut reader = BufReader::new(stream.try_clone().expect("reader"));
     let mut line = String::new();
     reader.read_line(&mut line).expect("hello");
