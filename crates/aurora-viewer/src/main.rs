@@ -361,10 +361,16 @@ fn run_viewer() -> anyhow::Result<()> {
     saves::wait(std::time::Duration::from_secs(5));
     // the browsers stop with the app; their private profiles are removed
     // while the plugins let go of their files
+    let restart_vr = app.requested_vr_restart();
     drop(app);
     media::private_profile::finish(std::time::Duration::from_secs(8));
     // the files given to external script editors this session
     ui::scripts::files::remove_session_dir();
+    // the teleport history's last writes, after the window has gone
+    world::tphistory::finish_writes();
     result?;
+    if let Some(mode) = restart_vr {
+        app::restart_with_vr(mode);
+    }
     Ok(())
 }
