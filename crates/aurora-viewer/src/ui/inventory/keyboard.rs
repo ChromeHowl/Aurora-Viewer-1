@@ -231,25 +231,32 @@ pub(super) fn open_shortcut(
 
 fn open_selected(inv: &Inventory, st: &mut InventoryUi, prefs: &InventoryPreferences, facts: &Facts, actions: &mut Vec<InvAction>) {
     let mut ids: Vec<_> = st.selection.iter().copied().collect();
-    ids.sort();
-    for id in ids {
-        let Some(original) = rules::original(inv, id) else {
-            // A broken link keeps its own answer, like its double-click.
-            context::double_click(inv, id, st, prefs, facts, actions);
-            continue;
-        };
-        if inv.folders.contains_key(&original) {
+    ids.sort_unstable();
+    // The Legacy Viewer checks the whole selection for Marketplace wear before opening anything.
+    if ids.iter().any(|id| context::listing_wear(inv, *id, st)) {
+        return;
+    }
+    let mut opened = std::collections::HashSet::new();
+    for &id in &ids {
+        if let Some(original) = rules::original(inv, id) {
+            // A selected item and its links all describe the same action. Prefer its own row.
+            if (id != original && ids.binary_search(&original).is_ok()) || !opened.insert(original) {
+                continue;
+            }
+        }
+        if inv.folders.contains_key(&id) {
             // The explorer steps into a folder; anywhere else Enter folds it.
             if st.aurora.is_some_and(|frame| frame.explorer) {
-                st.browse = original;
+                st.browse = id;
                 st.selection.clear();
                 st.selected = None;
             } else if st.result_view() {
-                st.result_tree.toggle(original, st.tab);
+                st.result_tree.toggle(id, st.tab);
             } else {
-                st.plain.set_open(original, !st.plain.is_open(original));
+                st.plain.set_open(id, !st.plain.is_open(id));
             }
         } else {
+            // A link to a folder reveals the linked folder, as its double-click does.
             context::double_click(inv, id, st, prefs, facts, actions);
         }
     }

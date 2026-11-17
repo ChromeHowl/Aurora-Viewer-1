@@ -169,6 +169,9 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
     cli::get();
+    // the stochastic transparency's measurement switches that weaken it
+    // (AURORA_ST_GUARDS) are read by development builds alone
+    aurora_render::oit_stochastic::set_development_build(env!("AURORA_BUILD_PROFILE") != "release");
     // without a window: before the crash watcher, the logs and the link
     // hand-off
     if cli::get().uninstall {
@@ -361,10 +364,16 @@ fn run_viewer() -> anyhow::Result<()> {
     saves::wait(std::time::Duration::from_secs(5));
     // the browsers stop with the app; their private profiles are removed
     // while the plugins let go of their files
+    let restart_vr = app.requested_vr_restart();
     drop(app);
     media::private_profile::finish(std::time::Duration::from_secs(8));
     // the files given to external script editors this session
     ui::scripts::files::remove_session_dir();
+    // the teleport history's last writes, after the window has gone
+    world::tphistory::finish_writes();
     result?;
+    if let Some(mode) = restart_vr {
+        app::restart_with_vr(mode);
+    }
     Ok(())
 }

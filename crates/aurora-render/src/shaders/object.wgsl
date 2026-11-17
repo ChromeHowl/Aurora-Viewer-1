@@ -2834,10 +2834,16 @@ struct StParams {
     frame_seed: u32,
     _pad: u32,
 };
-// masks[R * ST_SEEDS + seed]: a random R-subset of the S sample bits
+// masks[R * ST_SEEDS + seed]: a random R-subset of the S sample bits; after
+// the (S + 1) * ST_SEEDS subsets, the 64 x 64 tile of ranks (blue noise, a
+// permutation of 0..4095) that dithers R
 @group(3) @binding(30) var<storage, read> st_masks: array<u32>;
 @group(3) @binding(31) var<uniform> st: StParams;
 const ST_SEEDS: u32 = 2048u;
+const ST_TILE: u32 = 64u;
+// Whether the alpha passes test a fragment's alpha for a NaN (oit_stochastic.rs
+// `with_guards` turns it off for a measurement, AURORA_ST_GUARDS=0)
+const ST_GUARDS: bool = true;
 
 fn st_hash(v: u32) -> u32 {
     var x = v * 747796405u + 2891336453u;
@@ -2845,18 +2851,29 @@ fn st_hash(v: u32) -> u32 {
     return (x >> 22u) ^ x;
 }
 
-// The whole S-bit mask of a fragment of alpha `a`.
+// The whole S-bit mask of a fragment of alpha `a`: R = floor(a S + xi) of the
+// S samples, with xi in 24-bit fixed point, so that its mean over a tile is
+// 1/2 to within one stratum (1/4096) and E[R] = a S.
 fn st_mask(px: vec2<u32>, tie: u32, prim: u32, a: f32) -> u32 {
-    // the primitive's own seed (and the frame's when temporal) rotates the
-    // pixel's white-noise value that dithers R
-    var seed = st_hash(st_hash(tie * 0x9e3779b9u + 0x7f4a7c15u) ^ st_hash(prim + 0x632be5abu));
+    // the primitive's own seed: it rotates the dither, so that layers stay
+    // decorrelated, and (with the frame's when temporal) picks the subset
+    let layer = st_hash(st_hash(tie * 0x9e3779b9u + 0x7f4a7c15u) ^ st_hash(prim + 0x632be5abu));
+    var seed = layer;
+    var frame = 0u;
     if ((st.flags & 1u) != 0u) {
-        seed = st_hash(seed + st.frame_seed);
+        // the subset is hashed again every frame; the dither instead advances
+        // by the golden ratio conjugate (frame_seed is frame * 0x9e3779b9,
+        // that fraction of 2^32), so that 8 frames hold 8 well spread values
+        // of xi (Enderton et al., "Stochastic Transparency", I3D 2010,
+        // section 5, stratified seeds)
+        seed = st_hash(layer + st.frame_seed);
+        frame = st.frame_seed >> 8u;
     }
-    let h = st_hash(px.x | (px.y << 16u));
-    let pv = vec2<f32>(f32(h >> 8u), f32(st_hash(h) >> 8u)) / 16777216.0;
-    let rot = vec2<f32>(f32(seed >> 8u), f32(st_hash(seed) >> 8u)) / 16777216.0;
-    let dither = fract(pv + rot).x;
+    // xi: the pixel's stratum in the blue-noise tile (section 3.1, R dithered
+    // across a tile), rotated by the primitive's own offset (Cranley-Patterson)
+    let rank = st_masks[(st.samples + 1u) * ST_SEEDS + (px.y & (ST_TILE - 1u)) * ST_TILE + (px.x & (ST_TILE - 1u))];
+    let xi24 = ((2u * rank + 1u) * 2048u + (layer >> 8u) + frame) & 0xffffffu;
+    let dither = f32(xi24) / 16777216.0;
     // the subset is hashed from the layer's seed and the pixel, whatever the
     // pixel values: two layers whose rotations met on one table index would
     // otherwise share a subset over their whole overlap and hide the back one
@@ -2881,7 +2898,7 @@ fn water_clipped(world_pos: vec3<f32>) -> bool {
 // number, which would take the pixel's total alpha, then the scene under it;
 // never over 1 (a transparency under 0).
 fn st_alpha(a: f32) -> f32 {
-    if (not_finite(a) || a < 0.004) {
+    if ((ST_GUARDS && not_finite(a)) || a < 0.004) {
         return -1.0;
     }
     return min(a, 1.0);
@@ -3117,6 +3134,19 @@ fn fs_selection_mask(in: VsOut) -> @location(0) vec4<f32> {
 // the Texture tab's values. The whole face is drawn, holes of an alpha
 // mask and invisible faces included, as LL draws the face's triangles.
 //
+// Where it is blended: the world's pattern goes into the HDR scene with the
+// debug overlays (`fs_selection_pattern_hdr`), before exposure, tone mapping
+// and gamma, as LL's renderHighlights runs in renderGeomPostDeferred before
+// renderFinalize; the HUDs' over the finished HUD image (`fs_selection_pattern`),
+// as LL's HUDs are drawn after renderFinalize.
+//
+// Two visible differences, kept on purpose (better for the user):
+// - rigged faces get the pattern too; LL draws nothing on them (the rigged
+//   branch of LLFace::renderSelected is `#if 0`);
+// - it follows texture animation on every face; LL's stays still on faces
+//   large enough to animate through the texture matrix (MIN_TEX_ANIM_SIZE in
+//   LLFace::getGeometryVolume), since renderSelected sets no texture matrix.
+//
 // The asset is fetched from the grid; frame.features[FEATURE_FACE_SELECT_SLOT] is its slot once
 // loaded, 0 while it loads and offline. Meanwhile `face_select_standin`
 // draws the pattern LL describes for it ("white squares with the rounded
@@ -3158,8 +3188,8 @@ fn face_select_color(loaded: bool, texel: vec4<f32>, standin: f32) -> vec4<f32> 
     return vec4<f32>(c.rgb, c.a * 0.5);
 }
 
-@fragment
-fn fs_selection_pattern(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+// The pattern in linear color, straight alpha.
+fn selection_pattern(in: VsOut, front: bool) -> vec4<f32> {
     // (sampled and differentiated before any discard)
     let slot = frame.features[FEATURE_FACE_SELECT_SLOT];
     let texel = sample_tex(slot, in.uv);
@@ -3172,6 +3202,19 @@ fn fs_selection_pattern(in: VsOut, @builtin(front_facing) front: bool) -> @locat
     if (!front && (rec.flags.x & FLAG_DOUBLE_SIDED) == 0u) { discard; }
     let c = face_select_color(slot != 0u, texel, standin);
     if (c.a <= 0.002) { discard; }
+    return c;
+}
+
+// The world's faces: blended into the HDR scene, before the post pass.
+@fragment
+fn fs_selection_pattern_hdr(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    return selection_pattern(in, front);
+}
+
+// The HUDs' faces: blended over the finished HUD image.
+@fragment
+fn fs_selection_pattern(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    let c = selection_pattern(in, front);
     var rgb = c.rgb;
     if (!HUD_SRGB_TARGET) { rgb = ll_linear_to_srgb(rgb); }
     return vec4<f32>(rgb, c.a);

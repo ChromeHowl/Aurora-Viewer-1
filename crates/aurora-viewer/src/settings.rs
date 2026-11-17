@@ -1148,6 +1148,10 @@ pub struct Settings {
     /// (FSFloaterIMContainer::startFlashingTab, FlashCount / FlashPeriod;
     /// Preferences > Chat, on).
     pub flash_unread_conversations: bool,
+    /// The button back to the latest messages over a conversation scrolled
+    /// away from its end (`ui/chat/latest.rs`, #558; on). The Legacy Viewer
+    /// has no such button.
+    pub chat_latest_button: bool,
     /// The Conversations button flashes when an IM, a group chat or a
     /// conference message arrives while the window is closed, then stays
     /// lit until it is opened; minimized, its bar flashes instead
@@ -2065,7 +2069,7 @@ pub(crate) fn max_texture_resolution_choice(v: u32) -> u32 {
         .unwrap_or(MAX_TEXTURE_RESOLUTIONS[0])
 }
 
-const SETTINGS_VERSION: u32 = 42;
+const SETTINGS_VERSION: u32 = 43;
 
 /// The world render percentage that draws at the display's logical
 /// resolution, as the Legacy Viewer does on a Mac with RenderHiDPI 0: 50 on
@@ -2661,6 +2665,7 @@ impl Default for Settings {
             pie_opacity_override: false,
             pie_opacity: crate::ui::surface_opacity::PIE,
             flash_unread_conversations: true,
+            chat_latest_button: true,
             flash_conversations_button: true,
             flash_conversations_nearby: true,
             announce_incoming_im: false,
@@ -3688,6 +3693,13 @@ impl Settings {
                 self.inventory.recent_sort.system_first = false;
             }
         }
+        if self.settings_version < 43 {
+            // the Instant movement is still experimental, and "All in Aurora
+            // version" turned it on with the rest: every earlier file goes
+            // back once to the simulator's movement (Legacy), its row in
+            // Preferences › Aurora keeps Instant as a choice
+            self.predict_own_motion = false;
+        }
         if !self.audio.mic_gain.is_finite() {
             self.audio.mic_gain = 1.0;
         }
@@ -4180,6 +4192,7 @@ pub enum MiniAvatarNameFormat {
     Legacy,
     #[default]
     DisplayAndLegacy,
+    LegacyAndDisplay,
 }
 
 /// Mini-map (LLNetMap) and world map (LLFloaterWorldMap) options, with the
@@ -5349,6 +5362,25 @@ mod tests {
             ..Settings::default()
         };
         assert_eq!(again.sanitized().chat_bar, ChatBar::Always);
+    }
+
+    /// The Instant movement goes back to the simulator's once, on every
+    /// earlier file; chosen again afterwards, it stays.
+    #[test]
+    fn instant_movement_goes_back_to_legacy_once() {
+        for version in [9, 42] {
+            let file = serde_json::json!({ "settings_version": version, "predict_own_motion": true });
+            let migrated = serde_json::from_value::<Settings>(file).expect("load settings").sanitized();
+            assert!(!migrated.predict_own_motion, "version {version}");
+            assert_eq!(migrated.settings_version, SETTINGS_VERSION);
+        }
+        let chosen = Settings {
+            predict_own_motion: true,
+            ..Settings::default()
+        };
+        let json = serde_json::to_string(&chosen).expect("save settings");
+        let reloaded = serde_json::from_str::<Settings>(&json).expect("reload settings").sanitized();
+        assert!(reloaded.predict_own_motion, "a choice made after the update stays");
     }
 
     #[test]

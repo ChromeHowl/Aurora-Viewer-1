@@ -16,7 +16,7 @@ use aurora_net::{LoginRequest, NetClient, NetCommand, NetEvent, StartLocation, c
 use aurora_render::{DrawLists, EguiHandOver, FrameParams, RenderStats, Renderer};
 use glam::{Mat4, Vec3, Vec4};
 use std::collections::HashSet;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
 use winit::event::{DeviceEvent, ElementState, MouseButton, MouseScrollDelta, WindowEvent};
@@ -464,6 +464,9 @@ pub struct App {
     /// The window of a lost GPU device, kept on screen until the new one has
     /// presented its first image (gpu_recovery.rs).
     retired_window: Option<Arc<Window>>,
+    // Available while a frame borrows Gfx for rendering and dispatches a quit action.
+    current_window: Weak<Window>,
+    exit_windows_hidden: bool,
     /// When the GPU device was lost lately (gpu_recovery.rs `loss_step`).
     gpu_losses: std::collections::VecDeque<Instant>,
     egui_ctx: egui::Context,
@@ -1933,6 +1936,8 @@ impl App {
             window_size_ui: Default::default(),
             fullscreen_applied: false,
             retired_window: None,
+            current_window: Weak::new(),
+            exit_windows_hidden: false,
             gpu_losses: Default::default(),
             egui_ctx,
             native_viewports,
@@ -3366,11 +3371,21 @@ impl App {
             }
             // a poke to a demo resident is poked back (AURORA_DEMO_POKE)
             crate::demo::poke::sent(&cmd);
-            let events = match self.demo_fetch.as_ref() {
+            let mut events = match self.demo_fetch.as_ref() {
                 Some(source) => crate::world::inventory::demo::fetch_reply(&cmd, &self.world.inventory, source, &mut self.demo_faults)
                     .unwrap_or_else(|| crate::demo::demo_reply(&cmd)),
                 None => crate::demo::demo_reply(&cmd),
             };
+            if matches!(
+                cmd,
+                NetCommand::Call {
+                    method: aurora_net::CallMethod::StartConference { .. },
+                    ..
+                }
+            ) && crate::demo::calls::mode() == Some(crate::demo::calls::Mode::ConferenceFocus)
+            {
+                self.call_demo.delay_conference_start(&mut events, Instant::now());
+            }
             for mut ev in events {
                 crate::demo::saved_profile_picks(&self.world.profiles, self.world.agent_id, &mut ev);
                 crate::ao::demo::preserve_custom_motions(&self.world, &cmd, &mut ev);
@@ -4772,9 +4787,7 @@ impl App {
                 // New region must learn walk/run again (LLAgent::sendWalkRun
                 // after RegionHandshake, llviewermessage.cpp). Without this
                 // Always run stays lit in Controls while the sim walks (#3041).
-                self.send(NetCommand::SetAlwaysRun(
-                    self.always_run || self.temp_run.is_some() || self.joystick.running,
-                ));
+                self.send(NetCommand::SetAlwaysRun(self.walk_run()));
                 // (a border crossing leaves the camera where it is)
                 if !self.world.arrived_by_crossing {
                     self.vr_rebase_after_travel();
@@ -7467,6 +7480,19 @@ impl App {
         self.egui_ctx.request_repaint();
     }
 
+    fn pump_network_events(&mut self, t_ev: Instant) {
+        while let Ok((sent, ev)) = self.net.events.try_recv() {
+            // (`sent`: when the session read the datagram, the time its
+            // motion starts from)
+            self.receive_event(ev, sent);
+            let now = Instant::now();
+            self.net_profile.event_applied(sent, now);
+            if now.duration_since(t_ev) > Duration::from_millis(8) {
+                break;
+            }
+        }
+    }
+
     fn confirm_exit(&mut self, action: ui::exit::Action) {
         if action != ui::exit::Action::Cancel
             && (!self.close_wearable_editor() || !self.script_editors.prepare_exit() || !self.texture_library.prepare_exit(&self.egui_ctx))
@@ -7476,6 +7502,9 @@ impl App {
         }
         if !self.exit_prompt.confirm(action, Instant::now()) {
             return;
+        }
+        if action == ui::exit::Action::Quit {
+            self.hide_windows_for_exit();
         }
         if self.in_world() {
             self.world.save_social_history();
@@ -7492,6 +7521,7 @@ impl App {
 
     /// Log out, save the window, layout, inventory cache and settings, exit.
     fn shutdown(&mut self, event_loop: &ActiveEventLoop) {
+        self.hide_windows_for_exit();
         self.instances.leave();
         // closed while the graphics card still holds a frame, from its
         // notice or not: reported, and the next start offers the safe
@@ -7525,29 +7555,6 @@ impl App {
         // it waits for the LogoutReply). No wait when none is.
         if !self.net.wait_viewer_stats(Duration::from_secs(2)) {
             log::debug!("the last viewer statistics report was still being posted at exit");
-        }
-        if let Some(g) = self
-            .gfx
-            .as_ref()
-            .filter(|g| forced_window_size().is_none() && g.window.fullscreen().is_none())
-        {
-            self.settings.window_maximized = g.window.is_maximized();
-            // when maximized, keep the restored size / position recorded below
-            if !self.settings.window_maximized && !g.window.is_minimized().unwrap_or(false) {
-                let s = g.window.inner_size();
-                let sf = g.window.scale_factor();
-                self.settings.window_width = (s.width as f64 / sf) as u32;
-                self.settings.window_height = (s.height as f64 / sf) as u32;
-                if let Ok(p) = g.window.outer_position() {
-                    self.settings.window_x = Some(p.x);
-                    self.settings.window_y = Some(p.y);
-                }
-                self.settings.window_display = g
-                    .window
-                    .current_monitor()
-                    .as_ref()
-                    .map(crate::window_display::SavedDisplay::from_monitor);
-            }
         }
         if self.capture.is_none() {
             ui::layout::save(&self.egui_ctx);
@@ -7586,10 +7593,46 @@ impl App {
         crate::world::region_tracker::save_before_exit();
         crate::autoreplace::save_before_exit();
         crate::tolerant::save_before_exit();
-        if self.restart_into_vr {
-            restart_with_vr(self.vr_requested_mode);
-        }
         event_loop.exit();
+    }
+
+    /// Hide as soon as Quit is confirmed. A hidden native window may lose its
+    /// reported geometry, so capture it before hiding either recovery window.
+    fn hide_windows_for_exit(&mut self) {
+        if self.exit_windows_hidden {
+            return;
+        }
+        self.exit_windows_hidden = true;
+        if let Some(window) = self.current_window.upgrade() {
+            if forced_window_size().is_none() && window.fullscreen().is_none() {
+                self.settings.window_maximized = window.is_maximized();
+                // The last restored size and position already belong to a maximized window.
+                if !self.settings.window_maximized && !window.is_minimized().unwrap_or(false) {
+                    let size = window.inner_size();
+                    let scale = window.scale_factor();
+                    if size.width > 0 && size.height > 0 {
+                        self.settings.window_width = (size.width as f64 / scale) as u32;
+                        self.settings.window_height = (size.height as f64 / scale) as u32;
+                        if let Ok(pos) = window.outer_position() {
+                            self.settings.window_x = Some(pos.x);
+                            self.settings.window_y = Some(pos.y);
+                        }
+                        self.settings.window_display = window
+                            .current_monitor()
+                            .as_ref()
+                            .map(crate::window_display::SavedDisplay::from_monitor);
+                    }
+                }
+            }
+            window.set_visible(false);
+        }
+        if let Some(window) = &self.retired_window {
+            window.set_visible(false);
+        }
+    }
+
+    pub fn requested_vr_restart(&self) -> Option<crate::camera::VrView> {
+        self.restart_into_vr.then_some(self.vr_requested_mode)
     }
 
     fn record_inventory_logout(&mut self) {
@@ -8232,7 +8275,7 @@ impl App {
             self.world.call_voice_update(status, members);
         }
         // a new call shows its conversation (started, accepted, answered by text)
-        let call = self.world.calls.active.as_ref().map(|c| c.session);
+        let call = self.world.calls.active.as_ref().map(|c| c.initial_session);
         if call.is_some() && call != self.call_shown {
             ui::notifications::open_conversations(&self.egui_ctx, &mut self.panels.chat);
         }
@@ -8268,8 +8311,21 @@ impl App {
         let Some(ui::options::Capture::Binding(action, slot)) = self.options_ui.take_capture() else {
             return;
         };
+        // the chat fields' shortcuts are read from their key events: a
+        // binding the field could never see is refused (`chat_accepts`)
         if let Some(input) = input {
             let b = crate::keybinds::Binding::captured(input, mods);
+            if crate::keybinds::is_chat(action) && !crate::keybinds::chat_accepts(&b) {
+                // say why the old key stays, instead of a capture that
+                // seems to have missed the press
+                self.world.notifications.push(
+                    crate::world::notifications::Kind::Info,
+                    aurora_i18n::tr!("keybinds-chat-typing").to_owned(),
+                    aurora_i18n::tr!("keybinds-chat-refused", keys = b.label()),
+                    crate::world::notifications::Data::None,
+                );
+                return;
+            }
             self.settings.keybinds.set(action, slot, Some(b));
             if action == Action::HudDrag {
                 self.down.clear();
@@ -9258,9 +9314,8 @@ impl App {
             return;
         }
         self.always_run = on;
-        self.send(NetCommand::SetAlwaysRun(
-            (self.always_run || self.temp_run.is_some() || self.joystick.running) && !self.vr_walk_override.active(),
-        ));
+        // an autopilot run @alwaysrun allows keeps running (`walk_run`)
+        self.send(NetCommand::SetAlwaysRun(self.walk_run()));
         self.world.system_message(if self.always_run {
             aurora_i18n::tr!("app-always-run-enabled")
         } else {
@@ -10137,6 +10192,14 @@ impl App {
         wanted.extend(self.pay_ui.wanted_pics.drain());
         wanted.extend(self.inventory_ui.wanted_pics.drain());
         wanted.extend(self.conversation_log_ui.wanted_pics.drain());
+        let portrait = self.appearance_ui.wanted_outfit_portrait.take();
+        self.scene.textures.show_outfit_portrait(portrait);
+        if let Some(image) = portrait
+            && !self.ui_coarse.contains_key(&image)
+            && !self.scene.textures.is_unavailable(&image)
+        {
+            self.note_ui_copy(image);
+        }
         self.refine_ui_copies();
         for agent in wanted {
             self.world.want_profile(agent);
@@ -11151,15 +11214,8 @@ impl App {
             self.inventory_ui.expand_all = Some(true);
         }
         self.sync_chat_log();
-        while !still && let Ok((sent, ev)) = self.net.events.try_recv() {
-            // (`sent`: when the session read the datagram, the time its
-            // motion starts from)
-            self.receive_event(ev, sent);
-            let now = Instant::now();
-            self.net_profile.event_applied(sent, now);
-            if now.duration_since(t_ev) > Duration::from_millis(8) {
-                break;
-            }
+        if !still {
+            self.pump_network_events(t_ev);
         }
         self.poll_inventory_offers();
         self.net_profile.events_left(self.net.events.len());
@@ -12358,16 +12414,17 @@ impl App {
             // build selection, wire outlines and edits stay untouched; its
             // ordinary face overlay returns when the mode is switched off.
             let revealing = self.imports.local_status.revealing();
-            let build_faces = if revealing {
-                Default::default()
-            } else {
-                self.build.face_selection(&self.world, &self.settings.build)
-            };
-            // (TE mode's faces also show the face-select pattern)
+            // (TE mode's faces show the face-select pattern, and the halo
+            // with "Show highlight": the picks are gathered once)
             let pattern = if revealing {
                 Default::default()
             } else {
                 self.build.face_picks(&self.world)
+            };
+            let build_faces = if revealing {
+                Default::default()
+            } else {
+                crate::build::BuildTool::halo_faces(|| pattern.clone(), &self.settings.build)
             };
             let mut selected_faces = if revealing {
                 self.imports.appearance_status(&self.world.objects).faces
@@ -12386,7 +12443,7 @@ impl App {
                 *selected_faces.entry(idx).or_default() |= mask;
             }
             self.scene.set_face_selection(&mut self.world, selected_faces);
-            self.scene.set_face_pattern(&pattern);
+            self.scene.set_face_pattern(&mut self.world, &pattern);
             if std::mem::take(&mut self.build.ui.reveal_faces) {
                 self.scene.reveal_selected_faces();
             }
@@ -13799,6 +13856,8 @@ impl App {
                 self.sound_cues.pass_start(ui.ctx());
                 // before any field reads its keys: Ctrl+W is the frontmost window's
                 ui::close_key::begin(ui.ctx());
+                // the chat fields' shortcuts, as Preferences › Shortcuts set them
+                ui::chat::shortcuts::publish(ui.ctx(), &self.settings.keybinds);
                 let t = Instant::now();
                 let projector = ui::hud::Projector::for_ui(ui.ctx(), vp, [w as f32, h as f32]);
                 // A discarded pass (`request_discard`) is followed by one that
@@ -14321,7 +14380,7 @@ impl App {
         self.last_render = stats;
         self.busy_pause_frame(gfx.renderer.vr_engaged());
         self.gaming_mode_frame();
-        if stats.presented && !gfx.shown {
+        if stats.presented && !gfx.shown && !self.exit_windows_hidden {
             gfx.shown = true;
             // On Windows, maximizing can show even a hidden window. Defer
             // it until its client area already contains a rendered image;
@@ -16166,6 +16225,7 @@ impl App {
                             self.build.toggle_place(&self.world);
                         }
                     }
+                    crate::build::demo::Step::Highlight(on) => self.settings.build.show_highlight = on,
                     crate::build::demo::Step::Linked(on) => {
                         self.build.set_edit_linked(&mut self.world, &mut self.settings.build, on);
                         self.flush_build();
@@ -18478,6 +18538,15 @@ impl App {
             self.world.system_message(aurora_i18n::tr!("app-all-settings-have-been-reset"));
             ui::layout::forget(ctx);
         }
+        if res.reset_windows {
+            ui::widgets::reset_windows(ctx);
+            ui::layout::save(ctx);
+        }
+        if let Some(layout) = res.restore_layout
+            && let Err(e) = ui::layout::apply(ctx, &layout)
+        {
+            log::warn!("window layout not put back: {e}");
+        }
         if let Some(page) = res.reset_section {
             self.settings.save();
             self.world
@@ -19477,6 +19546,7 @@ impl App {
                 self.grid_status_listed = toolbar_settings.location("gridstatus", bar_layout).is_some();
                 self.toolbar_ui.islands = !classic_bars;
                 self.chat_ui.keep_focus = self.settings.chat_keep_focus;
+                self.chat_ui.hide_latest = !self.settings.chat_latest_button;
                 self.chat_ui.enter_toggles = self.settings.chat_enter_toggles;
                 self.chat_ui.enter_last_field = self.settings.chat_enter_last_field;
                 // the chat fields' suggestions (#980); the residents around
@@ -23746,7 +23816,10 @@ impl ApplicationHandler for App {
             if let Ok(view) = std::env::var("AURORA_DEMO_APPEARANCE") {
                 crate::world::appearance::seed_demo(&mut self.world.inventory, self.world.agent_id);
                 // showcase: the gallery's showcase with folders, pictures and favorites
-                let showcase = view == "showcase" || view.starts_with("portrait") || view == "photo-mode" || view.starts_with("batch");
+                let showcase = matches!(view.as_str(), "showcase" | "showcase-hd")
+                    || view.starts_with("portrait")
+                    || view == "photo-mode"
+                    || view.starts_with("batch");
                 if view.starts_with("folders") || showcase {
                     crate::world::outfit_folders::seed_demo(&mut self.world.inventory, self.world.agent_id);
                     if view.starts_with("folders-many") {
@@ -23772,6 +23845,9 @@ impl ApplicationHandler for App {
                 if showcase {
                     ui::appearance::demo_previews(&self.egui_ctx, &mut self.world.inventory, &mut self.ui_images);
                     ui::appearance::demo_showcase(&mut self.world.inventory, &mut self.appearance_ui);
+                    if view == "showcase-hd" {
+                        self.demo_cached_outfit_portrait();
+                    }
                 }
                 let many = crate::world::appearance::demo_outfit_count();
                 if many > 0 {
@@ -25009,6 +25085,7 @@ impl ApplicationHandler for App {
     /// closed connection and every exit ended in a segmentation fault (before
     /// the browsers' private profiles were cleaned up).
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        self.hide_windows_for_exit();
         self.native_viewports.shutdown();
         #[cfg(windows)]
         crate::slurl_handoff::release();
@@ -25242,9 +25319,7 @@ impl ApplicationHandler for App {
                 ui::menu::window_geometry_changed(&self.egui_ctx);
                 self.geom_changed = Some(Instant::now());
             }
-            WindowEvent::RedrawRequested => {
-                self.frame(event_loop);
-            }
+            WindowEvent::RedrawRequested if !self.exit_windows_hidden => self.frame(event_loop),
             WindowEvent::ModifiersChanged(m) => {
                 self.shift = m.state().shift_key();
                 self.ctrl = m.state().control_key();
@@ -25646,6 +25721,10 @@ impl ApplicationHandler for App {
                             m.surrender_focus(id);
                         }
                     });
+                    // a left press also puts away the typing-only chat bar
+                    if *button == MouseButton::Left {
+                        self.chat_ui.dismiss_typing_bar(&self.egui_ctx);
+                    }
                     // the field commits first, to what it was typed for
                     if typing {
                         self.press_while_typing();
@@ -25721,6 +25800,24 @@ impl ApplicationHandler for App {
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         crate::crash::pumped();
+        if self.exit_windows_hidden {
+            // A hidden window need not receive redraws. Finish the last scene
+            // capture if requested, then only pump LogoutReply and the quit timer.
+            if self.exit_prompt.quitting() {
+                if self.want_scene_capture || self.scene_capture_pending {
+                    self.frame(event_loop);
+                } else {
+                    self.pump_network_events(Instant::now());
+                    if self.exit_prompt.finish(!self.in_world() || self.demo, Instant::now()).is_some() {
+                        self.shutdown(event_loop);
+                    }
+                }
+                event_loop.set_control_flow(winit::event_loop::ControlFlow::WaitUntil(
+                    Instant::now() + Duration::from_millis(16),
+                ));
+            }
+            return;
+        }
         self.sync_minimized_mute();
         self.follow_keyboard_layout();
         if self.settings.window_fullscreen != self.fullscreen_applied {
@@ -25903,7 +26000,7 @@ fn capture_files(path: &std::path::Path, frames: &str) -> Vec<(u64, std::path::P
 /// Start this viewer again with `--vr`, as the process ends: the identity
 /// of this instance is kept (title, frame cap, language, grid), not the
 /// one-time login or start place.
-fn restart_with_vr(mode: crate::camera::VrView) {
+pub fn restart_with_vr(mode: crate::camera::VrView) {
     let cli = crate::cli::get();
     let Ok(exe) = std::env::current_exe() else {
         log::warn!("restart into VR: the viewer's path is unknown");
