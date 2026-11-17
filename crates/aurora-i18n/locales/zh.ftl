@@ -16775,3 +16775,5 @@ camera-mode-click-to-leave = { $mode }（点击退出）
 camera-menu-lock-history-path = 锁定、历史与路径
 ui-options-camera-show-mode-changes = 显示相机模式变化
 ui-options-camera-show-mode-changes-tip = 在世界画面顶部简短提示所进入的相机模式及退出方法；相机被锁定、在路径上、自由或由脚本控制时会保留一个小标签
+ui-chat-applink-unblock-confirm = A link asks to unblock { $name }. Do you want to remove this block?
+ui-chat-applink-unblock-object-confirm = A link asks to unblock the object { $name }. Do you want to remove this block?

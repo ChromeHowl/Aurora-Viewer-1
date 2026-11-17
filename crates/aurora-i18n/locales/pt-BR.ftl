@@ -16768,3 +16768,5 @@ camera-mode-click-to-leave = { $mode } (clique para sair)
 camera-menu-lock-history-path = Trava, histórico e trajeto
 ui-options-camera-show-mode-changes = Mostrar mudanças de modo da câmera
 ui-options-camera-show-mode-changes-tip = Uma nota curta no alto do mundo diz o modo de câmera em que você entrou e como sair; um pequeno chip permanece enquanto a câmera está travada, em um trajeto, livre ou movida por um script
+ui-chat-applink-unblock-confirm = A link asks to unblock { $name }. Do you want to remove this block?
+ui-chat-applink-unblock-object-confirm = A link asks to unblock the object { $name }. Do you want to remove this block?
