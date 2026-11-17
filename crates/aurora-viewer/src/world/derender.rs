@@ -1339,6 +1339,8 @@ mod tests {
         world.derender = Derender::load(path.clone());
         assert!(!world.derender(wolf, entry(Kind::Resident, false)));
         assert!(!world.derender(hat, entry(Kind::Object, true)));
+        // written by a save thread (saves.rs)
+        assert!(crate::saves::wait_for(&path, std::time::Duration::from_secs(10)));
         assert!(path.exists(), "the permanent entry is saved");
         world.derender = Derender::load(path);
         assert!(!world.derender.contains(&wolf), "a temporary entry never survives a relog");
