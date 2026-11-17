@@ -437,7 +437,15 @@ fn list_part(
                 );
                 if !ui.is_rect_visible(rect) {
                     if !anonymous {
-                        super::rows::list_menu(&resp, p, world, &st.radar_selected, row.id, AvatarList::Nearby);
+                        super::rows::list_menu(
+                            &resp,
+                            p,
+                            world,
+                            crate::world::names::NameScope::World,
+                            &st.radar_selected,
+                            row.id,
+                            AvatarList::Nearby,
+                        );
                     }
                     continue;
                 }
@@ -479,7 +487,15 @@ fn list_part(
                 }
                 // menu_fs_radar.xml, menu_fs_radar_multiselect.xml for several
                 if !anonymous {
-                    super::rows::list_menu(&resp, p, world, &st.radar_selected, row.id, AvatarList::Nearby);
+                    super::rows::list_menu(
+                        &resp,
+                        p,
+                        world,
+                        crate::world::names::NameScope::World,
+                        &st.radar_selected,
+                        row.id,
+                        AvatarList::Nearby,
+                    );
                 }
                 super::rows::contact_tip(resp, tip.as_deref());
             }

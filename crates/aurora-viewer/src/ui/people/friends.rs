@@ -493,7 +493,7 @@ fn row(ui: &mut egui::Ui, c: &mut Ctx, data: &super::RadarData, st: &mut PeopleU
         ui.memory_mut(|m| m.request_focus(focus));
     }
     if !ui.is_rect_visible(rect) {
-        rows::person_menu(&resp, p, c.world, &st.sel, f.id);
+        rows::person_menu(&resp, p, c.world, NameScope::Roster, &st.sel, f.id);
         return;
     }
     if !data.pics.contains_key(&f.id) {
@@ -566,7 +566,7 @@ fn row(ui: &mut egui::Ui, c: &mut Ctx, data: &super::RadarData, st: &mut PeopleU
     if action.activate {
         c.actions.push(super::PeopleAction::OpenIm(f.id));
     }
-    rows::person_menu(&resp, p, c.world, &st.sel, f.id);
+    rows::person_menu(&resp, p, c.world, NameScope::Roster, &st.sel, f.id);
     let on_names = resp.hover_pos().is_some_and(|at| at.x >= left && at.x <= end.names_right);
     rows::contact_tip(resp, (on_names && (cut || line.full != line.name)).then_some(line.full.as_str()));
 }

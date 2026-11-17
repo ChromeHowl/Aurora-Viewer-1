@@ -640,6 +640,9 @@ pub struct World {
     pub lsl_bridge: lslbridge::LslBridge,
     pub rlva: rlva::Rlva,
     pub rlva_privacy: rlva::privacy::TextFilter,
+    /// `rlva_privacy` without the names: what the places that name their
+    /// residents (`NameScope::Roster`) still hide under `@showloc`.
+    pub rlva_place_privacy: rlva::privacy::TextFilter,
     pub rlva_hover_privacy: rlva::privacy::TextFilter,
     rlva_location_hidden: bool,
     /// Derendered objects and residents, and the asset blacklist.
@@ -1133,6 +1136,7 @@ impl World {
             ik_targets: rig_targets::Targets::default(),
             rlva: rlva::Rlva::default(),
             rlva_privacy: Default::default(),
+            rlva_place_privacy: Default::default(),
             rlva_hover_privacy: Default::default(),
             rlva_location_hidden: false,
             derender: derender::Derender::default(),
@@ -5191,10 +5195,12 @@ impl World {
                 new_session: !self.social.has_session(&im.from_agent_id),
                 poke: self.takes_poke(&im.message, im.offline),
             });
+            // named whatever `@shownames`: an instant message is not the
+            // nearby chat (process_improved_im tests nothing for it)
             let from = self
                 .social
                 .avatar_names
-                .complete(&im.from_agent_id)
+                .complete_in(names::NameScope::Roster, &im.from_agent_id)
                 .unwrap_or_else(|| im.from_name.clone());
             self.social.session_mut(im.from_agent_id);
             let open = attention::Open::Conversation(im.from_agent_id);
@@ -6050,6 +6056,12 @@ impl World {
         if !id.is_nil() && !self.rlva_can_name(*id) {
             return Some(self.rlva_anonymous(*id).display_name.clone());
         }
+        self.scene_name(id)
+    }
+
+    /// The name the scene gives an avatar, whatever RLVa hides: for the
+    /// callers that applied `@shownames` themselves.
+    fn scene_name(&self, id: &Uuid) -> Option<String> {
         let idx = self.objects.index_of_uuid(id)?;
         self.objects.get(idx)?.display_name()
     }
@@ -6079,8 +6091,11 @@ impl World {
             // never during login, in do not disturb nor for a blocked resident
             if toast && self.notifications.started && !self.status.dnd && !self.mutes.is_muted_id(&id) {
                 let notification = self.notifications.push_presence(id, n.clone(), online);
-                self.notifications
-                    .link_name(notification, self.social.name_of(&id), notifications::NameTarget::Avatar(id));
+                self.notifications.link_name(
+                    notification,
+                    self.social.name_in(names::NameScope::Roster, &id),
+                    notifications::NameTarget::Avatar(id),
+                );
             }
             // FriendOnlineOffline for the system (never during login)
             if self.notifications.started && !self.mutes.is_muted_id(&id) {
@@ -6097,7 +6112,7 @@ impl World {
                 // checked as nearby chat (LLAvatarTracker::processNotify),
                 // unless notices are kept quiet (#741)
                 if self.alerts(ChatKind::System) {
-                    let from = self.social.name_of(&id);
+                    let from = self.social.name_in(names::NameScope::Roster, &id);
                     self.keyword_alert(id, &from, &n, true, attention::Open::NearbyChat);
                 }
                 // the name is a link to the resident (social::online_chat_line)
@@ -6165,8 +6180,11 @@ impl World {
             (line.from.clone(), emote.unwrap_or(text))
         };
         let notification = self.notifications.push_message(m.session, from, title, body, prefs.im_in_bell);
-        self.notifications
-            .link_name(notification, self.social.name_of(&from), notifications::NameTarget::Avatar(from));
+        self.notifications.link_name(
+            notification,
+            self.social.name_in(names::NameScope::Roster, &from),
+            notifications::NameTarget::Avatar(from),
+        );
         if m.kind == ImKind::Group {
             self.notifications.link_name(
                 notification,
@@ -6236,10 +6254,17 @@ impl World {
     /// Complete name of an avatar ("Jane Doe (janedoe)"), else its legacy
     /// name (name-values, UUIDNameReply).
     pub fn person_name(&self, id: &Uuid) -> Option<String> {
+        self.person_name_in(names::NameScope::World, id)
+    }
+
+    /// `person_name` for a name shown in `scope`.
+    pub fn person_name_in(&self, scope: names::NameScope, id: &Uuid) -> Option<String> {
         self.social
             .avatar_names
-            .complete(id)
-            .or_else(|| self.avatar_name(id))
+            // (the stand-in of a resident `scope` hides: the names below
+            // are those of the residents it shows)
+            .complete_in(scope, id)
+            .or_else(|| self.scene_name(id))
             .or_else(|| self.social.names.get(id).cloned())
     }
 
