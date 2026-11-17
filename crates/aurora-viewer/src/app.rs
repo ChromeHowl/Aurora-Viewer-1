@@ -10990,6 +10990,8 @@ impl App {
         self.scene
             .textures
             .set_kept(self.settings.keep_own_worn_textures, self.settings.keep_textures_in_background);
+        // (gaming mode gives the textures back too, app/gaming_mode.rs)
+        self.scene.textures.set_stepped_back(self.gaming_mode_pauses());
         // (a demo or a timed run neither publishes nor reads, instances.rs)
         let timed = self.capture.is_some() || self.frame_profile.enabled();
         // the busy card's switch, the same in every viewer (instances.rs)
