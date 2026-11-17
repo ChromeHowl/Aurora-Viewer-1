@@ -1122,7 +1122,7 @@ mod tests {
 
     /// #1009: autohidden, the chat island shows only while the chat is used
     /// (Enter, a draft), without its button when the dock holds
-    /// Conversations; Escape on the empty bar puts it away. A saved dock
+    /// Conversations; Escape puts it away, the draft kept until Enter. A saved dock
     /// without Conversations keeps the island's button alone.
     #[test]
     fn the_autohidden_chat_island_shows_while_the_chat_is_used() {
@@ -1147,12 +1147,18 @@ mod tests {
             bench.ctx.read_response(Id::unique("chat_island_open")).is_none(),
             "without its button"
         );
-        // a draft keeps it once the keyboard went elsewhere
+        // Escape puts the bar away, the draft kept in the editor until Enter
+        // (upstream #2701's final form: `dismiss_typing_bar`)
         bench.frame(vec![egui::Event::Text("draft".into())]);
-        bench.frame(escape());
+        assert!(bench.frame(escape()).0.is_none());
         bench.frame(vec![]);
-        assert!(!bench.chat.has_focus);
-        assert!(bench.chat.bar_shown(), "the draft keeps the bar");
+        assert!(!bench.chat.has_focus && !bench.chat.bar_shown() && !bench.chat.in_use());
+        assert_eq!(bench.chat.input, "draft");
+        bench.chat.start_chat(&bench.ctx, false, |_| false);
+        assert!(bench.frame(vec![key(egui::Key::Enter, true, egui::Modifiers::NONE)]).0.is_none());
+        bench.frame(vec![]);
+        assert!(bench.chat.has_focus && bench.chat.bar_shown());
+        assert_eq!(bench.chat.input, "draft");
         // empty, Escape puts it away
         bench.chat.input.clear();
         bench.chat.focus_request = true;
