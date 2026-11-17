@@ -16830,3 +16830,22 @@ world-groups-session-error-muted = A group moderator disabled your text chat.
 world-groups-session-error-removed = You have been removed from the group.
 world-groups-session-error-close-on-no-ability = You no longer have the ability to be in the chat session.
 login-not-a-login-server = This address answered, but not as a login server: it sent a web page or something else instead of a login reply. Check the grid's login URI (it is often different from the address of the grid's web site), then try again.
+director-clear-tip = Clear the track: every keyframe goes (asked first; Undo brings them back)
+director-clear-confirm = Clear the track?
+director-clear-confirm-text = { $count ->
+    [one] Its keyframe is deleted. Undo (Ctrl+Z) brings it back.
+   *[other] Its { $count } keyframes are deleted. Undo (Ctrl+Z) brings them back.
+    }
+director-clear-action = Clear
+director-key-aim = Looks at
+director-key-aim-tip = What the view looks at when the track plays this keyframe. Between two keyframes, it turns smoothly from what one looks at to what the next does.
+director-key-aim-lock-on = The lock's target: { $target }
+director-key-aim-lock-off = Where its camera is laid (it follows the lock, which is off)
+director-key-aim-free = Where its camera is laid
+director-aim-joint = { $target } · { $joint }
+director-key-aim-take = Use the lock's target
+director-key-aim-take-tip = This keyframe looks at the target chosen under Lock, as it is now. It keeps it when the lock changes target or is turned off.
+director-key-aim-clear = Clear the target
+director-key-aim-clear-tip = This keyframe looks where its camera was laid, even while the view is locked.
+director-key-aim-follow = Follow the lock
+director-key-aim-follow-tip = This keyframe looks at the lock's target while the view is locked, and where its camera was laid when it is not.

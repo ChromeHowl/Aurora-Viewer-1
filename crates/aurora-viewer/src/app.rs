@@ -12396,8 +12396,8 @@ impl App {
                 mods,
             );
             self.build.refresh_link_geometry(&self.world, &self.scene);
-            // (nor while the Director's track plays: the world alone)
-            let bare = self.photo_full_frame() || self.director_playing();
+            // (nor while the Director's track plays or it films: the world alone)
+            let bare = self.photo_full_frame() || self.director_playing() || self.director_filming();
             let mut selection_wire = if bare {
                 Default::default()
             } else {
@@ -18924,6 +18924,11 @@ impl App {
                 }
                 // a held photo (freeze frame) instead of the world, under the windows
                 let held = self.photo_held(&ctx, &p);
+                // a film of the Director keeps the world alone, as its playback does:
+                // no tag, mark nor guide (they are drawn before the film's frame is
+                // taken, `Capture::Scene`)
+                let filming = self.director_filming();
+                let bare = held || filming;
                 // what belongs to the world first: the HUD attachments, the bars and
                 // every window cover the name tags, the floating texts and the beacon
                 let voice_levels = if self.demo {
@@ -18956,7 +18961,7 @@ impl App {
                 // the look-at crosshairs under the name tags (none, nor the
                 // walk mark, over a held photo or with the interface hidden,
                 // like the Legacy Viewer's UI layer)
-                if !held && !self.interface.clears_view() {
+                if !bare && !self.interface.clears_view() {
                     ui::lookat_targets::draw(
                         &ctx,
                         &p,
@@ -18987,7 +18992,7 @@ impl App {
                 self.plates.probe = ui::nameplate::level_log().then_some(self.world.agent_id);
                 self.update_plate_hover(&ctx);
                 let chat_bubbles = self.chat_bubbles();
-                self.name_tags = if held {
+                self.name_tags = if bare {
                     self.name_tag_visibility.clear();
                     Vec::new()
                 } else {
@@ -19050,17 +19055,17 @@ impl App {
                     &self.name_tags,
                     &mut self.contact_markers,
                     self.settings.contact_marker_anchor,
-                    self.settings.contact_markers && !held && (!self.interface.immersive || self.settings.immersive_name_tags),
+                    self.settings.contact_markers && !bare && (!self.interface.immersive || self.settings.immersive_name_tags),
                 );
                 // FSShowChatRangeSpheres; in mouselook, the residents out of
                 // view (FSMouselookCombatFeatures, ExodusMouselookIFF)
-                if !held && self.settings.people.chat_range_spheres {
+                if !bare && self.settings.people.chat_range_spheres {
                     ui::people_overlay::chat_spheres(&ctx, &self.world, projector);
                 }
-                if self.camera.mouselook() && !held && self.settings.people.mouselook_markers {
+                if self.camera.mouselook() && !bare && self.settings.people.mouselook_markers {
                     ui::people_overlay::mouselook_markers(&ctx, &p, &self.world, projector, self.settings.people.mouselook_marker_range);
                 }
-                if self.camera.mouselook() && !held && self.settings.people.mouselook_name {
+                if self.camera.mouselook() && !bare && self.settings.people.mouselook_name {
                     ui::people_overlay::crosshair_name(
                         &ctx,
                         &p,
@@ -19073,7 +19078,7 @@ impl App {
                 // RenderTrackerBeacon (LLTracker::render3D, renderBeacon): drawn
                 // in every camera mode, mouselook included. There the pointer
                 // is captured, so the beacon is neither hovered nor clicked.
-                if !held && self.settings.tracker_beacon {
+                if !bare && self.settings.tracker_beacon {
                     let mouselook = self.camera.mouselook();
                     let hit = ui::minimap::draw_beacon(&ctx, &p, &self.world, projector, beacon_hovered && !mouselook);
                     self.beacon_hit = hit.filter(|_| !mouselook);
@@ -19082,34 +19087,23 @@ impl App {
                 }
                 // the hover tips of what the pointer rested on (none in
                 // mouselook nor over a held photo)
-                if let Some(action) = self.draw_hover_tips(&ctx, &p, !self.camera.mouselook() && !held) {
+                if let Some(action) = self.draw_hover_tips(&ctx, &p, !self.camera.mouselook() && !bare) {
                     a.ctx_action = Some(action);
                 }
-                ui::sky_beacons::draw(
-                    &ctx,
-                    &p,
-                    &self.world,
-                    projector,
-                    [self.settings.sun_beacon, self.settings.moon_beacon],
-                );
-                ui::beacons::draw(&ctx, &p, projector, &self.scene.beacon_markers, &self.settings.beacons);
-                ui::beacons::draw_guides(&ctx, &p, &self.world, projector, &self.scene.light_boxes, &self.settings.beacons);
-                ui::portals::labels(&ctx, &p, &self.world, projector);
-                if !held {
-                    self.build.draw_world_guides(
+                if !filming {
+                    ui::sky_beacons::draw(
                         &ctx,
                         &p,
                         &self.world,
-                        &self.settings.build,
-                        crate::build::Mods {
-                            shift: self.shift,
-                            ctrl: self.ctrl,
-                            alt: self.alt,
-                        },
+                        projector,
+                        [self.settings.sun_beacon, self.settings.moon_beacon],
                     );
+                    ui::beacons::draw(&ctx, &p, projector, &self.scene.beacon_markers, &self.settings.beacons);
+                    ui::beacons::draw_guides(&ctx, &p, &self.world, projector, &self.scene.light_boxes, &self.settings.beacons);
+                    ui::portals::labels(&ctx, &p, &self.world, projector);
+                    self.director_world(&ctx, &p, projector);
                 }
-                self.director_world(&ctx, &p, projector);
-                if !held {
+                if !bare {
                     self.build.draw_world_guides(
                         &ctx,
                         &p,
