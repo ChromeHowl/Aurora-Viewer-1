@@ -128,7 +128,7 @@ impl App {
         };
         if self.camera.focus_on_avatar() {
             let at = self.camera.target;
-            self.camera.focus_own_surface(at, None, None, &self.settings.camera);
+            self.camera.focus_own_surface(at, None, &self.settings.camera);
         }
         self.selection_turn = Some(yaw);
         log::info!("photo: turn to the camera, to {:.0}°", yaw.to_degrees());

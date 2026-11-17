@@ -14,6 +14,7 @@
 
 use super::path::{self, Path, Transition, Waypoint};
 use super::track::{self, KeyFile, Track, TrackFile};
+use crate::director::{Aim, Joint, Target};
 
 /// Why a track or a path could not be turned into the other.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +53,7 @@ pub fn track_from_path(path: &Path, origin: (u32, u32)) -> Result<Track, Bridge>
                 fov: w.fov,
                 rest: w.transition == Transition::Ease || before == Some(Transition::Ease),
                 locked: false,
+                aim: None,
             }
         })
         .collect();
@@ -61,7 +63,12 @@ pub fn track_from_path(path: &Path, origin: (u32, u32)) -> Result<Track, Bridge>
         ease_ends: true,
         keys,
     };
-    Track::from_file(&file, origin).ok_or(Bridge::Invalid)
+    // no keyframe of a path is locked, so no target is read from `older`
+    let older = Aim {
+        target: Target::Own,
+        joint: Joint::Neck,
+    };
+    Track::from_file(&file, origin, older).ok_or(Bridge::Invalid)
 }
 
 /// The path of `track`, named `name`, for a main region whose corner is at

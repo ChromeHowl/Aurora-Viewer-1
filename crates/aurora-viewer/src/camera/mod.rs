@@ -1071,6 +1071,20 @@ impl Camera {
         self.set_focus_global(Some(focus), object.map(|o| o.0), object.map(|o| o.1), s);
     }
 
+    /// Aim the displayed shot at a point of the posed body the user chose,
+    /// keeping the eye where it is on screen (upstream's `focus_own_surface`,
+    /// #2337, without its joint-motion term: the fork's
+    /// `third_person_joint_delta` takes the frame, not a joint). The photo
+    /// window's "Turn to camera" uses it so the shot does not swing with the
+    /// body.
+    pub fn focus_own_surface(&mut self, point: Vec3, object: Option<(Uuid, FocusObject)>, s: &CameraSettings) {
+        self.focus_on_avatar = false;
+        self.fov_zoom = self.current_fov_zoom;
+        let virtual_eye = point + (self.position - point) / (1.0 + self.fov_zoom);
+        self.set_camera_pos_and_focus(virtual_eye, point, object, s);
+        self.update_focus_offset();
+    }
+
     /// `pstcampos` chat command (cmdline_apply_camera): unlockView, then
     /// setCameraPosAndFocusGlobal.
     pub fn set_view(&mut self, camera: Vec3, focus: Vec3, agent: &mut AgentState, s: &CameraSettings) {
