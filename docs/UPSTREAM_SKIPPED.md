@@ -100,3 +100,20 @@ Taken: see the "Upstream sync batch 13" line of TASKS.md. Everything the batch-1
   - #3992 LiveMesh preview key: plug-in version 0.15.0 (the fork's 0.14.11 is superseded).
   - #3976 settings migration: upstream's version 42 is version 43 here, the fork's recent-sort migration already uses 42.
 - #3105 square expand icon on minimised floaters: already in the fork (`minimize_title_icon` and its test are identical).
+
+## Batch 14 (upstream commits up to a55a09001)
+
+Taken: see the "Upstream sync batch 14" line of TASKS.md. Not taken:
+
+- #4033 proxy settings (SOCKS 5 and HTTP proxy): the fork has its own complete implementation (`aurora-net/src/socks5.rs`, `NetOptions` / `HttpProxy` in `aurora-net/src/lib.rs`, Preferences › Network). Upstream's is a different one (new `aurora-proxy` crate, `circuit_socket.rs`, `session/proxy.rs`, credentials storage, its own Preferences page) with a `Cargo.lock` change that needs the licence script; taking it would replace the fork's feature, so it needs the owner's decision.
+- #4034 target frame rate (Autotune): the fork has its own (`app/autotune.rs`, `settings/render_photo.rs` `AutoTune`, Preferences › Graphics, `scene/render_time.rs`). Upstream's reworks it (`settings/autotune.rs`, `ui/monitor/autotune.rs`, the user's own values kept apart, the Performance window's section) over 2300 lines; replacing the fork's tuner and its settings path is left for the owner's decision.
+- #3600 0 s one-shot animation and #2545 flycam notice with the interface: already in the fork (same tests present).
+- #4008 and #4025 (TASKS.md and docs only): nothing to take.
+- Upstream TASKS.md text of every taken change is not copied: the fork's TASKS.md keeps its own lines and the batch-14 line.
+- #3267 volumetric clouds: the fork already carries the cloud renderer (`clouds.rs` is identical); only the final change is taken: the shader's sheet cover for overcast skies, the noise file's loader test, the example's link fix, the demo scenario that only runs in demo mode, and the Hillaire notice in `NOTICE.md`. The fork's other renderer code is untouched.
+- Conflicts resolved with the fork's structure kept:
+  - #4009 / #4015 photo gaze: the fork's own head and eye limits (`look_limits`, `debug_eyes`) are kept beside the look-over-animations priority; `look_limits` still comes first in `scene/mod.rs`.
+  - #3993 / #4016 RLVa camera: the fork's `run-` demo scenarios live in `app/movement.rs`, so only upstream's `offset-zoom` and `no-mouselook` demo steps are added to `app/rlva.rs`; the fork's `third_person_joint_delta(s, f)` and the Director's `track` field are kept.
+  - #3975 Director: the fork's rule that the track's view makes a Camera Path or the Camera Lock give the camera up is kept over upstream's per-keyframe targets; the world guides were drawn twice in `app.rs` and are drawn once now.
+  - #3989: `widgets::search_box` stays out of the re-export (the fork's own list), `chip_row` is added; the Director keys the lock rework replaced are dropped from the de, pt-BR and zh catalogues.
+  - #3123 Environment labels: upstream's version of the fix replaces the fork's earlier one (#3109).
