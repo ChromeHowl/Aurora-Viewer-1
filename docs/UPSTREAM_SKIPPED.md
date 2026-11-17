@@ -77,11 +77,26 @@ Taken: see the "Upstream sync batch 12" line of TASKS.md. Not taken:
 
 ### Present in the fork in another form; the squash's review changes conflict with fork-only code
 
-- #3282 Enter opens the selected inventory items: the fork has the feature; not taken: the marketplace-link refusal and the "reveal a linked folder" review changes, and the focus tests.
+- #3282 Enter opens the selected inventory items: taken in batch 13 as a delta (Marketplace wear check, links deduplicated, linked folders revealed); only upstream's focus tests are not taken.
 - #2819 @interact and @fartouch hold beyond the touch: the fork's own implementation (`rlva_selection_too_far`, `rlva_can_designate` in `policy.rs`); upstream's regrouping into `rlva_selectable` is not taken, so a HUD already selected under @interact is not kept selected.
-- #2778 @temprun and @alwaysrun each stop their own run, #2436 Enter toggles typing, #2701 Chat bar setting, #3024 a conversation the user opens takes the keyboard, #3277 minimap name formats (the fork has the single name-format setting; the per-place formats are not ported), #3284 the SLT clock (the fork's `slt_offset` applies the grid correction to every instant; upstream applies it to the computer's readings only): the fork's versions work; the review rework conflicts with the fork's chat, radar-marks and clock code. Candidates for a hand port on request.
-- #3785 rebindable chat keys, Shift+Enter new line, smoother conversation drag, taller chat box: conflicts with the fork's `enter_pass`, send-button and chat bar code; owner decision (chat area).
+- #2778 @temprun and @alwaysrun each stop their own run, #2436 Enter toggles typing, #2701 Chat bar setting, #3024 a conversation the user opens takes the keyboard, #3277 minimap name formats, #3284 the SLT clock, #3785 rebindable chat keys: all taken in batch 13 (see below); #2436 was already in the fork.
 
 ### Persistence stack, partly taken
 
-- #3931 teleport history across reconnects and shutdown (hides the window at quit, reorders the exit): not taken, it changes the exit order of the whole viewer and the fork's `tphistory.rs` writer is different. #3945 and #3950 are taken without their `tphistory.rs` part: the teleport history keeps the fork's own writer, which is not retried after a refused write.
+- #3931 teleport history across reconnects and shutdown: taken in batch 13 (see below); #3945 and #3950 are now complete with their `tphistory.rs` part.
+
+## Batch 13 (upstream commits up to 2062d136d)
+
+Taken: see the "Upstream sync batch 13" line of TASKS.md. Everything the batch-12 section above lists as "present in another form" is now taken, except #2819. Not taken:
+
+- #2819 @interact and @fartouch hold beyond the touch: the fork has its own implementation (`rlva_selection_too_far`, `rlva_can_designate` in `policy.rs`, with #3951's rule that a worn HUD answers no click under @interact). Upstream regroups the same functions into `rlva_selectable`; taking it would replace the fork's designate rule. Kept as it is; the one visible difference is that a HUD already selected under @interact is not kept selected.
+- #3966 the Rust cache save drops the workspace's outputs: taken (it is a CI action of the fork's own `.github`); its TASKS.md line is not copied.
+- #3909 bump of the minor crates (batch 12), and any other `Cargo.lock` change: not taken, the licence script cannot be run here.
+- Upstream TASKS.md text of every taken change is not copied: the fork's TASKS.md keeps its own lines and the batch-13 line.
+- Conflicts resolved with the fork's structure kept (the upstream behaviour is taken, not the upstream code layout):
+  - #3277 minimap name formats: the fork's `world::radar::Marks` and `ui/context.rs::mark_submenu` are kept (no `AvatarList::MiniMap`, no `CtxAction::MarkCustom { source }`); the four formats, the display-name options, the RLVa anonymous names and the "resident must be visible" rule are ported.
+  - #3546 face-select pattern: the fork already had the earlier branch tip; the final version (HDR scene blend before tone mapping, the HUD pass over the finished HUD image, transparent faces getting their record) replaces it. The fork's `FEATURE_OPAQUE_WATER`, the `overlays` closure and `multi_mesh_materials_events` stay.
+  - #3789 stochastic transparency: the fork moved the `ST_BEGIN` to `ST_END` block of `object.wgsl`; the new block replaces it there.
+  - #3992 LiveMesh preview key: plug-in version 0.15.0 (the fork's 0.14.11 is superseded).
+  - #3976 settings migration: upstream's version 42 is version 43 here, the fork's recent-sort migration already uses 42.
+- #3105 square expand icon on minimised floaters: already in the fork (`minimize_title_icon` and its test are identical).
