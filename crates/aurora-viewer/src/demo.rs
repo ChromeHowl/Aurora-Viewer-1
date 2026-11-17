@@ -1041,6 +1041,11 @@ fn demo_raw() -> Llsd {
             Llsd::Array(vec![llsd_map! { "folder_name" => name, "gender" => gender }]),
         );
     }
+    // Exercise the login clock correction on the normal LoggedIn path.
+    if std::env::var("AURORA_DEMO_EVENT_TIMES").as_deref() == Ok("grid-behind") {
+        let seconds = crate::ui::bars::clock::now_unix().saturating_sub(3600);
+        raw.insert("seconds_since_epoch", seconds.to_string());
+    }
     // AURORA_DEMO_PEOPLE's groups tab: "3 groups out of 42"
     if let Some(limit) = people::group_limit()
         && let Llsd::Map(m) = &mut raw
