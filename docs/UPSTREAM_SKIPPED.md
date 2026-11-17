@@ -55,3 +55,33 @@ with fork-only code.
 
 - #3705 distance in name tags: the fork has `people.tag_distance` and the colours by band on its classic tags; upstream's distance on the pill and far name plates (`relation_tag`, `apply_distance_preferences`) is not ported. A real, small gap to port on request.
 - #3780 Recent folders sorted by date: taken; its settings migration runs at the fork's settings version 42 (upstream's is 40, which the fork uses for another change).
+
+## Batch 12 (upstream commits up to 45c64fb2f)
+
+Taken: see the "Upstream sync batch 12" line of TASKS.md. Not taken:
+
+### Dependencies, tooling, security policy
+
+- #3909 bump of the minor crates: a `Cargo.lock` change needs `./scripts/third-party-licenses.ps1`, left for a dedicated change.
+- #3921 optimisation-free test executable, #3941 optimised dependencies in the CI test jobs: Cargo profile and CI tooling of upstream.
+- #3938 the agents' shell hook stays fast on a long script, #3942 other tasks' Git commands no longer restart a build: upstream agent tooling.
+- #3949 a security policy for vulnerability reports: it names upstream's reporting channel.
+
+### Already in the fork (the same PR branch was merged); the squash adds only review changes
+
+- #2467 poser follows a new or edited shape: identical, `rebase_pose` and its review fix are present.
+- #2427 flying in mouselook follows the camera's pitch, #2818 an object worn from the ground under an RLVa lock, #2407 Alpha mode for any texture with alpha, #3500 @camtextures grey, #3368 RLVa camera distance limits: identical.
+- #2615 refuse payments under @pay: identical but one line in `ui/context.rs` (`rlva_can_pay`).
+- #3580 secondlife:// links clicked in a page on a prim, #3171 Ctrl+W closes script-opened windows (the fork's own, only a doc comment and tests differ): present.
+- #2797 pose stand, #2990 panorama pictures: present (a few review lines differ).
+
+### Present in the fork in another form; the squash's review changes conflict with fork-only code
+
+- #3282 Enter opens the selected inventory items: the fork has the feature; not taken: the marketplace-link refusal and the "reveal a linked folder" review changes, and the focus tests.
+- #2819 @interact and @fartouch hold beyond the touch: the fork's own implementation (`rlva_selection_too_far`, `rlva_can_designate` in `policy.rs`); upstream's regrouping into `rlva_selectable` is not taken, so a HUD already selected under @interact is not kept selected.
+- #2778 @temprun and @alwaysrun each stop their own run, #2436 Enter toggles typing, #2701 Chat bar setting, #3024 a conversation the user opens takes the keyboard, #3277 minimap name formats (the fork has the single name-format setting; the per-place formats are not ported), #3284 the SLT clock (the fork's `slt_offset` applies the grid correction to every instant; upstream applies it to the computer's readings only): the fork's versions work; the review rework conflicts with the fork's chat, radar-marks and clock code. Candidates for a hand port on request.
+- #3785 rebindable chat keys, Shift+Enter new line, smoother conversation drag, taller chat box: conflicts with the fork's `enter_pass`, send-button and chat bar code; owner decision (chat area).
+
+### Persistence stack, partly taken
+
+- #3931 teleport history across reconnects and shutdown (hides the window at quit, reorders the exit): not taken, it changes the exit order of the whole viewer and the fork's `tphistory.rs` writer is different. #3945 and #3950 are taken without their `tphistory.rs` part: the teleport history keeps the fork's own writer, which is not retried after a refused write.
