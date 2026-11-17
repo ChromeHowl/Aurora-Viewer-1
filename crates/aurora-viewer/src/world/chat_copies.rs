@@ -127,6 +127,7 @@ mod tests {
             session,
             new_session: false,
             poke: false,
+            mention: false,
         }
     }
 
