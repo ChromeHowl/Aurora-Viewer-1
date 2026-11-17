@@ -43,6 +43,25 @@ pub(super) struct UiImageCache {
 }
 
 impl UiImageCache {
+    /// Keep the immediate preview of an upload. Only a grid receipt gives
+    /// us an asset that can be fetched again after the preview is evicted.
+    pub fn store_upload(
+        &mut self,
+        images: &mut HashMap<Uuid, egui::TextureHandle>,
+        asset: Uuid,
+        texture: egui::TextureHandle,
+        can_reload: bool,
+    ) {
+        let id = texture.id();
+        let [w, h] = texture.size();
+        if let Some(old) = images.insert(asset, texture) {
+            self.forget(&asset, old.id());
+        }
+        if can_reload {
+            self.note(asset, id, w as u32, h as u32, Instant::now());
+        }
+    }
+
     /// `texture` now shows `image`, `width` × `height` (a finer copy of the
     /// same texture replaces the size noted).
     pub fn note(&mut self, image: Uuid, texture: TextureId, width: u32, height: u32, now: Instant) {
@@ -227,6 +246,39 @@ mod tests {
     }
 
     #[test]
+    fn grid_uploads_can_be_evicted_and_offline_uploads_keep_their_only_copy() {
+        let ctx = egui::Context::default();
+        let mut images = HashMap::new();
+        let mut cache = UiImageCache::default();
+        let upload = |side| {
+            ctx.load_texture(
+                "outfit",
+                egui::ColorImage::filled([side; 2], egui::Color32::RED),
+                Default::default(),
+            )
+        };
+        let (grid, offline) = (id(1), id(2));
+        cache.store_upload(&mut images, grid, upload(512), true);
+        let first = images[&grid].id();
+        cache.store_upload(&mut images, grid, upload(1024), true);
+        cache.store_upload(&mut images, offline, upload(512), false);
+        assert_eq!(cache.bytes, 4 * 1024 * 1024);
+        assert!(!cache.owners.contains_key(&first));
+        assert!(ctx.tex_manager().read().meta(first).is_none());
+
+        let now = Instant::now() + IDLE;
+        cache.note(id(3), TextureId::User(3), 2048, 3072, now);
+        let current = images[&grid].id();
+        let gone = cache.evict(true, now);
+        assert_eq!(gone, [grid]);
+        for id in gone {
+            images.remove(&id);
+        }
+        assert!(ctx.tex_manager().read().meta(current).is_none());
+        assert!(ctx.tex_manager().read().meta(images[&offline].id()).is_some());
+    }
+
+    #[test]
     fn a_picture_drawn_is_used_however_it_is_painted() {
         let ctx = egui::Context::default();
         let image = |name: &str| ctx.load_texture(name, egui::ColorImage::filled([4, 4], egui::Color32::RED), Default::default());
@@ -236,7 +288,7 @@ mod tests {
         for (k, t) in [&by_image, &by_painter, &by_mesh, &nested, &hidden].into_iter().enumerate() {
             cache.note(id(k as u128), t.id(), 4, 4, start);
         }
-        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
             ui.image(egui::load::SizedTexture::new(by_image.id(), [16.0, 16.0]));
             let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(16.0, 16.0));
             let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
@@ -247,6 +299,8 @@ mod tests {
             mesh.texture_id = nested.id();
             ui.painter().add(Shape::Vec(vec![Shape::mesh(mesh)]));
         });
+        // This headless test inspects shapes without sending the texture updates to a renderer.
+        output.textures_delta.clear();
         let later = start + IDLE;
         assert!(!cache.look(1, &output.shapes, later), "only every few frames");
         assert!(cache.look(LOOK_EVERY, &output.shapes, later));
