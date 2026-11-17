@@ -5939,7 +5939,9 @@ impl App {
         }
         let alt = self.alt || self.object_view;
         let now = Instant::now();
-        // a rigged mesh with nothing to do with the click lets it through
+        // (the modifiers of the press, which a click run again has restored)
+        self.scene.rigged_clicks = self.rigged_clicks();
+        // a rigged mesh the click has nothing to do with lets it through
         let depth = if alt || self.build.open {
             depth
         } else {
@@ -12169,6 +12171,7 @@ impl App {
             self.scene.impostor_exclude_animesh = self.settings.render_photo.impostor_exclude_animesh;
             self.scene.terrain_scale = self.settings.render_extras.terrain_scale;
             self.scene.surface_protection = self.settings.surface_protection();
+            self.scene.rigged_clicks = self.rigged_clicks();
             self.scene.textures.set_max_resolution(self.settings.max_texture_resolution);
             self.scene.max_avatars = self.settings.max_avatars as usize;
             self.scene.hidden_types = self.settings.debug.hidden_types;
