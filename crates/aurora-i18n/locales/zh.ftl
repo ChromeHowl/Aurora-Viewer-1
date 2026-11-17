@@ -16812,3 +16812,4 @@ ui-options-reset-windows-text = Every window goes back to its default place and 
 ui-options-windows-were-reset = The windows are back to their default places
 blender-live-addon-outdated = The Blender plug-in is out of date and cannot connect. Update it in the Plugins tab, then restart Blender.
 blender-live-token-refused = A program tried to connect without this preview's key. Only the Aurora plug-in in Blender can connect.
+build-wheel-on-hover = Wheel changes the value under the pointer
