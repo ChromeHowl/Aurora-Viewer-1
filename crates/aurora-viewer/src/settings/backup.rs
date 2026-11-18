@@ -43,6 +43,8 @@ const THIS_PC: &[&str] = &[
     "window_maximized",
     "cache_location",
     "chat_log_location",
+    // a file of this PC (Preferences › Language and updates)
+    "custom_language_file",
 ];
 /// The same inside `audio`: the devices of this PC.
 const THIS_PC_AUDIO: &[&str] = &["output_device", "voice_output_device", "input_device"];
@@ -290,6 +292,7 @@ impl Settings {
         self.window_maximized = current.window_maximized;
         self.cache_location = current.cache_location.clone();
         self.chat_log_location = current.chat_log_location.clone();
+        self.custom_language_file = current.custom_language_file.clone();
         self.audio.output_device = current.audio.output_device.clone();
         self.audio.voice_output_device = current.audio.voice_output_device.clone();
         self.audio.input_device = current.audio.input_device.clone();

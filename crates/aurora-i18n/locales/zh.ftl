@@ -16873,3 +16873,25 @@ poser-import-legacy = Import Legacy Viewer or Alchemy poses…
 poser-import-legacy-title = Folder of Legacy Viewer or Alchemy poses
 poser-legacy-invalid = This file is not a Legacy Viewer or Alchemy pose.
 poser-imported = Poses added to the library: { $added }. Already there, kept: { $kept }. Unreadable: { $unreadable }.
+language-file = 语言文件
+language-file-help = 使用 Fluent 翻译文件（.ftl）代替列表中的语言，格式与查看器自带的语言目录相同。它在查看器启动时读取；缺少的文本将以英文显示。
+language-file-use = 使用语言文件（.ftl）
+language-file-instead = 将改用该语言文件。
+language-file-browse = 浏览…
+language-file-choose = 选择语言文件
+language-file-filter = Fluent 语言文件
+language-file-none = 尚未选择文件：使用列表中的语言。
+language-file-in-use = 正在使用：{ $name }（{ $count ->
+   *[other] { $count } 条文本
+    }）
+language-file-errors = { $count ->
+   *[other] 有 { $count } 个条目无法读取，将以英文显示。
+    }
+language-file-unnamed = 文件名不是语言代码（例如 de.ftl 或 pt-BR.ftl）：复数规则遵循英文。
+language-file-next = 下次启动时：{ $name }
+language-file-failed = 未使用 { $name }（{ $reason }）：使用列表中的语言。
+language-file-missing = 找不到文件
+language-file-unreadable = 无法读取该文件
+language-file-too-large = 文件过大
+language-file-not-text = 不是 UTF-8 文本
+language-file-empty = 其中没有任何消息

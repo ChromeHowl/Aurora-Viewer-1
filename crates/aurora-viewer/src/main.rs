@@ -62,6 +62,7 @@ mod interface_colors;
 mod joystick;
 mod keybinds;
 mod keywords;
+mod language_file;
 mod legacy_profile;
 mod link_preview;
 mod link_trust;
@@ -201,6 +202,8 @@ fn main() -> anyhow::Result<()> {
     aurora_i18n::select("default", cli::get().language.as_deref());
     crash::start();
     logging::init();
+    // the interface language file, read with the settings before the log
+    language_file::report();
     splash::settings();
     // started by an update: its helper waits while the start moves on
     splash::report_to_update();

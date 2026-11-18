@@ -16906,3 +16906,27 @@ poser-import-legacy = Import Legacy Viewer or Alchemy poses…
 poser-import-legacy-title = Folder of Legacy Viewer or Alchemy poses
 poser-legacy-invalid = This file is not a Legacy Viewer or Alchemy pose.
 poser-imported = Poses added to the library: { $added }. Already there, kept: { $kept }. Unreadable: { $unreadable }.
+language-file = Sprachdatei
+language-file-help = Eine Fluent-Übersetzungsdatei (.ftl) statt der Liste verwenden, im Format der eigenen Kataloge des Viewers. Sie wird beim Start des Viewers gelesen; fehlende Texte werden auf Englisch angezeigt.
+language-file-use = Eine Sprachdatei (.ftl) verwenden
+language-file-instead = Stattdessen wird die Sprachdatei verwendet.
+language-file-browse = Durchsuchen…
+language-file-choose = Sprachdatei auswählen
+language-file-filter = Fluent-Sprachdatei
+language-file-none = Noch keine Datei ausgewählt: Es wird die Sprache der Liste verwendet.
+language-file-in-use = In Verwendung: { $name } ({ $count ->
+    [one] { $count } Text
+   *[other] { $count } Texte
+    })
+language-file-errors = { $count ->
+    [one] { $count } Eintrag konnte nicht gelesen werden und wird auf Englisch angezeigt.
+   *[other] { $count } Einträge konnten nicht gelesen werden und werden auf Englisch angezeigt.
+    }
+language-file-unnamed = Der Dateiname ist kein Sprachcode (wie de.ftl oder pt-BR.ftl): Die Pluralregeln folgen dem Englischen.
+language-file-next = Beim nächsten Start: { $name }
+language-file-failed = { $name } wird nicht verwendet ({ $reason }): Es wird die Sprache der Liste verwendet.
+language-file-missing = Datei nicht gefunden
+language-file-unreadable = die Datei kann nicht gelesen werden
+language-file-too-large = die Datei ist zu groß
+language-file-not-text = kein UTF-8-Text
+language-file-empty = keine Nachricht darin
