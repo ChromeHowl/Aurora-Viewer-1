@@ -238,7 +238,7 @@ pub(super) fn look_style(p: &Palette, look: crate::world::notification_history::
 /// The start of a message on its card: its links by their labels first,
 /// then cut, so never inside an address (#947).
 fn message_excerpt(world: &World, body: &str) -> String {
-    let body = super::chat::resolved_text_in(world, Kind::Message.names(), body);
+    let body = super::chat::resolved_text_in(world, Kind::Message.text(), body);
     let mut text: String = body.chars().take(MESSAGE_CHARS).collect();
     if body.chars().count() > MESSAGE_CHARS {
         text.push('…');
@@ -573,12 +573,12 @@ pub(super) fn card(
                     let rows = options(ui.ctx()).script_dialog_rows as f32;
                     let row = ui.fonts_mut(|f| f.row_height(&egui::FontId::proportional(12.0)));
                     egui::ScrollArea::vertical().max_height(rows * row).show(ui, |ui| {
-                        super::chat::text_with_links(ui, p, world, n.kind.names(), &shown, &n.name_links, 12.0, p.ink);
+                        super::chat::text_with_links(ui, p, world, n.kind.text(), &shown, &n.name_links, 12.0, p.ink);
                     });
                 } else {
                     ui.horizontal(|ui| {
                         ui.add_space(indent);
-                        super::chat::text_with_links(ui, p, world, n.kind.names(), &shown, &n.name_links, 12.0, p.muted);
+                        super::chat::text_with_links(ui, p, world, n.kind.text(), &shown, &n.name_links, 12.0, p.muted);
                     });
                 }
             }
