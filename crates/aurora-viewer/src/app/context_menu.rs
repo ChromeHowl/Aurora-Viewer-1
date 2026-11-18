@@ -289,6 +289,7 @@ impl App {
                 f.sound_blocks = w.derender.owner_sound_flags(*id);
                 f.contact_sets = w.contact_sets.set_names();
                 f.im_blocked = !w.rlva_can_start_im(*id);
+                f.name_hidden = !w.rlva_can_name(*id);
                 f.pay_blocked = !w.rlva_can_pay() || !w.rlva_can_name(*id);
                 // the friendship itself: no offer to a hidden friend
                 f.friend = w.social.is_friend(id);

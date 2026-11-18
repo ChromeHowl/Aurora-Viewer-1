@@ -80,6 +80,12 @@ fn show_one(
             (id, world.social.name_of(&id))
         })
         .collect::<HashMap<_, _>>();
+    // the names above are the world's: a hidden one opens no profile
+    let unnamed = names
+        .keys()
+        .copied()
+        .filter(|id| !world.rlva_shows_name(crate::world::names::NameScope::World, *id))
+        .collect::<std::collections::HashSet<_>>();
     let mut open = true;
     let window_id = format!("task_item_props_{}_{}", state.object, state.item);
     properties::window(ctx, &window_id)
@@ -99,6 +105,7 @@ fn show_one(
                     // TaskInventory has no thumbnail field or agent-thumbnail capability.
                     can_thumbnail: false,
                     names: &names,
+                    unnamed: &unnamed,
                     images,
                     wanted_images: &mut tool.ui.wanted_images,
                 },

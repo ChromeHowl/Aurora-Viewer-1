@@ -133,7 +133,7 @@ pub(super) fn show(
                 presence::paint_dot(ui.painter(), p, pic, status, p.panel);
             }
             let r = ui.interact(pic, sidebar::control_id("head-pic"), egui::Sense::click());
-            super::name_menu(&r, p, world, a);
+            super::name_menu(&r, p, world, a, crate::world::names::NameScope::Roster);
             if r.on_hover_cursor(egui::CursorIcon::PointingHand)
                 .on_hover_text(status.label())
                 .clicked()
@@ -404,7 +404,7 @@ pub(super) fn show(
     let names = egui::Rect::from_x_y_ranges(text_left..=text_right, rect.y_range());
     let r = ui.interact(names, sidebar::control_id("head-names"), egui::Sense::click());
     if let Some(a) = who.avatar {
-        super::name_menu(&r, p, world, a);
+        super::name_menu(&r, p, world, a, crate::world::names::NameScope::Roster);
         let r = tips.show(r.on_hover_cursor(egui::CursorIcon::PointingHand));
         if r.clicked() {
             actions.push(ConvAction::Profile(a));

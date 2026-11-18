@@ -484,7 +484,7 @@ impl HistoryUi {
         });
         super::line_menu::show(ui, menu, p, |ui, target| {
             if let Some(sender) = target.sender {
-                super::sender_menu(ui, p, world, sender, &target.line);
+                super::sender_menu(ui, p, world, sender, crate::world::names::NameScope::World, &target.line);
             }
         });
         debug_assert!(self.lines.len() <= PAGE);
