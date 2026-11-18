@@ -2849,6 +2849,10 @@ switches, the away timers, friends-only calls) in
 `Settings::autoresponse_accounts`: the Legacy Viewer keeps them per account.
 The former shared block goes to the first account that logs in; another new
 account starts from the defaults; a settings save snapshots the active account.
+
+`settings/account_prefs.rs` binds the keyword alerts, the chat and IM logging
+options and the crouch toggle the same way (`Settings::prefs_accounts`); login
+installs the account's keyword alerts again.
 The account's Hover Height window remains accessible while region support is
 unavailable, so its automatic and camera options are still editable. Manual
 height editing follows the region's feature; only server writes additionally

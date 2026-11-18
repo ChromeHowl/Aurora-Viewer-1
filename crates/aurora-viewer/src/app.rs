@@ -4578,6 +4578,9 @@ impl App {
                     );
                     self.settings.select_hover_account(l.agent_id);
                     self.settings.select_autoresponse_account(l.agent_id);
+                    self.settings.select_prefs_account(l.agent_id);
+                    // the alerts follow a settings change only: this one is not
+                    crate::keywords::set(&self.keyword_settings());
                     self.settings.save();
                 }
                 self.bridge_runtime = Default::default();
