@@ -140,6 +140,7 @@ pub mod search;
 pub mod shadow_realm;
 pub mod shape;
 pub mod sheet;
+pub mod signup;
 pub mod sim_console;
 pub mod skin;
 pub mod sky_beacons;
