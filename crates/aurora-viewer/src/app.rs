@@ -24095,6 +24095,10 @@ impl ApplicationHandler for App {
                         | "aurora-wide"
                         | "aurora-columns"
                         | "aurora-columns-hidden"
+                        | "aurora-gallery"
+                        | "aurora-gallery-medium"
+                        | "aurora-gallery-large"
+                        | "aurora-combination"
                         | "aurora-worn"
                         | "aurora-worn-medium"
                         | "aurora-worn-wide"
@@ -24136,7 +24140,7 @@ impl ApplicationHandler for App {
                     crate::world::inventory::demo::seed_view(
                         &mut self.world.inventory,
                         self.world.agent_id,
-                        view == "large" || view.starts_with("search-selection"),
+                        view == "large" || view == "aurora-gallery-large" || view.starts_with("search-selection"),
                     );
                     self.settings.inventory = ui::inventory::InventoryPreferences::default();
                     self.inventory_ui.show_original(&self.world.inventory, self.world.inventory.root);
@@ -24238,6 +24242,16 @@ impl ApplicationHandler for App {
                         }
                         if view.ends_with("-no-details") {
                             self.settings.inventory.show_details = false;
+                        }
+                        if view.starts_with("aurora-gallery") || view == "aurora-combination" {
+                            // pictures on some of the folder's entries, all of
+                            // them in the large folder
+                            crate::world::inventory::demo::seed_gallery(&mut self.world.inventory);
+                            self.settings.inventory.explorer.view = if view == "aurora-combination" {
+                                ui::inventory::view::ExplorerView::Combination
+                            } else {
+                                ui::inventory::view::ExplorerView::Gallery
+                            };
                         }
                         if view.starts_with("aurora-folder-window") {
                             // the right-click tests in a window of their own
