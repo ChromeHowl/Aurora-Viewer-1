@@ -4,8 +4,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-pub mod area_search;
 mod account_prefs;
+pub mod area_search;
 mod autoresponse_account;
 pub mod avatar_motion;
 pub mod backup;
