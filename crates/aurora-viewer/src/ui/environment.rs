@@ -348,8 +348,9 @@ impl EnvironmentUi {
         }
         ui.add_space(6.0);
         widgets::divider(ui, p);
-        ui.horizontal(|ui| {
-            ui.add_space(label_w + 4.0);
+        // Actions use the whole width, and wrap as the text grows (#3613).
+        // Indenting them by the labels' width clipped Aurora Weather.
+        ui.horizontal_wrapped(|ui| {
             ui.add_enabled_ui(free, |ui| {
                 if widgets::flat_button(ui, p, aurora_i18n::tr!("common-personal-lighting"))
                     .on_hover_text(aurora_i18n::tr!("ui-environment-adjust-the-current-sky-for-your-view-only"))
