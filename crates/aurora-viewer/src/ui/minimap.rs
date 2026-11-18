@@ -225,6 +225,7 @@ pub fn avatars(world: &World) -> Vec<(Uuid, Vec3, bool)> {
         // (nobody the Shadow Realm hides: `world/shadow_realm.rs`)
         if o.full_id != world.agent_id
             && !world.shadow_hides(&o.full_id)
+            && !world.is_mirror(&o.full_id)
             && let Some((p, _, _)) = Scene::object_transform(world, idx, now, 0)
         {
             out.push((o.full_id, p, true));

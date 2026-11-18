@@ -36,7 +36,7 @@ impl Editor {
             Some(_) if add => {
                 if let Some(next) = self.clip_followers().first().copied() {
                     self.clip.together.retain(|b| *b != next);
-                    self.select(next, rig, frame);
+                    self.select_joint(next, rig, frame);
                 }
             }
             _ => {
@@ -48,6 +48,20 @@ impl Editor {
     /// A drag begun on a joint: on a joint of the selection it leads the
     /// others, elsewhere it selects that joint only.
     pub(in crate::ik_edit) fn clip_grab_bone(&mut self, bone: usize, rig: &Rig, frame: &Frame) {
+        if self.selected != Some(bone) {
+            self.clip_lead_bone(bone, rig, frame);
+        }
+    }
+    /// Select `bone` as the timeline does (its row, or one of its keys): a
+    /// joint of the selection leads the others, any other joint is selected
+    /// alone, so that joints picked earlier never follow a joint they were
+    /// not picked with.
+    pub(in crate::ik_edit) fn clip_lead_bone(&mut self, bone: usize, rig: &Rig, frame: &Frame) {
+        self.select(bone, rig, frame);
+    }
+    /// The joints picked together once `bone` is selected (see
+    /// `clip_lead_bone`); `select` applies it on every path.
+    pub(in crate::ik_edit) fn clip_retarget_followers(&mut self, bone: usize) {
         if self.selected == Some(bone) {
             return;
         }
@@ -58,7 +72,6 @@ impl Editor {
         } else {
             self.clip.together.clear();
         }
-        self.select(bone, rig, frame);
     }
     /// Give the followers the change `lead` went through from `start` to
     /// `pose`, record it as their own edit and keep a goal for each, so that
@@ -87,12 +100,19 @@ impl Editor {
         let turn = (start.rotations[lead].inverse() * pose.rotations[lead]).normalize();
         let offset = now[lead].w_axis.truncate() - was[lead].w_axis.truncate();
         let direct = self.goals.iter().any(|g| g.bone == lead && g.mode == Mode::Direct);
-        for bone in followers {
-            // a joint the selected one's own change already carried (its
-            // chain, or a child for a move) keeps that and nothing more
-            let moved = pose.rotations[bone].dot(start.rotations[bone]).abs() < 0.9999999
-                || (!rotate && now[bone].w_axis.truncate().distance_squared(was[bone].w_axis.truncate()) > 1e-12);
-            if moved {
+        // a joint the selected one's own change already carried (its chain,
+        // or a child for a move) keeps that and nothing more; read before any
+        // follower moves, since a follower's own chain would otherwise carry
+        // the next one (an elbow's solve swinging a wrist picked with it)
+        let carried: Vec<bool> = followers
+            .iter()
+            .map(|&bone| {
+                pose.rotations[bone].dot(start.rotations[bone]).abs() < 0.9999999
+                    || (!rotate && now[bone].w_axis.truncate().distance_squared(was[bone].w_axis.truncate()) > 1e-12)
+            })
+            .collect();
+        for (bone, carried) in followers.into_iter().zip(carried) {
+            if carried {
                 continue;
             }
             let before = pose.clone();

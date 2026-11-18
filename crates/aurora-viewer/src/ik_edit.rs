@@ -146,6 +146,12 @@ impl Frame {
             .zip(&rig.default_world_inv)
             .map(|(p, inverse)| model * *p * inverse.inverse())
             .collect();
+        // couple mode: Person B's body is drawn where the editor moved it
+        // (`World::couple_shift`); the move rides on the model, as below,
+        // so their recorded keys stay free of it
+        if let Some(shift) = world.couple_shift(subject, model) {
+            model = shift * model;
+        }
         // Avatar Studio's Hover Height lifts the stored pose for display
         // only. Carry the lift on the model instead: the joints stay where
         // the avatar shows, and everything read back in model space (bone
@@ -278,6 +284,12 @@ impl Editor {
 
     fn bone_overlays_visible(&self) -> bool {
         !(self.clip.active && self.clip.is_playing())
+    }
+
+    /// Whether a click or a grab on `joint`'s handle starts its limb's pole:
+    /// the joint must be the selected one, in IK, with no pole yet.
+    fn takes_limb_pole(&self, joint: usize) -> bool {
+        self.selected == Some(joint) && self.mode == Mode::Ik && self.pole.is_none()
     }
 
     fn point_drag_enabled(&self, modifiers: egui::Modifiers) -> bool {
@@ -773,6 +785,18 @@ impl Editor {
     }
 
     fn select(&mut self, bone: usize, rig: &Rig, frame: &Frame) {
+        if self.clip.active && !self.poser.active {
+            // every way of picking a joint in the animation editor (handle,
+            // bone, picker, Tracks row, timeline, joint list, pole, binding,
+            // link…) keeps the joints picked together right: a joint of the
+            // selection leads the others, any other joint is selected alone
+            self.clip_retarget_followers(bone);
+        }
+        self.select_joint(bone, rig, frame);
+    }
+    /// Select `bone` and leave the animation editor's joints picked together
+    /// as they are: for the paths that already set them.
+    fn select_joint(&mut self, bone: usize, rig: &Rig, frame: &Frame) {
         if self.poser.active {
             self.select_pose_bone(bone, rig, frame);
             return;
@@ -966,6 +990,7 @@ impl Editor {
         // the poser's Ctrl picks another part or avatar: the handles let the
         // pointer through (a drag already begun keeps them)
         let picking_parts = self.poser_ctrl_picks(modifiers) && !self.gizmo.dragging();
+        self.gizmo.shift_fine = self.poser.active || self.clip.active;
         let (owns, change) = self
             .gizmo
             .show(ctx, palette, geometry, pose, !point_hit && !picking_parts, self.gizmo_sensitivity());
@@ -1094,6 +1119,8 @@ impl Editor {
             if !selected_pole {
                 self.show_poles(ctx, palette, proj, &frame, rig, gizmo_owns);
             }
+            // couple mode: the other person's joints, a click edits them
+            self.couple_waiting_handles(ctx, palette, world, proj, gizmo_owns || self.clip.waiting_source());
             let limb_list = if self.limb_controls {
                 limbs(rig).into_iter().filter(|l| self.limb_enabled(l.end)).collect()
             } else {
@@ -1194,8 +1221,10 @@ impl Editor {
                         } else {
                             self.clip_grab_bone(joint, rig, &frame);
                         }
-                        if self.mode == Mode::Ik
-                            && self.pole.is_none()
+                        // only for the joint that leads: one added to the
+                        // selection (Shift or Ctrl + click) must not give the
+                        // selected joint its own limb's pole
+                        if self.takes_limb_pole(joint)
                             && let Some(limb) = limb
                         {
                             self.pole = Some(limb.pole(&frame));
