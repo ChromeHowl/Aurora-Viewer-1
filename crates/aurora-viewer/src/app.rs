@@ -8275,7 +8275,7 @@ impl App {
             processing: self.settings.audio.mic_processing(),
             ear: self.settings.audio.voice_ear,
             transmit,
-            release_mic_when_muted: self.settings.legacy_prefs.release_mic_when_muted,
+            stop_mic_when_muted: self.settings.legacy_prefs.release_mic_when_muted,
             avatar: (global(self.world.agent.position), self.world.agent.body_rotation()),
             listener: (global(self.camera.position), cam_rot),
             call: self.world.calls.active.as_ref().and_then(|c| c.channel.as_ref()),
