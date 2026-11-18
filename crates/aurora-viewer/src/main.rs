@@ -46,6 +46,7 @@ mod external_url;
 mod fast_hash;
 mod frame_par;
 mod frame_profile;
+mod game_control;
 mod gestures;
 mod gif_search;
 mod gpu_driver;

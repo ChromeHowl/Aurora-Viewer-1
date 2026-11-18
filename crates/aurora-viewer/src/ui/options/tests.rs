@@ -2408,3 +2408,10 @@ fn the_selected_system_font_stays_in_view() {
     }
     assert!(drawn(&texts, "Font 35"), "the list opens on the chosen font");
 }
+
+#[test]
+fn every_page_icon_is_built_in() {
+    for page in Page::ALL {
+        assert!(crate::ui::icons::embedded(page.icon()), "{page:?}: {}", page.icon());
+    }
+}
