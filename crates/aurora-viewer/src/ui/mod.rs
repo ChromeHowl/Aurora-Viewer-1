@@ -75,6 +75,7 @@ pub mod icons;
 pub mod inspect;
 pub mod interface;
 pub mod inventory;
+pub mod keyboard_focus;
 pub mod land;
 pub mod landmark_create;
 pub mod layout;
