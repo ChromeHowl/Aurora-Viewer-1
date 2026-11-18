@@ -14894,3 +14894,7 @@ joystick-linux-layout-help = Velg oppsettet til inndatadriveren hvis X og Y er b
 joystick-layout-positional = Posisjonsbasert
 joystick-layout-auto = Automatisk
 joystick-layout-xinput = XInput
+ui-options-chat-service-history = Historikk fra Chat Service
+ui-options-chat-service-history-help = Gridet tar vare på historikken for de private samtalene dine. Dette alternativet velger om Aurora laster den ned, beholder en kopi sammen med chatutskriftene dine på denne datamaskinen (bare mens direktemeldinger lagres) og viser den i samtalene. Å slå det av sletter ingenting fra gridet. Leses ved pålogging: en endring gjelder fra neste pålogging.
+chat-service-delete-failed = Noe av den lokale historikken kunne ikke slettes på en trygg måte. Historikken forblir skjult til Slett chatutskrifter lykkes.
+ui-chat-history-loading = Laster inn historikk…

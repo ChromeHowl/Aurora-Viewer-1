@@ -15258,3 +15258,7 @@ joystick-linux-layout-help = Wybierz układ sterownika wejścia, jeśli X i Y s�
 joystick-layout-positional = Pozycyjny
 joystick-layout-auto = Automatyczny
 joystick-layout-xinput = XInput
+ui-options-chat-service-history = Historia usługi czatu
+ui-options-chat-service-history-help = Serwery świata przechowują historię prywatnych rozmów. Ta opcja określa, czy Aurora ją pobiera, przechowuje jej kopię razem z transkrypcjami na tym komputerze (tylko gdy wiadomości IM są zapisywane) i pokazuje ją w rozmowach. Wyłączenie niczego nie usuwa z serwerów. Odczytywane przy logowaniu: zmiana obowiązuje od następnego logowania.
+chat-service-delete-failed = Nie udało się bezpiecznie usunąć części lokalnej historii. Historia pozostaje ukryta, dopóki „Usuń transkrypcje” się nie powiedzie.
+ui-chat-history-loading = Wczytywanie historii…

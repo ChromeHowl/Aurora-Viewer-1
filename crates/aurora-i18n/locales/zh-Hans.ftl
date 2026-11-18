@@ -16903,3 +16903,7 @@ build-ui-texture-stucco = 灰泥
 build-ui-texture-suction = 吸盘
 build-ui-texture-weave = 编织
 script-fold-line-count = { $count } 行
+ui-options-chat-service-history = 聊天服务历史记录
+ui-options-chat-service-history-help = 服务器会保存您的私聊记录。此选项决定 Aurora 是否下载该记录、将其副本保存在本机的聊天记录中（仅在开启私聊消息保存时），并在对话窗口中显示。关闭此选项不会删除服务器上的任何记录。仅在登录时读取：更改后将在下次登录时生效。
+chat-service-delete-failed = 部分本地历史记录未能安全删除。在“删除聊天记录”成功执行前，历史记录将保持隐藏状态。
+ui-chat-history-loading = 正在加载历史记录…

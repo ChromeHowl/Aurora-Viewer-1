@@ -16903,3 +16903,7 @@ script-fold-line-count =
         [one] { $count } linha
         *[other] { $count } linhas
     }
+ui-options-chat-service-history = Histórico do serviço de chat
+ui-options-chat-service-history-help = O grid mantém o histórico de conversas privadas. Esta opção permite baixá-lo, exibi-lo nas conversas e salvar uma cópia local se o registro das mensagens instantâneas estiver ativado. Desativar não apaga dados do grid. A mudança vale a partir da próxima entrada.
+chat-service-delete-failed = Parte do histórico local não pôde ser excluída com segurança. Ele continuará oculto até que Excluir históricos seja concluído.
+ui-chat-history-loading = Carregando histórico…

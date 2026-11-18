@@ -67,6 +67,10 @@ mod land_net;
 #[path = "session_offline.rs"]
 mod offline_net;
 
+/// The transport of the grid's direct IM history requests.
+#[path = "session_chat_service.rs"]
+mod chat_service_net;
+
 /// Directory search: queries, replies, event and group details (search.rs).
 #[path = "session_search.rs"]
 mod search_net;
@@ -1769,6 +1773,7 @@ impl Session<'_> {
         if self.on_object_action_command(&c)
             || self.on_social_command(&c)
             || self.on_offline_command(&c)
+            || self.on_chat_service_command(&c)
             || self.on_search_command(&c)
             || self.on_groups_command(&c)
         {
@@ -3302,6 +3307,8 @@ impl Session<'_> {
             | NetCommand::RequestOfflineMessagesLegacy
             | NetCommand::AnswerOfflineFriendship { .. }
             | NetCommand::AnswerOfflineGroupInvite { .. } => {}
+            // handled by on_chat_service_command
+            NetCommand::ChatServiceRequest { .. } => {}
             // handled by on_groups_command
             NetCommand::GroupMembersRequest { .. }
             | NetCommand::GroupRoleDataRequest { .. }

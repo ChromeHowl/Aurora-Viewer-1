@@ -16943,3 +16943,7 @@ script-fold-line-count =
         [one] { $count } Zeile
         *[other] { $count } Zeilen
     }
+ui-options-chat-service-history = Verlauf des Chatdienstes
+ui-options-chat-service-history-help = Das Grid speichert Ihren privaten Nachrichtenverlauf. Diese Option lädt ihn herunter, zeigt ihn in Unterhaltungen und speichert bei aktivierten IM-Protokollen eine lokale Kopie. Beim Ausschalten bleiben die Daten im Grid erhalten. Änderungen gelten ab der nächsten Anmeldung.
+chat-service-delete-failed = Ein Teil des lokalen Verlaufs konnte nicht sicher gelöscht werden. Der Verlauf bleibt ausgeblendet, bis die Chatprotokolle erfolgreich gelöscht wurden.
+ui-chat-history-loading = Verlauf wird geladen…

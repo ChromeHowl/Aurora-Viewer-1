@@ -14894,3 +14894,7 @@ joystick-linux-layout-help = Scegliere la disposizione del driver di input se X 
 joystick-layout-positional = Posizionale
 joystick-layout-auto = Automatica
 joystick-layout-xinput = XInput
+ui-options-chat-service-history = Cronologia del Chat Service
+ui-options-chat-service-history-help = La grid conserva la cronologia delle conversazioni private. Questa opzione stabilisce se Aurora la scarica, ne conserva una copia con le trascrizioni su questo computer (solo finché i messaggi istantanei vengono salvati) e la mostra nelle conversazioni. Disattivarla non elimina nulla dalla grid. Letta all'accesso: una modifica si applica dal prossimo accesso.
+chat-service-delete-failed = Non è stato possibile eliminare in modo sicuro parte della cronologia locale. La cronologia resta nascosta finché “Cancella trascrizioni” non riesce.
+ui-chat-history-loading = Caricamento della cronologia…

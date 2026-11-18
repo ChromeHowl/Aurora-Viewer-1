@@ -1067,7 +1067,7 @@ impl App {
             CtxAction::NewContactSet(ids) => self.contacts_ui.ask_new_set_for(ids),
             CtxAction::ShowHistory(conversation) => {
                 let (title, file) = self.world.transcript_of(conversation);
-                self.history_ui.show_file(title, file);
+                self.open_history(conversation, title, file);
             }
         }
     }

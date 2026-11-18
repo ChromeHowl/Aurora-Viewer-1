@@ -10,6 +10,7 @@ pub mod bridge;
 pub mod build;
 pub mod caps;
 mod chat_reply;
+pub mod chat_service;
 pub mod circuit;
 mod curl_url;
 pub mod currency;
