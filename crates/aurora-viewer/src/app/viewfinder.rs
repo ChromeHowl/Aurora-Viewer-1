@@ -401,15 +401,11 @@ impl App {
         }
     }
 
-    /// What the lens takes on an avatar's head, whichever way its face is
-    /// turned: the side of the head nearest the camera (the face, or the
-    /// back of the head), not the mHead bone, which sits at the base of the
-    /// skull a hand behind the face: at f/1.8 close up, the face would blur.
+    /// What the lens takes on an avatar's head: its nearer eye, or the back
+    /// of its head from behind (`vf::face_focus`).
     fn vf_head(&self, id: &uuid::Uuid, now: Instant) -> Option<glam::Vec3> {
-        // the head's middle, about where the face box is centred
-        let centre = self.scene.head_world(&self.world, id, now)? + glam::Vec3::Z * 0.09;
-        let toward = (self.camera.position - centre).normalize_or_zero();
-        Some(centre + toward * HEAD_RADIUS)
+        let face = self.scene.face_world(&self.world, id, now)?;
+        Some(vf::face_focus(self.camera.position, face.head, face.forward, face.eyes))
     }
 
     /// The name the AF frame shows over an avatar's head: its display name
@@ -1567,9 +1563,6 @@ fn digit_command(digit: u8, modes_open: bool) -> Digit {
         d => Digit::Focal(vf::FOCAL_PRESETS[usize::from(d.clamp(1, 5)) - 1]),
     }
 }
-
-/// About half a head's depth (m): from its middle to the face.
-const HEAD_RADIUS: f32 = 0.09;
 
 /// The viewfinder's sounds (`snapshot::viewfinder`).
 #[derive(Debug, Clone, Copy)]
