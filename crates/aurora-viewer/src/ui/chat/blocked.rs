@@ -64,6 +64,7 @@ mod tests {
             source: uuid::Uuid::from_u128(7),
             origin: Origin::Live,
             blocked: false,
+            speaker: Default::default(),
         };
         assert_eq!(alpha(&line), 1.0);
         line.blocked = true;

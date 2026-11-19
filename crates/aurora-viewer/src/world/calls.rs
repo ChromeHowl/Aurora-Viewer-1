@@ -932,6 +932,7 @@ impl World {
                 source: Uuid::nil(),
                 origin: Origin::Live,
                 blocked: false,
+                speaker: Default::default(),
             },
             true,
         );

@@ -1467,6 +1467,7 @@ mod tests {
             source: uuid::Uuid::nil(),
             origin: Origin::Live,
             blocked: false,
+            speaker: Default::default(),
         };
         let mut pv = Previews::default();
         let visible = |pv: &Previews, line: &ChatLine| text(Some(pv), line, &line.text, 320.0).into_owned();
@@ -1555,6 +1556,7 @@ mod tests {
             source: uuid::Uuid::nil(),
             origin: Origin::Live,
             blocked: false,
+            speaker: Default::default(),
         };
         assert_eq!(text(Some(&pv), &line, &line.text, 340.0), urls[3]);
         assert_eq!(

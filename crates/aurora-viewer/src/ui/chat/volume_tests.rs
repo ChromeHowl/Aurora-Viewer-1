@@ -44,6 +44,7 @@ fn volume_emphasis_reaches_conversations_toasts_links_emoji_and_search() {
                         source: uuid::Uuid::from_u128(7),
                         origin: Origin::Live,
                         blocked: false,
+                        speaker: Default::default(),
                     };
                     world.chat.clear();
                     world.chat.push_back(line.clone());
@@ -159,6 +160,7 @@ fn object_volume_changes_start_a_new_console_card() {
         source: uuid::Uuid::from_u128(7),
         origin: Origin::Live,
         blocked: false,
+        speaker: Default::default(),
     };
     let lines = [line(ChatType::Normal), line(ChatType::Whisper), line(ChatType::Shout)];
     assert_eq!(console::groups(&lines.iter().collect::<Vec<_>>()).len(), 3);

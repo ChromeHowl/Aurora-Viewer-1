@@ -132,7 +132,7 @@ fn system_pill(ui: &mut egui::Ui, env: &mut LineEnv, line: &crate::world::ChatLi
                         p,
                         env.emoji,
                         world,
-                        line.kind.text_in(env.names),
+                        line.wording(env.names),
                         env.want_names,
                         &text,
                         chat_size(ui.ctx(), 12.0),
@@ -195,10 +195,10 @@ pub(super) fn draw(ui: &mut egui::Ui, env: &mut LineEnv, line: &crate::world::Ch
     let tone = if env.plain_history { None } else { history_tone(p, line.origin) };
     let own = line.kind.is_own();
     let object = matches!(line.kind, ChatKind::Object(_) | ChatKind::ObjectIm);
-    let name = super::sender_name(world, env.names, env.own_name, line);
+    let name = super::sender_name(world, env.own_name, line);
     // a history line's sender is known when its name was cached
     // (world/transcripts.rs): its picture shows, dimmed
-    let avatar = if object {
+    let avatar = if object || line.anonymous() {
         uuid::Uuid::nil()
     } else if own {
         world.agent_id
@@ -262,7 +262,7 @@ pub(super) fn draw(ui: &mut egui::Ui, env: &mut LineEnv, line: &crate::world::Ch
 
     // the text: an emote is the name in italics, a shout or a whisper says so
     let (text, italics) = super::line_body(line, &name);
-    let text = world.rlva_filter_text_in(line.kind.text_in(env.names), &text).into_owned();
+    let text = world.rlva_filter_text_in(line.wording(env.names), &text).into_owned();
     let visible = super::previews::text(env.previews.as_deref(), line, &text, max_bubble - 20.0);
     let text_color = match (own, tone) {
         (true, None) => p.on_accent,
@@ -305,7 +305,7 @@ pub(super) fn draw(ui: &mut egui::Ui, env: &mut LineEnv, line: &crate::world::Ch
                         p,
                         env.emoji,
                         world,
-                        line.kind.text_in(env.names),
+                        line.wording(env.names),
                         env.want_names,
                         &visible,
                         size,
@@ -449,6 +449,7 @@ mod tests {
             source: uuid::Uuid::from_u128(1),
             origin: Origin::Live,
             blocked: false,
+            speaker: Default::default(),
         };
         let day = 86_400;
         // yesterday's two lines, then today's
@@ -497,6 +498,7 @@ mod tests {
             source: uuid::Uuid::from_u128(7),
             origin: Origin::Live,
             blocked: false,
+            speaker: Default::default(),
         };
         let mut list_top = 0.0;
         let mut output = ctx.run_ui(

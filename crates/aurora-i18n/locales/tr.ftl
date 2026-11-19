@@ -14915,3 +14915,5 @@ ui-options-chat-service-history = Sohbet Hizmeti geçmişi
 ui-options-chat-service-history-help = Grid, özel sohbetlerinizin geçmişini tutar. Bu seçenek, Aurora'nın onu indirip indirmeyeceğini, bu bilgisayarda dökümlerinizle birlikte bir kopyasını saklayıp saklamayacağını (yalnızca anlık iletiler kaydedilirken) ve sohbetlerde gösterip göstermeyeceğini belirler. Kapatmak gridden hiçbir şey silmez. Oturum açılırken okunur: değişiklik bir sonraki oturum açışta geçerli olur.
 chat-service-delete-failed = Bazı yerel geçmişler güvenle silinemedi. “Dökümleri Sil” başarılı olana kadar geçmiş gizli kalır.
 ui-chat-history-loading = Geçmiş yükleniyor…
+world-inventory-offers-sent-anonymous = { "Envanter öğesi şu kişiye teklif edildi: " }{ $name }
+rlva-tools-child = alt

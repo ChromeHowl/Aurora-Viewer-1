@@ -14874,3 +14874,5 @@ ui-options-chat-service-history = 聊天服務歷史記錄
 ui-options-chat-service-history-help = 伺服器會儲存您的私聊記錄。此選項決定 Aurora 是否下載該記錄、將其副本儲存在本機的聊天記錄中（僅在開啟私聊訊息儲存時），並在對話視窗中顯示。關閉此選項不會刪除伺服器上的任何記錄。僅在登入時讀取：更改後將在下次登入時生效。
 chat-service-delete-failed = 部分本地歷史記錄未能安全刪除。在“刪除聊天記錄”成功執行前，歷史記錄將保持隱藏狀態。
 ui-chat-history-loading = 正在載入歷史記錄…
+world-inventory-offers-sent-anonymous = 已向 { $name } 傳送物品贈送請求
+rlva-tools-child = 子元素

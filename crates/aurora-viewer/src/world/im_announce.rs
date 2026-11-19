@@ -52,6 +52,7 @@ impl World {
             source: Uuid::nil(),
             origin: Origin::Live,
             blocked: false,
+            speaker: Default::default(),
         };
         log::info!("incoming IM announced (the sender started typing)");
         self.conversation_card(from, line);

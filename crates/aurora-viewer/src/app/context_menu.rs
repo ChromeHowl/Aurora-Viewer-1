@@ -115,6 +115,10 @@ impl App {
         let particle_only = surface.is_none();
         let (object, point) = surface.or_else(|| particles.first().map(|p| (None, p.point)))?;
         self.object_menu_pick(object, ray, particles, particle_only);
+        self.object_menu.near = object
+            .filter(|_| point.is_finite() && point.distance(self.world.agent.position) <= 1.5)
+            .and_then(|idx| self.world.objects.get(linkset_root(&self.world, idx)))
+            .map(|root| root.key);
         Some((object, point))
     }
 
@@ -148,6 +152,11 @@ impl App {
         // Shift or Ctrl alone adds to the selection or takes out of it
         // (LLToolPie::handleRightClickPick, the click's mask)
         let extend = crate::build::BuildTool::menu_extends(self.shift, self.ctrl, self.alt);
+        // (the surface clicked is within 1.5 m: `ObjectMenu::near`)
+        let near_root = self.object_menu.near;
+        let near = |world: &World, idx: usize| {
+            near_root.is_some() && world.objects.get(linkset_root(world, idx)).map(|root| root.key) == near_root
+        };
         let me = self.world.agent_id;
         let target = match picked.and_then(|i| self.world.objects.get(i).map(|o| (i, o))) {
             Some((_, o)) if o.is_avatar() => Target::Avatar {
@@ -159,7 +168,15 @@ impl App {
                 let (key, full_id) = (o.key, o.full_id);
                 match ui::context::wearer(&self.world, idx) {
                     Some(w) if w == me => {
-                        self.build.select_for_menu_with(&mut self.world, &self.settings.build, idx, extend);
+                        let near = near(&self.world, idx);
+                        if self.build.open
+                            && crate::build::menu_selectable(&self.world, idx, near)
+                            && crate::build::BuildTool::menu_only(&self.world, idx)
+                        {
+                            self.build.close(&mut self.world, &mut self.settings.build);
+                        }
+                        self.build
+                            .select_for_menu_near(&mut self.world, &self.settings.build, idx, extend, near);
                         self.flush_build();
                         Target::Attachment { key }
                     }
@@ -176,7 +193,15 @@ impl App {
                             super::object_actions::object_sit_offset(&self.world, &self.camera, idx, point, ray).unwrap_or(Vec3::ZERO);
                         // selected and outlined while the menu is open
                         // (LLToolSelect::handleObjectSelection, temp_select)
-                        self.build.select_for_menu_with(&mut self.world, &self.settings.build, idx, extend);
+                        let near = near(&self.world, idx);
+                        if self.build.open
+                            && crate::build::menu_selectable(&self.world, idx, near)
+                            && crate::build::BuildTool::menu_only(&self.world, idx)
+                        {
+                            self.build.close(&mut self.world, &mut self.settings.build);
+                        }
+                        self.build
+                            .select_for_menu_near(&mut self.world, &self.settings.build, idx, extend, near);
                         self.flush_build();
                         if let Some(bounds) = self.build.bounds(&self.world, Instant::now()) {
                             self.turn_to_selection(idx, bounds.center);
@@ -290,6 +315,7 @@ impl App {
                 f.contact_sets = w.contact_sets.set_names();
                 f.im_blocked = !w.rlva_can_start_im(*id);
                 f.name_hidden = !w.rlva_can_name(*id);
+                f.names_hidden = w.rlva.has("shownames");
                 f.pay_blocked = !w.rlva_can_pay() || !w.rlva_can_name(*id);
                 // the friendship itself: no offer to a hidden friend
                 f.friend = w.social.is_friend(id);
@@ -358,7 +384,10 @@ impl App {
             for_sale,
         );
         f.open = interaction::allow_open(w, idx);
-        f.edit = crate::build::selectable(w, idx);
+        // (handle_object_edit: the tools open on the menu's selection, and
+        // drop it at once when @fartouch finds the object too far)
+        f.edit = crate::build::selectable_within(w, idx)
+            && (w.rlva_within_fartouch(idx) || w.objects.get(root).is_some_and(|r| self.object_menu.near == Some(r.key)));
         f.id = o.full_id;
         f.attachment_item = w.objects.get(root).and_then(|o| o.attachment_item_id());
         f.blocked = w.object_block_entry(&o.full_id).is_some();
@@ -840,13 +869,11 @@ impl App {
             CtxAction::ReloadAvatar(id) => self.reload_avatar(id),
             CtxAction::Take(id) | CtxAction::TakeCopy(id) => {
                 let copy = matches!(act, CtxAction::TakeCopy(_));
-                if let Some(idx) = self.world.objects.index_of_uuid(&id) {
-                    self.build.click_select(&mut self.world, &self.settings.build, Some(idx), false);
+                if let Some(idx) = self.world.objects.index_of_uuid(&id)
+                    && self.build.select_for_action(&mut self.world, &self.settings.build, idx)
+                {
                     self.build.take(&mut self.world, copy);
-                    if !self.build.open {
-                        self.build.deselect_all(&self.world);
-                    }
-                    self.flush_build();
+                    self.release_action_selection();
                 }
             }
             CtxAction::Delete(id) => {
@@ -868,8 +895,9 @@ impl App {
                 }
             }
             CtxAction::DeleteConfirmed(id) => {
-                if let Some(idx) = self.world.objects.index_of_uuid(&id) {
-                    self.build.click_select(&mut self.world, &self.settings.build, Some(idx), false);
+                if let Some(idx) = self.world.objects.index_of_uuid(&id)
+                    && self.build.select_for_action(&mut self.world, &self.settings.build, idx)
+                {
                     self.build.delete(&mut self.world);
                     self.flush_build();
                 }
@@ -888,13 +916,11 @@ impl App {
                 }
             }
             CtxAction::Unlink(id) => {
-                if let Some(idx) = self.world.objects.index_of_uuid(&id) {
-                    self.build.click_select(&mut self.world, &self.settings.build, Some(idx), false);
+                if let Some(idx) = self.world.objects.index_of_uuid(&id)
+                    && self.build.select_for_action(&mut self.world, &self.settings.build, idx)
+                {
                     self.build.unlink(&mut self.world);
-                    if !self.build.open {
-                        self.build.deselect_all(&self.world);
-                    }
-                    self.flush_build();
+                    self.release_action_selection();
                 }
             }
             CtxAction::SaveToObjectContents => {
@@ -1054,9 +1080,17 @@ impl App {
                 self.contacts_ui.ask_teleport_offer(ids, &self.world.rlva_region_label());
             }
             CtxAction::RequestTeleport(id) => self.contacts_ui.ask_teleport_request(id, self.world.status.cfg.reject_teleports),
-            CtxAction::ActivateGroup(id) => self.send(NetCommand::ActivateGroup(id)),
+            CtxAction::ActivateGroup(id) => {
+                if self.world.rlva_can_change_group() {
+                    self.send(NetCommand::ActivateGroup(id));
+                }
+            }
             CtxAction::PinGroup(id) => self.world.groups.toggle_favorite(id),
-            CtxAction::LeaveGroup(id) => self.contacts_ui.ask_leave_group(id),
+            CtxAction::LeaveGroup(id) => {
+                if self.world.rlva_can_leave_group(id) {
+                    self.contacts_ui.ask_leave_group(id);
+                }
+            }
             CtxAction::GroupChat(id) => {
                 self.world.ui_sounds.push(UiSound::StartIm);
                 self.world.start_group_chat(id, true);

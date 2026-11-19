@@ -169,6 +169,7 @@ impl World {
             source: c.source_id,
             origin: super::Origin::Live,
             blocked: true,
+            speaker: Default::default(),
         });
     }
 

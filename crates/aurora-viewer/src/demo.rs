@@ -1654,6 +1654,7 @@ pub fn bubbles_lines(world: &mut crate::world::World, view: Bubbles) {
         source,
         origin: Origin::Live,
         blocked: false,
+        speaker: Default::default(),
     };
     match view {
         Bubbles::Friend | Bubbles::Legacy => {
@@ -1892,6 +1893,7 @@ pub fn conv_scroll_lines(world: &mut crate::world::World) {
             source,
             origin: Origin::Live,
             blocked: false,
+            speaker: Default::default(),
         };
         world.conversation_line(DEMO_FRIEND, line);
     }
@@ -1914,6 +1916,7 @@ pub fn conv_scroll_new(world: &mut crate::world::World, scrolled: bool) {
             source: DEMO_FRIEND,
             origin: crate::world::Origin::Live,
             blocked: false,
+            speaker: Default::default(),
         };
         world.conversation_line(DEMO_FRIEND, line);
     }
@@ -2076,6 +2079,7 @@ pub fn aurora_lines(world: &mut crate::world::World, scene: AuroraScene) {
         source,
         origin: Origin::Live,
         blocked: false,
+        speaker: Default::default(),
     };
     let names = |id: Uuid| world_name(id);
     let group = [

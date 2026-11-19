@@ -241,6 +241,8 @@ impl World {
         let from = match line.kind {
             ChatKind::System => String::new(),
             ChatKind::Own(_) => names.complete(&self.agent_id).unwrap_or_else(|| line.from.clone()),
+            // the stand-in the line keeps (`ChatLine::anonymous`)
+            ChatKind::Local(_) if line.anonymous() => line.from.clone(),
             ChatKind::Local(_) | ChatKind::Im if !line.source.is_nil() && line.origin != Origin::Copy => {
                 names.complete_in(scope, &line.source).unwrap_or_else(|| line.from.clone())
             }
@@ -252,7 +254,9 @@ impl World {
             Some(ChatType::Whisper) => "whispers: ",
             _ => "",
         };
-        let text = format::encode_mentions(&line.text, |id| self.social.name_in(scope, &id));
+        // (a mention `@shownames` hides is no link any more:
+        // `World::rlva_freeze_mentions`)
+        let text = format::encode_mentions(&line.text, |id| self.social.name_in(NameScope::Roster, &id));
         (
             self.rlva_filter_text_in(scope, &from).into_owned(),
             self.rlva_filter_text_in(line.kind.text_in(scope), &format!("{verb}{text}"))
@@ -262,7 +266,8 @@ impl World {
 
     /// A line enters a conversation: written to its transcript (new lines,
     /// when instant messages are logged), kept in memory within `MAX_CHAT`.
-    pub(super) fn conversation_push(&mut self, session: Uuid, line: ChatLine, unread: bool) {
+    pub(super) fn conversation_push(&mut self, session: Uuid, mut line: ChatLine, unread: bool) {
+        self.rlva_freeze_line(NameScope::Roster, &mut line);
         self.session_lines(session);
         self.ensure_transcript(session);
         // LLConversationLog::onNewMessageReceived
@@ -316,7 +321,8 @@ impl World {
     }
 
     /// A line enters the nearby chat (same bound).
-    pub(super) fn nearby_push(&mut self, line: ChatLine) {
+    pub(super) fn nearby_push(&mut self, mut line: ChatLine) {
+        self.rlva_freeze_line(NameScope::World, &mut line);
         self.log_nearby(&line);
         self.chat.push_back(line);
         self.chat_clock.pushed_back();
@@ -598,6 +604,7 @@ impl World {
                     source,
                     origin: Origin::Log,
                     blocked: false,
+                    speaker: Default::default(),
                 }
             })
             .collect()
@@ -704,6 +711,7 @@ impl World {
                     source: if mine { Uuid::nil() } else { h.from_id },
                     origin: Origin::ServerLog,
                     blocked: false,
+                    speaker: Default::default(),
                 }
             })
             .collect();
@@ -954,6 +962,7 @@ mod tests {
             source: Uuid::from_u128(2),
             origin: Origin::Live,
             blocked: false,
+            speaker: Default::default(),
         });
         // ours, as the simulator echoes it, keeps its volume and its verb
         // (#1323)

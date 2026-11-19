@@ -14975,3 +14975,5 @@ ui-options-chat-service-history = Historial del servicio de chat
 ui-options-chat-service-history-help = La red guarda el historial de sus conversaciones privadas. Esta opción elige si Aurora lo descarga, guarda una copia con sus transcripciones en este equipo (solo mientras se guardan los mensajes instantáneos) y lo muestra en las conversaciones. Desactivarla no borra nada de la red. Se lee al iniciar sesión: un cambio se aplica a partir del siguiente inicio de sesión.
 chat-service-delete-failed = Parte del historial local no se pudo eliminar de forma segura. El historial permanece oculto hasta que «Eliminar transcripciones» se complete con éxito.
 ui-chat-history-loading = Cargando historial…
+world-inventory-offers-sent-anonymous = { "Ítem de inventario ofrecido a " }{ $name }
+rlva-tools-child = hijo

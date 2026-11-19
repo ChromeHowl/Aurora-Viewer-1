@@ -298,6 +298,9 @@ fn item_row(
     item: &TaskItem,
     editable: bool,
 ) {
+    // the seat held by RLVa takes nothing in and lets nothing out, but its
+    // items keep their names and their scripts their switch
+    let items_editable = editable || tool.contents_items_editable(world, idx);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
         widgets::inventory_spacing(ui);
@@ -393,7 +396,7 @@ fn item_row(
                 p,
                 "pencil-filled",
                 aurora_i18n::tr!("common-rename"),
-                editable && item_modify && tool.ui.contents_selection.items.len() == 1,
+                items_editable && item_modify && tool.ui.contents_selection.items.len() == 1,
             ) {
                 contents_selection::begin_rename(tool, world, object_id, item.item_id);
             }
@@ -423,7 +426,7 @@ fn item_row(
                 } else {
                     ("player-play-filled", aurora_i18n::tr!("build-ui-contents-run"))
                 };
-                if menu::item_if(ui, p, icon, label, editable) {
+                if menu::item_if(ui, p, icon, label, items_editable) {
                     tool.set_script_running(world, idx, item.item_id, !on);
                 }
             }
@@ -436,7 +439,7 @@ fn item_row(
                 });
             } else if item.asset_type == 7 || preview {
                 tool.ui.open_notecard = Some((object_id, item.item_id));
-            } else if editable && item_modify {
+            } else if items_editable && item_modify {
                 contents_selection::begin_rename(tool, world, object_id, item.item_id);
             }
         }

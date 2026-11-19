@@ -14898,3 +14898,5 @@ ui-options-chat-service-history = Cronologia del Chat Service
 ui-options-chat-service-history-help = La grid conserva la cronologia delle conversazioni private. Questa opzione stabilisce se Aurora la scarica, ne conserva una copia con le trascrizioni su questo computer (solo finché i messaggi istantanei vengono salvati) e la mostra nelle conversazioni. Disattivarla non elimina nulla dalla grid. Letta all'accesso: una modifica si applica dal prossimo accesso.
 chat-service-delete-failed = Non è stato possibile eliminare in modo sicuro parte della cronologia locale. La cronologia resta nascosta finché “Cancella trascrizioni” non riesce.
 ui-chat-history-loading = Caricamento della cronologia…
+world-inventory-offers-sent-anonymous = { "Oggetto dell'inventario offerto a " }{ $name }
+rlva-tools-child = prim figlio

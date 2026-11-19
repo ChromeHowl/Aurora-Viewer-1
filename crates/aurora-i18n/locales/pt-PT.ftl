@@ -14957,3 +14957,5 @@ ui-options-chat-service-history = Histórico do Chat Service
 ui-options-chat-service-history-help = O grid guarda o histórico das suas conversas privadas. Esta opção escolhe se o Aurora o transfere, guarda uma cópia com as suas transcrições neste computador (só enquanto as mensagens instantâneas forem guardadas) e o mostra nas conversas. Desativá-la não elimina nada do grid. Lida ao iniciar sessão: uma alteração aplica-se a partir do próximo início de sessão.
 chat-service-delete-failed = Não foi possível eliminar em segurança parte do histórico local. O histórico fica oculto até «Eliminar transcrições» ser concluído com êxito.
 ui-chat-history-loading = A carregar o histórico…
+world-inventory-offers-sent-anonymous = { "Item de inventário oferecido a " }{ $name }
+rlva-tools-child = filho
