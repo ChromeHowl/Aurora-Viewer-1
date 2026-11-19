@@ -1,6 +1,6 @@
 //! Real-joint selection and manipulation. No project, binding or virtual-node pass.
 use super::*;
-use crate::ik_edit::segments::{self, Source};
+use crate::ik_edit::segments;
 
 /// A joint marker's square, in points.
 const MARKER_SIZE: f32 = 12.0;
@@ -397,7 +397,7 @@ impl Editor {
         let Some(segment) = segments::pick(&segments, pointer) else {
             return;
         };
-        let Source::Bone(bone) = segment.source else { return };
+        let bone = segment.bone;
         // From the geometry: the shaft's area only exists once hovered.
         self.poser.pointer_owned = true;
         self.poser.marker_hover = true;
