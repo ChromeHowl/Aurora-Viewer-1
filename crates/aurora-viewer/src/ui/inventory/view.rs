@@ -1505,12 +1505,24 @@ fn compare(a: &Entry, b: &Entry, sort: Sort) -> Ordering {
     if a.group == 4 || b.group == 4 {
         return a.group.cmp(&b.group).then_with(|| a.id.cmp(&b.id));
     }
+    // LLInventorySort::operator() (indra/newview/llfolderviewmodelinventory.cpp):
+    // with System folders first, the groups are system folders, Trash,
+    // ordinary folders, items; without it, by date only the Trash goes to
+    // the bottom, and by name nothing is grouped, so folders and items mix
+    // alphabetically. Folders always by name without System folders first:
+    // the Legacy Viewer tests only the first entry's kind there, which is not
+    // a consistent order; here the folders stay above the items.
     let groups = if sort.system_first {
         a.group.cmp(&b.group)
-    } else if sort.by_date && !sort.folders_by_name {
-        (a.group == 1).cmp(&(b.group == 1))
+    } else if sort.by_date {
+        let trash = (a.group == 1).cmp(&(b.group == 1));
+        if sort.folders_by_name {
+            trash.then_with(|| b.folder.cmp(&a.folder))
+        } else {
+            trash
+        }
     } else {
-        b.folder.cmp(&a.folder)
+        Ordering::Equal
     };
     let by_name = !sort.by_date || (sort.folders_by_name && a.folder && b.folder);
     groups
@@ -2038,6 +2050,38 @@ mod tests {
         for support in [30, 31, 32] {
             assert!(position(&list, 2) < position(&list, support), "no pin above newer contents");
         }
+    }
+
+    #[test]
+    fn by_name_without_system_folders_first_mixes_folders_and_items_like_the_legacy_viewer() {
+        let (mut inv, _) = fixture();
+        let root = inv.root;
+        folder(&mut inv, 40, root, -1, "C folder");
+        inv.add_items(vec![item(41, root, "B item", 100)]);
+        let order = |sort: Sort| {
+            let prefs = InventoryPreferences {
+                sort,
+                ..Default::default()
+            };
+            let mut cache = ViewCache::default();
+            cache.prepare(&inv, sort);
+            cache
+                .children(inv.root, &prefs, inv.lib_root)
+                .into_iter()
+                .filter(|entry| [id(2), id(40), id(41)].contains(entry))
+                .collect::<Vec<_>>()
+        };
+        let mixed = Sort {
+            by_date: false,
+            folders_by_name: false,
+            system_first: false,
+        };
+        assert_eq!(order(mixed), [id(2), id(41), id(40)], "A folder, B item, C folder");
+        let grouped = Sort {
+            system_first: true,
+            ..mixed
+        };
+        assert_eq!(order(grouped), [id(2), id(40), id(41)], "folders, then items");
     }
 
     #[test]
