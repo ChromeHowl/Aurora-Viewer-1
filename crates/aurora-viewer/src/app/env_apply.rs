@@ -231,7 +231,7 @@ impl App {
         }
         for action in actions {
             match action {
-                EnvAction::Pick(kind, asset) => self.pick_local_settings(asset, kind, None),
+                EnvAction::Pick(kind, asset) => self.world.eep.request_local(asset, kind),
                 EnvAction::Shared => {
                     self.world.eep.clear_local();
                     self.panels.time_of_day = 0;
@@ -253,72 +253,6 @@ impl App {
                 }
             }
         }
-    }
-
-    /// A sky, water or day for myself (`EnvSelector::request_local`), with
-    /// the name of the inventory item holding it: its Aurora Weather code,
-    /// typed there by hand, is not in its asset. `item`: the one picked (the
-    /// inventory's); without it (the Environment window's catalog, which
-    /// lists assets), an item holding that asset, the first found.
-    pub(super) fn pick_local_settings(
-        &mut self,
-        asset: uuid::Uuid,
-        kind: crate::world::env_select::SettingsKind,
-        item: Option<uuid::Uuid>,
-    ) {
-        let inv = &self.world.inventory;
-        let held = match item {
-            Some(id) => inv.items.get(&id).filter(|it| it.asset_id == asset),
-            None => inv.items.values().find(|it| it.asset_id == asset),
-        };
-        if let Some(it) = held {
-            self.world.eep.note_item_name(asset, &it.name);
-        }
-        self.world.eep.request_local(asset, kind);
-    }
-
-    /// The grid the environments saved for parcels are kept under.
-    fn parcel_grid(&self) -> String {
-        crate::world::chat_log::grid_name(&self.settings.grid, &self.settings.custom_login_uri, self.demo)
-    }
-
-    /// The environments saved for parcels, each frame.
-    pub(super) fn parcel_environment_frame(&mut self) {
-        use crate::ui::environment::ParcelChoice;
-        use crate::world::parcel_env::Outcome;
-        let grid = self.parcel_grid();
-        let (outcome, ask) = self
-            .world
-            .parcel_environment_frame(&self.settings.parcel_environments, &grid, std::time::Instant::now());
-        if let Some(ask) = ask {
-            self.send(ask);
-        }
-        match outcome {
-            Outcome::Nothing => {}
-            Outcome::Saved(entry) => {
-                log::info!("environment saved for parcel {}", entry.parcel);
-                crate::world::parcel_env::store(&mut self.settings.parcel_environments, entry);
-                self.settings.save();
-            }
-            Outcome::NotSaved => self.env_alert(
-                aurora_i18n::tr!("common-environment"),
-                aurora_i18n::tr!("parcel-environment-not-saved"),
-            ),
-            Outcome::Left => self.env_alert(aurora_i18n::tr!("common-environment"), aurora_i18n::tr!("parcel-environment-left")),
-        }
-        let saved_here = self
-            .world
-            .parcel_env
-            .saved_here(&self.settings.parcel_environments, &grid)
-            .is_some();
-        let savable = self.world.parcel.is_some() && (self.world.eep.has_local() || self.panels.time_of_day != 0);
-        self.env_ui.parcel_choice = if saved_here && !(savable && self.world.parcel_environment_changed()) {
-            ParcelChoice::Saved
-        } else if savable {
-            ParcelChoice::Save
-        } else {
-            ParcelChoice::Nothing
-        };
     }
 
     /// The sunbeacon / moonbeacon settings, saved when changed.
