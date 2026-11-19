@@ -718,10 +718,6 @@ pub struct App {
     particle_inject: particle_editor::Inject,
     portal_drop: Option<portals::landmark::Pending>,
     portal_journey: Option<portals::Journey>,
-    /// A non-friend portal's first crossing waits for this question.
-    portal_ask: Option<ui::portals::CrossingAsk>,
-    /// A peer contains a full World; keep it off the Windows startup stack.
-    portal_demo_peer: Option<Box<portals::demo::Peer>>,
     follow_recovery: Option<follow::Recovery>,
     /// The control flags the walk asks for this frame.
     autopilot_flags: u32,
@@ -2253,8 +2249,6 @@ impl App {
             particle_inject: Default::default(),
             portal_drop: None,
             portal_journey: None,
-            portal_ask: None,
-            portal_demo_peer: None,
             follow_recovery: None,
             report_abuse: Default::default(),
             dof_focus: Default::default(),
@@ -3794,8 +3788,6 @@ impl App {
         self.particle_inject = Default::default();
         self.portal_drop = None;
         self.portal_journey = None;
-        self.portal_ask = None;
-        self.portal_demo_peer = None;
         // its teleport belongs to the session that held it
         self.suitcase_ask = None;
         self.follow_recovery = None;
@@ -3970,11 +3962,10 @@ impl App {
         }
         if let NetEvent::BridgeQueryReply { request, result } = ev {
             let _ = self.sync_bridge_queries();
-            if self.bridge_services.owns(request) || self.world.portals.owns(request) {
+            if self.bridge_services.owns(request) {
                 let error = result.as_ref().err().map(String::as_str);
                 self.bridge_runtime.query_reply(&self.world, error, Instant::now());
             }
-            self.world.portals.reply(request, &result, Instant::now());
             if let Some(message) = self.bridge_services.reply(request, result, Instant::now()) {
                 self.world.system_message(message);
             }
@@ -11482,7 +11473,6 @@ impl App {
             };
             self.world.pokes.enabled = self.settings.pokes;
             self.world.group_titles = self.settings.group_titles;
-            self.world.portal_sources = self.portal_sources();
             self.world.show_back_slurl = self.settings.show_back_slurl;
             self.world.fly_after_teleport = self.settings.fly_after_teleport && !(self.demo && crate::demo::friend_join_flight_scenario());
             self.world.hud_scale_factor = self.settings.legacy_prefs.hud_scale;
@@ -20972,7 +20962,6 @@ impl App {
                 {
                     self.answer_suitcase(ask, yes);
                 }
-                self.portal_crossing_question(&ctx, &p);
                 if let Some(failure) = self.world.tp_failure.as_ref() {
                     let said = crate::world::teleport_failure::text(&failure.code, &failure.reason, &failure.region);
                     let hint = crate::world::teleport_failure::hint(&failure.reason, self.teleport_failure_grid());
