@@ -280,7 +280,7 @@ fn person(
     c.want_names.insert(id);
     let known = world.social.avatar_names.complete(&id);
     let name = known.unwrap_or_else(|| row_name.to_owned());
-    let gear = |ui: &mut egui::Ui| context::avatar_list_menu(ui, p, world, id, context::AvatarList::Name);
+    let gear = |ui: &mut egui::Ui| context::avatar_roster_menu(ui, p, world, id, context::AvatarList::Search);
     let block = if blocked {
         aurora_i18n::tr!("common-unblock")
     } else {
