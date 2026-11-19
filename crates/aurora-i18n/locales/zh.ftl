@@ -17353,3 +17353,4 @@ director-title-color = 颜色
 director-title-color-tip = 标题的颜色。
 director-title-fade = 淡入淡出
 director-title-fade-tip = 出现与消失所用的秒数（0：立即）。
+update-error-protected = Aurora 无法在此处替换自身：此文件夹属于沙盒软件包（Flatpak、Snap、AppImage），或你的账户无权写入。请按其安装方式更新，或从发布页面下载新版本。

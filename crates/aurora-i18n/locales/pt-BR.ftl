@@ -17348,3 +17348,4 @@ director-title-color = Cor
 director-title-color-tip = A cor do título.
 director-title-fade = Fade
 director-title-fade-tip = Segundos para aparecer e sumir (0: de uma vez).
+update-error-protected = O Aurora não consegue se substituir aqui: esta pasta pertence a um pacote em sandbox (Flatpak, Snap, AppImage) ou sua conta não pode gravar nela. Atualize-o da forma como foi instalado, ou baixe a nova versão na página dela.

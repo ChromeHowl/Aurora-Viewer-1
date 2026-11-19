@@ -17388,3 +17388,4 @@ director-title-color = Farbe
 director-title-color-tip = Die Farbe des Titels.
 director-title-fade = Überblendung
 director-title-fade-tip = Sekunden zum Erscheinen und Verschwinden (0: sofort).
+update-error-protected = Aurora kann sich hier nicht selbst ersetzen: Dieser Ordner gehört zu einem Sandbox-Paket (Flatpak, Snap, AppImage), oder dein Konto darf nicht darin schreiben. Aktualisiere es auf dem Weg, auf dem es installiert wurde, oder lade die neue Version von ihrer Seite herunter.
