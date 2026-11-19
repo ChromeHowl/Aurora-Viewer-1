@@ -1987,7 +1987,15 @@ mod tests {
                         flat.sort_by_key(|id| order.rank(*id));
                         assert_eq!(flat, expected);
                     }
-                    assert_eq!(order.children(root).first(), Some(&id(30)));
+                    // #Aurora is a system folder, not a pin: first unless the
+                    // sort is by date alone, where the folder with the newest
+                    // contents (id 2) leads, as in the Legacy Viewer
+                    let first = if by_date && !folders_by_name && !system_first {
+                        id(2)
+                    } else {
+                        id(30)
+                    };
+                    assert_eq!(order.children(root).first(), Some(&first), "{sort:?}");
                     assert_eq!(order.children(root).last(), Some(&inv.lib_root));
                     assert!(order.rank(id(15)) < order.rank(id(16)), "Library stays after personal items");
                     assert_eq!(order.rank(id(14)) < order.rank(id(15)), by_date);
