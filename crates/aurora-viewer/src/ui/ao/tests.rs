@@ -10,7 +10,6 @@ struct Fixture {
     state: AoUi,
     movement: super::super::movement::MovementUi,
     movement_prefs: crate::movement::Preferences,
-    water_volumes: crate::movement::water_volume::Settings,
     keys: crate::keybinds::KeyBindings,
     quick: Option<quick::Quick>,
     manager_open: bool,
@@ -38,7 +37,6 @@ impl Fixture {
             state: AoUi::default(),
             movement: Default::default(),
             movement_prefs: Default::default(),
-            water_volumes: Default::default(),
             keys: Default::default(),
             quick: None,
             manager_open: true,
@@ -96,7 +94,6 @@ impl Fixture {
                 &mut self.manager_open,
                 &mut self.movement,
                 &mut self.movement_prefs,
-                &mut self.water_volumes,
                 &self.keys,
                 "",
             ));
@@ -456,7 +453,6 @@ fn ao_manager_keeps_its_size_across_frames() {
                 &mut f.manager_open,
                 &mut f.movement,
                 &mut f.movement_prefs,
-                &mut f.water_volumes,
                 &f.keys,
                 "",
             );
