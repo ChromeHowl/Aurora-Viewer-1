@@ -578,7 +578,13 @@ pub(super) fn card(
                 } else {
                     ui.horizontal(|ui| {
                         ui.add_space(indent);
-                        super::chat::text_with_links(ui, p, world, &shown, &n.name_links, 12.0, p.muted);
+                        if matches!(n.data, Data::GroupNotice { .. }) {
+                            super::chat::select::document(ui, p, n.id, &shown, |ui, line| {
+                                super::chat::text_with_links(ui, p, world, line, &n.name_links, 12.0, p.muted);
+                            });
+                        } else {
+                            super::chat::text_with_links(ui, p, world, &shown, &n.name_links, 12.0, p.muted);
+                        }
                     });
                 }
             }
