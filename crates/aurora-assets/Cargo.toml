@@ -10,6 +10,7 @@ publish.workspace = true
 crossbeam-channel = "0.5.17"
 base64 = "0.23.1"
 flate2 = "1.1.10"
+zopfli = { version = "0.8.4", default-features = false, features = ["std", "zlib"] }
 glam = "0.34.1"
 image = { version = "0.25.10", default-features = false, features = ["png", "tga", "jpeg", "bmp"] }
 log = "0.4.34"

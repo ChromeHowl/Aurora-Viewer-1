@@ -18,6 +18,22 @@ routing. Script hosts retain the original source-text ID and register the
 active editor on the host layer, so tab changes preserve cursors and route
 Find correctly. Inactive scripts still poll preprocessing and external-file
 workers; errors stop host closure and reveal the affected editor.
+||||||| parent of 3451dffea (fix(build-tools): reduce mesh upload cost with Legacy LODs and adaptive physics (#4229))
+`ui/chat/select/document.rs` scopes the transcript's rich-text selection to
+group notice bodies, in group profiles and notification cards. It retains
+selection for the Copy menu without replacing clickable links or emoji.
+
+`aurora-assets/src/import_mesh/process/adaptive.rs` simplifies default collision
+hulls by adding their worst-approximated point until the extra distance error
+is within 0.25% of the hull diagonal. Support-plane extremes remain, instance
+scales tighten the bound, and 16-bit upload quantization has its own allowance.
+`imports::mesh` uses Lowest first for automatic collision;
+explicit collision sources and convex decomposition retain their existing path.
+
+`ui/chat/select/document.rs` scopes the transcript's rich-text selection to
+group notice bodies, in group profiles and notification cards. It retains
+selection for the Copy menu without replacing clickable links or emoji.
+
 Static local mesh assemblies are baked by `imports/local/scene.rs` on the
 import worker, preserving every instance transform and face slot across LODs.
 Their render-only asset uses `import_mesh::encode::local_asset` (45 faces);
