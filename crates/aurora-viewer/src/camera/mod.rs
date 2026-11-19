@@ -22,6 +22,7 @@ mod mouselook_zoom;
 pub mod path;
 pub mod path_file;
 pub mod presets;
+pub mod second;
 mod settings;
 pub mod takeover;
 pub mod track;
