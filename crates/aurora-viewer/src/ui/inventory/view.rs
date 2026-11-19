@@ -753,11 +753,17 @@ impl ViewCache {
                 // folder in llfoldertype.cpp), with the other system folders
                 let protected =
                     matches!(kind, 0..=3 | 5..=7 | 8 | 10 | 13 | 15 | 16 | 20 | 21 | 23 | 46 | 48 | 49 | 50 | 52 | 56 | 57 | 100);
+                // #Aurora, #Firestorm and #RLV count as system folders, like the
+                // Legacy Viewer's FSSortFSFoldersToTop (on by default;
+                // LLFolderBridge::getSortGroup, indra/newview/llinventorybridge.cpp):
+                // above the others with System folders first, and sorted by
+                // date with everything else when it is off (the Recent tab).
+                let support = is_support_folder(&folder_name(inv, *id)) && !rules::library(inv, *id);
                 let group = if *id == inv.lib_root {
                     4
                 } else if kind == 14 {
                     1
-                } else if protected {
+                } else if protected || support {
                     0
                 } else {
                     2
@@ -1488,16 +1494,14 @@ pub(super) fn hidden_when_empty(inv: &Inventory, id: Uuid) -> bool {
     })
 }
 
+/// The viewer support folders the Legacy Viewer sorts as system folders
+/// (ROOT_FIRESTORM_FOLDER, RLV_ROOT_FOLDER, "#Phoenix"; the match is not
+/// case sensitive, as the folders' names are folded for sorting).
+fn is_support_folder(name: &str) -> bool {
+    matches!(name.to_lowercase().as_str(), "#aurora" | "#firestorm" | "#rlv")
+}
+
 fn compare(a: &Entry, b: &Entry, sort: Sort) -> Ordering {
-    // Viewer support folders stay discoverable above system categories,
-    // including in date order, as for Firestorm's support folder. #RLV
-    // joins them like the Legacy Viewer's FT_RLV (LLFolderBridge::getSortGroup
-    // with FSSortFSFoldersToTop, llinventorybridge.cpp).
-    let support = |e: &Entry| e.folder && !e.library && matches!(e.name.as_str(), "#aurora" | "#firestorm" | "#rlv");
-    let pinned = support(b).cmp(&support(a));
-    if pinned != Ordering::Equal {
-        return pinned;
-    }
     if a.group == 4 || b.group == 4 {
         return a.group.cmp(&b.group).then_with(|| a.id.cmp(&b.id));
     }
@@ -1991,26 +1995,48 @@ mod tests {
     }
 
     #[test]
-    fn viewer_support_folders_stay_above_system_folders_with_every_sort() {
+    fn viewer_support_folders_are_system_folders_like_the_legacy_viewer() {
         let (mut inv, _) = fixture();
         let root = inv.root;
         folder(&mut inv, 30, root, -1, "#Aurora");
         folder(&mut inv, 31, root, -1, "#Firestorm");
         folder(&mut inv, 32, root, -1, "#RLV");
+        let order = |prefs: &InventoryPreferences, inv: &Inventory| {
+            let mut cache = ViewCache::default();
+            cache.prepare(inv, prefs.sort);
+            cache.children(inv.root, prefs, inv.lib_root)
+        };
+        let position = |list: &[Uuid], n: u128| list.iter().position(|x| *x == id(n)).expect("listed");
         for by_date in [false, true] {
-            for system_first in [false, true] {
-                let prefs = InventoryPreferences {
-                    sort: Sort {
-                        by_date,
-                        system_first,
-                        folders_by_name: false,
-                    },
-                    ..Default::default()
-                };
-                let mut cache = ViewCache::default();
-                cache.prepare(&inv, prefs.sort);
-                assert_eq!(&cache.children(root, &prefs, inv.lib_root)[..3], &[id(30), id(31), id(32)]);
+            // System folders first: they sit with the system group, above
+            // the ordinary folders, and never above the others by a pin
+            let prefs = InventoryPreferences {
+                sort: Sort {
+                    by_date,
+                    system_first: true,
+                    folders_by_name: false,
+                },
+                ..Default::default()
+            };
+            let list = order(&prefs, &inv);
+            for support in [30, 31, 32] {
+                assert!(position(&list, support) < position(&list, 2), "above an ordinary folder");
+                assert!(position(&list, support) < position(&list, 6), "above an ordinary folder");
             }
+        }
+        // by date alone (the Recent default): an ordinary folder with newer
+        // contents comes first, as in the Legacy Viewer
+        let prefs = InventoryPreferences {
+            sort: Sort {
+                by_date: true,
+                system_first: false,
+                folders_by_name: false,
+            },
+            ..Default::default()
+        };
+        let list = order(&prefs, &inv);
+        for support in [30, 31, 32] {
+            assert!(position(&list, 2) < position(&list, support), "no pin above newer contents");
         }
     }
 
@@ -2607,7 +2633,7 @@ mod tests {
     }
 
     #[test]
-    fn recent_keeps_support_folders_first_and_trash_last_even_with_newer_contents() {
+    fn recent_sorts_support_folders_by_date_like_system_folders_and_keeps_trash_last() {
         let (mut inv, facts) = fixture();
         let root = inv.root;
         folder(&mut inv, 20, root, -1, "Store delivery");
@@ -2629,7 +2655,16 @@ mod tests {
             .into_iter()
             .filter(|entry| [id(4), id(5), id(20), id(21), id(22)].contains(entry))
             .collect();
-        assert_eq!(order, [id(21), id(22), id(20), id(4), id(5)]);
+        assert_eq!(order, [id(20), id(4), id(21), id(22), id(5)]);
+        // with System folders first they join the system group, then the
+        // Trash, then the ordinary folders (Legacy Viewer sort groups)
+        let mut first = prefs.clone();
+        first.recent_sort.system_first = true;
+        let order: Vec<_> = recent_tree_order(&inv, &facts, &first)
+            .into_iter()
+            .filter(|entry| [id(4), id(5), id(20), id(21), id(22)].contains(entry))
+            .collect();
+        assert_eq!(order, [id(4), id(21), id(22), id(5), id(20)]);
     }
 
     #[test]
