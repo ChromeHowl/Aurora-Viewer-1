@@ -2012,7 +2012,7 @@ The background of the update and exit dialogs is blurred by
 separates the background layers from the dialog. The scene and these layers
 are rendered into a texture, blurred horizontally then vertically on the
 GPU; the dialog stays sharp. These targets exist only while the dialog is
-displayed.
+displayed. Preferences › Accessibility › Disable glass skips this pass.
 
 ```
 aurora-viewer/                  git repository (GitHub: Aurora-Viewer/Aurora-Viewer)
@@ -3436,6 +3436,7 @@ Scripts use a shared editor (`ui/scripts.rs`, actions in `app/scripts.rs`) for i
 | `ui/presence.rs` | Status of a resident and the color and shape of its dot, shared by the name plates, the lists, the profiles and our own status: in our regions from the away / do not disturb animations, else a friend's online status, else an automatic response until the next message, else unknown. The shape (`Shape`, `paint_mark`: a disc online, a crescent away, a barred disc in do not disturb, a hollow ring offline) says the status without its colour (#418) |
 | `colorblind.rs`, `ui/options/pages/accessibility.rs` | Colour blindness (#418, Preferences › Accessibility): the deficiency and its strength, process-wide (`set` / `current`), read by `Theme::palette`. `palette` moves only the colours that carry a meaning and collide for the deficiency, to an Okabe–Ito hue of the same luminance (success blue for red–green, warning orange and links sky blue for blue–yellow, a ladder of greys for monochrome); `adapt` daltonises the other colours (`ui/colors.rs`, the complexity ramp of the name tags) from the simulation of Machado et al. 2009. `options/pages/accessibility.rs` is the page, with a preview of the status dots |
 | `high_contrast.rs` | High contrast (#906, Preferences › Accessibility): process-wide (`set` / `current`), read by `Theme::palette`, which then takes its palette instead of the skin's (before the colour blindness adaptation): opaque black surfaces, white text, one light violet accent, states apart by lightness. `Palette::high_contrast` gives buttons, fields, windows, islands and dividers a light border (`Theme::apply`, `widgets::border_stroke`). Its tests measure the WCAG ratios of every text / surface pair |
+| `disable_glass.rs` | Disable glass (Preferences › Accessibility › Vision, under High contrast): process-wide (`set` / `current`), applied by `Theme::palette` (`panel_alpha` 255) and `aurora_render::set_ui_blur`. Windows, bars, menus, name plates and dialogs stay opaque, without frosting the world. High contrast already does this. Off by default. Demo `AURORA_DEMO_GLASS=0` |
 | `interface_colors.rs` | Interface colours (Preferences › Appearance › Skin): the user's accent, windows' background and text, process-wide (`set` / `current`), applied by `Theme::palette` over the skin's colours (not in high contrast, before the colour blindness adaptation). The other roles follow by the skin's own relations: the accent family in OKLCH (lightness step, chroma ratio, hue turn), the surfaces and the muted texts by their place between the background and the text in OKLab, so that the skin's bases give back every colour exactly. Lightness moves until text reads 4.5:1 on the panel and the accent 3:1, and so do the states and the links' teal (hue kept); `on_panel` does the same for the chat's configurable colours and the name tags (`ui/colors.rs`, `text`); `on_accent` switches to navy when white no longer reads |
 | `theme_presets.rs` | Named colour themes (Preferences › Appearance › Theme, setting `interface_theme`): ten presets, each a stable id and the skin's colours only (never layout, radii, glass or font scale). The chosen one is the skin's base (`Theme::skin_palette` through `resolve`, unless a `theme.json` of one's own changed the colours); the accent, background and text picks, the system theme, high contrast and colour blindness apply over it. Process-wide (`set` / `current`), applied live like `interface_colors`; `AURORA_DEMO_THEME` in demo mode. `tests.rs` runs the readability rules over every preset |
 | `system_theme.rs` | Follow the system theme (Preferences › Appearance › Skin, off by default): the desktop's light or dark mode and accent colour, read from the XDG portal on Linux, from winit and `UISettings` / `NSColor` on Windows and macOS, become the interface colours (`colors`), a colour the user chose winning. Nothing runs until the option is on. Aurora's own |
@@ -4333,7 +4334,9 @@ by the visible windows: copy and two blur passes on the GPU, then
 sampling within their rounded rectangles only. The resources are
 reused as long as the size and the scale stay stable, then freed when
 no surface needs them. The world around the windows stays sharp. A skin
-with `panel_alpha = 255` keeps opaque windows without these passes. A
+with `panel_alpha = 255` keeps opaque windows without these passes.
+Preferences › Accessibility › Disable glass (`panel_alpha` 255,
+`aurora_render::set_ui_blur`) skips the passes and keeps surfaces opaque. A
 GPU surface that does not allow the copy keeps the tinted frame; the markers
 stay undrawn to preserve the indices of the blur of the modals.
 What belongs to the world (name tags and name plates, floating texts,

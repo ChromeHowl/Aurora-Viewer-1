@@ -38,6 +38,7 @@ mod demo;
 mod destination_guide;
 mod dev_toolbox;
 mod director;
+mod disable_glass;
 mod disk_io;
 mod dof;
 mod export;

@@ -1547,6 +1547,17 @@ fn wanted_high_contrast(settings: &Settings) -> bool {
     settings.high_contrast
 }
 
+/// Whether the interface skips its glass: the preferences', or in demo
+/// mode `AURORA_DEMO_GLASS` (a capture's, never saved).
+fn wanted_disable_glass(settings: &Settings) -> bool {
+    if std::env::var_os("AURORA_DEMO").is_some()
+        && let Some(on) = crate::disable_glass::demo_override()
+    {
+        return on;
+    }
+    settings.disable_glass
+}
+
 /// The interface colours: the preferences', with the system's when they
 /// are followed, or in demo mode `AURORA_DEMO_COLORS` (a capture's, never
 /// saved).
@@ -1892,6 +1903,7 @@ impl App {
         if crate::system_theme::following(&settings) {
             crate::system_theme::start(true);
         }
+        crate::disable_glass::set(wanted_disable_glass(&settings));
         crate::interface_colors::set(wanted_interface_colors(&settings));
         crate::theme_presets::set(&wanted_interface_theme(&settings));
         ui::surface_opacity::set(wanted_opacity(&settings));
@@ -14191,19 +14203,22 @@ impl App {
             if self.settings.vsync != vsync {
                 gfx.renderer.set_vsync(self.settings.vsync);
             }
-            // a new colour blindness, contrast or interface colour: the
-            // palette again, at once
+            // a new colour blindness, contrast, glass or interface colour:
+            // the palette again, at once
             let vision = wanted_vision(&self.settings);
             let high_contrast = wanted_high_contrast(&self.settings);
+            let disable_glass = wanted_disable_glass(&self.settings);
             let interface_colors = wanted_interface_colors(&self.settings);
             let interface_theme = wanted_interface_theme(&self.settings);
             if vision != crate::colorblind::current()
                 || high_contrast != crate::high_contrast::current()
+                || disable_glass != crate::disable_glass::current()
                 || interface_colors != crate::interface_colors::current()
                 || interface_theme != crate::theme_presets::current().id
             {
                 crate::colorblind::set(vision);
                 crate::high_contrast::set(high_contrast);
+                crate::disable_glass::set(disable_glass);
                 crate::interface_colors::set(interface_colors);
                 crate::theme_presets::set(&interface_theme);
                 self.palette = self.skin.theme.palette();

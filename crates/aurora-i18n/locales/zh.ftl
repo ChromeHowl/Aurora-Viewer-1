@@ -16880,3 +16880,5 @@ ui-options-rigged-click-own = 你佩戴的骨骼绑定附件
 ui-options-rigged-click-own-help = 左键点击会作用于你佩戴的、带有触摸脚本或点击动作的骨骼绑定附件（网格身体、骨骼绑定的衣服和头发）。关闭时与 Legacy Viewer 一致：点击会交给其下方佩戴的可点击对象，否则交给你的头像用于操控；右键菜单仍然可以作用于它
 ui-options-rigged-click-others = 其他头像的骨骼绑定附件
 ui-options-rigged-click-others-help = 左键点击会作用于其他头像佩戴的、带有触摸脚本或点击动作的骨骼绑定附件（网格身体、骨骼绑定的衣服和头发）。关闭时与 Legacy Viewer 一致：点击会交给其下方佩戴的可点击对象，否则停留在该头像上，不会到达其后方的对象；右键菜单仍然可以作用于它
+ui-options-disable-glass = 关闭玻璃效果
+ui-options-disable-glass-help = 窗口、栏、菜单和对话框保持不透明，不会模糊其后的世界。高对比度已经是这样。

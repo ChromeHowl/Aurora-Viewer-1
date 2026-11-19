@@ -16873,3 +16873,5 @@ ui-options-rigged-click-own = Anexos com rig que você veste
 ui-options-rigged-click-own-help = Um clique esquerdo age em um anexo com rig que você veste e que tem um script de toque ou uma ação de clique (corpo de malha, roupas e cabelo com rig). Desligado, como no Legacy Viewer: o clique vai para um objeto clicável vestido por baixo e, caso contrário, para o seu avatar, para guiá-lo; o menu do botão direito ainda o alcança
 ui-options-rigged-click-others = Anexos com rig de outros avatares
 ui-options-rigged-click-others-help = Um clique esquerdo age em um anexo com rig vestido por outro avatar que tem um script de toque ou uma ação de clique (corpo de malha, roupas e cabelo com rig). Desligado, como no Legacy Viewer: o clique vai para um objeto clicável vestido por baixo e, caso contrário, fica no avatar sem alcançar o que está atrás; o menu do botão direito ainda o alcança
+ui-options-disable-glass = Desativar vidro
+ui-options-disable-glass-help = Janelas, barras, menus e diálogos permanecem opacos, sem embaçar o mundo atrás deles. O alto contraste já faz isso.

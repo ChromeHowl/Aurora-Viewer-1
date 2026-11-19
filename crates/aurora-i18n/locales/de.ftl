@@ -16913,3 +16913,5 @@ ui-options-rigged-click-own = Geriggte Anhänge, die du trägst
 ui-options-rigged-click-own-help = Ein Linksklick wirkt auf einen getragenen geriggten Anhang mit Touch-Skript oder Klickaktion (Mesh-Körper, geriggte Kleidung und Haare). Aus, wie im Legacy Viewer: Der Klick geht an ein darunter getragenes anklickbares Objekt, sonst an deinen Avatar, um ihn zu steuern; das Rechtsklickmenü erreicht ihn weiterhin
 ui-options-rigged-click-others = Geriggte Anhänge anderer Avatare
 ui-options-rigged-click-others-help = Ein Linksklick wirkt auf einen von einem anderen Avatar getragenen geriggten Anhang mit Touch-Skript oder Klickaktion (Mesh-Körper, geriggte Kleidung und Haare). Aus, wie im Legacy Viewer: Der Klick geht an ein darunter getragenes anklickbares Objekt, sonst bleibt er auf dem Avatar, ohne zu dem zu gelangen, was dahinter liegt; das Rechtsklickmenü erreicht ihn weiterhin
+ui-options-disable-glass = Glas deaktivieren
+ui-options-disable-glass-help = Fenster, Leisten, Menüs und Dialoge bleiben undurchsichtig, ohne die Welt dahinter zu vernebeln. Hoher Kontrast tut das bereits.
