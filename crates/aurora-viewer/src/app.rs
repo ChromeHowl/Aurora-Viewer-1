@@ -17065,12 +17065,6 @@ impl App {
                 let on = !self.world.friends_only();
                 self.world.set_friends_only(on);
             }
-            BarAction::ToggleShadowRealm => {
-                self.settings.shadow_realm.enabled = !self.settings.shadow_realm.enabled;
-                self.settings.save();
-                // at once, not at the next frame's tick
-                self.world.tick_shadow_realm(&self.settings.shadow_realm, Instant::now());
-            }
             BarAction::BuyCurrency => self.open_buy_currency(),
             // FSLoadSLMarketplace (llviewermenu.cpp): the system browser when
             // every link goes there, else the Marketplace window
@@ -19262,7 +19256,6 @@ impl App {
                     double_click: self.double_click_action(),
                     quickjump: self.settings.quickjump,
                     friends_only: self.world.friends_only(),
-                    shadow_realm: self.settings.shadow_realm.enabled,
                     camera_tools: self.camera_tools_state(),
                     last_chatter: self.can_look_at_last_chatter(),
                     show_name_tags: self.settings.show_name_tags,

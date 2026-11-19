@@ -16552,7 +16552,6 @@ pcu-cheat-pbt = mode de prise de vue · balance des blancs · style
 
 # Shadow Realm (Monde › Royaume des ombres…)
 sr-title = Royaume des ombres
-sr-menu-enabled = Royaume des ombres activé
 sr-menu-window = Royaume des ombres…
 sr-menu-add = Ajouter au Royaume des ombres
 sr-menu-remove = Retirer du Royaume des ombres

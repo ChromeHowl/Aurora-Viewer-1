@@ -16440,7 +16440,6 @@ pcu-cheat-pbt = 撮影モード · ホワイトバランス · スタイル
 
 # Shadow Realm（ワールド › 影の領域…）
 sr-title = 影の領域
-sr-menu-enabled = 影の領域を有効にする
 sr-menu-window = 影の領域…
 sr-menu-add = 影の領域に追加
 sr-menu-remove = 影の領域から削除

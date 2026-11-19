@@ -16566,7 +16566,6 @@ pcu-cheat-pbt = shot mode · white balance · style
 
 # Shadow Realm (World › Shadow Realm…)
 sr-title = Shadow Realm
-sr-menu-enabled = Shadow Realm enabled
 sr-menu-window = Shadow Realm…
 sr-menu-add = Add to Shadow Realm
 sr-menu-remove = Remove from Shadow Realm

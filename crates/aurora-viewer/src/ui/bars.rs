@@ -110,8 +110,6 @@ pub enum BarAction {
     ToggleChatBar,
     /// Show Friends Only switched (RFO, FSRenderFriendsOnly).
     ToggleFriendsOnly,
-    /// World › Shadow Realm enabled.
-    ToggleShadowRealm,
     ToggleNameTags,
     /// The toolbar's HUDs button: Show HUDs switched.
     ToggleHuds,
@@ -359,8 +357,6 @@ pub struct StatusInfo<'a> {
     pub quickjump: bool,
     /// Show Friends Only is on (World › Show Friends only).
     pub friends_only: bool,
-    /// The Shadow Realm is on (World › Shadow Realm enabled).
-    pub shadow_realm: bool,
     /// The Camera Lock is on; the view history has a view to go back to,
     /// and one to go forward to (`App::camera_tools_state`).
     pub camera_tools: (bool, bool, bool),
@@ -1542,18 +1538,8 @@ fn main_menus(ui: &mut egui::Ui, p: &Palette, panels: &mut Panels, st: &StatusIn
         ) {
             *action = BarAction::ToggleFriendsOnly;
         }
-        // the Shadow Realm beside it (`world/shadow_realm.rs`): its switch
-        // and its window
-        if menu::check(
-            ui,
-            p,
-            crate::ui::context::SHADOW_REALM_ICON,
-            aurora_i18n::tr!("sr-menu-enabled"),
-            st.shadow_realm,
-            true,
-        ) {
-            *action = BarAction::ToggleShadowRealm;
-        }
+        // the Shadow Realm beside it (`world/shadow_realm.rs`): its window
+        // only, the switch is in the window
         flip_window(
             ui,
             p,

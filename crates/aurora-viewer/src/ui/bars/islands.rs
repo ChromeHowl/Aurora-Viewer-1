@@ -1182,7 +1182,6 @@ mod tests {
             double_click: Default::default(),
             quickjump: false,
             friends_only: false,
-            shadow_realm: false,
             camera_tools: (false, false, false),
             last_chatter: false,
             show_name_tags: true,

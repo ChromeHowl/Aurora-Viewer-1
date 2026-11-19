@@ -16135,7 +16135,6 @@ pcu-help-arrows = Arrows, Enter
 pcu-help-arrows-text = In the quick menu, the mode list or a sheet: move, change (Enter steps the tile or chooses the mode)
 pcu-cheat-pbt = shot mode · white balance · style
 sr-title = Shadow Realm
-sr-menu-enabled = Shadow Realm enabled
 sr-menu-window = Shadow Realm…
 sr-menu-add = Add to Shadow Realm
 sr-menu-remove = Remove from Shadow Realm
