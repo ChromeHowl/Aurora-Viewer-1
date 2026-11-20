@@ -768,7 +768,11 @@ fn avatar_groups(ui: &mut Builder, f: &Facts, id: Uuid, attachment: Option<Uuid>
                 aurora_i18n::tr!("ui-context-inspect-2"),
                 CtxAction::Inspect(object),
             );
-            ui.item("code", aurora_i18n::tr!("ui-context-script-info"), CtxAction::ScriptInfo(object));
+            ui.item(
+                "code",
+                aurora_i18n::tr!("ui-context-script-information"),
+                CtxAction::ScriptInfo(object),
+            );
             ui.item(
                 "box",
                 aurora_i18n::tr!("ui-context-object-information"),
@@ -840,7 +844,7 @@ fn avatar_groups(ui: &mut Builder, f: &Facts, id: Uuid, attachment: Option<Uuid>
                 if attachment.is_some() {
                     aurora_i18n::tr!("ui-context-inspect-worn")
                 } else {
-                    aurora_i18n::tr!("ui-context-inspect-2")
+                    aurora_i18n::tr!("ui-context-inspect-all-attachments")
                 },
                 f.worn,
                 CtxAction::InspectAvatar(id),
@@ -1780,7 +1784,7 @@ mod tests {
             attachment: None,
         };
         // "Inspect" lists what the avatar wears: greyed when it wears nothing in view
-        let inspect = |f: &Facts| find(world_menu(&on_avatar, f, Vec3::ZERO), "ui-context-inspect-2", false);
+        let inspect = |f: &Facts| find(world_menu(&on_avatar, f, Vec3::ZERO), "ui-context-inspect-all-attachments", false);
         assert!(!inspect(&Facts::default()).enabled);
         let wearing = Facts {
             worn: true,
