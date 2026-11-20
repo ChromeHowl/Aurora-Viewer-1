@@ -13,7 +13,7 @@ pub mod backup;
 mod colors;
 mod debug;
 mod dialogs;
-mod editing;
+pub(crate) mod editing;
 mod experiences;
 pub(crate) mod files;
 mod focus;
