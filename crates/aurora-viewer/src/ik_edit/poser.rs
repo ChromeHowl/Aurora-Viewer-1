@@ -120,7 +120,6 @@ impl Default for Config {
 pub enum Request {
     Ask(Uuid),
     Cancel(Uuid),
-    OpenPrivacy,
     /// The bridge's Repair, offered when its query service is silent or failed.
     RepairBridge,
     /// Show the inventory folder of the uploaded poses in the inventory window.
