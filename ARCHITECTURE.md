@@ -18,12 +18,20 @@ routing. Script hosts retain the original source-text ID and register the
 active editor on the host layer, so tab changes preserve cursors and route
 Find correctly. Inactive scripts still poll preprocessing and external-file
 workers; errors stop host closure and reveal the affected editor.
-||||||| parent of 3451dffea (fix(build-tools): reduce mesh upload cost with Legacy LODs and adaptive physics (#4229))
-`ui/chat/select/document.rs` scopes the transcript's rich-text selection to
-group notice bodies, in group profiles and notification cards. It retains
-selection for the Copy menu without replacing clickable links or emoji.
 
-||||||| parent of a2cb11bfd (fix(build-tools): accept large PBR imports and improve queue controls (#4302))
+`imports/file_picker.rs` owns pending native selections and their import-window
+identity. Closing that window cancels and retires the request without discarding
+existing drafts; request ids reject late replies. Native dialogs run on dedicated
+threads with panic-safe completion. On Windows, `file_picker/windows.rs` installs
+a thread timer for the modal loop and posts WM_CLOSE only to native dialogs on
+that picker thread. `file_picker/macos.rs` retains a modeless NSOpenPanel and
+dispatches its cancellation to AppKit's main thread. `file_picker/linux/portal.rs`
+subscribes before OpenFile, retains the returned Request handle and calls Close
+without waiting for a Response signal on cancellation; its non-modal dialog
+keeps Aurora reachable. `file_picker/linux/zenity.rs` retains and reaps the exact
+fallback child when the portal is unavailable. No backend cancels another
+request's selector. File decoding stays off the frame thread.
+
 `imports/ui/inspector.rs` owns the draggable queue divider. Its preferred width
 is stored under each import window in the shared persisted UI layout; fitting
 a smaller window only clamps the displayed width. Double-click restores the
