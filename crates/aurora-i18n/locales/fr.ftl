@@ -15314,6 +15314,11 @@ ui-weather-northern-lights-display = Grand spectacle
 ui-weather-northern-lights-night = Visible seulement après le coucher du soleil.
 ui-weather-clean-up = Nettoyer
 ui-weather-snow-fill = Remplir de neige
+ui-weather-enabled-tip = Aurora Weather activée : pluie ou neige, vent, orage et aurores boréales comme réglés dessous. Désactivée, rien n’est dessiné ; les réglages sont gardés
+ui-weather-now-off = Météo désactivée
+ui-weather-precipitation-on-tip = La pluie ou la neige tombe comme réglée dessous ; désactivé, rien ne tombe et il n’y a pas d’orage
+ui-weather-wind-on-tip = Le vent de la météo pousse la pluie et la neige, et s’entend dehors ; désactivé, l’air est calme
+ui-weather-wind-follow-region = Vent de la région
 
 ui-options-legacy-lists = Importer les listes du Legacy Viewer
 ui-options-legacy-lists-help = Ajoute l'historique des téléportations, la liste noire des ressources, la liste du filtre média et les cercles de ce compte. Les fichiers du Legacy Viewer sont seulement lus.

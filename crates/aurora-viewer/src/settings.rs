@@ -2086,7 +2086,7 @@ pub(crate) fn max_texture_resolution_choice(v: u32) -> u32 {
         .unwrap_or(MAX_TEXTURE_RESOLUTIONS[0])
 }
 
-const SETTINGS_VERSION: u32 = 43;
+const SETTINGS_VERSION: u32 = 44;
 
 /// The world render percentage that draws at the display's logical
 /// resolution, as the Legacy Viewer does on a Mac with RenderHiDPI 0: 50 on
@@ -3720,6 +3720,12 @@ impl Settings {
             // back once to the simulator's movement (Legacy), its row in
             // Preferences › Aurora keeps Instant as a choice
             self.predict_own_motion = false;
+        }
+        if self.settings_version < 44 {
+            // Aurora Weather's main and card switches, off by default: an
+            // earlier file keeps on what it drew (upstream's own migration
+            // number was 43; the fork's 43 is the Instant movement above)
+            self.weather.upgrade_to_switches();
         }
         if !self.audio.mic_gain.is_finite() {
             self.audio.mic_gain = 1.0;
