@@ -2086,7 +2086,7 @@ pub(crate) fn max_texture_resolution_choice(v: u32) -> u32 {
         .unwrap_or(MAX_TEXTURE_RESOLUTIONS[0])
 }
 
-const SETTINGS_VERSION: u32 = 44;
+const SETTINGS_VERSION: u32 = 45;
 
 /// The world render percentage that draws at the display's logical
 /// resolution, as the Legacy Viewer does on a Mac with RenderHiDPI 0: 50 on
@@ -3726,6 +3726,12 @@ impl Settings {
             // earlier file keeps on what it drew (upstream's own migration
             // number was 43; the fork's 43 is the Instant movement above)
             self.weather.upgrade_to_switches();
+        }
+        if self.settings_version < 45 {
+            // the wind's defaults, a breeze: a wind off and left still
+            // takes them, so that switching it on blows (upstream's number
+            // was 44, see the Aurora Weather switches above)
+            self.weather.upgrade_wind_defaults();
         }
         if !self.audio.mic_gain.is_finite() {
             self.audio.mic_gain = 1.0;
