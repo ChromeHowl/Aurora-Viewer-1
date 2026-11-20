@@ -1918,3 +1918,49 @@ fn select_same_faces_picks_the_matching_faces_of_the_whole_linkset() {
     assert_eq!(tool.faces[&root_key], [0]);
     assert_eq!(tool.faces[&child_key], [1]);
 }
+
+#[test]
+fn creator_navigation_crosses_single_face_links_and_wraps_both_ways() {
+    let (mut world, mut tool, mut settings) = fixture();
+    let root = object(&world, 99610);
+    let child = object(&world, 99611);
+    tool.face_counts.insert(world.objects.get(root).unwrap().full_id, 3);
+    tool.face_counts.insert(world.objects.get(child).unwrap().full_id, 1);
+    settings.edit_linked = true;
+    tool.set_edit_mode(&mut world, &mut settings, EditMode::Face);
+    tool.face_click(&mut world, Some(root), Some(2), false);
+    for expected in [(child, 0), (root, 0), (root, 1), (root, 2), (child, 0)] {
+        tool.select_next_part(&mut world, &mut settings, true, false);
+        assert_eq!(tool.sel_te(&world), [expected]);
+    }
+    tool.select_next_part(&mut world, &mut settings, false, false);
+    assert_eq!(tool.sel_te(&world), [(root, 2)]);
+}
+
+#[test]
+fn creator_navigation_shift_skips_selected_neighbors_in_both_directions() {
+    for next in [true, false] {
+        let (mut world, mut tool, mut settings) = fixture();
+        let root = object(&world, 99610);
+        let child = object(&world, 99611);
+        let handle = world.objects.get(root).unwrap().key.region;
+        let mut extra = crate::demo::worn::root();
+        extra.local_id = 99615;
+        extra.full_id = crate::demo::action_id(99615);
+        extra.parent_id = 99610;
+        extra.name_values.clear();
+        let last = world.objects.upsert(handle, extra);
+        settings.edit_linked = true;
+        tool.selection_linked = true;
+        let anchor = if next { root } else { last };
+        let wanted = if next { last } else { root };
+        tool.add(&world, world.objects.get(child).unwrap().key);
+        tool.add(&world, world.objects.get(anchor).unwrap().key);
+        tool.select_next_link(&mut world, &mut settings, next, true);
+        assert_eq!(tool.selection.first(), Some(&world.objects.get(wanted).unwrap().key));
+        assert_eq!(tool.selection.len(), 3);
+        let full = tool.selection.clone();
+        tool.select_next_link(&mut world, &mut settings, next, true);
+        assert_eq!(tool.selection, full);
+    }
+}

@@ -16936,3 +16936,5 @@ camera-mode-click-to-leave = { $mode } (click to leave)
 camera-menu-lock-history-path = Lock, history and path
 ui-options-camera-show-mode-changes = Show camera mode changes
 ui-options-camera-show-mode-changes-tip = A short note at the top of the world names the camera mode you enter and how to leave it; a small chip stays while the camera is locked, on a path, free or moved by a script
+picker-local-newest = Newest first
+picker-local-name = Name A–Z

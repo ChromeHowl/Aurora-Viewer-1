@@ -16940,3 +16940,5 @@ camera-mode-click-to-leave = { $mode } (cliquer pour quitter)
 camera-menu-lock-history-path = Verrou, historique et trajet
 ui-options-camera-show-mode-changes = Indiquer les changements de mode de caméra
 ui-options-camera-show-mode-changes-tip = Une courte note en haut du monde donne le mode de caméra où vous entrez et comment en sortir ; une petite pastille reste tant que la caméra est verrouillée, sur un trajet, libre ou pilotée par un script
+picker-local-newest = Plus récentes
+picker-local-name = Nom A–Z

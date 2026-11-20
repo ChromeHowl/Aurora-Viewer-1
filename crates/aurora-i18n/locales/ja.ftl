@@ -16824,3 +16824,5 @@ camera-mode-click-to-leave = { $mode }（クリックで解除）
 camera-menu-lock-history-path = ロック・履歴・パス
 ui-options-camera-show-mode-changes = カメラモードの変更を表示
 ui-options-camera-show-mode-changes-tip = 入ったカメラモードと解除方法を画面上部に短く表示します。カメラがロック中、パス上、フリー、またはスクリプト操作の間は小さなチップが残ります
+picker-local-newest = 追加順（新しい順）
+picker-local-name = 名前順
