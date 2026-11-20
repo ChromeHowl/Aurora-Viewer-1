@@ -169,10 +169,31 @@ pub(super) fn words(query: &str) -> Vec<String> {
 }
 
 /// Whether every word of the search starts a word of `text`, as a name is
-/// typed ("ombre" finds "Ombres", not "Nombre").
+/// typed ("ombre" finds "Ombres", not "Nombre"). A query with kana, Han
+/// or Hangul is found anywhere in the text, including inside compounds, as
+/// the Legacy Viewer finds every search (ll::prefs::SearchableItem::
+/// hightlightAndHide, llsearchableui.cpp): 区画 finds 常に表示する区画.
 pub(super) fn found(text: &str, words: &[String]) -> bool {
     let folded = fold(text);
-    words.iter().all(|w| tokens(&folded).any(|t| t.starts_with(w.as_str())))
+    words.iter().all(|w| {
+        if anywhere(w) {
+            folded.contains(w.as_str())
+        } else {
+            tokens(&folded).any(|t| t.starts_with(w.as_str()))
+        }
+    })
+}
+
+/// Scripts for which a search term may start inside a word.
+fn anywhere(word: &str) -> bool {
+    word.chars().any(|c| {
+        matches!(c,
+            '\u{3040}'..='\u{30FF}' // hiragana, katakana
+            | '\u{3400}'..='\u{4DBF}' | '\u{4E00}'..='\u{9FFF}' | '\u{F900}'..='\u{FAFF}' // kanji
+            | '\u{FF66}'..='\u{FF9F}' // half-width katakana
+            | '\u{1100}'..='\u{11FF}' | '\u{3130}'..='\u{318F}' // Hangul jamo
+            | '\u{A960}'..='\u{A97F}' | '\u{AC00}'..='\u{D7FF}') // Hangul syllables and extended jamo
+    })
 }
 
 /// Where the first word of the search starts a word of `label`, and where
@@ -1199,6 +1220,30 @@ mod tests {
         assert_eq!(fold("Œuvre"), "oeuvre");
         assert_eq!(words("  Ombré  ÉCUME "), vec!["ombre".to_owned(), "ecume".to_owned()]);
         assert!(found("Qualité des ombres", &words("OMBRE")));
+    }
+
+    #[test]
+    fn japanese_is_found_inside_a_phrase_latin_at_a_word_start() {
+        // no spaces in Japanese: a word with kana or kanji matches anywhere
+        assert!(found("常に表示する区画", &words("区画")));
+        assert!(found("フィルタを適用する区画", &words("区画")));
+        assert!(found("フィルタを適用する区画", &words("適用 区画")));
+        assert!(!found("常に表示する区画", &words("土地")));
+        assert_eq!(found_in("常に表示する区画", &words("区画")), Some((18, 24)));
+        // Latin words still start a word
+        assert!(!found("Nombre", &words("ombre")));
+        assert_eq!(found_in("Nombre", &words("ombre")), None);
+        assert_eq!(found_in("Les ombres", &words("ombre")), Some((4, 9)));
+    }
+
+    #[test]
+    fn chinese_and_korean_search_match_and_highlight_inside_compounds() {
+        for (label, query) in [("图形设置", "设置"), ("圖形設定", "設定"), ("그래픽설정", "설정")] {
+            let terms = words(query);
+            assert!(found(label, &terms));
+            let (start, end) = found_in(label, &terms).expect("highlight");
+            assert_eq!(&label[start..end], query);
+        }
     }
 
     #[test]
