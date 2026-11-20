@@ -17194,3 +17194,5 @@ poser-consent-dialog-no = Não
 poser-consent-dialog-granted = Obrigado! Para parar a qualquer momento, pressione Parar ou digite /{ $channel } stop no chat local. Também termina quando um de nós sai da região.
 poser-consent-dialog-stop = Parar
 poser-consent-dialog-stopped = Pose encerrada: não posso mais posar seu avatar.
+ui-options-avatar-cache = Avatares do cache
+ui-options-avatar-cache-help = Enquanto a aparência e os objetos vestidos de um avatar ainda estão a caminho, desenha sua forma, pele e objetos como estavam na última vez que foi visto (com as animações que seus próprios objetos tocam em você) e depois os da própria região (recurso próprio do Aurora; o Legacy Viewer mostra uma nuvem até a região enviá-los)

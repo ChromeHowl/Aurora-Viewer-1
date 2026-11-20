@@ -17199,3 +17199,5 @@ poser-consent-dialog-no = 否
 poser-consent-dialog-granted = 谢谢！如需随时停止，请按“停止”或在附近聊天中输入 /{ $channel } stop。我们任何一方离开区域时也会结束。
 poser-consent-dialog-stop = 停止
 poser-consent-dialog-stopped = 已停止摆姿势：我无法再为你的化身摆姿势。
+ui-options-avatar-cache = 来自缓存的头像
+ui-options-avatar-cache-help = 在头像的外观和所穿戴的物体仍在传输途中时，按上次见到它时的样子绘制其形体、皮肤和物体（包括你自己的物体在你身上播放的动画），之后再换成区域自己发送的内容（Aurora 自有功能；Legacy Viewer 会显示云状图标，直到区域发来数据）

@@ -17234,3 +17234,5 @@ poser-consent-dialog-no = Nein
 poser-consent-dialog-granted = Danke! Zum Stoppen jederzeit Stopp drücken oder /{ $channel } stop in den Nahbereichs-Chat tippen. Es endet auch, wenn einer von uns die Region verlässt.
 poser-consent-dialog-stop = Stopp
 poser-consent-dialog-stopped = Posieren gestoppt: Ich kann deinen Avatar nicht mehr posieren.
+ui-options-avatar-cache = Avatare aus dem Cache
+ui-options-avatar-cache-help = Solange das Aussehen und die getragenen Objekte eines Avatars noch unterwegs sind, werden seine Form, Haut und Objekte so gezeichnet, wie sie beim letzten Sehen waren (mit den Animationen, die deine eigenen Objekte auf dir abspielen), danach die der Region selbst (Auroras eigene Funktion; der Legacy Viewer zeigt eine Wolke, bis die Region sie sendet)
