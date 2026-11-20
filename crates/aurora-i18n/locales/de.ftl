@@ -16917,3 +16917,60 @@ ui-options-disable-glass = Glas deaktivieren
 ui-options-disable-glass-help = Fenster, Leisten, Menüs und Dialoge bleiben undurchsichtig, ohne die Welt dahinter zu vernebeln. Hoher Kontrast tut das bereits.
 picker-local-newest = Neueste zuerst
 picker-local-name = Name A–Z
+content-perms-nested = Objekte in Objekten einbeziehen
+content-perms-nested-help = Ändert auch, was die Objekte in diesem Inhalt enthalten, bis zu 5 Ebenen tief. Jedes Objekt wird 2 m über dem Prim gerezzt, das es enthält, seine laufenden Skripte werden angehalten, sein Inhalt geändert, seine Skripte wieder gestartet und es dann in den Inhalt zurückgespeichert. Die Berechtigungen des zurückgegebenen Objekts werden dort gesetzt und geprüft, bevor die gerezzte Kopie gelöscht wird. Objekte, die du nicht kopieren, übertragen oder ändern darfst, bleiben geschlossen. Erfordert Baurechte dort, wo die Objekte gerezzt werden.
+content-perms-nested-preview = { $objects ->
+    [one] { $objects } Objekt im Inhalt wird geöffnet, übersprungen: { $skipped }.
+   *[other] { $objects } Objekte im Inhalt werden geöffnet, übersprungen: { $skipped }.
+    }
+content-perms-nested-entry = { $name } ({ $reason })
+content-perms-nested-separator = {", "}
+content-perms-nested-skip-no-copy = nicht kopierbar oder nicht übertragbar
+content-perms-nested-skip-no-modify = nicht änderbar
+content-perms-nested-skip-depth = mehr als 5 Ebenen tief
+content-perms-nested-rezzing = „{ $name }“ wird gerezzt (Ebene { $level })…
+content-perms-nested-stopping = Die Skripte von „{ $name }“ werden angehalten…
+content-perms-nested-applying = Der Inhalt von „{ $name }“ wird geändert…
+content-perms-nested-restoring = Die Skripte von „{ $name }“ werden wieder gestartet…
+content-perms-nested-saving = „{ $name }“ wird zurückgespeichert…
+content-perms-nested-deleting = Die gerezzte Kopie von „{ $name }“ wird gelöscht…
+content-perms-nested-finished = { $count } Objekte in { $objects } Objekten in Objekten aktualisiert, übersprungen: { $skipped }.
+content-perms-nested-kept-next = { $kept ->
+    [one] { $kept } neben dem Original behalten: Die Namen waren verschieden.
+   *[other] { $kept } neben ihren Originalen behalten: Die Namen waren verschieden.
+    }
+content-perms-nested-stopped = Angehalten: Die gerezzten Kopien wurden gelöscht, die ursprünglichen Objekte blieben unverändert.
+content-perms-nested-stop-help = Löscht die noch in der Welt befindlichen gerezzten Kopien und beendet: Die ursprünglichen Objekte bleiben unverändert, bereits zurückgespeicherte Objekte behalten ihre Änderungen.
+content-perms-nested-scripts-warning = Jedes Objekt wird in der Welt gerezzt, daher laufen die Rez-Aktionen seiner Skripte (eine Explosion, eine Teleportation, ein Geschenk…), bevor sie angehalten werden können. Um das zu verhindern, aktiviere zuerst „Skripte deaktivieren“ unter Region / Grundstück in einer Region, die du verwaltest, und schalte es danach wieder aus.
+content-perms-nested-original-kept = „{ $name }“ wurde zurückgespeichert, aber das ursprüngliche Objekt konnte nicht entfernt werden: Beide befinden sich im Inhalt.
+content-perms-nested-copy-left = Die gerezzte Kopie von „{ $name }“ konnte nicht gelöscht werden: Lösche sie von Hand.
+content-perms-nested-save-unconfirmed = das Zurückspeichern wurde nicht bestätigt
+content-perms-nested-saved-perms-unconfirmed = Angehalten: Die Berechtigungen des in seinen Container zurückgespeicherten Objekts konnten nicht bestätigt werden. Die gerezzten Arbeitskopien wurden behalten; prüfe sie, bevor du sie entfernst.
+content-perms-nested-timeout = der Simulator hat nicht rechtzeitig geantwortet
+content-perms-nested-rez-refused = Angehalten: Der Simulator hat das Rezzen von „{ $name }“ verweigert ({ $reason }).
+content-perms-nested-rez-timeout = Angehalten: „{ $name }“ ist nicht innerhalb von 15 Sekunden erschienen. Falls es später über dem Prim erscheint, lösche es.
+content-perms-nested-not-ours = Angehalten: Das für „{ $name }“ gerezzte Objekt stammt nicht aus diesem Inhalt, es wurde in der Welt belassen.
+content-perms-nested-unverified = Angehalten: Das für „{ $name }“ erschienene Objekt konnte nicht als aus diesem Inhalt gerezzt geprüft werden, daher wurde es in der Welt belassen.
+content-perms-nested-group-split = Angehalten: „{ $name }“ (mehrere als eines gespeicherte Objekte) kam als einzelnes Objekt zurück. Seine gerezzten Teile wurden in der Welt behalten: Wähle sie alle aus und nimm sie, um die Gruppe wiederherzustellen.
+content-perms-nested-failed = „{ $name }“ unverändert gelassen: { $reason }.
+content-perms-nested-original-gone = „{ $name }“ bleibt in der Welt: Das Zurückspeichern wurde nicht bestätigt und das ursprüngliche Objekt ist weg.
+content-perms-nested-gone = das Objekt hat die Welt verlassen
+content-perms-nested-land-denied = Angehalten: Du darfst über diesem Prim, wo die Objekte gerezzt würden, nicht bauen.
+content-perms-nested-parcel-full = Angehalten: Auf dem Grundstück ist kein Platz mehr für die gerezzten Kopien.
+content-perms-nested-rlva = Angehalten: Das Rezzen ist eingeschränkt (RLVa).
+content-perms-nested-too-many = zu viele Skripte
+content-perms-nested-unreadable = sein Inhalt konnte nicht gelesen werden
+content-perms-demo-chest = Truhe
+content-perms-demo-notes = Truhennotizen
+content-perms-demo-outer = Äußere Kiste
+content-perms-demo-glow = Leucht-Skript
+content-perms-demo-readme = Liesmich
+content-perms-demo-inner = Innere Kiste
+content-perms-demo-inner-note = Innere Notiz
+content-perms-demo-tiny = Winzige Kiste
+content-perms-demo-spin = Dreh-Skript
+content-perms-demo-heirloom = Erbstück
+content-perms-demo-sealed = Versiegelte Kiste
+content-perms-demo-linked = Verknüpfte Kiste
+content-perms-demo-pebble = Kieselkiste
+content-perms-demo-stack = Kistenstapel

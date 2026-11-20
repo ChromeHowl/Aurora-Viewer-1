@@ -16877,3 +16877,60 @@ ui-options-disable-glass = Desativar vidro
 ui-options-disable-glass-help = Janelas, barras, menus e diálogos permanecem opacos, sem embaçar o mundo atrás deles. O alto contraste já faz isso.
 picker-local-newest = Mais recentes primeiro
 picker-local-name = Nome A–Z
+content-perms-nested = Incluir objetos dentro de objetos
+content-perms-nested-help = Também altera o que os objetos nestes conteúdos guardam, até 5 níveis de profundidade. Cada objeto é criado (rez) 2 m acima do prim que o contém, seus scripts em execução são parados, seu conteúdo alterado, seus scripts iniciados de novo e depois ele é salvo de volta no conteúdo. As permissões do objeto devolvido são definidas e verificadas ali antes de a cópia criada ser apagada. Objetos que você não pode copiar, transferir ou modificar permanecem fechados. Exige direitos de construção onde os objetos são criados.
+content-perms-nested-preview = { $objects ->
+    [one] { $objects } objeto no conteúdo será aberto, ignorados: { $skipped }.
+   *[other] { $objects } objetos no conteúdo serão abertos, ignorados: { $skipped }.
+    }
+content-perms-nested-entry = { $name } ({ $reason })
+content-perms-nested-separator = {", "}
+content-perms-nested-skip-no-copy = sem cópia ou sem transferência
+content-perms-nested-skip-no-modify = sem modificação
+content-perms-nested-skip-depth = mais de 5 níveis de profundidade
+content-perms-nested-rezzing = Criando “{ $name }” (nível { $level })…
+content-perms-nested-stopping = Parando os scripts de “{ $name }”…
+content-perms-nested-applying = Alterando o conteúdo de “{ $name }”…
+content-perms-nested-restoring = Iniciando os scripts de “{ $name }” de novo…
+content-perms-nested-saving = Salvando “{ $name }” de volta…
+content-perms-nested-deleting = Apagando a cópia criada de “{ $name }”…
+content-perms-nested-finished = { $count } itens atualizados em { $objects } objetos dentro de objetos, ignorados: { $skipped }.
+content-perms-nested-kept-next = { $kept ->
+    [one] { $kept } mantido ao lado do original: os nomes eram diferentes.
+   *[other] { $kept } mantidos ao lado dos originais: os nomes eram diferentes.
+    }
+content-perms-nested-stopped = Interrompido: as cópias criadas foram apagadas, os itens originais ficaram como estavam.
+content-perms-nested-stop-help = Apaga as cópias criadas ainda no mundo e termina: os itens originais ficam como estão, os objetos já salvos de volta mantêm suas alterações.
+content-perms-nested-scripts-warning = Cada objeto é criado no mundo, então as ações de rez dos seus scripts são executadas (uma explosão, um teletransporte, um item entregue…) antes que possam ser paradas. Para evitar isso, ative primeiro Desativar scripts em Região / Propriedade, em uma região que você administra, e desative depois.
+content-perms-nested-original-kept = “{ $name }” foi salvo de volta, mas o item original não pôde ser removido: ambos estão no conteúdo.
+content-perms-nested-copy-left = A cópia criada de “{ $name }” não pôde ser apagada: apague-a manualmente.
+content-perms-nested-save-unconfirmed = o salvamento de volta não foi confirmado
+content-perms-nested-saved-perms-unconfirmed = Interrompido: as permissões do objeto salvo de volta em seu contêiner não puderam ser confirmadas. As cópias de trabalho criadas foram mantidas; verifique-as antes de removê-las.
+content-perms-nested-timeout = o simulador não respondeu a tempo
+content-perms-nested-rez-refused = Interrompido: o simulador recusou criar “{ $name }” ({ $reason }).
+content-perms-nested-rez-timeout = Interrompido: “{ $name }” não apareceu em 15 segundos. Se aparecer mais tarde acima do prim, apague-o.
+content-perms-nested-not-ours = Interrompido: o objeto criado para “{ $name }” não vem destes conteúdos, foi deixado no mundo.
+content-perms-nested-unverified = Interrompido: o objeto que apareceu para “{ $name }” não pôde ser verificado como criado a partir destes conteúdos, por isso foi deixado no mundo.
+content-perms-nested-group-split = Interrompido: “{ $name }” (vários objetos salvos como um só) voltou como um único objeto. Suas partes criadas foram mantidas no mundo: selecione todas e pegue-as para refazer o grupo.
+content-perms-nested-failed = “{ $name }” deixado inalterado: { $reason }.
+content-perms-nested-original-gone = “{ $name }” foi mantido no mundo: o salvamento de volta não foi confirmado e o item original sumiu.
+content-perms-nested-gone = o objeto saiu do mundo
+content-perms-nested-land-denied = Interrompido: você não pode construir acima deste prim, onde os objetos seriam criados.
+content-perms-nested-parcel-full = Interrompido: o terreno não tem mais espaço para as cópias criadas.
+content-perms-nested-rlva = Interrompido: criar objetos está restrito (RLVa).
+content-perms-nested-too-many = scripts demais
+content-perms-nested-unreadable = seu conteúdo não pôde ser lido
+content-perms-demo-chest = Baú
+content-perms-demo-notes = Notas do baú
+content-perms-demo-outer = Caixa externa
+content-perms-demo-glow = Script de brilho
+content-perms-demo-readme = Leia-me
+content-perms-demo-inner = Caixa interna
+content-perms-demo-inner-note = Nota interna
+content-perms-demo-tiny = Caixa minúscula
+content-perms-demo-spin = Script de giro
+content-perms-demo-heirloom = Herança
+content-perms-demo-sealed = Caixa lacrada
+content-perms-demo-linked = Caixa vinculada
+content-perms-demo-pebble = Caixa de seixo
+content-perms-demo-stack = Pilha de caixotes
