@@ -1785,7 +1785,7 @@ keybinds-numpad-4 = . (цифровой блок)
 keybinds-numpad-5 = / (цифровой блок)
 ui-options-0-hide-avatar-names = 0 = скрыть имена аватаров
 ui-options-0-no-chat-bubbles-above-the-chat-bar = 0 = не показывать реплики над строкой чата
-demo-1-violet-wolf-0-2-spam-box-0-0 = { "1 " }{ $value0 }{ " Violet Wolf|0\u000A2 " }{ $value1 }{ " Ящик со спамом|0\u000A0 " }{ $value2 }{ " Рекламный щит|\u000A0 " }{ $value3 }{ " Группа:" }{ $value4 }{ "|\u000A" }
+demo-1-violet-wolf-0-2-spam-box-0-0 = { "1 " }{ $value0 }{ " Violet Wolf|0\u000A2 " }{ $value1 }{ " Ящик со спамом|0\u000A0 " }{ $value2 }{ " Рекламный щит|\u000A0 " }{ $value3 }{ " Group:" }{ $value4 }{ "|\u000A" }
 ui-land-dialogs-1-set-a-price = 1. Укажите цену
 build-ui-general-127-bytes-maximum = Не более 127 байт.
 ui-land-dialogs-2-sell-the-land-to = 2. Укажите покупателя
@@ -10224,7 +10224,13 @@ script-edit-outdent = Уменьшить отступ (Shift+Tab)
 script-selection-edit-failed = Не удалось изменить код. Он слишком велик или уже содержит блочный комментарий. Для вложенных комментариев используйте //.
 script-fold-collapse = Свернуть блок
 script-fold-expand = Развернуть блок
-script-fold-lines = строк
+script-fold-line-count =
+    { $count ->
+        [one] { $count } строка
+        [few] { $count } строки
+        [many] { $count } строк
+        *[other] { $count } строки
+    }
 script-fold-all = Свернуть всё
 script-expand-all = Развернуть всё
 loading-residents =
@@ -15205,6 +15211,7 @@ ui-weather-quality-tip = Чем ниже качество отрисовки п�
 ui-weather-quality-low = Низкое
 ui-weather-quality-medium = Среднее
 ui-weather-quality-high = Высокое
+ui-weather-wind-follow-region = Ветер региона
 picker-pipette-hint = Щёлкните по грани объекта, чтобы выбрать из инвентаря её текстуру или материал.
 picker-pipette-no-texture = В вашем инвентаре нет подходящей текстуры с правом копирования.
 picker-pipette-no-material = В вашем инвентаре нет подходящего материала с правом копирования.
@@ -15378,4 +15385,3 @@ joystick-linux-layout-help = Выберите раскладку драйвер�
 joystick-layout-positional = По положению кнопок
 joystick-layout-auto = Автоматически
 joystick-layout-xinput = XInput
-ui-weather-wind-follow-region = Ветер региона

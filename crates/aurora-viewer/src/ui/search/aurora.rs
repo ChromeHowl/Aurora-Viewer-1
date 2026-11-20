@@ -21,6 +21,7 @@ use crate::ui::place_card::{self, RowSize, Thumb};
 use crate::ui::place_details::Ctx;
 use crate::ui::widgets::{self, ActionKind};
 use crate::world::search::{Key, Request, Row, RowIcon, Search, SearchSettings, Status, Tab, Value};
+use aurora_i18n::UiUpper;
 use aurora_net::search::{
     AgentAccess, EventsMode, LandFilter, LandKind, LandSort, PLACE_CATEGORY_ANY, SIM_ACCESS_ADULT, SIM_ACCESS_MATURE, SIM_ACCESS_PG,
 };
@@ -955,7 +956,7 @@ impl SearchUi {
                 let (_, month, day, ..) = super::event_parts(unix, zone);
                 let mon = crate::ui::land::months()[(month.max(1) - 1).min(11)]
                     .trim_end_matches('.')
-                    .to_uppercase();
+                    .ui_upper();
                 let day = day.to_string();
                 let (violet, ink) = (p.violet_light, p.ink);
                 let font = semibold.clone();
@@ -1102,7 +1103,7 @@ fn section_head(ui: &mut egui::Ui, p: &Palette, kind: Kind, count: &str, more: b
         ui.add_space(8.0);
         ui.spacing_mut().item_spacing.x = 6.0;
         widgets::glyph(ui, kind.icon(), p.muted, 13.0);
-        let caps = RichText::new(kind.label().to_uppercase())
+        let caps = RichText::new(kind.label().ui_upper())
             .size(11.0)
             .color(p.muted)
             .family(crate::ui::fonts::semibold(ui.ctx()));

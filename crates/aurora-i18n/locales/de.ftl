@@ -9561,7 +9561,6 @@ script-edit-outdent = Einzug verkleinern (Umschalt+Tab)
 script-selection-edit-failed = Bearbeitung nicht möglich: Quelle zu groß oder vorhandener Blockkommentar. Verwenden Sie // für verschachtelte Kommentare.
 script-fold-collapse = Block einklappen
 script-fold-expand = Block erweitern
-script-fold-lines = Linien
 script-fold-all = Alles einklappen
 script-expand-all = Alles erweitern
 loading-residents =
@@ -16939,3 +16938,8 @@ build-ui-texture-siding = Verkleidung
 build-ui-texture-stucco = Stuck
 build-ui-texture-suction = Saugnäpfe
 build-ui-texture-weave = Gewebe
+script-fold-line-count =
+    { $count ->
+        [one] { $count } Zeile
+        *[other] { $count } Zeilen
+    }

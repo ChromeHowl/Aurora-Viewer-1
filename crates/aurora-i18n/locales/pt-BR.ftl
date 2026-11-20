@@ -8381,7 +8381,6 @@ script-edit-outdent = Diminuir recuo (Shift+Tab)
 script-selection-edit-failed = Não é possível editar: fonte muito grande ou comentário em bloco existente. Use // para comentários aninhados.
 script-fold-collapse = Recolher bloco
 script-fold-expand = Expandir bloco
-script-fold-lines = linhas
 script-fold-all = Recolher tudo
 script-expand-all = Expandir tudo
 loading-residents =
@@ -16899,3 +16898,8 @@ build-ui-texture-siding = revestimento
 build-ui-texture-stucco = estuque
 build-ui-texture-suction = sucção
 build-ui-texture-weave = trama
+script-fold-line-count =
+    { $count ->
+        [one] { $count } linha
+        *[other] { $count } linhas
+    }
