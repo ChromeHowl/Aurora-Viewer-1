@@ -6982,6 +6982,7 @@ impl Backend {
                 il,
                 false,
                 true,
+                soft,
             ),
             blend: mk(
                 "frame blend",
@@ -7009,6 +7010,7 @@ impl Backend {
                     mirror,
                     &dummies.black,
                     t.depth_copy.as_ref().map_or(&t.depth_ss, |(_, view)| view),
+                    &dummies.depth,
                     contact,
                     il,
                     false,
