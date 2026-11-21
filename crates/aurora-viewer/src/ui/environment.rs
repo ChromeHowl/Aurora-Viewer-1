@@ -963,7 +963,6 @@ pub fn settings_list(
                 // (LLScrollListCtrl::handleUnicodeCharHere). `search_field`
                 // with ↑ ↓ left to the list, so ↓ reaches the names, and
                 // the A–Z switch at its end (also an Aurora addition).
-                ui.set_min_width(width);
                 let search = ui
                     .horizontal(|ui| {
                         let width = ui.available_width() - 20.0 - ui.spacing().item_spacing.x;
