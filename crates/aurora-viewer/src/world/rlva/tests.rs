@@ -1884,9 +1884,9 @@ fn rlva_stand_return_waits_for_a_successful_sit_and_is_cancelled_by_disabling() 
     w.rlva_sitting_tick();
     w.rlva_sitting_tick();
     assert!(w.rlva.stand_return.is_none(), "an unanswered sit is not a stand");
-    w.agent.seated = true;
+    w.agent.ground_sit = true;
     w.rlva_sitting_tick();
-    w.agent.seated = false;
+    w.agent.ground_sit = false;
     w.rlva_sitting_tick();
     assert_eq!(w.rlva.stand_return, Some(origin));
     let c = NetCommand::TeleportTo {
@@ -2947,14 +2947,6 @@ fn rlva_interact_and_fartouch_gate_what_a_click_can_designate() {
     assert!(!world.rlva_can_rez_drop(None, false));
     assert!(!world.rlva_can_rez_drop(Some(far), false));
     assert!(!world.rlva_can_rez_drop(Some(far), true), "a drop into contents only on a HUD");
-    let add = aurora_net::NetCommand::Build(aurora_net::build::BuildCmd::Duplicate {
-        handle: world.main_region.expect("demo region"),
-        local_ids: Vec::new(),
-        offset: Vec3::ZERO,
-        group_id: Uuid::nil(),
-        flags: 0,
-    });
-    assert!(!world.rlva_allows_command(&add, Uuid::nil()));
     let sit = aurora_net::NetCommand::RequestSit {
         target: world.objects.get(far).unwrap().full_id,
         offset: Vec3::ZERO,

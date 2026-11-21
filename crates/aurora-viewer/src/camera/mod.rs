@@ -8391,7 +8391,7 @@ mod tests {
         for _ in 0..3 {
             cam.update(&mut w, &s, &f);
             assert!(!cam.locked());
-            assert!(cam.position.distance(w.agent.position) <= 2.001);
+            assert!(cam.rlva_distances().0 <= 2.001);
             assert!(cam.fov_y >= 0.8 - 1e-4);
         }
     }

@@ -1143,7 +1143,7 @@ ui-options-content-general = Geral
 language-help = As alterações são aplicadas imediatamente. Traduções indisponíveis são exibidas em inglês.
 language-item-count =
     { $count ->
-        [1] { $count } item
+        [one] { $count } item
        *[other] { $count } itens
     }
 
