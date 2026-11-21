@@ -248,7 +248,6 @@ struct Facts {
     account: Option<(&'static str, bool)>,
     sets: Vec<(String, Color32)>,
     blocked: bool,
-    can_pay: bool,
 }
 
 /// The badges come from what the server sends (the account) and from what
@@ -297,7 +296,6 @@ fn facts(world: &World, id: &Uuid, own: bool, profile: Option<&AvatarProfile>) -
         account: profile.and_then(profiles::header_badge),
         sets,
         blocked: world.is_avatar_blocked(id),
-        can_pay: world.rlva_can_pay(),
     }
 }
 
