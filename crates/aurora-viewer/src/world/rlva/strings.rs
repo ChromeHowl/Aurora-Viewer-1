@@ -27,14 +27,17 @@ pub const MAX_LEN: usize = 1023;
 
 /// The translated text of a name (rlva_strings.xml's `value`).
 pub fn default_text(name: &str) -> &'static str {
+    use super::legacy_strings::{Remote, remote};
     use aurora_i18n::tr;
     match name {
         "blocked_recvim" => tr!("rlva-im-blocked-receive"),
-        "blocked_recvim_remote" => tr!("rlva-im-blocked-receive-remote"),
-        "blocked_sendim" => tr!("rlva-im-blocked-send"),
-        "imquery_list_deny" => tr!("rlva-im-denied"),
-        "stopim_nosession" => tr!("rlva-im-no-restriction"),
-        "stopim_endsession_remote" => tr!("rlva-im-ended-remote"),
+        // what leaves the viewer follows the Legacy Viewer's catalogue
+        // (`legacy_strings`), word for word
+        "blocked_recvim_remote" => remote(Remote::BlockedReceiveIm),
+        "blocked_sendim" => remote(Remote::BlockedSendIm),
+        "imquery_list_deny" => remote(Remote::ListDeny),
+        "stopim_nosession" => remote(Remote::StopImNoSession),
+        "stopim_endsession_remote" => remote(Remote::StopImEndSession),
         _ => "",
     }
 }
