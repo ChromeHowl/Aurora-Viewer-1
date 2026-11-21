@@ -328,7 +328,7 @@ struct ProbeSet {
 @group(0) @binding(13) var contact_tex: texture_2d<f32>;
 // the sun's soft shadows (soft_shadows.wgsl): per pixel, the light let
 // through (10 bits) and the distance of the surface it was made for (an f16)
-@group(0) @binding(29) var soft_tex: texture_2d<u32>;
+@group(0) @binding(30) var soft_tex: texture_2d<u32>;
 
 @group(1) @binding(0) var<storage, read> records: array<DrawRecord>;
 @group(1) @binding(1) var<storage, read> palettes: array<mat4x4<f32>>;

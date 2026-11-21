@@ -4354,7 +4354,7 @@ impl Backend {
             },
             // the soft shadows' mask (soft_shadows.rs)
             wgpu::BindGroupLayoutEntry {
-                binding: 29,
+                binding: 30,
                 visibility: wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Texture {
                     sample_type: wgpu::TextureSampleType::Uint,
@@ -6805,7 +6805,7 @@ impl Backend {
                     // the soft shadows' mask (main view only; any texture of
                     // the format elsewhere, never read: `Frame.soft.x` is 0)
                     wgpu::BindGroupEntry {
-                        binding: 29,
+                        binding: 30,
                         resource: wgpu::BindingResource::TextureView(soft.unwrap_or(milky_way)),
                     },
                     wgpu::BindGroupEntry {
