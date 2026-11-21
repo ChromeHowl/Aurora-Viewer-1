@@ -320,14 +320,14 @@ pub mod snow_spin;
 /// particles" (AURORA_DEMO_SOCIAL_MENU).
 #[path = "demo_social_menu.rs"]
 pub mod social_menu;
-/// Things standing in the sun, for the penumbra of the soft shadows
-/// (AURORA_DEMO_SOFT_SHADOWS).
-#[path = "demo_soft_shadows.rs"]
-pub mod soft_shadows;
 /// Glass whose opacity crosses one half within a face, under things that
 /// occlude it (AURORA_DEMO_SOFT_BLEND).
 #[path = "demo_soft_blend.rs"]
 pub mod soft_blend;
+/// Things standing in the sun, for the penumbra of the soft shadows
+/// (AURORA_DEMO_SOFT_SHADOWS).
+#[path = "demo_soft_shadows.rs"]
+pub mod soft_shadows;
 /// A sound passing in front of the listener, back and forth, for the
 /// Doppler shift (AURORA_DEMO_SOUND_DOPPLER).
 #[path = "demo_sound_doppler.rs"]
