@@ -16931,3 +16931,4 @@ content-perms-demo-sealed = Caixa lacrada
 content-perms-demo-linked = Caixa vinculada
 content-perms-demo-pebble = Caixa de seixo
 content-perms-demo-stack = Pilha de caixotes
+dev-toolbox-o10 = Hitboxes de avatares

@@ -16936,3 +16936,4 @@ content-perms-demo-sealed = 密封盒子
 content-perms-demo-linked = 链接盒子
 content-perms-demo-pebble = 卵石盒子
 content-perms-demo-stack = 箱子堆
+dev-toolbox-o10 = 头像碰撞盒

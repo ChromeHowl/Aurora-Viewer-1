@@ -16971,3 +16971,4 @@ content-perms-demo-sealed = Versiegelte Kiste
 content-perms-demo-linked = Verknüpfte Kiste
 content-perms-demo-pebble = Kieselkiste
 content-perms-demo-stack = Kistenstapel
+dev-toolbox-o10 = Avatar-Hitboxen
