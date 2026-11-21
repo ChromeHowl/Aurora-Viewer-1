@@ -12384,7 +12384,6 @@ bridge-object-info-result =
     你的当前位置：{ $observer }
 bridge-query-timeout = 桥接器未及时返回所请求的信息。请重试。
 bridge-query-interrupted = 信息请求因区域或桥接器连接变更而中断。请重试。
-ao-bootstrap-interrupted = An unfinished AO import already exists in #{ $folder }. Use the recovery notice in the AO window before retrying.
 # Guided AO editor
 ao-states = 状态
 ao-combine = 合并…
@@ -17210,3 +17209,4 @@ second-camera-tip = 拖动可绕你的头像旋转，滚动可缩放，双击可
 second-camera-no-avatar = 你的头像进入世界后会显示在这里。
 second-camera-mouselook = 第一人称视角下已暂停。
 second-camera-restricted = RLVa 限制相机期间不可用。
+ao-import-unfinished-retry = #Aurora/{ $folder } 中已存在未完成的 AO 导入。请先使用 AO 窗口中的恢复提示，再重试。

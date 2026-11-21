@@ -11098,7 +11098,6 @@ bridge-object-info-result =
     Sua posição atual: { $observer }
 bridge-query-timeout = A ponte não retornou as informações solicitadas a tempo. Tente novamente.
 bridge-query-interrupted = A solicitação de informações foi interrompida por uma alteração de região ou conexão de ponte. Tente novamente.
-ao-bootstrap-interrupted = An unfinished AO import already exists in #{ $folder }. Use the recovery notice in the AO window before retrying.
 # Guided AO editor
 ao-states = Estados
 ao-combine = Combinar…
@@ -17205,3 +17204,4 @@ second-camera-tip = Arraste para girar em torno do seu avatar, role para dar zoo
 second-camera-no-avatar = Seu avatar aparecerá aqui quando estiver no mundo.
 second-camera-mouselook = Pausada na visão em primeira pessoa.
 second-camera-restricted = Indisponível enquanto uma restrição do RLVa prende a câmera.
+ao-import-unfinished-retry = Já existe uma importação de AO inacabada em #Aurora/{ $folder }. Use o aviso de recuperação na janela do AO antes de tentar de novo.
