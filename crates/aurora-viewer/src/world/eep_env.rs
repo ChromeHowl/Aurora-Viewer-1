@@ -859,7 +859,6 @@ impl EnvSelector {
         }
     }
 
-
     pub fn has_local(&self) -> bool {
         self.local.is_some()
     }

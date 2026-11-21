@@ -13412,9 +13412,7 @@ impl App {
             // the world's own filters (a stack, `world_look`), else the single
             // colour table of Preferences › Graphics (`world_lut_look`); not
             // on the avatar studio's stage
-            None if studio_view.is_none() => self
-                .world_look((w, h), focus)
-                .or_else(|| self.world_lut_look((w, h))),
+            None if studio_view.is_none() => self.world_look((w, h), focus).or_else(|| self.world_lut_look((w, h))),
             None => None,
         };
         self.scene.parts.lap(Part::ParamsProbes, t_part);
@@ -18845,6 +18843,8 @@ impl App {
                     // behind the photo mode), and the reminder that someone
                     // may pose us stays in sight
                     self.poser_consent_ui(&ctx, &p, true);
+                    // Phototools stays over it too, as Personal Lighting does
+                    self.phototools_over_photo(&ctx, &p);
                     // Personal Lighting, opened from the light panel, stays
                     // over it too: the photo's light refined without leaving
                     if self.panels.personal_lighting {
@@ -18919,6 +18919,7 @@ impl App {
                         self.settings.lookat.show_names,
                     );
                     self.draw_walk_mark(&ctx, &p, projector);
+                    self.draw_focus_point(&ctx, projector);
                 }
                 let classic_tags = self.classic_name_tags();
                 // AURORA_DEMO_FRIEND_PLATES=1: the setting for this run, without saving it
