@@ -11,14 +11,6 @@ impl Editor {
         self.poser.marker_spots.iter().any(|r| r.contains(pointer))
     }
     pub(in crate::ik_edit) fn select_pose_bone(&mut self, bone: usize, rig: &Rig, frame: &Frame) {
-        if self.selected != Some(bone) {
-            let cause = if std::mem::take(&mut self.poser.open_frame_pending) {
-                crate::camera::AutoCameraMove::PoserOpenFraming
-            } else {
-                crate::camera::AutoCameraMove::PoserSelectionFraming
-            };
-            self.poser.focus_requested = Some((bone, cause));
-        }
         self.mirrors.initialize(rig);
         self.selected = Some(bone);
         self.poser.unselected = false;
@@ -131,6 +123,11 @@ impl Editor {
             && !self.gizmo.dragging()
         {
             self.sync_pose_bone(bone, &frame);
+        }
+        // the poser opened: frame the whole avatar, once (a tab, a side or a
+        // drag only changes the selection and never asks)
+        if std::mem::take(&mut self.poser.open_frame_pending) {
+            self.request_poser_framing(rig.pelvis, crate::camera::PoserFraming::Open);
         }
         // Process tabs first: hidden groups must lose their handles this frame.
         self.poser_ui(ctx, p, world, &frame);
