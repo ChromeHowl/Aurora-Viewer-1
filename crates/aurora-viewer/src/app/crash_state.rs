@@ -286,6 +286,7 @@ pub(super) fn effects(settings: &crate::settings::Settings, vr: bool) -> String 
     }
     word(settings.blend_order > 0, format_args!("blend-exact{}", settings.blend_order));
     word(settings.bloom, format_args!("bloom"));
+    word(settings.planet_curvature, format_args!("curvature"));
     word(settings.glow, format_args!("glow"));
     word(
         ao && settings.ao_method == 1 && settings.screen_indirect_light,
@@ -598,6 +599,7 @@ mod tests {
             antialiasing: 6,
             bloom: true,
             screen_indirect_light: true,
+            planet_curvature: true,
             ..Default::default()
         };
         let list = effects(&settings, true);
@@ -607,6 +609,7 @@ mod tests {
             "ao-gtao2",
             "aa-smaa",
             "bloom",
+            "curvature",
             "indirect-light",
             "vr",
             "scale",
