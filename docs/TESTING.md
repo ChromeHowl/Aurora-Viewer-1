@@ -1144,6 +1144,11 @@ when unfocused") is ignored during a screenshot.
 | `AURORA_DEMO_TELEPORT_FAILED=<reason>[,hypergrid]` | Every teleport is refused with that reason: the Teleport failed popup |
 | `AURORA_DEMO_TP_CANCEL=1\|locked` | The teleport screen's Cancel pressed during the demo teleport, or a teleport that cannot be cancelled |
 | `AURORA_DEMO_TP_AWAY=1` | Departure out of range of the demo region, then return |
+||||||| parent of f060ed236 (fix(render): a teleport to another region no longer brings the snow left behind (#4143))
+| `AURORA_DEMO_TP_AWAY=1` | Departure out of range of the demo region, then return |
+| `AURORA_DEMO_AUTO_UNMUTE=1` | Ambient sounds and sound effects muted, unmuted by the demo teleport (see Details) |
+| `AURORA_DEMO_TP_AWAY=1\|snow` | Departure out of range of the demo region, then return; `snow`: over lying snow |
+| `AURORA_DEMO_AUTO_UNMUTE=1` | Ambient sounds and sound effects muted, unmuted by the demo teleport (see Details) |
 | `AURORA_DEMO_AGENT_JITTER=<mm>` | Small position corrections of our avatar |
 | `AURORA_DEMO_LINK=<ping ms>[,…]` | Our avatar moved by a stand-in simulator through a simulated link, to compare Aurora's movement with Firestorm's |
 | `AURORA_DEMO_KEY=<arrow>[:pulse]` | Holds an arrow key (or presses and releases it, over and over) |
@@ -1661,6 +1666,13 @@ when unfocused") is ignored during a screenshot.
   `AURORA_DEMO_CONV=aurora:friend-away` and `AURORA_DEMO_CONV_MENU=im`,
   Nova's Zoom is enabled at frame 740, disabled at frame 900 (Teleport To
   stays, through her map rights), and enabled again at frame 1000.
+  `snow` (#3664): the same trip over lying snow. At frame 300 the ground
+  fills with snow in calm weather (the Weather window's snow-fill button),
+  and both arrivals go through the app as from the network. Each one, in
+  another region, cleans up what lay (log: `weather: arrival in another
+  region, ground cleaned up true`): captured at frames 700 and 1100,
+  the plaza is white, then bare. With `AURORA_SNOW=0.5` (my own snow
+  falling) the log says `false` and the snow stays.
   The departure's arrival also says "Teleport completed from" and a link to
   the plaza in nearby chat (FSShowBackSLURL; capture at frame 900); the
   return says nothing, the far region having no name.
