@@ -208,8 +208,10 @@ fn found_in(label: &str, words: &[String]) -> Option<(usize, usize)> {
     let chars: Vec<char> = folded.chars().collect();
     words.iter().find_map(|w| {
         let w: Vec<char> = w.chars().collect();
-        let start = (0..chars.len())
-            .find(|&i| (i == 0 || !chars[i - 1].is_alphanumeric()) && chars.get(i..i + w.len()).is_some_and(|s| s == w.as_slice()))?;
+        let inside = anywhere(&w.iter().collect::<String>());
+        let start = (0..chars.len()).find(|&i| {
+            (i == 0 || inside || !chars[i - 1].is_alphanumeric()) && chars.get(i..i + w.len()).is_some_and(|s| s == w.as_slice())
+        })?;
         let byte = |n: usize| label.char_indices().nth(n).map_or(label.len(), |(i, _)| i);
         Some((byte(start), byte(start + w.len())))
     })

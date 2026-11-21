@@ -1886,7 +1886,7 @@ mod tests {
             attachment: None,
         };
         assert!(matches!(
-            &labelled(&on_body, "ui-context-inspect-2")[..],
+            &labelled(&on_body, "ui-context-inspect-all-attachments")[..],
             [Kind::Action(CtxAction::InspectAvatar(id))] if *id == avatar
         ));
         assert!(labelled(&on_body, "ui-context-inspect-worn").is_empty());

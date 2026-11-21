@@ -1336,12 +1336,12 @@ bug-demo-expected = Die Textur sollte vollständig geladen sein.
 bug-demo-actual = Ein Panel bleibt grau. Dies ist ein Beispielbericht, kein echter Fehler.
 attachment-point = Befestigungspunkt { $point }
 font-sample = 0123456789 · éèàçù · ÆŒ · „Anführungszeichen“ · L$ 1 250
-number-decimal-separator = .
-number-thousands-separator = ,
+number-decimal-separator = ,
+number-thousands-separator = .
 profile-date = { $month }/{ $day }/{ $year }
 profile-date-hidden = { $month }/{ $day }
 date-day-month = { $day } { $month }
-date-day-month-year = { $day } { $month } { $year }
+date-day-month-year = { $day }. { $month } { $year }
 land-claim-date = { $weekday } { $day } { $month } { $year } { $time }
 land-covenant-date = { $weekday } { $month } { $day } { $time } { $year }
 map-dir-n = N
@@ -1392,8 +1392,8 @@ ui-options-content-general = Allgemein
 language-help = Änderungen gelten sofort. Fehlende Übersetzungen verwenden Englisch.
 language-item-count =
     { $count ->
-        [one] { $count } Artikel
-       *[other] { $count } Artikel
+        [one] { $count } Objekt
+       *[other] { $count } Objekte
     }
 
 # Viewer interface and notifications
@@ -1439,7 +1439,7 @@ keybinds-numpad-4 = . (Nummernblock)
 keybinds-numpad-5 = / (Nummernblock)
 ui-options-0-hide-avatar-names = 0 = Avatar-Namen ausblenden
 ui-options-0-no-chat-bubbles-above-the-chat-bar = 0 = keine Chat-Blasen über der Chat-Leiste
-demo-1-violet-wolf-0-2-spam-box-0-0 = { "1 " }{ $value0 }{ " Violetter Wolf|0\u000A2 " }{ $value1 }{ " Spam-Box|0\u000A0 " }{ $value2 }{ " Werbetafel|\u000A0 " }{ $value3 }{ " Gruppe:" }{ $value4 }{ "|\u000A" }
+demo-1-violet-wolf-0-2-spam-box-0-0 = { "1 " }{ $value0 }{ " Violetter Wolf|0\u000A2 " }{ $value1 }{ " Spam-Box|0\u000A0 " }{ $value2 }{ " Werbetafel|\u000A0 " }{ $value3 }{ " Group:" }{ $value4 }{ "|\u000A" }
 ui-land-dialogs-1-set-a-price = 1. Legen Sie einen Preis fest:
 build-ui-general-127-bytes-maximum = Maximal 127 Byte.
 ui-land-dialogs-2-sell-the-land-to = 2. Verkaufen Sie das Land an:
@@ -8445,7 +8445,7 @@ extra-jul = Juli
 extra-sep = Sept
 extra-oct = Okt
 extra-nov = Nov
-extra-sun = Sonne
+extra-sun = So
 extra-mon = Mo
 extra-tue = Di
 extra-wed = Mi
