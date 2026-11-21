@@ -513,7 +513,9 @@ import-load-preset = 载入预设
 import-save-preset = 另存为预设
 import-analysis-progress = 分析：{ $percent }%
 import-animation-settings = 动画设置
-import-batch-limit = 已达上限（每次选择 256 个文件、每份草稿 512 个资源或 1 GiB）。请移除文件或减少所选文件后继续。
+import-gltf-resource-limit = 外部 glTF 资源过大：{ $bytes } 字节；每个资源最多 { $limit } 字节。
+import-lod-legacy = Legacy 生成
+import-queue-resize = 拖动以调整文件列表的大小。双击可重置其宽度。
 import-mesh-fee-required = 上传前请先计算费用。
 import-hands-spread-right = 右手张开
 import-local-mesh-selection = 应用此本地预览前，请先在场景中选择一个基本体或网格模型。
@@ -1936,6 +1938,14 @@ splash-update-installing = 正在安装更新…
 splash-update-cache = 正在清理缓存…
 splash-update-launching = 正在启动新版本…
 app-aurora-viewer-unable-to-initialize-metal = { "Aurora 查看器：无法初始化 Metal：" }{ $e }
+app-graphics-start-memory-full =
+    显卡已没有可供 Aurora Viewer 使用的显存：另一个程序占用了它。
+
+    可以尝试：
+    • 关闭使用显卡的程序（另一个查看器、游戏、视频或 3D 编辑器），然后重新启动 Aurora Viewer；
+    • 如果是装有两块显卡的笔记本电脑，请检查 Aurora Viewer 运行在哪一块显卡上。
+
+    本次启动的日志：{ $log }
 app-graphics-start-failed-title = Aurora查看器无法启动
 app-graphics-start-failed =
     Aurora Viewer 无法打开显卡来绘制窗口。

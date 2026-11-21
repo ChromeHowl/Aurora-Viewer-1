@@ -302,7 +302,9 @@ import-load-preset = Carregar predefinição
 import-save-preset = Salvar como predefinição
 import-analysis-progress = Análise: { $percent } %
 import-animation-settings = Configurações de animação
-import-batch-limit = Limite atingido (256 arquivos por seleção, 512 ativos ou 1 GiB por rascunho). Remova arquivos ou selecione menos arquivos antes de continuar.
+import-gltf-resource-limit = O recurso glTF externo é grande demais: { $bytes } bytes; máximo de { $limit } bytes por recurso.
+import-lod-legacy = Geração Legacy
+import-queue-resize = Arraste para redimensionar a lista de arquivos. Clique duas vezes para restaurar a largura.
 import-mesh-fee-required = Calcule a taxa antes de enviar.
 import-hands-spread-right = Extensão à direita
 import-local-mesh-selection = Selecione um prim ou malha no mundo antes de aplicar esta visualização local.
@@ -1607,6 +1609,14 @@ cli-aurora-viewer-2 = { "Aurora Viewer " }{ $version }{ " - " }{ $t }
 common-aurora-viewer = { "Aurora Viewer " }{ $value0 }
 app-aurora-viewer-unable-to-initialize-vulkan = { "Visualizador Aurora: não é possível inicializar Vulkan: " }{ $e }
 app-aurora-viewer-unable-to-initialize-metal = { "Visualizador Aurora: não é possível inicializar o Metal: " }{ $e }
+app-graphics-start-memory-full =
+    A placa de vídeo não tem mais memória de vídeo para o Aurora Viewer: outro programa a está ocupando.
+
+    O que tentar:
+    • feche os programas que usam a placa de vídeo (outro viewer, um jogo, um editor de vídeo ou 3D) e inicie o Aurora Viewer de novo;
+    • em um notebook com duas placas de vídeo, verifique em qual delas o Aurora Viewer está rodando.
+
+    O registro desta inicialização: { $log }
 app-graphics-start-failed-title = O visualizador Aurora não pode ser iniciado
 app-graphics-start-failed =
     O Aurora Viewer não conseguiu acessar uma placa gráfica para renderizar a janela.

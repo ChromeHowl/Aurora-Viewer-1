@@ -505,7 +505,9 @@ import-load-preset = Voreinstellung laden
 import-save-preset = Als Voreinstellung speichern
 import-analysis-progress = Analyse: { $percent } %
 import-animation-settings = Animationseinstellungen
-import-batch-limit = Limit erreicht (256 Dateien pro Auswahl, 512 Assets oder 1 GiB pro Entwurf). Entfernen Sie Dateien oder wählen Sie weniger Dateien aus, bevor Sie fortfahren.
+import-gltf-resource-limit = Die externe glTF-Ressource ist zu groß: { $bytes } Bytes; höchstens { $limit } Bytes pro Ressource.
+import-lod-legacy = Legacy-Erzeugung
+import-queue-resize = Ziehen, um die Dateiliste in der Größe zu ändern. Doppelklick setzt die Breite zurück.
 import-mesh-fee-required = Berechnen Sie die Gebühr vor dem Hochladen.
 import-hands-spread-right = Rechte Hand gespreizt
 import-local-mesh-selection = Wählen Sie ein Prim oder Netz in der Welt aus, bevor Sie diese lokale Vorschau anwenden.
@@ -1925,6 +1927,14 @@ splash-update-installing = Das Update wird installiert…
 splash-update-cache = Cache leeren…
 splash-update-launching = Starten der neuen Version…
 app-aurora-viewer-unable-to-initialize-metal = { "Aurora Viewer: Metal kann nicht initialisiert werden: " }{ $e }
+app-graphics-start-memory-full =
+    Die Grafikkarte hat keinen Videospeicher mehr für Aurora Viewer: ein anderes Programm belegt ihn.
+
+    Das können Sie versuchen:
+    • Schließen Sie die Programme, die die Grafikkarte nutzen (ein anderer Viewer, ein Spiel, ein Video- oder 3D-Editor), und starten Sie Aurora Viewer dann neu;
+    • prüfen Sie bei einem Laptop mit zwei Grafikkarten, auf welcher Aurora Viewer läuft.
+
+    Das Protokoll dieses Starts: { $log }
 app-graphics-start-failed-title = Aurora Viewer kann nicht gestartet werden
 app-graphics-start-failed =
     Aurora Viewer konnte eine Grafikkarte nicht öffnen, um ihr Fenster zu zeichnen.
