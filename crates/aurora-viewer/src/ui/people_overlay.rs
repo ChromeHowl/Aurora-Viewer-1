@@ -177,7 +177,7 @@ pub fn mouselook_markers(ctx: &egui::Context, p: &Palette, world: &World, proj: 
             continue;
         };
         let name = world.social.name_of(&s.id);
-        let color = super::colors::map_color(world, &s.id, &name);
+        let color = super::colors::arrow_color(world, &s.id, &name);
         let color = world.rlva_shown_mark(&s.id).map_or(color, |[r, g, b]| Color32::from_rgb(r, g, b));
         let color = super::colors::shadow_red(world, &s.id).unwrap_or(color);
         arrow(&painter, p, at, direction, color);
