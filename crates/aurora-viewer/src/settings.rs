@@ -3725,8 +3725,11 @@ impl Settings {
             // Aurora Weather's main and card switches, off by default: an
             // earlier file keeps on what it drew (upstream's own migration
             // number was 43; the fork's 43 is the Instant movement above)
+            // (none of its own where regions set the weather)
             self.weather.upgrade_to_switches();
         }
+        // only the migration above reads the former region switch
+        self.weather.former_region_weather = None;
         if self.settings_version < 45 {
             // the wind's defaults, a breeze: a wind off and left still
             // takes them, so that switching it on blows (upstream's number
@@ -5483,6 +5486,41 @@ mod tests {
         assert!(!loaded.inventory.recent_sort.system_first);
         assert_eq!(loaded.inventory.sort, Settings::default().inventory.sort);
         assert_eq!(loaded.inventory.received_sort, Settings::default().inventory.received_sort);
+    }
+
+    /// A file from before Aurora Weather's switches turns on only the
+    /// weather it drew: with "Let regions set the weather" on, none of its
+    /// own, so the main switch stays off. A file from since keeps its
+    /// switch, whatever an older build wrote back.
+    #[test]
+    fn weather_from_before_the_switches_stays_off_where_regions_set_it() {
+        let read = |file: serde_json::Value| serde_json::from_value::<Settings>(file).expect("read settings").sanitized();
+        let own_weather = |regions: Option<bool>| {
+            let mut weather = serde_json::json!({ "amount": 0.6, "wind_max": 0.3, "aurora": true });
+            if let Some(on) = regions {
+                weather["region_weather"] = serde_json::json!(on);
+            }
+            weather
+        };
+        for version in [0, 41, 42, 43] {
+            let regions = read(serde_json::json!({ "settings_version": version, "weather": own_weather(Some(true)) }));
+            assert!(!regions.weather.enabled, "version {version}");
+            assert!(regions.weather.precipitation_on && regions.weather.wind_on, "version {version}");
+            for regions in [None, Some(false)] {
+                let mine = read(serde_json::json!({ "settings_version": version, "weather": own_weather(regions) }));
+                assert!(mine.weather.enabled, "version {version}, {regions:?}");
+            }
+        }
+        let saved = serde_json::to_value(read(
+            serde_json::json!({ "settings_version": 42, "weather": own_weather(Some(true)) }),
+        ))
+        .expect("serialize");
+        assert!(saved["weather"].get("region_weather").is_none());
+        // switched on since: an older build's region switch changes nothing
+        let mut since = own_weather(Some(true));
+        since["enabled"] = serde_json::json!(true);
+        let kept = read(serde_json::json!({ "settings_version": SETTINGS_VERSION, "weather": since }));
+        assert!(kept.weather.enabled && kept.weather.former_region_weather.is_none());
     }
 
     /// ArrowKeysAlwaysMove is off in the Legacy Viewer: the arrows move the
