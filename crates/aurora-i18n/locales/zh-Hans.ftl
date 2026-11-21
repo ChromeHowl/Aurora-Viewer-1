@@ -16909,3 +16909,7 @@ chat-service-delete-failed = 部分本地历史记录未能安全删除。在“
 ui-chat-history-loading = 正在加载历史记录…
 world-inventory-offers-sent-anonymous = 已向 { $name } 发送物品赠送请求
 rlva-tools-child = 子元素
+
+ui-chat-contacts-groups-sub = 群组 · { $count }
+people-show-group-sheet = 显示群组详情
+people-group-details-empty = 没有可显示的群组

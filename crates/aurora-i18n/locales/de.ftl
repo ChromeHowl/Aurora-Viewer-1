@@ -16949,3 +16949,7 @@ chat-service-delete-failed = Ein Teil des lokalen Verlaufs konnte nicht sicher g
 ui-chat-history-loading = Verlauf wird geladen…
 world-inventory-offers-sent-anonymous = Inventarobjekt an { $name } angeboten
 rlva-tools-child = Unterobjekt
+
+ui-chat-contacts-groups-sub = Gruppen · { $count }
+people-show-group-sheet = Gruppendetails anzeigen
+people-group-details-empty = Keine Gruppe zum Anzeigen

@@ -16909,3 +16909,7 @@ chat-service-delete-failed = Parte do histórico local não pôde ser excluída 
 ui-chat-history-loading = Carregando histórico…
 world-inventory-offers-sent-anonymous = Item do inventário oferecido a { $name }
 rlva-tools-child = filho
+
+ui-chat-contacts-groups-sub = Grupos · { $count }
+people-show-group-sheet = Mostrar detalhes do grupo
+people-group-details-empty = Nenhum grupo para exibir
