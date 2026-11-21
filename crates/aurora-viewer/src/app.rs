@@ -7009,7 +7009,11 @@ impl App {
             .or_else(|| self.day_editor.weather_preview());
         use crate::weather::WeatherSource;
         if let Some((weather, falling)) = preview {
-            rlva::rlva_hold_weather(&mut self.weather_now, RegionDay::fixed(weather).apply(own, region, secs, falling), locked);
+            rlva::rlva_hold_weather(
+                &mut self.weather_now,
+                RegionDay::fixed(weather).apply(own, region, secs, falling),
+                locked,
+            );
             self.env_ui.weather_source = WeatherSource::Preview;
             return;
         }

@@ -834,15 +834,7 @@ pub fn draw(
                 base.gamma_multiply(alpha)
             });
             // the highlighted text in front of the others
-            texts.push((
-                if highlighted { 0.0 } else { d },
-                sp,
-                text,
-                col,
-                anchor,
-                highlighted,
-                plate,
-            ));
+            texts.push((if highlighted { 0.0 } else { d }, sp, text, col, anchor, highlighted, plate));
         }
     }
     visibility.finish();

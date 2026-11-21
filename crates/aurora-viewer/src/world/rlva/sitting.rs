@@ -64,10 +64,7 @@ impl World {
     pub fn rlva_note_sit_command(&mut self, command: &NetCommand, actor: Uuid) {
         self.rlva.note_sit_command(command, actor);
         // `/siton` and the area search record nothing (`Sitting::no_sit_source`)
-        if matches!(command, NetCommand::RequestSit { .. })
-            && self.rlva.has("standtp")
-            && !self.rlva.sitting.no_sit_source
-        {
+        if matches!(command, NetCommand::RequestSit { .. }) && self.rlva.has("standtp") && !self.rlva.sitting.no_sit_source {
             self.rlva.stand_origin = self.main_region.map(|handle| (handle, self.agent.position));
         }
     }
