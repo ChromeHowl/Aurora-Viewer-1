@@ -4324,6 +4324,10 @@ impl Session<'_> {
                     &self.sh.stats,
                 );
                 let extra = crate::teleport_failed::llsd_bytes(&alert["ExtraParams"]);
+                // handle_teleport_access_blocked: a refusal for the rating
+                if let Some(blocked) = crate::teleport_access::from_alert_info(&code, &extra) {
+                    emit(self.sh, NetEvent::TeleportAccessBlocked(blocked));
+                }
                 emit(self.sh, crate::teleport_failed::event(reason, Some((code, &extra))));
             }
             "DisableSimulator" => {
@@ -5758,6 +5762,14 @@ impl Session<'_> {
                 ),
                 &self.sh.stats,
             );
+            // handle_teleport_access_blocked: a refusal for the rating
+            if let Some(blocked) = m
+                .alert_info
+                .first()
+                .and_then(|info| crate::teleport_access::from_alert_info(&field_str(&info.message), &info.extra_params))
+            {
+                emit(self.sh, NetEvent::TeleportAccessBlocked(blocked));
+            }
             emit(self.sh, crate::teleport_failed::event(field_str(&m.info.reason), alert));
         } else if id == ParcelMediaCommandMessage::ID {
             let m: ParcelMediaCommandMessage = pkt.decode()?;

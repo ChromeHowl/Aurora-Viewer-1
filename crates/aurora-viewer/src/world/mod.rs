@@ -123,6 +123,7 @@ pub mod staff;
 pub mod status;
 pub mod suitcase;
 pub mod system_messages;
+pub mod teleport_access;
 pub mod teleport_cancel;
 pub mod teleport_failure;
 pub mod teleport_invites;
@@ -750,6 +751,9 @@ pub struct World {
     /// The content rating chosen during the session and its sync with the
     /// server.
     pub maturity: maturity::MaturityPreference,
+    /// A teleport refused for its content rating: the request to restart
+    /// and the prompt (`teleport_access.rs`).
+    pub teleport_access: teleport_access::TeleportAccess,
     /// World › Set Home to Here waiting for the simulator's answer.
     pub set_home: home::SetHome,
     /// Preferences › Privacy's account settings kept by the grid.
@@ -1216,6 +1220,7 @@ impl World {
             payments: payments::Payments::default(),
             pokes: pokes::Pokes::default(),
             maturity: maturity::MaturityPreference::default(),
+            teleport_access: Default::default(),
             set_home: home::SetHome::default(),
             user_info: user_info::UserInfoState::default(),
             sim_console: sim_console::SimConsole::default(),
@@ -3195,6 +3200,10 @@ impl World {
                 self.hover_height.reply(request, region, success);
                 None
             }
+            NetEvent::TeleportAccessBlocked(blocked) => {
+                self.teleport_access.blocked(blocked);
+                None
+            }
             NetEvent::MaturityPreference(result) => {
                 self.on_maturity_answer(result);
                 None
@@ -3275,6 +3284,11 @@ impl World {
                     self.coarse.retain(|h, _| *h == handle);
                 }
                 self.movement_complete = true;
+                // LLAgent::handleTeleportFinished, once the arrival is known
+                // (LLViewerParcelMgr's teleport finished callback)
+                if self.teleporting {
+                    self.teleport_access_ended(true);
+                }
                 if self.teleporting || !self.arrived_once {
                     let at = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
@@ -3785,15 +3799,20 @@ impl World {
                 self.teleporting = false;
                 self.tp_failed = true;
                 let said = teleport_failure::text(&code, &reason, &region);
-                self.system_notice(
-                    aurora_i18n::tr!("world-mod-teleport-failed", reason = said),
-                    crate::world::notice_topics::Topic::Teleport,
-                );
-                // CouldNotTeleportReason: the simulator's failures only, the
-                // viewer's own ones stay a notice
-                if !code.is_empty() {
-                    log::warn!("teleport failed: {reason} (code {code})");
-                    self.tp_failure = Some(teleport_failure::Failure { code, reason, region });
+                self.teleport_access_ended(false);
+                // handle_teleport_access_blocked: a refusal for the rating
+                // gets its prompt instead of the reason
+                if !self.teleport_access_failed() {
+                    self.system_notice(
+                        aurora_i18n::tr!("world-mod-teleport-failed", reason = said),
+                        crate::world::notice_topics::Topic::Teleport,
+                    );
+                    // CouldNotTeleportReason: the simulator's failures only, the
+                    // viewer's own ones stay a notice
+                    if !code.is_empty() {
+                        log::warn!("teleport failed: {reason} (code {code})");
+                        self.tp_failure = Some(teleport_failure::Failure { code, reason, region });
+                    }
                 }
                 None
             }
@@ -5898,6 +5917,13 @@ impl World {
             };
             self.invite_card_answered(invite, answer);
             return (std::mem::take(&mut self.groups.out), None);
+        }
+        // a teleport refused for its rating (teleport_access.rs)
+        if let Some(notifications::Data::MaturityChange { rating, prompt }) = data {
+            let accept = matches!(r, notifications::Response::Accept);
+            self.notifications.respond(id, r, |_| Uuid::nil(), Uuid::nil());
+            self.answer_teleport_access(rating, prompt, accept);
+            return (Vec::new(), None);
         }
         // teleport offers and requests: answered through their invitation,
         // closing the notification declines (as Firestorm's toasts do)
