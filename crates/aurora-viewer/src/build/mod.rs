@@ -1100,6 +1100,14 @@ pub fn select_type(world: &World, mut idx: usize) -> SelectType {
     SelectType::World
 }
 
+/// What RLVa lets stay selected: @edit's rules (RlvActions::canEdit), and
+/// under @interact only a HUD (LLSelectMgr::deselectAllIfTooFar, whose
+/// fall-back drops any other selection; LLViewerWindow::cursorIntersect
+/// refuses the pick).
+pub fn rlva_selectable(world: &World, idx: usize) -> bool {
+    world.rlva_can_edit(idx) && (!world.rlva.has("interact") || world.hud_root(idx).is_some())
+}
+
 /// World objects and what our avatar wears, HUDs included; the attachments
 /// of other avatars cannot be edited.
 pub fn selectable(world: &World, idx: usize) -> bool {

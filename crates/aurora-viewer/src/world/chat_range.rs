@@ -85,6 +85,7 @@ mod tests {
             source,
             origin: super::super::Origin::Live,
             blocked: false,
+            speaker: Default::default(),
         };
         assert!(!w.said_far(&line(near)));
         assert!(w.said_far(&line(away)));

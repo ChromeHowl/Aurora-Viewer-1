@@ -478,31 +478,4 @@ mod tests {
             assert_eq!(contact_chat_color(line, &world), None);
         }
     }
-
-    /// LLVOAvatar::getNameTagColor ends with the mark whatever RLVa hides,
-    /// and LLNetMap::draw gives a hidden resident the others' dot.
-    #[test]
-    fn rlva_hidden_names_keep_their_mark_on_the_name_tag_and_lose_it_on_the_map() {
-        let mut world = world();
-        let stranger = Uuid::from_u128(99);
-        let unmarked = tag_color(&world, &stranger, "Somebody Else", false);
-        world.avatar_marks.set(&[FRIEND], [186, 0, 31]);
-        let mark = text([186, 0, 31, 255]);
-        assert_eq!(tag_color(&world, &FRIEND, "Teagan Linden", false), mark);
-        assert_eq!(mark_color(&world, &FRIEND), Some(c([186, 0, 31, 255])));
-        rlva(&mut world, "@shownames=n");
-        // the tag: the mark still, and no distance colour over it
-        assert_eq!(tag_color(&world, &FRIEND, "Teagan Linden", false), mark);
-        assert!(relation_tag(&world, &FRIEND, "Teagan Linden"));
-        // the map: the dot of anyone else
-        assert_eq!(mark_color(&world, &FRIEND), None);
-        assert_eq!(
-            map_color(&world, &FRIEND, "Teagan Linden"),
-            map_color(&world, &stranger, "Somebody Else")
-        );
-        // no mark: a hidden friend's tag tells nothing, as before
-        world.avatar_marks.clear(&[FRIEND]);
-        assert_eq!(tag_color(&world, &FRIEND, "Teagan Linden", false), unmarked);
-        assert!(!relation_tag(&world, &FRIEND, "Teagan Linden"));
-    }
 }

@@ -793,16 +793,17 @@ mod tests {
             .coarse
             .insert(main, vec![(uuid::Uuid::from_u128(77), glam::Vec3::new(10.0, 10.0, 20.0))]);
         let point = glam::Vec3::new(128.0, 64.0, 30.0);
+        let ctx = egui::Context::default();
         let mut tiles = crate::ui::map_tiles::MapTiles::new();
-        let facts = PlaceFacts::gather(&mut world, &mut tiles, &here, Some(point), true);
+        let facts = PlaceFacts::gather(&ctx, &mut world, &mut tiles, &here, Some(point), true);
         assert!(facts.residents.is_some() && facts.pin.is_some());
         world.rlva_console_input("@shownearby=n");
-        let facts = PlaceFacts::gather(&mut world, &mut tiles, &here, Some(point), true);
+        let facts = PlaceFacts::gather(&ctx, &mut world, &mut tiles, &here, Some(point), true);
         assert!(facts.residents.is_none(), "@shownearby");
         assert!(facts.pin.is_some() && facts.position == "128, 64, 30");
         world.rlva_console_input("@shownearby=y");
         world.rlva_console_input("@showworldmap=n");
-        let facts = PlaceFacts::gather(&mut world, &mut tiles, &here, Some(point), true);
+        let facts = PlaceFacts::gather(&ctx, &mut world, &mut tiles, &here, Some(point), true);
         assert!(facts.tile.is_none() && facts.pin.is_none(), "@showworldmap");
         assert!(facts.residents.is_some(), "the residents around are not the map's");
         assert_eq!(banner_place(&world, ""), (here, None));

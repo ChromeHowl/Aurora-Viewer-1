@@ -1236,6 +1236,7 @@ mod tests {
                     source: BOB,
                     origin: crate::world::Origin::Live,
                     blocked: false,
+                    speaker: Default::default(),
                 },
             );
             kit.main_open = true;

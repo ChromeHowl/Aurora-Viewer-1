@@ -29,11 +29,9 @@ impl World {
         };
         // LLAvatarActions::startIM / startCall / startConference /
         // startAdhocCall and LLGroupActions::startIM / startCall
-        // (llavataractions.cpp, llgroupactions.cpp): UISndInvalidOp and
-        // RlvUtil::notifyBlocked with blocked_startim, the resident's or the
-        // group's link as [RECIPIENT], or blocked_startconf, which is given
+        // (llavataractions.cpp, llgroupactions.cpp): RlvUtil::notifyBlocked with blocked_startim, the
+        // resident's or the group's link as [RECIPIENT], or blocked_startconf, which is given
         // no [RECIPIENT] and shows it as written.
-        self.ui_sounds.push(crate::ui_sound::UiSound::InvalidOp);
         // (one resident is an ordinary conversation or call: startIM, startCall)
         let text = if recipients.len() > 1 {
             aurora_i18n::tr!("rlva-blocked-start-conference").to_owned()

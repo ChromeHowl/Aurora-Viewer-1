@@ -847,7 +847,6 @@ impl World {
                 source,
                 origin: Origin::Log,
                 blocked: false,
-                beyond_range: false,
                 speaker: Default::default(),
             }
         })

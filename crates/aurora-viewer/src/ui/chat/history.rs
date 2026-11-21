@@ -684,7 +684,6 @@ mod tests {
             source: uuid::Uuid::nil(),
             origin: crate::world::Origin::Log,
             blocked: false,
-            beyond_range: false,
             speaker: Default::default(),
         };
         assert_eq!(NAMES, NameScope::Roster);

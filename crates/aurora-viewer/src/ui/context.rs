@@ -1159,7 +1159,7 @@ fn avatar_menu_reporting(
     // refuses a friend whose name RLVa hides, in the nearby and the recent
     // lists; the friends list's own menu (FSContactsFriendsMenu) and a
     // name's ask nothing.
-    let removable = !matches!(kind, AvatarList::Nearby | AvatarList::MiniMap) || world.rlva_can_name(id);
+    let removable = !matches!(kind, AvatarList::Nearby) || world.rlva_can_name(id);
     let remove_friend = |ui: &mut egui::Ui| {
         if friend.is_some() && removable && menu::item(ui, p, "user-minus", aurora_i18n::tr!("common-remove-this-friend")) {
             act(CtxAction::RemoveFriend(id));
@@ -2265,7 +2265,7 @@ mod tests {
         assert!(!name_menu_restricted(AvatarList::Name, false, false));
         // FSNameListAvatarMenu (a group's members): no `@shownames` test
         assert!(!name_menu_restricted(AvatarList::Name, true, true));
-        for list in [AvatarList::Nearby, AvatarList::MiniMap, AvatarList::Friend] {
+        for list in [AvatarList::Nearby, AvatarList::Friend] {
             assert!(!name_menu_restricted(list, false, true), "{list:?}");
             assert!(!name_menu_restricted(list, true, true), "{list:?}");
             // PeopleContextMenu "can_add": a resident who is named, not a friend

@@ -1038,6 +1038,7 @@ mod tests {
             source: jane,
             origin: Origin::Copy,
             blocked: false,
+            speaker: Default::default(),
         };
         w.nearby_push(copy("not logged"));
         w.chat_display.more.log_im_copies = true;

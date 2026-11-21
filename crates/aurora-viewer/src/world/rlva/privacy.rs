@@ -828,8 +828,7 @@ impl World {
     pub fn rlva_is_nearby(&self, id: Uuid) -> bool {
         !id.is_nil()
             && id != self.agent_id
-            && (self.coarse.values().flatten().any(|(other, _)| *other == id)
-                || self.objects.avatars().any(|(_, o)| o.full_id == id && !self.is_mirror(&id)))
+            && (self.coarse.values().flatten().any(|(other, _)| *other == id) || self.objects.avatars().any(|(_, o)| o.full_id == id))
     }
 
     fn rlva_nearby_avatars(&self) -> std::collections::HashSet<Uuid> {
@@ -1445,7 +1444,6 @@ mod tests {
             source,
             origin: crate::world::Origin::Live,
             blocked: false,
-            beyond_range: false,
             speaker: Default::default(),
         }
     }

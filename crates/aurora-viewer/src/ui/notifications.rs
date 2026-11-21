@@ -371,7 +371,14 @@ pub(super) fn person_card(
                     ui.horizontal(|ui| {
                         let actions = 2.0 * ACTION + 4.0;
                         ui.allocate_ui(Vec2::new((ui.available_width() - actions).max(40.0), 18.0), |ui| {
-                            name_hover = name_hover.or(text::person_body(ui, p, env.emoji, &n.body, &n.name_links));
+                            name_hover = name_hover.or(text::person_body(
+                                ui,
+                                p,
+                                env.emoji,
+                                &n.body,
+                                &n.name_links,
+                                world.notifications.names_of(n),
+                            ));
                         });
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.spacing_mut().item_spacing.x = 4.0;

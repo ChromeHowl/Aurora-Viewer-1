@@ -254,8 +254,8 @@ fn name_color(env: &LineEnv, th: &Thread, line: &ChatLine, who: &Who) -> Color32
 
 /// The text of a message and how it reads: an emote is the name in violet
 /// italics, a whisper in grey italics; the user's chat colours otherwise.
-/// The lines drawn pass `shown_name` ("(You)" with the option); a quote
-/// passes the real name, since it is pasted for others to read.
+/// The lines drawn pass `sender_name` ("(You)" with the option, for an emote
+/// too); a quote passes the real name, since it is pasted for others to read.
 fn body(env: &LineEnv, line: &ChatLine, name: &str) -> (String, Color32, bool) {
     let emote = line.text.starts_with("/me ") || line.text.starts_with("/me'");
     let text = if emote {
@@ -438,7 +438,7 @@ fn roomy_row(
                     }
                 });
             }
-            let (text, color, italics) = body(env, line, super::shown_name(line, name));
+            let (text, color, italics) = body(env, line, name);
             let visible = super::previews::text(env.previews.as_deref(), line, &text, ui.available_width());
             if !visible.is_empty() {
                 let size = env.emoji.message_size(&visible, chat_size(ui.ctx(), TEXT));
@@ -501,7 +501,7 @@ fn compact_row(
                 tags(ui, p, th, line, who);
             });
         }
-        let (text, color, italics) = body(env, line, super::shown_name(line, name));
+        let (text, color, italics) = body(env, line, name);
         let visible = super::previews::text(env.previews.as_deref(), line, &text, ui.available_width() - RIGHT);
         ui.vertical(|ui| {
             ui.set_width((ui.available_width() - RIGHT).max(40.0));
