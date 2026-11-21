@@ -949,6 +949,8 @@ impl World {
                 self.social.names.entry(inv.from).or_insert_with(|| inv.from_name.clone());
             }
             let text = saved_prefix(inv.offline, inv.timestamp) + &inv.message;
+            // FSOpenIMContainerOnOfflineMessage (`Social::offline_ims`)
+            self.social.offline_ims |= inv.offline;
             let now = SystemTime::now();
             let l = line(inv.from_name.clone(), text, ChatKind::Im, inv.from, now);
             self.session_push(session, l, true);
@@ -956,10 +958,15 @@ impl World {
             if inv.offline && new {
                 self.log_conversation(session, true);
             }
-            // the time the server's history knows it by (the timestamp of
-            // the invitation, else its arrival)
-            let arrival = now.duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_secs() as u32).unwrap_or(0);
-            opener = Some(if inv.timestamp != 0 { inv.timestamp } else { arrival });
+            // where the server's history stops: the invitation's timestamp,
+            // else the server's own copy of this message
+            // (LLIMSession::addMessagesFromServerHistory never uses the
+            // local clock)
+            opener = Some(if inv.timestamp != 0 {
+                super::transcripts::Opener::At(inv.timestamp)
+            } else {
+                super::transcripts::Opener::Message(inv.from, inv.message.trim().to_owned())
+            });
         }
         self.groups.restoring.remove(&session);
         self.groups.out.push(NetCommand::ChatSession {
@@ -976,8 +983,8 @@ impl World {
                 method: SessionMethod::FetchHistory,
                 session,
             });
-            if let Some(time) = opener {
-                self.session_lines(session).log.opened_by(time);
+            if let Some(opener) = opener {
+                self.session_lines(session).log.opened_by(opener);
             }
         }
     }
