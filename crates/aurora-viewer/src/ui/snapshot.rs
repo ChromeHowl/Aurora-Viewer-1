@@ -1428,11 +1428,11 @@ fn dof_rows(ui: &mut egui::Ui, p: &Palette, d: &mut crate::dof::PhotoDof) {
     });
 }
 
-/// The photo's quick light (Phototools' Quick Environments, the sky, water
-/// and day cycle lists of its Env tab, Pause Clouds, Attached Lights and
-/// Exposure, and the sun of "Personal lighting"), for the photo only: closing
-/// the photo mode gives the user's own back, unless "Keep this
-/// light".
+/// The photo's quick light (the time of day, the sky, water and day cycle
+/// lists, Pause Clouds, Attached Lights, Exposure, and the sun of
+/// "Personal lighting"). Closing the photo mode gives the user's own back,
+/// unless "Keep this light", except Pause Clouds, a switch of the session
+/// that Phototools shares.
 fn light_rows(
     ui: &mut egui::Ui,
     p: &Palette,

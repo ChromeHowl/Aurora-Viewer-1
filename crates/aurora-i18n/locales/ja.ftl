@@ -7710,7 +7710,7 @@ photo-light-shadow-softness = 影のやわらかさ
 photo-light-shadow-intensity = 影の濃さ
 photo-light-shadow-reset = 環境設定の値に戻す
 photo-light-pause-clouds = 雲を止める
-photo-light-pause-clouds-hint = 静止した空にします。
+photo-light-pause-clouds-hint = 静止した空にします。セッションの間、解除するまで続きます。
 photo-light-attached = 装着されたライト
 photo-light-attached-hint = アバターが装着しているライト（フェイスライト）。このウィンドウを閉じるとすべて元に戻ります。
 photo-light-sky = 空
@@ -16835,3 +16835,12 @@ camera-mode-click-to-leave = { $mode }（クリックで解除）
 camera-menu-lock-history-path = ロック・履歴・パス
 ui-options-camera-show-mode-changes = カメラモードの変更を表示
 ui-options-camera-show-mode-changes-tip = 入ったカメラモードと解除方法を画面上部に短く表示します。カメラがロック中、パス上、フリー、またはスクリプト操作の間は小さなチップが残ります
+
+phototools-environment-settings = 環境設定
+phototools-quick-environments = クイック環境
+phototools-environment-presets = 環境プリセット
+phototools-general-render = 一般描画設定
+phototools-render-options = 描画オプション
+
+ui-bars-clouds-paused = 雲を停止中
+ui-bars-clouds-paused-tip = このセッションでは雲を止めています。クリックで再開します。
