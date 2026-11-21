@@ -171,7 +171,6 @@ mod tests {
                             self.p.ink,
                             false,
                             true,
-                            crate::world::names::NameScope::Roster,
                         );
                     })
                     .rect;

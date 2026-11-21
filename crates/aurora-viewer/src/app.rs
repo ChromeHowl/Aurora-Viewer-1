@@ -18009,7 +18009,7 @@ impl App {
             return;
         }
         let paths = self.media.plugins(&self.settings.media).cloned();
-        let browser = crate::media::browser_settings(&crate::settings::cache_dir(), aurora_i18n::language(), &self.settings.media);
+        let browser = crate::media::browser_settings(&crate::settings::cache_dir(), aurora_i18n::language());
         let env = ui::signup::SignupWeb {
             paths: paths.as_ref(),
             browser: &browser,

@@ -1086,7 +1086,7 @@ mod tests {
             assert!(
                 h.actions
                     .iter()
-                    .any(|a| matches!(a, InvAction::Preview(id, _) if *id == Uuid::from_u128(8103))),
+                    .any(|a| matches!(a, InvAction::Preview(id) if *id == Uuid::from_u128(8103))),
                 "{width} px"
             );
             h.double_click(name_of(h.row(8001)));
