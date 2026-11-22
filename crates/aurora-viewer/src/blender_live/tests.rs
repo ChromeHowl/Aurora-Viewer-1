@@ -92,7 +92,7 @@ fn blender_live_window_stays_steady_at_reported_ui_scales() {
                 // Scroll the body under the pointer in small steps. Stop on the
                 // button, even if the panel below it is taller than the window.
                 for step in 0..40 {
-                    if after.as_ref().is_some_and(&visible) && (step > 0 || window.height() > 500.0) {
+                    if after.as_ref().is_some_and(visible) && (step > 0 || window.height() > 500.0) {
                         break;
                     }
                     let wheel = egui::Event::MouseWheel {
