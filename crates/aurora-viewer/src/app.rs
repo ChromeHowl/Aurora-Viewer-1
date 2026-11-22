@@ -11834,6 +11834,7 @@ impl App {
                 self.end_mouselook_zoom();
             }
             self.follow_awaited_zoom();
+            self.camera_tools_tick(dt);
             let poser_auto_moves = !self.settings.camera.keeps_still(self.ik_editor.posing());
             let camera_settings = self.settings.camera.while_posing(self.ik_editor.posing());
             let frame = crate::camera::FrameInput {
