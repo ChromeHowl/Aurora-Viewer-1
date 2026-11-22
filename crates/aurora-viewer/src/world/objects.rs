@@ -1302,10 +1302,8 @@ impl ObjectStore {
         // Sample centre and size at the same application instant, including a
         // new report arriving before the previous correction has settled.
         // A HUD linkset root shows its size at once too.
-        let smooth_scale = o.pcode == aurora_prim::params::LL_PCODE_VOLUME
-            && !hud_root
-            && drawn.is_some()
-            && (o.velocity == Vec3::ZERO || continuing);
+        let smooth_scale =
+            o.pcode == aurora_prim::params::LL_PCODE_VOLUME && !hud_root && drawn.is_some() && (o.velocity == Vec3::ZERO || continuing);
         if !o.is_avatar() && !smooth_scale {
             drawn = None;
         }

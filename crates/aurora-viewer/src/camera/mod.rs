@@ -33,8 +33,8 @@ pub use extra::{CameraExtra, FollowJoint};
 pub use focus::FocusObject;
 pub use free::FreeCamera;
 pub use settings::{
-    CameraFollowJoint, CameraPreset, CameraSettings, CameraShot, DEFAULT_FOV, FOV_RANGE, NEAR_CLIP_RANGE, SMOOTHING_RANGE,
-    SavedViews, VrView, zoom_lens,
+    CameraFollowJoint, CameraPreset, CameraSettings, CameraShot, DEFAULT_FOV, FOV_RANGE, NEAR_CLIP_RANGE, SMOOTHING_RANGE, SavedViews,
+    VrView, zoom_lens,
 };
 pub use takeover::{Owner, View};
 

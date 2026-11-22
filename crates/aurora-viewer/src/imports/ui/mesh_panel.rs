@@ -473,7 +473,8 @@ fn mesh_controls(
                                                     edited = true;
                                                 }
                                             }
-                                            let response = ui.add(egui::DragValue::new(&mut lod.triangles).range(minimum_triangles..=triangles));
+                                            let response =
+                                                ui.add(egui::DragValue::new(&mut lod.triangles).range(minimum_triangles..=triangles));
                                             #[cfg(test)]
                                             ui.ctx().data_mut(|data| {
                                                 data.insert_temp(

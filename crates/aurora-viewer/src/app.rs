@@ -9951,7 +9951,8 @@ impl App {
         let movement_resets_camera = moving && !self.settings.camera.keeps_still(self.ik_editor.posing());
         if movement_resets_camera
             && !matches!(self.mouse_mode, MouseMode::FocusOrbit | MouseMode::MouseCam)
-            && self.vr_mode != Some(crate::camera::VrView::Avatar) {
+            && self.vr_mode != Some(crate::camera::VrView::Avatar)
+        {
             // A stick held to look up/down keeps its aim while walking,
             // like held mouse steering, instead of fighting the pitch fade.
             let steering = self.mouse_mode == MouseMode::Steer || i.joystick_pitch != 0.0 || gamepad_movement;

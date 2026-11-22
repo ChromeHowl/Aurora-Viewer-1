@@ -302,7 +302,11 @@ pub(crate) fn avatar_color(world: &World, id: &Uuid) -> Color32 {
         return super::colors::c(super::colors::get().map_other);
     }
     let col = super::colors::map_color(world, id, &fallback_name(world, id).unwrap_or_default());
-    let col = world.rlva_contact_appearance(id).minimap.map(super::colors::set_color).unwrap_or(col);
+    let col = world
+        .rlva_contact_appearance(id)
+        .minimap
+        .map(super::colors::set_color)
+        .unwrap_or(col);
     // a mark from the radar's or this menu wins (LLNetMap::getAvatarColor)
     let col = world.rlva_shown_mark(id).map_or(col, |[r, g, b]| Color32::from_rgb(r, g, b));
     // the Shadow Realm's red over a mark
