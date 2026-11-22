@@ -1217,7 +1217,6 @@ mod tests {
                     item: Uuid::from_u128(n + 1),
                     asset: Uuid::from_u128(n + 101),
                     name: format!("A very long environment name for the scrolling sky list {n}"),
-                    weather: n % 2 == 0,
                 })
                 .collect(),
             ..Default::default()

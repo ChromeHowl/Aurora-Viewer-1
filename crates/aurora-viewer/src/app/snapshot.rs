@@ -2756,42 +2756,6 @@ impl App {
         }
     }
 
-    /// The LUTs' actions of the looks editor: import, remove, open their
-    /// folder (the Photo window's and the Director's Filters tab).
-    pub(super) fn photo_lut_action(&mut self, action: Action) {
-        match action {
-            Action::ImportLut => {
-                if self.snapshots.lut_import.is_some() {
-                    return;
-                }
-                let dir = self.photo_luts().dir().to_path_buf();
-                let (tx, rx) = crossbeam_channel::bounded(1);
-                std::thread::spawn(move || {
-                    let picked = rfd::FileDialog::new()
-                        .set_title(aurora_i18n::tr!("photo-lut-dialog"))
-                        .add_filter(aurora_i18n::tr!("photo-lut-files"), &["cube", "CUBE"])
-                        .pick_files();
-                    let _ = tx.send(picked.map(|paths| LutLibrary::import_all(&dir, &paths)));
-                });
-                self.snapshots.lut_import = Some(rx);
-            }
-            Action::RemoveLut(name) => {
-                if let Err(e) = self.photo_luts().remove(&name) {
-                    log::warn!("photo LUT {name} not removed: {e}");
-                }
-                let id = format!("{}{name}", looks::LUT);
-                self.settings.snapshot.looks.retain(|l| l.id != id);
-                self.settings.save();
-            }
-            Action::OpenLutFolder => {
-                let dir = self.photo_luts().dir().to_path_buf();
-                let _ = std::fs::create_dir_all(&dir);
-                gallery::reveal(&dir, None);
-            }
-            _ => {}
-        }
-    }
-
     /// The tables' list for the interface, and an import that came back:
     /// the table chosen and said.
     fn photo_luts_update(&mut self) {
