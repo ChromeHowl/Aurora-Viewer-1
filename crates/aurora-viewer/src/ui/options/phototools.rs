@@ -55,7 +55,7 @@
 
 use super::cx::{Cx, Mode, Nothing, field};
 use super::{OptionsResult, OptionsUi, Page, pages, run_ui};
-use crate::snapshot::light::{EXPOSURE, PhotoLight};
+use crate::snapshot::light::{EXPOSURE, PhotoLight, photo_level};
 use crate::ui::widgets;
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -70,6 +70,8 @@ pub struct PhotoState {
     /// The viewfinder is on: it owns the view angle (and restores it when
     /// it closes), so the row is greyed.
     pub viewfinder: bool,
+    /// A photo is being made: its shadows and occlusion are held.
+    pub busy: bool,
     /// The photo quality's boost is on: the rows show the raised values.
     pub boost: bool,
 }
@@ -209,6 +211,8 @@ enum PhotoRow {
     DofEnabled,
     DofFNumber,
     DofFocus,
+    ShadowQuality,
+    AmbientOcclusion,
     AttachedLights,
     Exposure,
 }
@@ -224,6 +228,8 @@ fn photo_row(path: &str) -> Option<PhotoRow> {
         "dof.enabled" => PhotoRow::DofEnabled,
         "dof.f_number" => PhotoRow::DofFNumber,
         "dof.focus" => PhotoRow::DofFocus,
+        "shadow_quality" => PhotoRow::ShadowQuality,
+        "ssao" => PhotoRow::AmbientOcclusion,
         "others_attached_lights" => PhotoRow::AttachedLights,
         "exposure" => PhotoRow::Exposure,
         _ => return None,
@@ -348,9 +354,12 @@ pub(super) fn draw(cx: &mut Cx, section: Section, mut photo: Option<&mut PhotoLa
                     // level, which the rows' own declarations read from the
                     // saved settings. None of these settings is edited by a
                     // borrowed row of this pass.
-                    let saved = photo.as_deref().map(|_| {
-                        let saved = cx.s.dof.enabled;
+                    let saved = photo.as_deref().map(|photo| {
+                        let saved = (cx.s.dof.enabled, cx.s.shadow_quality, cx.s.ssao);
+                        let boost = photo.state.boost;
                         cx.s.dof.enabled = cx.s.snapshot.dof.enabled;
+                        cx.s.shadow_quality = photo_level(true, photo.light.shadow_quality, saved.1, boost);
+                        cx.s.ssao = photo_level(true, photo.light.ambient_occlusion, saved.2, boost);
                         saved
                     });
                     // The viewfinder owns the view angle: it writes its focal
@@ -362,8 +371,10 @@ pub(super) fn draw(cx: &mut Cx, section: Section, mut photo: Option<&mut PhotoLa
                     cx.st.rlva_camera_fov_locked |= viewfinder;
                     cx.borrow(run.page, run.tab, &run.paths);
                     cx.st.rlva_camera_fov_locked = was;
-                    if let Some(enabled) = saved {
+                    if let Some((enabled, shadow_quality, ssao)) = saved {
                         cx.s.dof.enabled = enabled;
+                        cx.s.shadow_quality = shadow_quality;
+                        cx.s.ssao = ssao;
                     }
                 }
                 Step::Photo(kind) => {
@@ -395,7 +406,8 @@ fn photo_control(cx: &mut Cx, kind: PhotoRow, photo: &mut PhotoLayer) {
     use crate::dof::PhotoFocus;
     use aurora_i18n::tr;
     let p = cx.p;
-    let PhotoLayer { light, touched, .. } = photo;
+    let PhotoLayer { light, state, touched } = photo;
+    let (boost, busy) = (state.boost, state.busy);
     match kind {
         PhotoRow::DofEnabled => {
             cx.row(
@@ -472,6 +484,45 @@ fn photo_control(cx: &mut Cx, kind: PhotoRow, photo: &mut PhotoLayer) {
                     },
                 );
             }
+        }
+        PhotoRow::ShadowQuality => {
+            let levels = [
+                tr!("ui-options-disabled-2"),
+                tr!("ui-options-low"),
+                tr!("common-medium"),
+                tr!("ui-options-high"),
+                tr!("ui-options-ultra"),
+            ];
+            cx.row(
+                tr!("ui-options-shadow-quality"),
+                tr!("ui-options-cascaded-shadow-resolution-and-distance"),
+                &Nothing,
+                |ui, s| {
+                    // held while a photo is made, as the photo window's
+                    ui.add_enabled_ui(!busy, |ui| {
+                        let before = light.shadow_quality;
+                        crate::ui::snapshot::quality_slider(ui, &p, &mut light.shadow_quality, s.shadow_quality, boost, &levels);
+                        *touched |= light.shadow_quality != before;
+                    });
+                    false
+                },
+            );
+        }
+        PhotoRow::AmbientOcclusion => {
+            let levels = [tr!("ui-options-disabled"), tr!("ui-options-low"), tr!("ui-options-high")];
+            cx.row(
+                tr!("ui-options-ambient-occlusion"),
+                tr!("ui-options-darkens-corners-and-contact-areas-ssao"),
+                &Nothing,
+                |ui, s| {
+                    ui.add_enabled_ui(!busy, |ui| {
+                        let before = light.ambient_occlusion;
+                        crate::ui::snapshot::quality_slider(ui, &p, &mut light.ambient_occlusion, s.ssao, boost, &levels);
+                        *touched |= light.ambient_occlusion != before;
+                    });
+                    false
+                },
+            );
         }
         PhotoRow::AttachedLights => {
             cx.row(tr!("photo-light-attached"), tr!("photo-light-attached-hint"), &Nothing, |ui, _| {
@@ -741,6 +792,23 @@ mod tests {
             "only the photo's distance"
         );
 
+        // shadow quality, occlusion
+        let e = sweep(tr!("ui-options-shadow-quality"), Section::Shadows, true, &base);
+        assert!(e.touched && !e.changed && e.light.shadow_quality.is_some());
+        assert!(same(&e.settings, &base), "the saved shadow quality is untouched");
+        let e = sweep(&saved_label("shadow_quality"), Section::Shadows, false, &base);
+        assert!(e.changed && !e.touched && e.light == PhotoLight::default());
+        assert!(
+            only(&base, &e.settings, |s| (s.shadow_quality, s.shadows) = (0, false)),
+            "only the saved level"
+        );
+        let e = sweep(tr!("ui-options-ambient-occlusion"), Section::AmbientOcclusion, true, &base);
+        assert!(e.touched && !e.changed && e.light.ambient_occlusion.is_some());
+        assert!(same(&e.settings, &base), "the saved occlusion is untouched");
+        let e = sweep(&saved_label("ssao"), Section::AmbientOcclusion, false, &base);
+        assert!(e.changed && !e.touched && e.light == PhotoLight::default());
+        assert!(only(&base, &e.settings, |s| s.ssao = 0), "only the saved level");
+
         // exposure
         let e = sweep(tr!("ui-options-exposure"), Section::GeneralRender, true, &base);
         assert!(e.touched && !e.changed && e.light.exposure.is_some());
@@ -759,5 +827,29 @@ mod tests {
             only(&base, &e.settings, |s| s.others_attached_lights = false),
             "only the saved switch"
         );
+    }
+    /// The photo's shadows and occlusion are held while a photo is made.
+    #[test]
+    fn a_photo_being_made_holds_its_shadows_and_occlusion() {
+        let ctx = egui::Context::default();
+        let p = crate::theme::Theme::default().palette();
+        let (mut s, d) = (Settings::default(), Settings::default());
+        let (mut st, mut r) = (OptionsUi::default(), OptionsResult::default());
+        let mut light = PhotoLight::default();
+        run_ui(&ctx, egui::RawInput::default(), |ui| {
+            ui.set_width(460.0);
+            let mut layer = PhotoLayer {
+                light: &mut light,
+                state: PhotoState {
+                    busy: true,
+                    ..PhotoState::default()
+                },
+                touched: false,
+            };
+            let mut cx = Cx::new(ui, p, &mut s, &d, &mut st, &mut r, Mode::Show, "");
+            draw(&mut cx, Section::Shadows, Some(&mut layer));
+            // (the held rows are drawn, greyed)
+            assert!(cx.drawn >= 1);
+        });
     }
 }

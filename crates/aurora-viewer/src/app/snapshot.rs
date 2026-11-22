@@ -278,6 +278,9 @@ pub(super) struct Snapshots {
     /// "Photo quality" was switched on for the first time: held off until
     /// its warning is answered (`Settings::quality_warned`).
     quality_ask: bool,
+    /// The shadow quality and ambient occlusion the renderer was last
+    /// given (`photo_update`).
+    quality_drawn: Option<(u8, u8)>,
     /// The photo's tone curve the renderer last had (`photo_light`): a
     /// new one is applied once.
     tone_applied: Option<u8>,
@@ -544,6 +547,7 @@ impl Default for Snapshots {
             confirm: None,
             short: None,
             quality_ask: false,
+            quality_drawn: None,
             tone_applied: None,
             upload: None,
             message_item: None,
@@ -663,7 +667,7 @@ impl App {
     pub(super) fn photo_frame(&mut self, renderer: &mut Renderer) -> Option<PhotoFrame> {
         let textures = &self.scene.textures;
         let (paused, pending, passes) = (textures.drawing_paused(), textures.pending_in_view(), textures.wants_passes());
-        let occlusion = self.settings.ssao > 0;
+        let occlusion = self.photo_ambient_occlusion() > 0;
         let near = self.camera.near;
         let s = &mut self.snapshots;
         s.capturing = None;
@@ -1412,7 +1416,7 @@ impl App {
         let interface = !plain && s.interface && snapshot::same_proportions(full, window);
         let huds = !plain && s.huds;
         // (with the ambient occlusion on: GTAO may be forced over its method)
-        let context = ContextPass::plan(size, tiles.len(), self.settings.ssao > 0)
+        let context = ContextPass::plan(size, tiles.len(), self.photo_ambient_occlusion() > 0)
             .within(self.photo_max_side(renderer), self.photo_max_pixels(renderer));
         // what the photo is drawn with, for the honest list of its effects
         // (`snapshot::effects`)
@@ -1428,7 +1432,7 @@ impl App {
             bloom: reach.bloom,
             dof: reach.dof,
             contact: reach.contact,
-            ao: (self.settings.ssao > 0).then_some(false),
+            ao: (self.photo_ambient_occlusion() > 0).then_some(false),
         };
         self.snapshots.job = Some(Job {
             purpose,
@@ -2266,7 +2270,7 @@ impl App {
     }
 
     /// Every frame: the saves, thumbnails, dialogs and preview to follow.
-    pub(super) fn photo_update(&mut self, renderer: &Renderer) {
+    pub(super) fn photo_update(&mut self, renderer: &mut Renderer) {
         if std::mem::take(&mut self.snapshots.to_disk) {
             self.snapshots.quiet = !self.panels.snapshot;
             self.photo_take(renderer, None);
@@ -2283,6 +2287,13 @@ impl App {
         self.photo_luts_update();
         self.photo_quality(renderer);
         self.photo_light();
+        // the photo's shadows and occlusion reach the renderer when they
+        // change (the window opening and closing included), not every frame
+        let drawn = (self.photo_shadow_quality(), self.photo_ambient_occlusion());
+        if self.snapshots.quality_drawn != Some(drawn) {
+            self.snapshots.quality_drawn = Some(drawn);
+            renderer.apply_settings(self.render_settings_now());
+        }
         self.photo_free_camera();
         if let Some(t) = self.snapshots.detail_wait {
             let pending = self.scene.textures.pending_in_view();
@@ -3524,7 +3535,17 @@ LUT_3D_SIZE {n}
     /// `apply_settings` takes, so that a change of settings or a GPU
     /// recovery during the photo mode keeps the photo's curve.
     pub(super) fn render_settings_now(&self) -> aurora_render::RenderSettings {
-        render_settings_with(&self.settings, &self.snapshots.ui.light)
+        render_settings_with(&self.settings, &self.snapshots.ui.light, self.panels.snapshot)
+    }
+
+    /// The shadow quality the world is drawn with (`snapshot::light`).
+    pub(super) fn photo_shadow_quality(&self) -> u8 {
+        snapshot::light::drawn_levels(&self.settings, &self.snapshots.ui.light, self.panels.snapshot).0
+    }
+
+    /// The ambient occlusion the world is drawn with (`snapshot::light`).
+    pub(super) fn photo_ambient_occlusion(&self) -> u8 {
+        snapshot::light::drawn_levels(&self.settings, &self.snapshots.ui.light, self.panels.snapshot).1
     }
 
     /// The sun's shadows the frame is drawn with: the photo's, else
@@ -3541,6 +3562,10 @@ LUT_3D_SIZE {n}
     /// Light section's rows.
     fn photo_shadow_view(&self) -> crate::ui::snapshot::ShadowView {
         crate::ui::snapshot::ShadowView {
+            quality: self.settings.shadow_quality,
+            occlusion: self.settings.ssao,
+            boost: self.settings.photo_held.is_some(),
+            held: self.photo_busy(),
             softness: self.settings.shadow_softness,
             intensity: self.settings.shadow_intensity,
             soft: self.settings.soft_shadows,
@@ -4149,8 +4174,9 @@ pub(super) fn env_view<'a>(
 pub(super) fn render_settings_with(
     settings: &crate::settings::Settings,
     light: &crate::snapshot::light::PhotoLight,
+    open: bool,
 ) -> aurora_render::RenderSettings {
-    let mut r = settings.render_settings();
+    let mut r = snapshot::light::render_settings(settings, light, open);
     r.tonemapper = crate::settings::tonemapper_of(snapshot::style::tonemapper(light, settings.tonemapper));
     r
 }

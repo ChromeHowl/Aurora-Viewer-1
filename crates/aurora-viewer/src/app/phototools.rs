@@ -21,6 +21,7 @@ impl App {
             sun: super::snapshot::env_view(&self.env_ui, &self.world.eep).sun,
             loading: self.world.eep.photo_loading(),
             viewfinder: self.viewfinder_on(),
+            busy: self.photo_busy(),
             boost: self.settings.photo_held.is_some(),
         });
         let director_dof = open && self.director_dof().is_some();

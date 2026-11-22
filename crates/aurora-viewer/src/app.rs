@@ -11503,7 +11503,7 @@ impl App {
         self.capture_360_frame(&mut gfx.renderer);
         self.outfit_batch_frame();
         self.outfit_portrait_frame(&gfx.renderer);
-        self.photo_update(&gfx.renderer);
+        self.photo_update(&mut gfx.renderer);
         self.studio_photo_frame(&mut gfx.renderer);
         self.viewfinder_frame(&mut gfx.renderer);
         self.director_frame(dt);
@@ -13075,9 +13075,11 @@ impl App {
                 frustum: CullView::new(vp, self.camera.position, lod_height as f32, self.camera.fov_y),
                 range: self.settings.draw_distance,
                 dt,
-                projector_shadows: self.settings.projector_shadows && self.settings.shadow_quality > 0,
+                projector_shadows: self.settings.projector_shadows && self.photo_shadow_quality() > 0,
                 projector_shadow_limit: aurora_render::projector_shadows::effective_limit(
-                    self.settings.render_extras.shadow_resolution(self.settings.shadow_params().0),
+                    self.settings
+                        .render_extras
+                        .shadow_resolution(crate::settings::Settings::shadow_params_of(self.photo_shadow_quality()).0),
                     self.settings.projector_shadow_limit,
                     gfx.renderer.max_texture_dimension(),
                 ),
@@ -13304,8 +13306,8 @@ impl App {
             god_rays_res: self.settings.god_rays_resolution,
             god_rays_side: self.settings.god_rays_side,
             water_height: self.world.main_water_height(),
-            shadows: self.settings.shadow_quality > 0 && matches!(self.screen, Screen::World),
-            shadow_distance: self.settings.shadow_params().1,
+            shadows: self.photo_shadow_quality() > 0 && matches!(self.screen, Screen::World),
+            shadow_distance: crate::settings::Settings::shadow_params_of(self.photo_shadow_quality()).1,
             shadow_softness: photo_shadows.0,
             shadow_intensity: photo_shadows.1,
             lights,
@@ -25292,8 +25294,11 @@ impl ApplicationHandler for App {
             WindowEvent::Resized(s) => {
                 ui::menu::window_geometry_changed(&self.egui_ctx);
                 if sync_auto_render_scale(&mut self.settings, g.window.scale_factor()) {
-                    g.renderer
-                        .apply_settings(snapshot::render_settings_with(&self.settings, &self.snapshots.ui.light));
+                    g.renderer.apply_settings(snapshot::render_settings_with(
+                        &self.settings,
+                        &self.snapshots.ui.light,
+                        self.panels.snapshot,
+                    ));
                 }
                 g.renderer.resize(s.width, s.height);
                 self.geom_changed = Some(Instant::now());
@@ -25304,8 +25309,11 @@ impl ApplicationHandler for App {
                 // the automatic world resolution before the Resized event that
                 // winit sends next.
                 if sync_auto_render_scale(&mut self.settings, g.window.scale_factor()) {
-                    g.renderer
-                        .apply_settings(snapshot::render_settings_with(&self.settings, &self.snapshots.ui.light));
+                    g.renderer.apply_settings(snapshot::render_settings_with(
+                        &self.settings,
+                        &self.snapshots.ui.light,
+                        self.panels.snapshot,
+                    ));
                 }
                 // DPI transitions can change both the surface size and saved
                 // physical placement without a distinct user resize.

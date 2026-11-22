@@ -249,6 +249,15 @@ pub struct PanoShown {
 /// and whether the soft shadows are on (the softness acts only then).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ShadowView {
+    /// Preferences' shadow quality and ambient occlusion, under the photo's
+    /// own (`snapshot::light`).
+    pub quality: u8,
+    pub occlusion: u8,
+    /// The photo quality's boost is on: its levels are the most the photo
+    /// can choose (`snapshot::light::photo_level`).
+    pub boost: bool,
+    /// A photo is being made: its shadows and occlusion are held.
+    pub held: bool,
     pub softness: f32,
     pub intensity: f32,
     pub soft: bool,
@@ -1428,6 +1437,19 @@ fn dof_rows(ui: &mut egui::Ui, p: &Palette, d: &mut crate::dof::PhotoDof) {
     });
 }
 
+/// A level of the photo's (shadows, occlusion) on Preferences' stepped
+/// slider: Preferences' `current` until one is chosen; under the photo
+/// quality's boost, never past it.
+pub(crate) fn quality_slider(ui: &mut egui::Ui, p: &Palette, value: &mut Option<u8>, current: u8, boost: bool, labels: &[&str]) {
+    use crate::snapshot::light::photo_level;
+    ui.horizontal(|ui| {
+        let mut level = photo_level(true, *value, current, boost);
+        if super::options::stepped(ui, p, &mut level, labels) {
+            *value = Some(photo_level(true, Some(level), current, boost));
+        }
+    });
+}
+
 /// The photo's quick light (the time of day, the sky, water and day cycle
 /// lists, Pause Clouds, Attached Lights, Exposure, and the sun of
 /// "Personal lighting"). Closing the photo mode gives the user's own back,
@@ -1447,6 +1469,38 @@ fn light_rows(
     ui.add_enabled_ui(!env.locked, |ui| env_rows(ui, p, l, env))
         .response
         .on_disabled_hover_text(aurora_i18n::tr!("rlva-blocked"));
+    {
+        use aurora_i18n::tr;
+        // held while a photo is made, as the photo quality's boost is
+        ui.add_enabled_ui(!shadows.held, |ui| {
+            row(ui, p, tr!("ui-options-shadow-quality"), None, |ui| {
+                quality_slider(
+                    ui,
+                    p,
+                    &mut l.shadow_quality,
+                    shadows.quality,
+                    shadows.boost,
+                    &[
+                        tr!("ui-options-disabled-2"),
+                        tr!("ui-options-low"),
+                        tr!("common-medium"),
+                        tr!("ui-options-high"),
+                        tr!("ui-options-ultra"),
+                    ],
+                );
+            });
+            row(ui, p, tr!("ui-options-ambient-occlusion"), None, |ui| {
+                quality_slider(
+                    ui,
+                    p,
+                    &mut l.ambient_occlusion,
+                    shadows.occlusion,
+                    shadows.boost,
+                    &[tr!("ui-options-disabled"), tr!("ui-options-low"), tr!("ui-options-high")],
+                );
+            });
+        });
+    }
     row(ui, p, aurora_i18n::tr!("photo-light-exposure"), None, |ui| {
         // (no exposure without HDR: LLPipeline::gammaCorrect)
         ui.add_enabled_ui(hdr, |ui| {
@@ -2362,6 +2416,10 @@ mod tests {
             exposure: 0.0,
             hdr: true,
             shadows: ShadowView {
+                quality: 0,
+                occlusion: 0,
+                boost: false,
+                held: false,
                 softness: 1.0,
                 intensity: 1.0,
                 soft: false,
@@ -2510,6 +2568,10 @@ mod tests {
                     1.234,
                     true,
                     ShadowView {
+                        quality: 3,
+                        occlusion: 2,
+                        boost: false,
+                        held: false,
                         softness: 1.0,
                         intensity: 1.0,
                         soft: true,
@@ -2521,6 +2583,7 @@ mod tests {
             output.textures_delta.clear();
         }
         assert_eq!(light.exposure, None);
+        assert_eq!((light.shadow_quality, light.ambient_occlusion), (None, None));
         assert_eq!((light.shadow_softness, light.shadow_intensity), (None, None));
         assert!(light.env.is_empty(), "showing the Light section picked {:?}", light.env);
     }
