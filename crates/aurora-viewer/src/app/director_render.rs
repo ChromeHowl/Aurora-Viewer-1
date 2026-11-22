@@ -180,6 +180,7 @@ impl App {
             // the Filters tab's looks, on the whole frame
             look: self.director_render_look(size),
             context: aurora_render::PhotoContext::None,
+            cube: None,
             cube_face: false,
         })
     }

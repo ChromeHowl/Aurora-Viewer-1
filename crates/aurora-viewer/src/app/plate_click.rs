@@ -272,7 +272,10 @@ impl App {
 
     /// The hand of a clickable object over a plate that acts.
     pub(super) fn plate_cursor(&self) -> bool {
-        !self.classic_name_tags() && plate_click_acts(self.plate_click_action(), self.plate_hover, self.world.agent_id)
+        !self.classic_name_tags()
+            && plate_click_acts(self.plate_click_action(), self.plate_hover, self.world.agent_id, |id| {
+                self.world.rlva_can_name(id)
+            })
     }
 
     /// A left press on the world: on someone else's plate with an action
@@ -419,7 +422,8 @@ mod tests {
     #[test]
     fn own_plate_allows_profile_and_menu_but_not_im_or_teleport() {
         let (me, other) = (Uuid::from_u128(1), Uuid::from_u128(2));
-        assert!(!plate_click_acts(PlateClick::Nothing, Some(other), me));
+        let named = |_: Uuid| true;
+        assert!(!plate_click_acts(PlateClick::Nothing, Some(other), me, named));
         for action in PlateClick::ALL.into_iter().filter(|a| *a != PlateClick::Nothing) {
             assert!(plate_click_acts(action, Some(other), me, named), "{action:?}");
             let acts_on_self = matches!(action, PlateClick::Profile | PlateClick::Menu);

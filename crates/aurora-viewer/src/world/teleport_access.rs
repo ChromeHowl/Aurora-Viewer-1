@@ -413,7 +413,7 @@ mod tests {
         // the preference first; the teleport waits for the server's answer
         assert!(matches!(
             w.maturity.take_commands()[..],
-            [(_, NetCommand::SetMaturityPreference(SIM_ACCESS_ADULT))]
+            [(_, NetCommand::SetMaturityPreference(SIM_ACCESS_ADULT), _)]
         ));
         assert_eq!(
             w.teleport_access.take_restart(),
@@ -423,7 +423,7 @@ mod tests {
             })
         );
         w.apply(aurora_net::NetEvent::MaturityPreference(Some(SIM_ACCESS_ADULT)));
-        assert!(matches!(w.maturity.take_commands()[..], [(_, NetCommand::TeleportTo { .. })]));
+        assert!(matches!(w.maturity.take_commands()[..], [(_, NetCommand::TeleportTo { .. }, _)]));
         // PreferredMaturityChanged once it arrives
         let before = w.notifications.list.len();
         arrive(&mut w);
@@ -451,7 +451,7 @@ mod tests {
         w.respond_notification(id, notifications::Response::Accept);
         assert!(matches!(
             w.maturity.take_commands()[..],
-            [(_, NetCommand::SetMaturityPreference(SIM_ACCESS_ADULT))]
+            [(_, NetCommand::SetMaturityPreference(SIM_ACCESS_ADULT), _)]
         ));
         assert_eq!(w.teleport_access.take_restart(), None);
         w.apply(aurora_net::NetEvent::MaturityPreference(Some(SIM_ACCESS_ADULT)));
@@ -480,7 +480,7 @@ mod tests {
         w.respond_notification(id, notifications::Response::Accept);
         w.maturity.take_commands();
         w.apply(aurora_net::NetEvent::MaturityPreference(Some(SIM_ACCESS_ADULT)));
-        assert!(matches!(w.maturity.take_commands()[..], [(_, NetCommand::TeleportHome)]));
+        assert!(matches!(w.maturity.take_commands()[..], [(_, NetCommand::TeleportHome, _)]));
         let before = w.notifications.list.len();
         arrive(&mut w);
         assert_eq!(w.notifications.list.len(), before);

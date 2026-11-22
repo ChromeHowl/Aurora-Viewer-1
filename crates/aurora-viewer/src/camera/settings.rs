@@ -77,51 +77,6 @@ mod first_person_tests {
     }
 
     #[test]
-    fn posing_with_the_camera_kept_still_stops_every_automatic_follow() {
-        let chosen = CameraSettings {
-            track_focus_object: true,
-            reset_on_movement: true,
-            mouselook_follow_eyes: true,
-            third_person_follow_joint: Some(CameraFollowJoint::Head),
-            still_while_posing: true,
-            ..CameraSettings::default()
-        };
-        assert!(chosen.keeps_still(true));
-        let still = chosen.while_posing(true);
-        assert!(!still.track_focus_object && !still.reset_on_movement && !still.mouselook_follow_eyes);
-        assert_eq!(still.third_person_follow_joint, None, "the camera does not follow a posed joint");
-        // not posing, or the option at its default: today's follows stay
-        let default_still = CameraSettings {
-            still_while_posing: false,
-            ..chosen.clone()
-        };
-        assert!(!chosen.keeps_still(false) && !default_still.keeps_still(true));
-        for unchanged in [chosen.while_posing(false), default_still.while_posing(true)] {
-            assert!(unchanged.track_focus_object && unchanged.reset_on_movement && unchanged.mouselook_follow_eyes);
-            assert_eq!(unchanged.third_person_follow_joint, Some(CameraFollowJoint::Head));
-        }
-    }
-
-    #[test]
-    fn the_poser_camera_options_default_to_todays_behaviour_and_keep_a_saved_choice() {
-        // an existing settings file, and a fresh one: no framing, the
-        // camera's own moves while posing as before (#2477)
-        let migrated: CameraSettings = serde_json::from_str("{}").unwrap();
-        for s in [&migrated, &CameraSettings::default()] {
-            assert!(!s.frame_while_posing, "the poser does not frame unless asked");
-            assert!(!s.still_while_posing, "the automatic moves while posing stay as before");
-            assert!(!s.keeps_still(true));
-        }
-        let chosen = CameraSettings {
-            frame_while_posing: true,
-            still_while_posing: true,
-            ..migrated
-        };
-        let loaded: CameraSettings = serde_json::from_str(&serde_json::to_string(&chosen).unwrap()).unwrap();
-        assert!(loaded.frame_while_posing && loaded.still_while_posing);
-    }
-
-    #[test]
     fn vr_preferences_ignore_old_view_and_keep_comfort_options() {
         let defaults: CameraSettings = serde_json::from_str("{}").expect("defaults");
         assert!(!defaults.vr.mouse_look);

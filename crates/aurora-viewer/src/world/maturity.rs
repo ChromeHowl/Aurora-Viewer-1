@@ -82,9 +82,9 @@ impl MaturityPreference {
     /// waits for the preference like any teleport (startTeleportRequest).
     pub fn restart(&mut self, teleport: NetCommand, actor: Uuid) {
         if self.synced() {
-            self.out.push((actor, teleport));
+            self.out.push((actor, teleport, false));
         } else {
-            self.hold(teleport, actor);
+            self.hold(teleport, actor, false);
         }
     }
 

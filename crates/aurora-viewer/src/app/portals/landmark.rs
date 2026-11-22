@@ -282,54 +282,46 @@ mod tests {
         assert!(drag.released && drag.shift);
     }
 
-    /// #2636: toggling Shift during a held landmark drag keeps the tooltip
-    /// fitted to its current text, and a later drag starts at that size; on
-    /// a screen narrower than the text it wraps, the same at every toggle,
-    /// and stays inside a window narrower than its usual minimum width.
+    /// #2636: the tooltip of a held landmark drag stays inside the screen,
+    /// wrapping on one narrower than its text, and a later drag starts at
+    /// the same size. (A portal is this viewer's own: no Shift choice of
+    /// who sees it, #4297.)
     #[test]
-    fn portal_drag_preview_fits_its_text_across_shift_toggles_and_drags() {
+    fn portal_drag_preview_fits_its_text_across_drags() {
         let palette = crate::theme::Theme::default().palette();
         for screen in [egui::vec2(1000.0, 700.0), egui::vec2(300.0, 700.0), egui::vec2(150.0, 700.0)] {
             let point = egui::pos2(screen.x * 0.65, 400.0);
-            let frame = |ctx: &egui::Context, shift: Option<bool>| {
+            let frame = |ctx: &egui::Context, shown: bool| {
                 let mut output = ctx.run_ui(
                     egui::RawInput {
                         screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, screen)),
                         ..Default::default()
                     },
                     |ui| {
-                        if let Some(shift) = shift {
-                            preview(ui.ctx(), &palette, point, shift, true);
+                        if shown {
+                            preview(ui.ctx(), &palette, point);
                         }
                     },
                 );
                 output.textures_delta.clear();
                 ctx.memory(|memory| memory.area_rect(egui::Id::unique("portal_landmark_preview")))
             };
-            let settled = |ctx: &egui::Context, shift: bool| {
+            let settled = |ctx: &egui::Context| {
                 let mut rect = None;
                 for _ in 0..3 {
-                    rect = frame(ctx, Some(shift));
+                    rect = frame(ctx, true);
                 }
                 rect.expect("preview shown")
             };
-            let fresh = |shift: bool| settled(&egui::Context::default(), shift).size();
-            let (friends, public) = (fresh(false), fresh(true));
-            assert_ne!(friends, public);
+            let first = settled(&egui::Context::default()).size();
             let ctx = egui::Context::default();
             for drag in 0..2 {
-                for shift in [false, true, false, true, false, true, false] {
-                    let rect = settled(&ctx, shift);
-                    assert_eq!(
-                        rect.size(),
-                        if shift { public } else { friends },
-                        "{screen:?}, drag {drag}, shift {shift}"
-                    );
-                    assert!(rect.width() <= screen.x, "{screen:?}: {rect:?} is wider than the screen");
-                }
+                let rect = settled(&ctx);
+                assert_eq!(rect.size(), first, "{screen:?}, drag {drag}");
+                assert!(rect.width() <= screen.x, "{screen:?}: {rect:?} is wider than the screen");
                 // Released: no preview for a few frames, then the next drag.
                 for _ in 0..3 {
-                    frame(&ctx, None);
+                    frame(&ctx, false);
                 }
             }
         }

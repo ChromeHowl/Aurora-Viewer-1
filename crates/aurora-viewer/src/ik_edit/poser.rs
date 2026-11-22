@@ -643,17 +643,12 @@ impl Editor {
     /// Logout bar, the server, a lost link): nothing of the editors stays
     /// for the next login, neither a pose that "stop when closed" off kept
     /// nor goals, animations or selections. The animation editor's document
-    /// (it autosaves its own drafts) and the project library are the
-    /// account's files and stay.
+    /// (it autosaves its own drafts) is the
+    /// account's file and stays.
     pub fn end_session(&mut self) {
         self.stop_editing();
         let clip = std::mem::take(&mut self.clip);
-        let project = std::mem::take(&mut self.project);
-        *self = Self {
-            clip,
-            project,
-            ..Self::default()
-        };
+        *self = Self { clip, ..Self::default() };
     }
     pub fn stop_editing(&mut self) {
         self.poser.active = false;

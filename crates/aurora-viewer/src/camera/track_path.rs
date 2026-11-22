@@ -54,6 +54,10 @@ pub fn track_from_path(path: &Path, origin: (u32, u32)) -> Result<Track, Bridge>
                 rest: w.transition == Transition::Ease || before == Some(Transition::Ease),
                 locked: false,
                 aim: None,
+                ease: Default::default(),
+                dolly_zoom: false,
+                follow: None,
+                extra: Default::default(),
             }
         })
         .collect();
