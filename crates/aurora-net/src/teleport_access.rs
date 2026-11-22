@@ -50,16 +50,6 @@ pub fn from_alert_info(code: &str, extra: &[u8]) -> Option<AccessBlocked> {
     })
 }
 
-/// The event queue's ExtraParams: binary (LLSD's own type) or, from some
-/// simulators, a string.
-pub(crate) fn extra_bytes(v: &Llsd) -> Vec<u8> {
-    match v {
-        Llsd::Binary(b) => b.clone(),
-        Llsd::String(s) => s.as_bytes().to_vec(),
-        _ => Vec::new(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -96,7 +86,7 @@ mod tests {
     #[test]
     fn event_queue_params_are_binary_or_text() {
         let xml = "<llsd><map><key>_region_access</key><integer>21</integer></map></llsd>";
-        let blocked = |v: Llsd| from_alert_info(ENTRY_ACCESS_BLOCKED, &extra_bytes(&v)).map(|b| b.region_access);
+        let blocked = |v: Llsd| from_alert_info(ENTRY_ACCESS_BLOCKED, &crate::teleport_failed::llsd_bytes(&v)).map(|b| b.region_access);
         assert_eq!(blocked(Llsd::Binary(xml.as_bytes().to_vec())), Some(SIM_ACCESS_MATURE));
         assert_eq!(blocked(Llsd::String(xml.into())), Some(SIM_ACCESS_MATURE));
         assert_eq!(blocked(Llsd::Undef), None);
