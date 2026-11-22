@@ -1124,7 +1124,9 @@ mod tests {
         model.faces.truncate(1);
         model.faces[0].indices = vec![0; 9_600];
         assert_eq!(model.triangles(), 3_200);
-        draft.lods[2].triangles = 0;
+        // one face: the field never goes below its single material face
+        let minimum = mesh::minimum_lod_triangles(&draft.scene);
+        draft.lods[2].triangles = minimum;
         let id = Uuid::new_v4();
         let frame = |draft: &mut mesh::Draft, events| {
             let mut output = ctx.run_ui(
@@ -1170,7 +1172,7 @@ mod tests {
                 },
             ],
         );
-        assert_eq!(draft.lods[2].triangles, 0, "hovering alone does not step the target");
+        assert_eq!(draft.lods[2].triangles, minimum, "hovering alone does not step the target");
         for pressed in [true, false] {
             frame(
                 &mut draft,
@@ -1199,7 +1201,7 @@ mod tests {
                 modifiers: egui::Modifiers::NONE,
             }],
         );
-        assert_eq!(draft.lods[2].triangles, 100);
+        assert_eq!(draft.lods[2].triangles, minimum + 100);
         frame(
             &mut draft,
             vec![egui::Event::Key {
@@ -1210,7 +1212,7 @@ mod tests {
                 modifiers: egui::Modifiers::NONE,
             }],
         );
-        assert_eq!(draft.lods[2].triangles, 0);
+        assert_eq!(draft.lods[2].triangles, minimum);
     }
 
     #[test]
