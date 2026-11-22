@@ -12,7 +12,7 @@ use crate::{
 use egui::Pos2;
 use glam::{Quat, Vec3, Vec4};
 
-pub(super) const DEFAULT_SENSITIVITY: f32 = 0.5;
+pub(crate) const DEFAULT_SENSITIVITY: f32 = 0.5;
 
 pub(super) fn sensitivity_scale(sensitivity: f32) -> f32 {
     if sensitivity.is_finite() {
@@ -23,7 +23,7 @@ pub(super) fn sensitivity_scale(sensitivity: f32) -> f32 {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) enum Tool {
+pub(crate) enum Tool {
     #[default]
     Move,
     Rotate,
@@ -48,13 +48,13 @@ enum Part {
 }
 
 #[derive(Clone, Copy)]
-pub(super) struct Pose {
+pub(crate) struct Pose {
     pub position: Vec3,
     pub rotation: Quat,
 }
 
 #[derive(Clone, Copy)]
-pub(super) struct Geometry {
+pub(crate) struct Geometry {
     cam: Cam,
     pivot: Vec3,
     basis: Quat,
@@ -391,8 +391,12 @@ impl Drag {
 }
 
 #[derive(Default)]
-pub(super) struct Gizmo {
+pub(crate) struct Gizmo {
     drag: Option<Drag>,
+    /// Whether Shift held during a handle drag makes it finer (`FINE`): the
+    /// Poser's and the animation editor's. In IK Edit and on the virtual
+    /// bones a handle follows the pointer one to one, Shift or not.
+    pub shift_fine: bool,
 }
 
 impl Gizmo {
@@ -451,7 +455,9 @@ impl Gizmo {
             if (down || released)
                 && let Some(pointer) = pointer
             {
-                change = drag.update_fine(pointer, fine).map(|pose| (pose, drag.geometry.tool));
+                change = drag
+                    .update_fine(pointer, fine && self.shift_fine)
+                    .map(|pose| (pose, drag.geometry.tool));
             }
             let mut visual = drag.geometry;
             if let Some((pose, Tool::Move)) = change {

@@ -175,7 +175,6 @@ pub fn show(
     open: &mut bool,
     movement: &mut super::movement::MovementUi,
     movement_prefs: &mut crate::movement::Preferences,
-    water_volumes: &mut crate::movement::water_volume::Settings,
     keys: &crate::keybinds::KeyBindings,
     movement_status: &str,
 ) -> Vec<Action> {
@@ -213,7 +212,7 @@ pub fn show(
                     let actions = egui::ScrollArea::vertical()
                         .id_salt("ao_movement")
                         .auto_shrink([false, false])
-                        .show(ui, |ui| movement.show(ui, p, movement_prefs, water_volumes, keys, movement_status))
+                        .show(ui, |ui| movement.show(ui, p, movement_prefs, keys, movement_status))
                         .inner;
                     if actions.changed {
                         out.push(Action::MovementPreferences);
@@ -315,10 +314,14 @@ pub fn show(
                     };
                     ui.label(RichText::new(notice).color(p.warn));
                     ui.horizontal(|ui| {
-                        if ui.button(aurora_i18n::tr!("ao-finish-import")).clicked() {
-                            out.push(Action::FinishRecovery(recovery));
-                        }
-                        if ui.button(aurora_i18n::tr!("ao-show-in-inventory")).clicked() {
+                        // Like the other AO buttons: an edit already running
+                        // would drop the click.
+                        ui.add_enabled_ui(!state.busy() && !catalog.loading, |ui| {
+                            if widgets::flat_button(ui, p, aurora_i18n::tr!("ao-finish-import")).clicked() {
+                                out.push(Action::FinishRecovery(recovery));
+                            }
+                        });
+                        if widgets::flat_button(ui, p, aurora_i18n::tr!("ao-show-in-inventory")).clicked() {
                             out.push(Action::ShowRecovery(recovery.source));
                         }
                     });

@@ -832,7 +832,7 @@ impl World {
     }
 
     fn rlva_nearby_avatars(&self) -> std::collections::HashSet<Uuid> {
-        let loaded = self.objects.avatars().map(|(_, o)| o.full_id);
+        let loaded = self.objects.avatars().map(|(_, o)| o.full_id).filter(|id| !self.is_mirror(id));
         let coarse = self.coarse.values().flatten().map(|(id, _)| *id);
         loaded.chain(coarse).filter(|id| !id.is_nil() && *id != self.agent_id).collect()
     }

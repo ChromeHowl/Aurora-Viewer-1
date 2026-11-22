@@ -58,6 +58,7 @@ pub mod social;
 pub mod socks5;
 pub mod stats;
 pub mod task_inventory;
+pub mod teleport_access;
 pub mod teleport_failed;
 pub mod terrain;
 #[cfg(test)]

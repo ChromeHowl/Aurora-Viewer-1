@@ -1964,6 +1964,12 @@ pub(crate) struct Backend {
     surface: std::mem::ManuallyDrop<Arc<wgpu::Surface<'static>>>,
     config: wgpu::SurfaceConfiguration,
     external: bool,
+    /// What the second camera's renderer is made from (second_view.rs):
+    /// the window's start, kept (`seed` is let go once the start is over);
+    /// None for an external renderer, or once one could not be made.
+    second_seed: Option<Box<BackendInit>>,
+    /// The second camera's renderer and picture, while its window is open.
+    second: Option<Box<SecondView>>,
     #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
     vr: Arc<crate::vr_control::Control>,
     #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
@@ -2028,6 +2034,8 @@ pub(crate) struct Backend {
     cube: Option<crate::equirect::CubeTarget>,
     /// The panoramas being read back, asked in order (equirect.rs).
     equirect_reads: crate::equirect::Readbacks,
+    /// The Director's film frames on their way back (film_readback.rs).
+    film_reads: crate::film_readback::FilmReads,
     /// The six faces of a 360° capture are drawn one after the other: the
     /// snapshot size stays (the render targets are made once, not twice per
     /// face) from the first face to the frame after the last.
@@ -2091,6 +2099,8 @@ pub(crate) struct Backend {
     exposure: crate::exposure::Exposure,
     /// The photo viewfinder's luminance histogram (histogram.rs).
     histogram: crate::histogram::Histogram,
+    /// The small pictures of the view asked for (thumbnail.rs).
+    thumbnails: crate::thumbnail::Thumbnails,
     /// The glow was drawn last frame: its image is there for the exposure.
     glow_drawn: bool,
     frame_buffer: wgpu::Buffer,
@@ -2283,6 +2293,15 @@ impl std::ops::DerefMut for EguiSlot {
     fn deref_mut(&mut self) -> &mut egui_wgpu::Renderer {
         self.0.as_mut().expect("egui renderer: only taken inside remake_refused")
     }
+}
+
+/// The second camera's renderer (second_view.rs): an external backend, as
+/// an eye of VR, and the texture egui shows its picture from.
+struct SecondView {
+    backend: Backend,
+    target: Option<crate::second_view::Target>,
+    /// Frames since the last one that asked for the view.
+    idle: u32,
 }
 
 #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
@@ -4083,6 +4102,7 @@ impl Backend {
     fn make(init: BackendInit, egui_later: bool) -> Result<Backend, RenderError> {
         #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
         let xr_seed = init.xr.as_ref().map(|_| Box::new(init.clone()));
+        let second_seed = (!init.external).then(|| Box::new(init.clone()));
         let BackendInit {
             device,
             queue,
@@ -4755,6 +4775,8 @@ impl Backend {
             surface: std::mem::ManuallyDrop::new(surface),
             config,
             external,
+            second_seed,
+            second: None,
             #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
             vr,
             #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
@@ -4785,6 +4807,7 @@ impl Backend {
             equirect: None,
             cube: None,
             equirect_reads: Default::default(),
+            film_reads: Default::default(),
             cube_hold: false,
             cube_keep: false,
             cube_step: None,
@@ -4820,6 +4843,7 @@ impl Backend {
             volumetric_res: None,
             exposure,
             histogram,
+            thumbnails: crate::thumbnail::Thumbnails::new(),
             glow_drawn: false,
             frame_buffer,
             refl_buffers,
@@ -8231,6 +8255,7 @@ impl Backend {
             crate::label_depth::skip(&mut ui.primitives);
             // the previews draw into targets of their own: they stay, and
             // egui-wgpu gets meshes, not callbacks it does not know
+            crate::second_view::replace(&mut ui.primitives, self.second_view_texture());
             self.previews.render(
                 &self.device,
                 &self.queue,
@@ -8280,7 +8305,14 @@ impl Backend {
         let cube_face = std::mem::take(&mut self.cube_step).is_some();
         // (a face of a 360° capture is answered by nothing: it stays on the
         // GPU, and the main thread did not wait for it)
-        let snapshot = self.end_snapshot() && !cube_face;
+        // (a film frame drawn at its size is no photo: its pixels come back
+        // in `films`, a later frame's result once the GPU is done)
+        let film = self.film_reads.end_frame();
+        let snapshot = self.end_snapshot() && !cube_face && !film;
+        if self.film_reads.busy() {
+            self.lost.poll(&self.device);
+        }
+        let films = self.film_reads.answers();
         FrameResult {
             index,
             stats,
@@ -8293,6 +8325,8 @@ impl Backend {
             snapshot,
             equirect: None,
             histogram: self.histogram.take(),
+            thumbnails: self.thumbnails.take(),
+            films,
             spent,
         }
     }
@@ -8565,6 +8599,8 @@ impl Backend {
             capture: None,
             equirect: None,
             histogram: None,
+            thumbnail: None,
+            second_view: None,
             motion_cut: packet.motion_cut,
             // (moved above, every renderer once)
             world_shift: [0.0; 2],
@@ -8710,7 +8746,112 @@ impl Backend {
         } else {
             packet
         };
-        self.render_view(packet)
+        let mut packet = packet;
+        let second = self.second_view_packet(&mut packet);
+        let result = self.render_view(packet);
+        self.render_second_view(second);
+        result
+    }
+
+    /// The egui texture of the second camera's last picture.
+    fn second_view_texture(&self) -> Option<egui::TextureId> {
+        self.second.as_ref().and_then(|s| s.target.as_ref()).map(|t| t.id)
+    }
+
+    /// The second camera's copy of this frame (second_view.rs), when the
+    /// viewer asks for it. A photo, a film or a 360° face drawn offscreen,
+    /// and a frame drawn into a caller's texture, draw none.
+    fn second_view_packet(&mut self, packet: &mut FramePacket) -> Option<FramePacket> {
+        let job = packet.second_view.take()?;
+        let offscreen = packet.output.is_some() || matches!(packet.capture, Some(Capture::Snapshot(_) | Capture::Film(..)));
+        if offscreen || self.external || self.lost.get() || self.second_seed.is_none() || job.size.contains(&0) {
+            return None;
+        }
+        Some(crate::second_view::packet(packet, &job))
+    }
+
+    /// Draw the second camera's view after the window's frame, into its
+    /// texture: the renderer is made the first time (as VR's eyes are, on
+    /// this thread), and let go once the view is no longer asked for.
+    fn render_second_view(&mut self, packet: Option<FramePacket>) {
+        let Some(mut packet) = packet else {
+            if let Some(second) = &mut self.second {
+                second.idle += 1;
+                if second.idle >= crate::second_view::IDLE_FRAMES {
+                    self.drop_second_view();
+                }
+            }
+            return;
+        };
+        if self.second.is_none() {
+            let Some(seed) = self.second_seed.as_ref() else {
+                return;
+            };
+            let mut init = (**seed).clone();
+            init.external = true;
+            #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+            {
+                init.xr = None;
+            }
+            init.width = packet.surface.width;
+            init.height = packet.surface.height;
+            init.output_format = Some(self.config.format);
+            init.scene = packet.scene.clone();
+            let started = Instant::now();
+            match Backend::new(init) {
+                Ok(backend) => {
+                    log::info!("second camera: renderer made ({} ms)", started.elapsed().as_millis());
+                    self.second = Some(Box::new(SecondView {
+                        backend,
+                        target: None,
+                        idle: 0,
+                    }));
+                }
+                Err(e) => {
+                    // (not tried again every frame: the window stays empty)
+                    log::warn!("second camera: renderer could not be made: {e}");
+                    self.second_seed = None;
+                    return;
+                }
+            }
+        }
+        let Some(second) = self.second.as_mut() else {
+            return;
+        };
+        second.idle = 0;
+        let size = [packet.surface.width, packet.surface.height];
+        if second.target.as_ref().is_none_or(|t| t.size != size) {
+            // (the interface drawn with the old picture is already submitted)
+            if let Some(old) = second.target.take() {
+                self.egui.free_texture(&old.id);
+            }
+            second.target = Some(crate::second_view::Target::new(
+                &self.device,
+                &mut self.egui,
+                self.config.format,
+                size,
+            ));
+        }
+        packet.output = second.target.as_ref().map(|t| t.texture.clone());
+        // the window's reflection probes, captured by this renderer: the
+        // second one's own stay empty, and without them the ambient light
+        // of everything in shade is black
+        if second.backend.probes.share_cubes(&self.probes) {
+            second.backend.remake_frame_groups();
+        }
+        let _ = second.backend.render_view(packet);
+    }
+
+    /// The second camera's renderer let go, with its picture.
+    fn drop_second_view(&mut self) {
+        if let Some(mut second) = self.second.take() {
+            if let Some(target) = second.target.take() {
+                self.egui.free_texture(&target.id);
+            }
+            // (a pipeline set still compiling is this one's to wait for)
+            self.adopt_pipeline_workers(&mut second.backend);
+            log::info!("second camera: renderer let go");
+        }
     }
 
     /// The renderer made again, whole, from what it was first made from:
@@ -8732,7 +8873,9 @@ impl Backend {
         init.scene = scene.clone();
         // what this one holds for a world it no longer draws is let go
         // first: a card with room for one renderer but not two would
-        // otherwise refuse every try
+        // otherwise refuse every try (the second camera's renderer too: it
+        // is made again for the new one)
+        self.drop_second_view();
         self.shed_world();
         // (how long a try holds the frame: the render thread makes the
         // whole renderer, its pipelines included)
@@ -8810,11 +8953,18 @@ impl Backend {
             // (taken by `render` before the frame)
             equirect: _,
             histogram,
+            thumbnail,
+            // (taken by `render_frame` before the frame)
+            second_view: _,
             motion_cut,
             world_shift,
             input_at,
         } = packet;
         let external_output = output.is_some();
+        self.film_reads.begin(match wanted {
+            Some(Capture::Film(tag, _)) => Some(tag),
+            _ => None,
+        });
         self.motion_cut |= motion_cut;
         self.shift_weather(world_shift);
         let mut stats = RenderStats::default();
@@ -8886,7 +9036,7 @@ impl Backend {
             self.rebuild_targets();
         }
         let snapshot = match wanted {
-            Some(Capture::Snapshot(s)) if s.width > 0 && s.height > 0 => Some(s),
+            Some(Capture::Snapshot(s) | Capture::Film(_, Some(s))) if s.width > 0 && s.height > 0 => Some(s),
             _ => None,
         };
         if let Some(s) = snapshot {
@@ -13240,6 +13390,7 @@ impl Backend {
             } else {
                 crate::label_depth::skip(labels);
             }
+            crate::second_view::replace(&mut ui.primitives, self.second_view_texture());
             self.previews
                 .render(&self.device, &self.queue, &mut encoder, &mut self.egui, &mut ui.primitives, scale);
             extra_cmds = self
@@ -13312,6 +13463,24 @@ impl Backend {
         if wanted == Some(Capture::Scene) {
             let source = self.ui_blur.as_ref().map_or(surface_tex.texture(), |blur| &blur.source);
             capture = self.encode_capture(&mut encoder, source, false);
+        } else if matches!(wanted, Some(Capture::Film(_, None))) && self.config.usage.contains(wgpu::TextureUsages::COPY_SRC) {
+            // a live film's frame: the same view, read back without a wait
+            let source = self.ui_blur.as_ref().map_or(surface_tex.texture(), |blur| &blur.source);
+            let bgra = matches!(
+                source.format(),
+                wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
+            );
+            self.film_reads.encode(&self.device, &mut encoder, source, bgra, f.cutout);
+        }
+        // the Director's keyframe thumbnail: the same view, read back later
+        if let Some(tag) = thumbnail
+            && snapshot.is_none()
+            && self.config.usage.contains(wgpu::TextureUsages::COPY_SRC)
+        {
+            let source = self.ui_blur.as_ref().map_or(surface_tex.texture(), |blur| &blur.source);
+            let (width, height, format) = (self.config.width, self.config.height, source.format());
+            self.thumbnails
+                .encode(&self.device, &mut encoder, source, width, height, format, tag);
         }
         let draws_hud_selection = hud_select_faces_range.1 > 0 && self.hud_selection.is_some() && self.hud_depth.is_some();
         // HUDs retain their original texture colors and never inherit world
@@ -13428,6 +13597,15 @@ impl Backend {
             if let Some(cube) = &mut self.cube {
                 cube.add_face(&mut encoder, surface_tex.texture(), step);
             }
+        } else if snapshot.is_some() && self.film_reads.carried() {
+            // an offline render's frame, drawn at its size: read back
+            // without a wait, answered by a later frame
+            let texture = surface_tex.texture();
+            let bgra = matches!(
+                texture.format(),
+                wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
+            );
+            self.film_reads.encode(&self.device, &mut encoder, texture, bgra, f.cutout);
         } else if snapshot.is_some() {
             capture = self.encode_capture(&mut encoder, surface_tex.texture(), true);
         }
@@ -13484,6 +13662,8 @@ impl Backend {
         frame_uploads.after_submit();
         // (a face of a 360° capture is on the GPU, with nothing to read)
         let captured = capture.and_then(|capture| self.read_capture(capture, f.cutout));
+        // a film frame's copy is submitted: its mapping can begin
+        self.film_reads.map();
 
         if let (Some(t), Some(slot)) = (&mut self.timer, timer_slot) {
             let ready = t.readback[slot].1.clone();
@@ -13505,6 +13685,7 @@ impl Backend {
         }
         self.exposure.after_submit();
         self.histogram.after_submit();
+        self.thumbnails.after_submit();
         self.drawn_pick.after_submit();
         self.part_pick.after_submit();
         prof.mark("submit");

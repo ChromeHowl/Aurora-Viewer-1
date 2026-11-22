@@ -120,7 +120,6 @@ impl Default for Config {
 pub enum Request {
     Ask(Uuid),
     Cancel(Uuid),
-    OpenPrivacy,
     /// The bridge's Repair, offered when its query service is silent or failed.
     RepairBridge,
     /// Show the inventory folder of the uploaded poses in the inventory window.
@@ -181,6 +180,12 @@ pub(super) struct State {
     /// A joint, shaft or gizmo handle was under the pointer, or dragged, in
     /// the last frame: the next press is the poser's, not a HUD's.
     pointer_owned: bool,
+    /// A framing asked by an explicit action (opening the poser, a click
+    /// that selects a joint), once. The app owns the camera and applies it
+    /// only with "Frame the avatar while posing" on (Aurora, #2477).
+    focus_requested: Option<(usize, crate::camera::PoserFraming)>,
+    /// The poser just opened: its first frame asks for the opening framing.
+    open_frame_pending: bool,
     /// This frame, the selected joint's handles were under the pointer (no
     /// drag), and a marker or shaft was: what `world_hint` may look under
     /// with Ctrl (the handles, never a marker).
@@ -219,10 +224,6 @@ pub(super) struct State {
     /// the subject before).
     pick_for: Uuid,
     pick_drop: u8,
-    /// A newly selected pose joint asks the app to frame it once. Camera
-    /// ownership stays with App, which applies the user's preference.
-    focus_requested: Option<(usize, crate::camera::AutoCameraMove)>,
-    open_frame_pending: bool,
     /// The joints edited over every subject, counted as the window shows:
     /// what a close that stops the pose would lose.
     edited_total: usize,
@@ -335,12 +336,19 @@ impl State {
     }
 }
 impl Editor {
-    pub fn take_poser_focus_request(&mut self) -> Option<(usize, crate::camera::AutoCameraMove)> {
+    pub fn take_poser_focus_request(&mut self) -> Option<(usize, crate::camera::PoserFraming)> {
         self.poser.focus_requested.take()
     }
-    pub fn take_poser_focus(&mut self, world: &World) -> Option<(Vec3, crate::camera::AutoCameraMove)> {
-        let (bone, cause) = self.take_poser_focus_request()?;
-        Some((self.editor_frame(world)?.joints.get(bone)?.w_axis.truncate(), cause))
+    pub fn take_poser_focus(&mut self, world: &World) -> Option<(Vec3, crate::camera::PoserFraming)> {
+        let (bone, framing) = self.take_poser_focus_request()?;
+        Some((self.editor_frame(world)?.joints.get(bone)?.w_axis.truncate(), framing))
+    }
+    /// Ask for a framing, except in the photo viewfinder, where the shot is
+    /// the user's.
+    pub(super) fn request_poser_framing(&mut self, bone: usize, framing: crate::camera::PoserFraming) {
+        if !self.over_viewfinder {
+            self.poser.focus_requested = Some((bone, framing));
+        }
     }
     pub(crate) fn update_poser_subject_names(&mut self, props: &[aurora_net::build::ObjectProps]) {
         for prop in props.iter().filter(|p| !p.name.trim().is_empty()) {
@@ -475,6 +483,11 @@ impl Editor {
     pub fn poser_subject(&self) -> Uuid {
         self.poser.subject
     }
+    /// The poser is open on our own avatar (a subject not chosen yet is us,
+    /// as in `editor_frame`).
+    pub fn posing_self(&self, world: &World) -> bool {
+        self.poser.active && (self.poser.subject.is_nil() || self.poser.subject == world.agent_id)
+    }
     /// The joints the subject's rigged meshes use, from the scene.
     pub fn set_poser_rigged_joints(&mut self, joints: std::collections::HashSet<usize>) {
         self.poser.rigged = joints;
@@ -517,8 +530,17 @@ impl Editor {
     pub fn take_poser_requests(&mut self) -> Vec<Request> {
         std::mem::take(&mut self.poser.requests)
     }
+    /// A consent action asked from another window (the animation editor's
+    /// couple mode), sent the poser's way.
+    pub(in crate::ik_edit) fn push_poser_request(&mut self, request: Request) {
+        self.poser.requests.push(request);
+    }
     pub fn set_poser_bridge(&mut self, state: crate::world::bridge::QueryState) {
         self.poser.bridge = state;
+    }
+    /// The bridge's request state, for the couple mode's Ask list.
+    pub(in crate::ik_edit) fn poser_bridge(&self) -> crate::world::bridge::QueryState {
+        self.poser.bridge
     }
     pub fn select_pose_subject(&mut self, world: &World, id: Uuid) {
         self.pick_subject(world, id);
@@ -564,8 +586,6 @@ impl Editor {
         *self = Self {
             clip,
             open: true,
-            initialized: true,
-            ignore_script_ik: true,
             poser: State {
                 active: true,
                 open_frame_pending: true,
@@ -623,23 +643,17 @@ impl Editor {
     /// Logout bar, the server, a lost link): nothing of the editors stays
     /// for the next login, neither a pose that "stop when closed" off kept
     /// nor goals, animations or selections. The animation editor's document
-    /// (it autosaves its own drafts) and the project library are the
-    /// account's files and stay.
+    /// (it autosaves its own drafts) is the
+    /// account's file and stays.
     pub fn end_session(&mut self) {
         self.stop_editing();
         let clip = std::mem::take(&mut self.clip);
-        let project = std::mem::take(&mut self.project);
-        *self = Self {
-            clip,
-            project,
-            ..Self::default()
-        };
+        *self = Self { clip, ..Self::default() };
     }
     pub fn stop_editing(&mut self) {
         self.poser.active = false;
         self.leave_clip();
         self.open = false;
-        self.cancel_link_pick();
         self.drag = None;
         self.gizmo.cancel();
     }
@@ -813,6 +827,15 @@ impl Editor {
             && let Err(refusal) = self.start_inventory_load(&world.inventory, Uuid::from_u128(crate::demo::poser::INV_ANIM_FIRST))
         {
             log::warn!("demo inventory load refused: {refusal:?}");
+        }
+        // frame: a click selects the left wrist once the demo's camera is
+        // set (500); the app frames it, the option being on for this launch
+        if frame == 540
+            && mode == "poser-frame"
+            && let Some(pose) = self.editor_frame(world)
+        {
+            let rig = &world.avatar_lib.rig;
+            self.click_pose_bone(rig.names["mWristLeft"], rig, &pose, false);
         }
         if frame == 480
             && mode == "poser-connected"

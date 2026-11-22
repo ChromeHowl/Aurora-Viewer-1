@@ -48,6 +48,28 @@ pub fn page(cx: &mut Cx) {
             &field!(block_click_sit),
         );
     });
+    // The rigged meshes a plain left click acts on (scene/drawn.rs). Off, the
+    // click passes through them, as LLToolPie::handleMouseDown does for all
+    // of them (`pick_rigged = false`); animesh are on at the human's request.
+    cx.group(tr!("ui-options-rigged-clicks"), |cx| {
+        // (a search for "rigged" lists it with the other two)
+        let section = tr!("ui-options-rigged-clicks").to_string();
+        cx.keywords(&section).toggle(
+            tr!("ui-options-rigged-click-animesh"),
+            tr!("ui-options-rigged-click-animesh-help"),
+            &field!(rigged_click_animesh),
+        );
+        cx.toggle(
+            tr!("ui-options-rigged-click-own"),
+            tr!("ui-options-rigged-click-own-help"),
+            &field!(rigged_click_own),
+        );
+        cx.toggle(
+            tr!("ui-options-rigged-click-others"),
+            tr!("ui-options-rigged-click-others-help"),
+            &field!(rigged_click_others),
+        );
+    });
     cx.group(tr!("ui-options-keyboard"), |cx| {
         cx.toggle(
             tr!("ui-options-arrows-strafe"),
@@ -126,26 +148,6 @@ pub fn page(cx: &mut Cx) {
             Page::Shortcuts,
             0,
         );
-    });
-    // #2008: the same settings as the AO's Movement tab, for every account.
-    cx.group(tr!("movement-prim-water"), |cx| {
-        cx.unfolded().experimental().toggle(
-            tr!("movement-prim-water"),
-            tr!("ui-options-prim-water-help"),
-            &field!(water_volumes.enabled),
-        );
-        let off = !cx.s.water_volumes.enabled;
-        cx.subs(off, |cx| {
-            cx.below()
-                .row(tr!("movement-prim-water-words"), "", &field!(water_volumes.words), |ui, s| {
-                    ui.add(
-                        egui::TextEdit::singleline(&mut s.water_volumes.words)
-                            .hint_text(crate::movement::water_volume::DEFAULT_WORDS)
-                            .desired_width(f32::INFINITY),
-                    )
-                    .changed()
-                });
-        });
     });
     teleport_group(cx);
 }

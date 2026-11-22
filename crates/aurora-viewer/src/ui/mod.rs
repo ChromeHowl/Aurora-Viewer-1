@@ -48,6 +48,13 @@ pub mod debug_settings;
 pub mod destinations;
 pub mod dev_toolbox;
 pub mod director;
+pub mod director_capture;
+pub mod director_drag;
+pub mod director_key_rows;
+pub mod director_library;
+pub mod director_look;
+pub mod director_output;
+pub mod director_ruler;
 pub mod display_name;
 pub mod emoji;
 pub mod env_day_editor;
@@ -138,6 +145,7 @@ pub mod rlva_selftest;
 pub mod script_queue;
 pub mod scripts;
 pub mod search;
+pub mod second_camera;
 pub mod shadow_realm;
 pub mod shape;
 pub mod sheet;
@@ -271,6 +279,9 @@ pub struct Panels {
     pub quick_prefs: bool,
     /// The Director (toolbar `director`): its window and its timeline.
     pub director: bool,
+    /// The second camera (View › Second camera, toolbar `second_camera`):
+    /// our avatar seen by a camera of its own (ui/second_camera.rs).
+    pub second_camera: bool,
     /// "Voice controls" (toolbar): who is in the voice channel and who speaks.
     pub voice_controls: bool,
     /// The conversation log (toolbar `conversation_log`, Communicate ›
@@ -364,6 +375,7 @@ impl Panels {
             phototools: false,
             quick_prefs: false,
             director: false,
+            second_camera: false,
             voice_controls: false,
             conversation_log: false,
             omnifilter: false,

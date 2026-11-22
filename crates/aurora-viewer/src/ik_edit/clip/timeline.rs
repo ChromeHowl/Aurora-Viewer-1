@@ -22,6 +22,10 @@ const LANE_PAD: f32 = 7.0;
 const KEY_GRAB: f32 = 8.0;
 /// Half the diagonal of a key's diamond.
 const KEY_HALF: f32 = 4.5;
+/// How close to the playhead line a press grabs the playhead rather than a
+/// key under it: on a clip keyed at every frame, every point of a lane is
+/// on a key.
+const PLAYHEAD_GRAB: f32 = 5.0;
 /// Labelled ruler ticks stay at least this many points apart.
 const LABEL_SPACING: f32 = 60.0;
 /// Frames between labelled ruler ticks, from the closest zoom out.
@@ -259,8 +263,17 @@ impl FrameScale {
     }
 }
 
-/// The visible key of `keys` (sorted) nearest to `x`, within `KEY_GRAB`.
+/// The visible key of `keys` (sorted) nearest to `x`, within `KEY_GRAB`, or
+/// only on its diamond (or its own frame) when the frames are packed tighter:
+/// with keys a few frames apart the full reach covered the whole lane, and a
+/// click between two keys could only send the playhead to one of them.
+/// Whether a press at `x` grabs the playhead drawn at `cursor`.
+pub(super) fn on_playhead(scale: &FrameScale, cursor: f64, x: f32) -> bool {
+    (scale.x(cursor) - x).abs() <= PLAYHEAD_GRAB
+}
+
 pub(super) fn key_under(keys: &[u32], scale: &FrameScale, x: f32) -> Option<u32> {
+    let grab = KEY_GRAB.min(KEY_HALF.max(scale.points_per_frame() * 0.5));
     let visible = &keys[keys.partition_point(|key| *key < scale.start)..keys.partition_point(|key| *key <= scale.end)];
     let pivot = visible.partition_point(|key| scale.x(f64::from(*key)) < x);
     [pivot.checked_sub(1), Some(pivot)]
@@ -268,7 +281,7 @@ pub(super) fn key_under(keys: &[u32], scale: &FrameScale, x: f32) -> Option<u32>
         .flatten()
         .filter_map(|index| visible.get(index).copied())
         .map(|key| (key, (scale.x(f64::from(key)) - x).abs()))
-        .filter(|(_, distance)| *distance <= KEY_GRAB)
+        .filter(|(_, distance)| *distance <= grab)
         .min_by(|a, b| a.1.total_cmp(&b.1))
         .map(|(key, _)| key)
 }
@@ -320,6 +333,19 @@ impl KeyBox {
     fn area(&self) -> egui::Rect {
         egui::Rect::from_two_pos(self.origin, self.current)
     }
+}
+
+/// A row of the timeline's list: in couple mode, each person's name
+/// heads their lanes.
+enum Row<'a> {
+    Person { b: bool, edited: bool },
+    Track(&'a TimelineTrack),
+    Waiting(&'a TimelineTrack),
+}
+
+/// Each person's colour in couple mode: A takes the editor's violet, B amber.
+pub(super) fn person_color(palette: &Palette, b: bool) -> egui::Color32 {
+    if b { palette.amber } else { palette.violet }
 }
 
 /// The lanes' geometry shared by every row: the name column, then the
@@ -588,13 +614,16 @@ impl Editor {
         if pointer_down {
             return;
         }
+        // the shift a group can really take: a group already at frame 0
+        // dragged left does not move, and leaves undo and redo alone
+        let group_shift = self.group_drag();
         let Some((bone, from, to)) = self.clip.drag_key.take() else {
             return;
         };
-        if from == to {
+        if from == to || group_shift == Some(0) {
             return;
         }
-        let group = self.clip.selected_keys.len() > 1 && self.clip.selected_keys.contains(&(bone, from));
+        let group = group_shift.is_some();
         self.clip.checkpoint();
         if let Some(document) = self.clip.document.as_mut() {
             if group {
@@ -613,7 +642,8 @@ impl Editor {
             }
             self.clip.changed();
         }
-        self.clip_seek(to);
+        // show the pose at the playhead again, now that the keys moved
+        self.clip_seek(self.clip.frame);
     }
 
     /// Pick every key of the lanes the timeline shows (Ctrl+A). False, and
@@ -771,7 +801,7 @@ impl Editor {
             self.clip.frame,
             self.clip.playing,
         );
-        let frame = Frame::new(world);
+        let frame = self.editor_frame(world);
         let content = ctx.content_rect();
         let size = timeline_default_size(content);
         let pos = timeline_default_position(content, size);
@@ -1227,6 +1257,54 @@ impl Editor {
             .iter()
             .filter(|track| track.authored || track.keys.len() > 1 || selected == Some(track.bone))
             .collect();
+        // keys an undo, a delete or a range change took away, and those of a
+        // lane no longer shown (a hidden rest key picked while its joint was
+        // selected), are no longer picked: a group move would otherwise author
+        // a joint the user never keyed
+        self.clip.selected_keys.retain(|(bone, frame)| {
+            shown
+                .iter()
+                .any(|track| track.bone == *bone && track.keys.binary_search(frame).is_ok())
+        });
+        if let Some(key_box) = self.clip.key_box.as_mut() {
+            if let Some(pointer) = ui.input(|input| input.pointer.latest_pos()) {
+                key_box.current = pointer;
+            }
+            key_box.hits.clear();
+        }
+        // couple mode: each person's lanes under their name, A first; the
+        // person set aside's lanes show their keys, a click there switches
+        let editing_b = self.clip.couple.as_ref().map(|couple| couple.editing_b);
+        let waiting_lanes = self
+            .clip
+            .couple
+            .as_mut()
+            .and_then(|couple| couple.waiting_lanes())
+            .unwrap_or_default();
+        let rows: Vec<Row> = match editing_b {
+            None => shown.iter().map(|track| Row::Track(track)).collect(),
+            Some(editing_b) => {
+                let edited = shown.iter().map(|track| Row::Track(track));
+                let waiting = waiting_lanes
+                    .iter()
+                    .filter(|track| track.authored || track.keys.len() > 1)
+                    .map(Row::Waiting);
+                let mut rows = vec![Row::Person {
+                    b: false,
+                    edited: !editing_b,
+                }];
+                if editing_b {
+                    rows.extend(waiting);
+                    rows.push(Row::Person { b: true, edited: true });
+                    rows.extend(edited);
+                } else {
+                    rows.extend(edited);
+                    rows.push(Row::Person { b: true, edited: false });
+                    rows.extend(waiting);
+                }
+                rows
+            }
+        };
         let status = self.timeline_status();
         let spacing = ui.spacing().item_spacing.y;
         let status_height = if status.is_some() {
@@ -1237,7 +1315,7 @@ impl Editor {
         let list_height = (ui.available_height() - RULER_HEIGHT - spacing - status_height).max(ROW_HEIGHT);
         // the rows take the width the scroll area leaves them, known before
         // they are drawn, so that the ruler above has exactly their width
-        let rows_height = shown.len() as f32 * (ROW_HEIGHT + ROW_GAP) - ROW_GAP;
+        let rows_height = rows.len() as f32 * (ROW_HEIGHT + ROW_GAP) - ROW_GAP;
         let scroll_bar = rows_height > list_height + 0.5;
         let width = (ui.available_width() - if scroll_bar { widgets::scroll_strip(ui) } else { 0.0 }).max(1.0);
         let name_width = (width * 0.28).clamp(96.0, 168.0);
@@ -1286,7 +1364,7 @@ impl Editor {
             start: view_start,
             end: view_end,
         };
-        let rows_bottom = if shown.is_empty() {
+        let rows_bottom = if rows.is_empty() {
             let (rect, _) = ui.allocate_exact_size(egui::vec2(width, list_height), egui::Sense::hover());
             let mut hint = ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink2(egui::vec2(4.0, 6.0))));
             hint.add(egui::Label::new(egui::RichText::new(aurora_i18n::tr!("anim-timeline-empty")).color(palette.muted)).wrap());
@@ -1299,9 +1377,13 @@ impl Editor {
                         .id_salt("avatar-studio-animation-timeline-tracks")
                         .auto_shrink([false, false])
                         .max_height(list_height)
-                        .show_rows(ui, ROW_HEIGHT, shown.len(), |ui, rows| {
-                            for track in rows.filter_map(|index| shown.get(index)) {
-                                self.timeline_row(ui, palette, rig, frame, track, lanes);
+                        .show_rows(ui, ROW_HEIGHT, rows.len(), |ui, range| {
+                            for row in range.filter_map(|index| rows.get(index)) {
+                                match row {
+                                    Row::Track(track) => self.timeline_row(ui, palette, rig, frame, track, lanes),
+                                    Row::Waiting(track) => self.timeline_waiting_row(ui, palette, track, lanes, editing_b == Some(false)),
+                                    Row::Person { b, edited } => self.timeline_person_row(ui, palette, *b, *edited, lanes),
+                                }
                             }
                         })
                 })
@@ -1409,7 +1491,7 @@ impl Editor {
         if name_ui.add(egui::Button::selectable(false, name).truncate()).clicked()
             && let Some(frame) = frame
         {
-            self.select(bone, rig, frame);
+            self.clip_lead_bone(bone, rig, frame);
         }
         self.timeline_lane(ui, palette, rig, frame, track, lane, FrameScale::new(lane, lanes.start, lanes.end));
     }
@@ -1438,23 +1520,32 @@ impl Editor {
             egui::Sense::click_and_drag(),
         );
         let grabbing = self.clip.drag_key.is_some_and(|(dragged, _, _)| dragged == bone);
+        // the playhead line takes a press before the keys: a clip keyed at
+        // every frame leaves no room between them to drag it
+        let cursor = self.clip.cursor;
         let hovered_key = if grabbing {
             None
         } else {
-            response.hover_pos().and_then(|pointer| key_under(&track.keys, &scale, pointer.x))
+            response
+                .hover_pos()
+                .filter(|pointer| !on_playhead(&scale, cursor, pointer.x))
+                .and_then(|pointer| key_under(&track.keys, &scale, pointer.x))
         };
         let modifiers = ui.input(|input| input.modifiers);
         if response.drag_started() && !self.clip.key_box_armed {
             // the key under the press, not under the pointer once the drag
             // threshold is passed
             let origin = ui.input(|input| input.pointer.press_origin()).or(response.interact_pointer_pos());
-            let key = origin.and_then(|pointer| key_under(&track.keys, &scale, pointer.x));
+            let key = origin
+                .filter(|pointer| !on_playhead(&scale, cursor, pointer.x))
+                .and_then(|pointer| key_under(&track.keys, &scale, pointer.x));
             self.clip.drag_key = key.map(|key| (bone, key, key));
             if let Some(key) = key {
+                // the playhead stays where it is: following the grabbed key
+                // would lay its line over the keys being moved
                 pick_key(&mut self.clip.selected_keys, (bone, key), modifiers, true);
-                self.clip_seek(key);
                 if let Some(frame) = frame {
-                    self.select(bone, rig, frame);
+                    self.clip_lead_bone(bone, rig, frame);
                 }
             }
         }
@@ -1471,7 +1562,6 @@ impl Editor {
                 Some((dragged, origin, current)) if dragged == bone => {
                     if current != to {
                         self.clip.drag_key = Some((bone, origin, to));
-                        self.clip_seek(to);
                     }
                 }
                 Some(_) => {}
@@ -1487,7 +1577,7 @@ impl Editor {
                 Some(key) => {
                     pick_key(&mut self.clip.selected_keys, (bone, key), modifiers, false);
                     if let Some(frame) = frame {
-                        self.select(bone, rig, frame);
+                        self.clip_lead_bone(bone, rig, frame);
                     }
                 }
                 // a plain click on an empty spot drops the picked keys
@@ -1502,7 +1592,10 @@ impl Editor {
         } else if let Some(key) = hovered_key {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
             response.on_hover_text(aurora_i18n::tr!("anim-edit-keyframe-at", frame = key));
+        } else if response.hover_pos().is_some_and(|pointer| on_playhead(&scale, cursor, pointer.x)) {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
         }
+        let person_b = self.clip.couple.as_ref().is_some_and(|couple| couple.editing_b);
         let painter = ui.painter();
         let center = lane.center().y;
         let base = if track.enabled {
@@ -1529,6 +1622,8 @@ impl Editor {
                 palette.teal
             } else if !track.enabled {
                 palette.muted_dim
+            } else if person_b {
+                palette.amber
             } else if Some(key) == hovered_key || (key == self.clip.frame && !self.clip.playing) {
                 palette.violet_light
             } else {
@@ -1550,6 +1645,112 @@ impl Editor {
                     paint_key(painter, egui::pos2(scale.x(to), center), KEY_HALF + 1.0, palette.teal);
                 }
             }
+        }
+    }
+
+    /// A person's name above their lanes in couple mode, in their colour;
+    /// a click on the person set aside edits them.
+    fn timeline_person_row(&mut self, ui: &mut egui::Ui, palette: &Palette, b: bool, edited: bool, lanes: Lanes) {
+        let (row, response) = ui.allocate_exact_size(egui::vec2(ui.available_width(), ROW_HEIGHT), egui::Sense::click_and_drag());
+        // a drag across the name row moves the playhead too
+        if response.dragged()
+            && !self.clip.key_box_armed
+            && let Some(pointer) = response.interact_pointer_pos()
+        {
+            let lane = egui::Rect::from_min_max(egui::pos2(row.left() + lanes.name_width, row.top()), row.max);
+            let to = FrameScale::new(lane, lanes.start, lanes.end).frame_at(pointer.x);
+            if to != self.clip.frame {
+                self.clip_seek(to);
+            }
+        }
+        let color = person_color(palette, b);
+        if edited {
+            ui.painter()
+                .rect_filled(row, ui.visuals().window_corner_radius, color.gamma_multiply(0.14));
+        }
+        paint_key(ui.painter(), egui::pos2(row.left() + 10.0, row.center().y), KEY_HALF, color);
+        let label = if b {
+            aurora_i18n::tr!("anim-couple-person-b").to_string()
+        } else {
+            aurora_i18n::tr!("anim-couple-person-a").to_string()
+        };
+        // kept to the name column: it never runs into the lanes
+        let names = egui::Rect::from_min_size(row.min, egui::vec2(lanes.name_width, ROW_HEIGHT));
+        ui.painter().with_clip_rect(names.intersect(ui.clip_rect())).text(
+            egui::pos2(row.left() + 22.0, row.center().y),
+            egui::Align2::LEFT_CENTER,
+            label,
+            egui::FontId::proportional(13.0),
+            if edited { palette.ink } else { palette.muted },
+        );
+        if !edited {
+            if response.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            if response.on_hover_text(aurora_i18n::tr!("anim-couple-switch")).clicked() {
+                self.switch_person();
+            }
+        }
+    }
+
+    /// A lane of the person set aside: their keys, dimmed, in their colour.
+    /// A click on it moves the playhead there and edits that person.
+    fn timeline_waiting_row(&mut self, ui: &mut egui::Ui, palette: &Palette, track: &TimelineTrack, lanes: Lanes, b: bool) {
+        let (row, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), ROW_HEIGHT), egui::Sense::hover());
+        let names = egui::Rect::from_min_size(row.min, egui::vec2(lanes.name_width, ROW_HEIGHT));
+        let lane = egui::Rect::from_min_max(egui::pos2(row.left() + lanes.name_width, row.top()), row.max);
+        let response = ui.interact(
+            row,
+            egui::Id::unique(("avatar-studio-animation-timeline-waiting", track.bone)),
+            egui::Sense::click_and_drag(),
+        );
+        ui.painter().text(
+            egui::pos2(names.left() + 26.0, names.center().y),
+            egui::Align2::LEFT_CENTER,
+            &track.name,
+            egui::FontId::proportional(13.0),
+            palette.muted,
+        );
+        let scale = FrameScale::new(lane, lanes.start, lanes.end);
+        let center = lane.center().y;
+        ui.painter().line_segment(
+            [
+                egui::pos2(scale.x(f64::from(scale.start)), center),
+                egui::pos2(scale.x(f64::from(scale.end)), center),
+            ],
+            egui::Stroke::new(1.0, palette.muted_dim.gamma_multiply(0.5)),
+        );
+        let color = if track.enabled {
+            person_color(palette, b).gamma_multiply(0.55)
+        } else {
+            palette.muted_dim
+        };
+        let visible =
+            &track.keys[track.keys.partition_point(|key| *key < scale.start)..track.keys.partition_point(|key| *key <= scale.end)];
+        for &key in visible {
+            paint_key(ui.painter(), egui::pos2(scale.x(f64::from(key)), center), KEY_HALF, color);
+        }
+        // a drag over these lanes moves the playhead, as over any lane
+        if response.dragged()
+            && !self.clip.key_box_armed
+            && let Some(pointer) = response.interact_pointer_pos()
+        {
+            let to = scale.frame_at(pointer.x);
+            if to != self.clip.frame {
+                self.clip_seek(to);
+            }
+        }
+        if response.hovered() && !response.dragged() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        if response.on_hover_text(aurora_i18n::tr!("anim-couple-switch")).clicked() {
+            if let Some(pointer) = ui.input(|input| input.pointer.interact_pos())
+                && lane.contains(pointer)
+            {
+                let to = key_under(&track.keys, &scale, pointer.x).unwrap_or_else(|| scale.frame_at(pointer.x));
+                self.clip_seek(to);
+            }
+            self.switch_person();
         }
     }
 }

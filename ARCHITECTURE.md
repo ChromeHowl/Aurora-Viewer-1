@@ -18,12 +18,33 @@ routing. Script hosts retain the original source-text ID and register the
 active editor on the host layer, so tab changes preserve cursors and route
 Find correctly. Inactive scripts still poll preprocessing and external-file
 workers; errors stop host closure and reveal the affected editor.
-||||||| parent of 3451dffea (fix(build-tools): reduce mesh upload cost with Legacy LODs and adaptive physics (#4229))
-`ui/chat/select/document.rs` scopes the transcript's rich-text selection to
-group notice bodies, in group profiles and notification cards. It retains
-selection for the Copy menu without replacing clickable links or emoji.
 
-||||||| parent of a2cb11bfd (fix(build-tools): accept large PBR imports and improve queue controls (#4302))
+`imports/mesh.rs` exposes Automatic through the retained `LodSource::Legacy` /
+`process::Method::Legacy` chain, and Reliable. Retired serialized generation
+choices alias to Legacy. Scene budgets reserve `process::minimum_lod_triangles`
+for every model before sharing the remainder; defaults and the UI use the same
+occupied-material floor. `aurora-assets/src/import_mesh/process/material_floor.rs`
+restores a representative triangle from a lost material slot after simplification
+(the full source face when an error limit is active).
+At Automatic's explicit minimum it runs the Legacy passes per material and keeps
+one noncollapsed representative triangle where the source has one, preserving
+that material's vertex attributes. Error-threshold generation does not force the
+minimum, and empty source slots stay empty. Fast remains internal to collision
+reduction; the former Auto and Precise algorithms are removed.
+
+`imports/file_picker.rs` owns pending native selections and their import-window
+identity. Closing that window cancels and retires the request without discarding
+existing drafts; request ids reject late replies. Native dialogs run on dedicated
+threads with panic-safe completion. On Windows, `file_picker/windows.rs` installs
+a thread timer for the modal loop and posts WM_CLOSE only to native dialogs on
+that picker thread. `file_picker/macos.rs` retains a modeless NSOpenPanel and
+dispatches its cancellation to AppKit's main thread. `file_picker/linux/portal.rs`
+subscribes before OpenFile, retains the returned Request handle and calls Close
+without waiting for a Response signal on cancellation; its non-modal dialog
+keeps Aurora reachable. `file_picker/linux/zenity.rs` retains and reaps the exact
+fallback child when the portal is unavailable. No backend cancels another
+request's selector. File decoding stays off the frame thread.
+
 `imports/ui/inspector.rs` owns the draggable queue divider. Its preferred width
 is stored under each import window in the shared persisted UI layout; fitting
 a smaller window only clamps the displayed width. Double-click restores the
@@ -233,6 +254,21 @@ New base angles, stopping and physical speed changes reset it; changing the
 parent with the same base angle retains the turn, as in the Legacy Viewer.
 Motion corrections fade towards the base angle with that retained turn
 applied, rather than fading the turn away.
+Full and terse reports carry separate receipt and application times into
+the object store. Receipt time anchors motion extrapolation; application
+time starts position, rotation and scale damping from the current visual
+pose. Time in the event queue therefore cannot consume a scripted transition.
+Volume corrections retain a drawable transform across reports, including a
+change from zero velocity to physical motion. Each frame follows
+`LLDrawable::updateXform`: a 0.06 s half-life, normalized quaternion interpolation,
+and one post-step stopping test for position, rotation and scale, relative to
+camera distance. `Scene::drawable_damping_view` supplies the preceding view's
+spatial visibility, independent of face transparency or draw-record count;
+selection prevents a new correction but does not cancel an existing one.
+`world/object_motion_trace.rs` optionally records short captures of volume
+reports, damping decisions and final render-record gaps, controlled by a local
+request file. It tracks at most 64 slots for 20 seconds and excludes object
+names, UUIDs, absolute positions and network payloads.
 
 `world/appearance_xml.rs` snapshots only the agent’s current visual parameters
 and joint palette for Legacy Viewer-compatible `linden_genepool` XML export.
@@ -508,6 +544,14 @@ answer retains the posed attachment behind a cutout. System avatar alpha layers
 keep their displayed cutouts; HUD and camera pick policies remain separate.
 Priority comparisons reuse the full-ray CPU candidates of the click or
 hover query, excluding rigged geometry while retaining its GPU-hover request.
+A plain left click and the hover cursor pass through rigged attachments, as
+LLToolPie::handleMouseDown does for every rigged mesh (`pick_rigged = false`):
+`scene/drawn.rs::RiggedClicks`, the three "Left click on rigged objects"
+preferences (animesh on, the attachments we wear and those of other avatars
+off), says which scripted rigged meshes keep the click instead; with Alt,
+Ctrl or Shift held the click reaches what it reached before them
+(`App::rigged_clicks`). The right click and the build tools read the drawn
+faces whatever they say.
 Distance-only Left queries share the large-face hierarchies and alpha tests;
 the diagnostic reference still walks every object's triangles independently.
 CPU interactions (touch, hover, menus, media, selection and placement), including
@@ -1122,65 +1166,39 @@ applies stop, stop-and-revoke and blacklist. Animation entries of
 `world/derender.rs` (AT_ANIMATION) drop the motion from every avatar's
 signals and ask the simulator to stop it on ours.
 
-`world/portals.rs` owns bounded, immutable two-minute portal invitations and
-per-observer crossing gates. Opening our portal needs the right to build
-where it stands (`world/land.rs::agent_can_build`, allowAgentBuild); an
-unknown parcel refuses and is asked for (`app/land_rights.rs`). A traveler's return
-is announced only where they may build; elsewhere, or while that land is
-unknown, it stays theirs alone: shown and crossable, announced to nobody.
-One kept private only because its land was unknown is announced once that
-land is known and open to them, while it lives; a shared return never
-becomes private again. `aurora-net/src/bridge/portal.rs` validates their
-bounded base64/JSON wire format. Bridge 1.37 uses an owner-authenticated,
-region-local relay to the independent query script; late arrivals discover
-existing portals once, with targeted replies and bounded traffic. The bridge
-never teleports anyone. Each recipient checks friendship or their own group
-membership at crossing, then `app/portals.rs` uses the ordinary user location
-teleport boundary, retaining RLVa and simulator destination access checks.
-Near-spawn observers must first leave a 3.5 m clearance; standing inside,
-involuntary motion, position jumps and replayed announcements never trigger.
-After that initial clearance, observer retries use the ordinary 1 m clearance,
-including after a private grant arrived too late for the first crossing.
-Traversal uses the movement controls already filtered by `update_move_input`;
-nearby-chat focus can pass movement arrows and does not independently veto them.
+`world/portals.rs` owns this viewer's own walk-through portals: our portal
+and the returns of our journeys, immutable for their two minutes, each with
+its crossing gate. Nothing is sent to the region or read from it, and no
+bridge is needed: portals were once announced to other Aurora viewers over
+region chat, taken out under Second Life's shared experience policy
+(AGENTS.md, "No data of our own in shared places"). Opening our portal needs
+the right to build where it stands (`world/land.rs::agent_can_build`,
+allowAgentBuild); an unknown parcel refuses and is asked for
+(`app/land_rights.rs`). A return needs no land right: nothing is placed in
+the world. Crossing is a voluntary plane crossing after a 1 m clearance:
+standing inside, involuntary motion, position jumps and the arrival of a
+teleport never trigger. Traversal uses the movement controls already
+filtered by `update_move_input`; nearby-chat focus can pass movement arrows
+and does not independently veto them. `app/portals.rs` then uses the
+ordinary user location teleport boundary, retaining RLVa and simulator
+destination access checks.
 `scene/portals.rs` shares one GPU quad with an analytic Aurora surface,
 depth-tested and sorted with world transparency/glow. Theme violet, indigo,
 teal and navy drive its flowing depth, fine rim and soft corona; the GPU
 animation clock runs it, with a static reduced-motion variant. No texture or
 particle uploads; unchanged portal records are not rewritten. `ui/portals.rs` provides
-World > Portals and depth-occluded destination/creator/access labels. This is
-an Aurora feature; ordinary teleport behavior follows LLAgent::teleportViaLocation
-and teleportRequest (`indra/newview/llagent.cpp`).
+World > Portals and depth-occluded destination labels with the remaining
+lifetime. This is an Aurora feature; ordinary teleport behavior follows
+LLAgent::teleportViaLocation and teleportRequest (`indra/newview/llagent.cpp`).
 Photo isolation hides portal surfaces and their world labels while preserving
-invitations, clearance guards and the posed body cut; choosing subjects or leaving
-photo mode restores live surfaces without replaying invitations.
-
-Portal wire v2 separates a public `Announcement` from targeted `Details`.
-Restricted announcements contain no destination, landmark asset/title or group
-identity. An observer makes one nonce-bound request with at most one retry;
-the creator checks their own friends or a fresh, complete server member list
-shared through `world/group_data.rs` before sending any details. Unsent grants
-are checked again at the bounded send cadence; unknown/denied requests remain
-silent. Responses cannot use regional broadcast, in both Rust and the bridge.
-Unauthorized labels omit creator names as well as destination/access details.
-Private details remain in session memory, bound to creator, portal and request;
-discovery is redacted and close/expiry/session changes retire pending exchanges.
-Starting a teleport preserves source-region invitations and pending grants until
-the actual region/session change. Traversal is disarmed during the transition;
-the arrival segment cannot trigger a portal. This lets the creator's still-local
-bridge finish authenticating visitors while departure is in progress.
-Locally created portals and personal returns use a 1 m clearance without startup suppression; other observers retain the initial 3.5 m anti-drop guard and 600 ms appearance delay.
-`app/portals.rs::Journey` carries a single, expiring return intent across the ordinary teleport boundary. Only AgentMovementComplete enables publication; failure, logout, expiry and a different arrival region discard it. Portals request arrival facing away from the return aperture four metres behind the avatar, so held forward movement cannot bounce the traveler back. The return derives a paired UUID from the source (reversing twice restores it), preserving the creator and expiry. Each regional entry merges bounded authenticated relay identities, preserving its first geometry and crossing gate; discovery includes locally shared returns. A traveler retains a local return grant. Friends grants require the original creator to be present; a relay never substitutes its own friends. Group relays verify a fresh complete server roster. Restricted announcements remain redacted.
-HTTP-in renewal within the same region preserves invitations and clearance gates.
-The query endpoint is invalidated on region changes or a dead-URL response;
-announcement/close delivery retries the same immutable action at most twice,
-with one- and two-second backoff. Only exhausted failures remove the
-local aperture. Replacement, expiry and region/session changes retire retries.
+the portals, clearance guards and the posed body cut; choosing subjects or
+leaving photo mode restores live surfaces.
+`app/portals.rs::Journey` carries a single, expiring return intent across the ordinary teleport boundary. Only AgentMovementComplete opens the return; failure, logout, expiry and a different arrival region discard it. Portals request arrival facing away from the return aperture four metres behind the avatar, so held forward movement cannot bounce the traveler back. The return derives a paired UUID from the source (reversing twice restores it) and keeps its expiry; within one region, the portal crossed is itself the way back.
 
 `ui/places/drag.rs` shares landmark/history cargo and a floating icon/thumbnail preview
 between all Favorites access modes and both Places layouts. Favorite reordering
 consumes only releases inside its visible list; scene releases reuse the inventory
-portal path. `ui/portals.rs` includes the actual remaining lifetime in world labels.
+portal path.
 History drags snapshot the exact arrival, including visits without a landmark;
 the map resolves their region asynchronously without inventory creation or asset
 requests. Only Favorites rows reserve a reorder grip. Landmarks and History retain
@@ -1192,11 +1210,11 @@ changes; a missing arrival uses one ordinary ParcelInfoRequest on drop, then
 freezes ParcelInfoReply's coordinates before the asynchronous region-map lookup.
 `app/portals/landmark.rs` resolves inventory landmark drops asynchronously through
 the ordinary landmark and map caches, including variable regions. A scene drop
-opens a Friends portal at the selected support; Shift at release makes it public.
-The shared overlay previews the selected access. Inventory items are never consumed;
+opens our portal at the selected support, with a shared overlay hint.
+Inventory items are never consumed;
 Ctrl insertion retains its existing behavior. Pending drops expire and cancel on
 region/session change, teleport or item replacement. `app/portals/demo.rs` drives
-actual world-drop input and authenticated in-memory peers for offline coverage.
+actual world-drop input and a walk through our portal for offline coverage.
 Successful landmark scene drops release inventory keyboard focus, including its
 short-lived list-focus restoration, while keeping inventory windows open.
 
@@ -1523,8 +1541,8 @@ hidden meanwhile. Inject creates the script item in #Aurora, uploads it with
 UpdateScriptAgent and puts it into the prim with RezScript.
 `ik_edit/poser.rs` adds Build > Poser over the same shaped Bento skeleton
 as the IK editor. `poser/overlay.rs` owns joint selection and manipulation,
-sharing skeleton geometry and transform gizmos. It bypasses IK projects,
-bone-to-prim/bone bindings, virtual controls, poles and object requests.
+sharing skeleton geometry and transform gizmos. It bypasses IK Edit's
+goals and poles.
 `poser/kinematics.rs` uses the numerical chain solver for positional edits
 and world pins, retaining every shaped parent offset. Unreachable targets
 yield at the chain's reach. Imports retarget non-root translations through
@@ -1586,14 +1604,15 @@ depth. FSR's display depth supports that copy too. Readback slots carry
 monotonic sequence numbers so a reused slot cannot deliver an older answer
 over a newer one. `renderer::part_tests` exercises the production shaders
 and shared pipeline states on the GPU; `part_pick` also tests slot reuse.
-`world/poser_consent.rs` owns region-scoped request/accept/refuse/cancel/withdraw
-state, privacy, nonces, timeouts and cooldowns: 2 minutes after no answer,
-10 minutes after explicit refusal, and no peer cooldown after an accepted
-session ends. Ended nonces remain invalid independently of that retry policy.
-`app/poser.rs` drives transport
-and the independent target modal/reminder. Bridge 1.34 adds authenticated
-attachment-to-attachment consent relay to `world/bridge/query.lsl`, using the
-existing private HTTPS query service. It sends no IM or viewer probe.
+`world/poser_consent.rs` owns the region-scoped consent we ask (request,
+accept, refuse, stop, cancel), nonces, timeouts and cooldowns (2 minutes
+after no answer, 10 minutes after an explicit refusal), and the texts of the
+dialog. `app/poser.rs` drives the transport and the ended notice. The
+dialog itself is shown by our bridge (`world/bridge/query.lsl`, through the
+private HTTPS query service): a standard `llDialog` to the resident, answered
+with its buttons or `stop` in nearby chat, whatever viewer they use. No
+message goes to another viewer (AGENTS.md, "No data of our own in shared
+places").
 See [the local trial and validation](docs/POSER.md).
 
 Native links share `ui/chat/action_marker.rs`: a parsed action chooses its
@@ -2009,7 +2028,7 @@ The background of the update and exit dialogs is blurred by
 separates the background layers from the dialog. The scene and these layers
 are rendered into a texture, blurred horizontally then vertically on the
 GPU; the dialog stays sharp. These targets exist only while the dialog is
-displayed.
+displayed. Preferences › Accessibility › Disable glass skips this pass.
 
 ```
 aurora-viewer/                  git repository (GitHub: Aurora-Viewer/Aurora-Viewer)
@@ -2043,6 +2062,7 @@ aurora-viewer/                  git repository (GitHub: Aurora-Viewer/Aurora-Vie
 ├─ packaging/macos/            `Info.plist` of `Aurora Viewer.app` (its texts translated in `*.lproj/InfoPlist.strings`) and the entitlements of its hardened runtime; `scripts/package-macos.ps1` builds the bundle, the release signs it
 ├─ scripts/                     tools for agents and humans (PowerShell)
 │  ├─ automation-window-border.ps1 dashed yellow outline of the automated-test windows (Windows)
+│  ├─ ffmpeg-pack.sh            the Director's ffmpeg pack (bash): its pinned sources, build per system, check, archive and corresponding source; run by `.github/workflows/ffmpeg-pack.yml`
 │  └─ tools/                    aurora-tools: menu, interface (ui), checks and repair (checks), actions, live PRs (prs), releases, reset (reset), Claude Code permissions (claude)
 └─ .github/                     CI and wiki publication (workflows/, actions/), release and nightly betas, PR template, Dependabot
 ```
@@ -2063,7 +2083,7 @@ one-line command (`scripts/setup.ps1`, then the tools):
 | Crate | Role |
 |---|---|
 | `aurora-viewer` | The application: window loop (winit), world state, scene, egui interface, agent, camera, offline demo |
-| `aurora-updater` | Stable GitHub releases (and the nightly betas on the Beta channel, `feed::Channel`) and maintenance thresholds; the list kept with its ETag, asked again with `If-None-Match` (a 304 does not count against GitHub's limit); cancellable download, SHA-256 and bounded ZIP extraction; Windows helper, transactional replacement and rollback until the new version has presented a frame. `user_data.rs` backs up/restores the cache and `settings.json` if the policy requires it. `media_pack.rs` installs the media plugins pack of its system (release `media-plugins-<n>`, size and SHA-256 pinned in the viewer per system; Unix permission bits kept, never setuid) in the user's data folder, with the same download and extraction. Isolated HTTP and file tests. |
+| `aurora-updater` | Stable GitHub releases (and the nightly betas on the Beta channel, `feed::Channel`) and maintenance thresholds; the list kept with its ETag, asked again with `If-None-Match` (a 304 does not count against GitHub's limit); cancellable download, SHA-256 and bounded ZIP and tar.gz extraction; the package of the system (Windows ZIP, Linux tar.gz); a helper on Windows and Linux, transactional replacement and rollback until the new version has presented a frame; a sandbox's folder or one this account cannot write is refused (`Failure::Protected`) before any download. `user_data.rs` backs up/restores the cache and `settings.json` if the policy requires it. `media_pack.rs` installs the media plugins pack of its system (release `media-plugins-<n>`, size and SHA-256 pinned in the viewer per system; Unix permission bits kept, never setuid) in the user's data folder, with the same download and extraction. `ffmpeg_pack.rs` does the same for the Director's ffmpeg (release `ffmpeg-<version>`; `PACK` empty until the project publishes one, and nothing offered while it is). Isolated HTTP and file tests. |
 | `aurora-version` | Common source of the compiled version: Git tag, provenance of builds between tags, HTTP User-Agent and SL login version with four numeric components. Its `build.rs` also tracks the Git references of the worktrees and passes the version to the viewer's `build.rs` (`links`), for the version block of the exe; `build_support.rs` holds the tested pure resolution. |
 | `aurora-i18n` | Language shared by the viewer and the network messages: Fluent catalogues `locales/*.ftl`, OS detection, saved choice, English fallback, variables, plurals and decimals. `build.rs` discovers the languages automatically; simple labels and arrays of labels are cached per language. See `docs/TRANSLATING.md`. |
 | `aurora-net` | Login (XML-RPC), UDP circuits, capabilities, event queue, HTTP download of assets (`fetch.rs`; `fetch_pace.rs`: how many requests are under way at once, from 24 up to 192 while the link keeps up, the bakes' service at 24); runs on its own tokio runtime. `probe.rs` (AURORA_PROFILE): counters by UDP message type, by kind of object update and by kind of HTTP request and asset host, off behind one flag. `transition.rs` (AURORA_PROFILE): the timeline of a teleport or a region crossing, one log line when it ends, and the `region link` lines of the neighbour circuits. `agent_update.rs`: when an AgentUpdate leaves (a change of the control flags at once and confirmed, the rest past the Legacy Viewer's thresholds at 125 a second at most, one a second to stay alive) and the draw distance it asks for (`FarStep`: the controls' draw distance, half of it on arrival, then growing to it); the viewer hands the session what must leave before its next tick (`NetClient::set_controls`). `packet_loss.rs`: bounded pending sequence ranges, confirmed lost only after sixteen smoothed round trips (5 s at most), shared by the throttle, viewer statistics and displayed loss percentage. `throttle.rs`: the bandwidth asked from the simulator, port of LLViewerThrottle (the setting shared between the seven channels, lowered while packets are lost or the viewer falls behind). `viewer_stats.rs`: Linden Lab's viewer statistics, port of send_viewer_stats (the report posted to the region's `ViewerStats` capability at arrival, every 5 minutes and at logout; the viewer's part comes from `app/viewer_stats.rs` through `NetClient::set_viewer_stats`). `render_info.rs`, `session/render_info_net.rs`: the avatar render info, port of LLAvatarRenderInfoAccountant (every region with the `AvatarRenderInfo` capability told every 60 s, 2 s more per avatar, the complexity of the avatars we see there and which are silhouettes, and asked every 15 s how many viewers around draw us as one; the viewer hands the avatars through `NetClient::set_seen_avatars` from `app/render_info.rs`, the answers come back as `NetEvent::AvatarRenderInfo` for `world/complexity_notice.rs`). `objcache.rs`, `session/object_cache.rs`: per-region object cache (the viewer side of ObjectUpdateCached) and its files kept off the session loop: read by a blocking task before RegionHandshakeReply leaves, written from snapshots by one writer. `session/object_actions.rs`: touch / grab / release and object inventory (capability or memory-bounded UDP transfer); `task_inventory.rs`: LLSD parsing and legacy file; `experience.rs`: experiences' details (GetExperienceInfo), the agent's permission for each (ExperiencePreferences) and the experiences a group owns (GroupExperiences); `land.rs`, `session_land.rs`: parcel messages ("About Land", RemoteParcelRequest of any place); `estate.rs`, `session/estate.rs`: the Region / Estate window's RegionInfo, EstateOwnerMessage `getinfo` with its invoice, EstateAccess / RegionExperiences / RegionSchedule / ExtEnvironment and SimStats, and its "Apply" (DispatchRegionInfo or `setregioninfo`, EstateChangeInfo or `estatechangeinfo`, `setregionterrain` / `texturedetail` / `textureheights` / `texturecommit`, the terrain's bake), and the estate lists' `estateaccessdelta` with the `setaccess` answer that asks them again; `group_money.rs`: a group's parcels (PlacesQuery / PlacesReply, also through the event queue), our land contribution (SetGroupContribution) and its accounts by week (GroupAccountSummary / Details / Transactions); `home.rs`, `user_info.rs`, `session/account.rs`: Set Home to Here (HomeLocation capability or SetStartLocationRequest, the simulator's home alerts) and the account's directory settings (UserInfo capability or UserInfoRequest / UserInfoReply / UpdateUserInfo); `message_split.rs`: the parts a chat line or an IM over 1023 bytes leaves as, cut at the last space (nearby chat, one-to-one and group IMs); `offer_hosts.rs`: the circuit each inventory offer (a resident's, an object's, a group notice's) came in on, under its transaction id, so `SendImDialog` sends its answer back to that simulator, a neighbour's included (LLOfferInfo::mHost, #3347); `trans.rs`: the transaction types of the money messages (lltransactiontypes.h), shared by the money tracker, the payment notices and a group's accounts; `sim_tls.rs`: the TLS checks of every client of the simulator side (capabilities, assets, bridge, release notes): Linden Lab's CA for any name, a public authority only for the host's own name (or another Linden name on a Linden host), each host's rule logged once; `test_http.rs` (tests only): how the loopback HTTP servers of the tests end a connection without losing their reply to a reset (#1422) |
@@ -2272,207 +2292,56 @@ jumping/falling, missing/invalid contact data or old objects veto this fallback.
 Existing flight survives the local reply. This does not change Fly After
 Teleport or the flags of later teleports/invitations.
 
-`world/hand_ik.rs` negotiates contacts with seated linksets or owned worn
-roots. `world/bridge/ik.rs` provisions/authenticates the third bridge script,
-`world/bridge/ik.lsl`, with independent Mono memory and no movement, HTTP or
-periodic timer. On an authenticated arrival handshake it asks, once, the
-roots avatars sit on and the wearer's own attachments (llRegionSayTo, never a
-region-wide discovery; others' worn publishers show at their next announcement)
-and forwards negative-channel events using private owner chat. Since bridge
-1.41 the viewer's hello goes on a channel derived from the worn root's key
-(new at each rez) and its relay commands on one derived from the relay's random
-session (`bridge::private_channel`); a worn bridge still at 1.40 is also asked
-on the old fixed channel after 10 s of silence while its version is unverified,
-answers with its old version and is updated.
-`world/hand_ik/relay.rs` authenticates relay envelopes, admits announced live
-seat/wearer sources, routes bounded definition requests and applies regional
-state events through the existing atomic revision/profile decoder.
-Only a complete definition matching the advertised bundle acknowledges initial
-loading. An early off event still releases contacts without silencing finite
-retries; a new bundle retires the old acknowledgement and partial transfer.
-Late old-bundle messages cannot acknowledge its replacement.
-`world/hand_ik/diagnostics.rs` builds the on-demand J8 local IK report from
-bounded counters and current sessions: relay validation, latched decoder failure,
-completed definitions, accepted activations, editor suppression and link-name
-resolution. It retains no packet bodies, authentication IDs or resident identities,
-and the report issues no network/property requests.
-`world/hand_ik/relay/declarations.rs` bounds identity-only regional declarations
-to 16 KiB and retries their authorization only after full simulator object events,
-covering late parentage and source reappearance without polling or rig preloads.
-`world/hand_ik/observers.rs` retains independent avatar/source sessions, verifies
-simulator parentage and shares a bounded request budget. Live sessions require
-the relay and never fall back to periodic candidate scans or lease renewals;
-offline protocol fixtures can still supply direct simulator snapshots.
-`world/hand_ik/reload.rs` normalizes a selected world/attachment root and queues
-one explicit authoring snapshot with a fresh nonce and zero cache hint. This
-separate session shares request/byte budgets but never enters runtime graphs.
-Tickets complete only on validated full definitions and cancel on source/region
-changes, explicit cancellation or a 45-second deadline. `ik_edit/object_data.rs`
-handles scene designation and imports the declaration as a fresh named project,
-rebasing source-relative virtual parents to that root. The existing project is
-saved before switching; imported runtime data carries no editor animation stack.
-The bridge's targeted edit command can query an unused publisher without an
-automatic announcement or any IK activation.
-`world/hand_ik/sources.rs` keeps independent source sessions, merges bone conflicts
-deterministically and prioritizes established sources. It discovers seat/worn
-sources without requiring the optional full-update OwnerID. Reception uses
-simulator-authenticated chat ownership, live root
-parentage and fresh session nonces, rejecting known ownership conflicts and
-requiring a worn publisher's owner to match its wearer. Full updates may omit
-OwnerID without sound/particles, as in Legacy LLViewerObject::processUpdateMessage.
-It bounds discovery, validates nonce/revision snapshots and
-expires a silent script; target parentage is checked from live objects.
-`world/hand_ik/limits.rs` admits only tracked live seat/wearer sources before
-JSON parsing, rate-limits regional and per-session ingress, and bounds serialized
-definitions plus incomplete replacements to 32 KiB per avatar and 128 KiB total.
-Each definition remains bounded to 8 KiB. Unused/invalid protocol messages never
-enter chat history or create sessions. Source loss and partial
-transfer timeouts drop data; explicit editor snapshots expire as well. There is
-no persistent rig catalog or disk cache.
-`world/hand_ik/profiles.rs` validates explicit named selections over shared
-binding declarations. Profiles contain bone names, never animation conditions.
-The selected keyword and per-binding source generations travel atomically with
-the cached rig. Shared contacts retain their clocks through mode switches;
-returning contacts reset even when an observer missed their release. Selection
-remains source-scoped; it never reads or controls avatar animation playback.
-`scene/hand_ik.rs` resolves the linked targets with this frame's interpolated
-transforms and rebuilt shape height, then analytically solves the two arm
-segments after animation blending. A configurable wrist-local contact point
-follows actual hand scale. Without an orientation target, the virtual
-elbow-to-palm segment reaches that point while preserving wrist articulation;
-with an authored orientation, the rotated palm offset determines the wrist
-goal. Zero/missing contact retains wrist-pivot behavior. An omitted target orientation preserves
-the animated local wrist articulation; an explicit quaternion follows the
-authored prim axes. `scene/anim.rs` keeps the corrected
-rotations separate from its held animation pose, so releasing contacts
-restores that pose. The ordinary parallel pose jobs and attachment palettes
-consume the final matrices. `demo_hand_ik.rs` drives the same protocol and
-render path on a tilted synthetic vehicle. See [HAND_CONTACTS.md](docs/HAND_CONTACTS.md)
-for motorcycle setup and creator offsets; [IK_EDIT.md](docs/IK_EDIT.md)
-documents the current multi-observer export and its wire contract.
+`scene/hand_ik.rs` holds the analytic two-segment solver shared by the IK
+chains, the Poser and foot grounding: a configurable bone-local contact point
+follows the actual joint scale, and an omitted orientation preserves the
+animated local articulation of the end joint.
 
-Bindings retain their own source contact, target offset and activation settings,
-including multiple slots for one bone. `ik_edit/graph.rs` selects and captures
-the association slot; row pencils replace that slot and link actions append.
-The avatar-frame numeric inspector starts collapsed, while every association
-owns its calibration disclosure. Runtime selection and fades use source/slot
-identity and the existing per-slot wire mask/cycles. `scene/ik/multiple.rs`
-combines same-bone targets by effective weight after their dependencies have
-resolved, using shaped material contacts and one capped joint influence.
+`scene/ik.rs` applies IK Edit's temporary goals to the own avatar's pose:
+analytic two-segment chains reuse that solver, longer ancestor paths use
+bounded CCD, and explicit direct mode (`Mode::Direct`) converts a target into
+the bone's local transform. `order()` solves a goal whose chain starts below
+another goal's joint after it. Its frozen editor snapshot and corrections
+never feed back into the controller's animation pose; the frozen base is
+captured before any IK. `scene/ik/body.rs` reconciles extended limbs that
+share body joints with numerical contact tolerances, avoiding a visible
+millimetre reach threshold that can snap almost-straight arms. A small
+secondary pose objective regularizes redundant body rotations in both the
+damped update and candidate scoring; partial influences keep their single
+local-transform blend. Fully influenced oriented parent goals protect their
+frames from later child chains; position-only and partial parents keep their
+freedom. Three-joint non-limb chains keep their animated bend plane,
+transported with the goal direction; finger goals never inherit an
+avatar-space elbow pole. `scene/ik/multiple.rs` combines same-bone goals by
+weight after their dependencies have resolved, with one capped joint
+influence.
 
-`scene/ik.rs` extends the same source protocol to named bones: analytic
-two-segment chains reuse the contact solver, longer ancestor paths use
-bounded CCD, and explicit direct mode converts a target into the bone's
-local transform. Its frozen editor snapshot and runtime corrections never
-feed back into the controller's animation pose. `ik_edit.rs` draws the own
-avatar's rendered skeleton, edits temporary goals, reads target prims and
-exports measured metric offsets/quaternions. The shared Build menu toggles
-the editor; exiting resumes the existing animation pause clock. See
-[IK_EDIT.md](docs/IK_EDIT.md) and `scripts/lsl/rig-contacts.lsl`.
+`ik_edit.rs` draws the own avatar's rendered skeleton, edits temporary goals
+and offers the Pose, Animations and Display tabs with a shared Options footer.
+The shared Build menu toggles the editor; exiting resumes the existing
+animation pause clock. Nothing it edits leaves the viewer. See
+[IK_EDIT.md](docs/IK_EDIT.md).
 `ik_edit/gizmo.rs` provides local-only bone axis/plane translation and ring
 rotation in world or bone axes, reusing the build tools' geometry and drawing.
-Pointer ownership checks window layers before starting a drag; rotation
-holds the authored contact target and never writes a simulator transform.
+Pointer ownership checks window layers before starting a drag; rotation never
+writes a simulator transform.
 `ik_edit/rig_controls.rs` maps the four shoulder/hip chains to hand/ankle
 effectors and elbow/knee pole controls, and mirrors paired edits through
-their canonical rest frames. Optional protocol pole points use the same
-metric target-prim frame as contacts and enter the analytic two-link solver.
-`ik_edit/bindings.rs` retains independent prim-relative definitions and
-resolves them to avatar-frame goals each frame. Four limb switches and
-per-bone enable state suppress both editor and corresponding runtime goals;
-new associations follow position/orientation, and bone edits recapture their
-prim-relative offsets. Two clipboard exports provide the configured companion
-or its escaped `string RIG = "…";` declaration, preserving disabled states,
-authored weights and offsets;
-the frozen base is captured before any IK, so disabling cannot bake contacts.
-Authored strength blends local transforms independently of runtime fades.
-Existing pins retain their chain roots across activation changes. Extended
-limb reconciliation uses numerical contact tolerances, avoiding a visible
-millimetre reach threshold that can snap almost-straight arms during motion.
-A small secondary pose objective regularizes redundant body rotations in both
-the damped update and candidate scoring. Complete full-strength contact groups
-retain only their preceding body corrections as a seed over the new animation
-frame. Those corrections recover exponentially toward the current animation
-with a 0.25-second time constant; contact reprojection retains required reach
-assistance instead of permanently carrying an earlier posture across animation
-changes and restarts. Limb reprojection respects the selected roots; partial influences keep
-their single blend. Changes of chains, editing context or contact lifetime
-discard the seed. Animation inputs and the editor's frozen base remain intact.
-`scene/ik/activation.rs` owns per-binding proximity gates and independent
-smoothstep entry/release durations. A waiting contact may enter range after
-another contact solves, while its own correction never opens its gate.
-Fully influenced oriented parent contacts protect their frames from later
-child chains in both live and authored poses; position-only and partial
-parents retain their freedom. Three-joint non-limb chains retain their animated
-bend plane, transported with the contact direction; straight chains use a
-joint-local fallback. Finger contacts never inherit an avatar-space elbow pole.
-Explicit poles and the default arm/leg directions remain authoritative.
-Release crossfades
-the last controlled local rotations and direct translations toward the current
-animation, avoiding a jump when an Idle clip cuts in. IK segment positions keep
-following the current shaped/animated skeleton. Shared joints use a single
-sample and active contacts retain precedence. A script activation
-epoch, source session, definition bundle and per-bone mask cycle identify each
-lifetime. A new lifetime discards old envelopes, release deltas and body seeds,
-including off/on packets processed between rendered frames. Rig definitions
-stay cached across phase changes. Authoring previews stay immediate; the four
-parameters live in the selected binding card and both clipboard exports.
+their canonical rest frames. `ik_edit/enable.rs` turns a joint's goal on and
+off and owns the four limb switches, which keep their chain roots across
+activation changes.
 `ik_edit/visibility.rs` classifies canonical Bento names into independent
 visual sets; its mask affects skeleton lines, handles, poles, highlights,
 gizmos and the picker list without removing any skeletal constraints.
 The initial Human preset excludes extended spines/appendages and ancillary
-groin joints; explicit association-row selection reveals the selected group.
-`ik_edit/profiles.rs` scopes authoring bindings and smoothing by named runtime
-profile, retaining each profile's independent animation snapshot. Explicit
-slot membership permits different calibrations for the same bone in different
-profiles; clipboard data duplicates only the referenced virtual ancestors.
-`ik_edit/project.rs` versions and bounds complete editor documents, schedules
-atomic account-local drafts and file dialogs on Jobs, and correlates explicit
-inventory notecard saves/loads. `ik_edit/project/library.rs` adds named,
-account-local project sets above the profile editor. UUID filenames are
-independent of editable titles. Transitions save the previous project before
-loading or creating the next one, with a brief input gate while Jobs owns the
-transition. Explicit saves/reloads and per-project autosaves share atomic IO;
-file/notecard exchange includes optional project identity, while runtime RIG
-exports remain profile definitions only.
-Its new-project menu centralizes blank creation, explicit object/attachment
-snapshots and local-file/notecard imports. Imports receive fresh identities so
-an imported copy cannot overwrite an existing library project.
-`ik_edit/project/library/browser.rs` presents the Projects tab, direct selection,
-search and per-row rename/duplicate/file-export/notecard/delete actions beside left-aligned
-names. Name selection opens Bindings after a successful load; row actions stay
-in Projects and preserve the working pose. `library/management.rs` resolves
-each action's own UUID document on Jobs, owns the local export dialog/atomic
-write and applies only catalogue changes
-unless that document is the active project. The compact header centers the
-read-only current title. Selection, creation, save/reload, target
-object designation, file/notecard exchange and draft recovery live inside Projects;
-the shared footer retains IK controls and runtime clipboard exports. Confirmed deletion
-validates one UUID-named document on Jobs before removing it, then clears the
-active editor without saving it again; empty-project cleanup needs no avatar pose.
-Project documents permit a genuinely empty set before first-profile creation;
-the initial UI gates authoring behind explicit project and profile naming.
-Import normalization creates groups only for existing authored data, never
-for an untouched empty editor. The network content-create callback validates
-the exact new item before uploading; notecards retain private permissions.
-`ik_edit/project/target.rs` designates a project's linkset independently of
-seat/script state. It normalizes child clicks to world/attachment roots,
-retargets all named anchors by unique in-linkset property names, releases
-unresolved anchors and preserves every calibration. Property discovery uses
-bounded child traversal and the existing read-only prim-property queue,
-limited to four requests per 250 ms. Project documents retain source identity
-and display name; preview contexts use the selected source frame. Project
-switches cancel any pending seated-object import.
+groin joints.
 `ik_edit/animations.rs` manages inventory-backed authoring layers and independent
-30 Hz frame controls. The authoring tabs share the manipulation toolbar
-and export footer. Assets use the ordinary background `AnimStreamer`.
+30 Hz frame controls. Assets use the ordinary background `AnimStreamer`.
 `scene/ik/animations.rs` samples native tracks at fixed times, honoring native
 per-joint priority and upper-row precedence among equals. It works on a copy
 of the frozen base before IK. Optional live-input suppression uses the shaped
 rest positions supplied by the controller, compensating the live pelvis
 offset without changing animation signals, controller state or the pause clock.
-The companion accepts uniform legacy nine-/ten-field or new eleven-field
-rows; the new final percentage becomes a bounded `0..1` wire weight.
 The rig keeps one canonical skeleton name per joint index for authoring;
 animation and skin binding still accept the original alias map.
 
@@ -3180,6 +3049,7 @@ Scripts use a shared editor (`ui/scripts.rs`, actions in `app/scripts.rs`) for i
 | `build/new_defaults.rs`, `ui/options/pages/build.rs` | What a prim made with the Create tool starts as (FSCommon::applyDefaultBuildPreferences): colour, transparency, glow, full bright, shininess, physical, temporary and phantom, given when it arrives ours with full rights; Preferences › Build lists them with the size and material |
 | `weather/mod.rs`, `ui/environment.rs`, `ui/weather_window.rs`, `scene/rain_sound.rs`, `scene/thunder.rs`, `scene/snow_detail.rs`, `scene/snow_trail.rs`, `scene/avatar_snow.rs`, `scene/rain_ground.rs`, `scene/shelter_hold.rs`, `aurora-render/src/projector_shadows.rs` (`shelter_slot`) | Aurora Weather: the settings and the gusting wind, the Aurora Weather window, the rain's sound, thunder and lightning, the snow's detail texture, footprints, snow on avatars, the terrain under the puddles, what a move of its own keeps out of the shelter map for a while (a script's steps), and the shelter map's place in the shadow atlas (the first map past the projectors'); the drawing itself is in `shaders/env.wgsl` (see "Aurora Weather" below) |
 | `scene/surface_area.rs` | Large surface protection (RenderVolumeSAProtection): prims and sculpts measured on their swept grid (`VolumeMesh::grid_area`, kept per geometry), those past their threshold added from the smallest each frame, the rest not drawn past the total; the object's drawing goes and comes back through `Scene::stop_drawing` and the sync planner |
+| `build/deep_perms.rs`, `build/deep_perms_demo.rs`, `build/deep_perms_tests.rs` | "Include objects inside objects" of the Content permissions window (an Aurora addition: the Legacy Viewer's bulk permissions never recurse): eligibility (rez-from-contents rule and modify, 5 levels), checks before the first rez (build right, parcel room, RLVa), then per object item, deepest first, a stage job confirmed by the simulator: rez above its holder, arrival and FromTaskID, scripts stopped, contents changes read back before object masks, masks confirmed, scripts restored, fresh source inventory baseline, save back (added or replaced in place), returned task item masks updated and read back in its container, original removed, copy deleted; recovery deletes a copy whose original is intact and stops on a refused or lost rez. Unconfirmed post-save item permissions stop the job with all working copies kept. Demo chest of nested boxes (`AURORA_DEMO_DEEP_PERMS`) |
 | `build/replace.rs`, `build/replace/`, `build/ui/replace.rs` | Guided replacement of a linked part: locked target, selection of the replacement, options and progress; steps confirmed by the server, copy of the contents through the resident's inventory, script states preserved, recovery of the initial configuration and offline simulator |
 | `ui/inventory/document.rs`, `aurora-net/src/inventory/notecard.rs` | Editing cycle of the documents: draft and save correlated with the window, closing after confirmation, refusal that keeps the text; import of v1 / v2 notecards, v2 export with a bounded UTF-8 length and the permissions of the attachments still referenced preserved |
 | `ui/inventory/aurora.rs`, `ui/inventory/aurora/` | Aurora's inventory window (`Settings::classic_inventory` off, Preferences › Aurora › Inventory): one window that widens. `aurora.rs` picks the layout from the body width (narrow below 700 px: icon tabs, search row, the tree, the selection's card; medium: a column of shortcuts and folders, an explorer of one folder with type, permissions and date columns, the card; wide from 1020 px: breadcrumb, Ctrl+F field, filter chips, details pane, status bar), counts the shortcuts per inventory generation and runs the explorer on its own `PlainTree` (folders never open in place, a double-click or held cargo goes in); `rows.rs` draws the 28 px rows (pills, star, rights, columns, Add / Take off and More on hover; body parts and physics retain Wear) over the shared `item_response` / `folder_response`; `gallery.rs` the explorer's gallery and combination views (`ExplorerPreferences::view`: list, every entry as a tile, or the pictured entries' tiles above the list of the others with a bar between them; `rows::Tiles` orders the folder's `PlainTree` for them and the list draws from `PlainTree::list_start`), laying out the tiles in sight only, asking for their pictures through `wanted_images`, arrows across and down the grid, Ctrl+wheel for the tiles' side; `rights.rs` the C/M/T letters and the CMT menu (`InventoryPreferences::rights`: mine, next owner, both, none); `sidebar.rs` the shortcuts and the folders-only tree; `columns.rs` the saved sidebar/column splitters, responsive geometry and column visibility menu (`InventoryPreferences::explorer`); `toolbar.rs` the bars, the Sort and New menus, the chips; a folder window is the same window under `InventoryUi::scope` (no tabs, its folder as the root of the lists, the column and the breadcrumb); `details.rs` the card and the pane (main action of the double-click, Give, next owner switches patched like the properties) |
@@ -3204,6 +3074,7 @@ Scripts use a shared editor (`ui/scripts.rs`, actions in `app/scripts.rs`) for i
 | `ik_edit/poser/playback.rs` | Inventory animations played on the posed subject at the 30 Hz authoring grid, each clip looping on its own length, locally only: play / pause / stop, manual edits overriding the animation, Apply keeping the frame shown |
 | `ik_edit/clip/interpolation.rs` | Animation timeline interpolation: Step and Spline written into the native file as extra keys on the 30 fps grid, Linear keeping the keys as they are |
 | `camera/` | The camera like LLAgentCamera: view behind the avatar, Alt camera on a point or an object (`focus.rs`), seat camera, scripted camera (`follow.rs`: LLFollowCam parameters, per-object activation stack held by World and avatar-relative simulation; `world/mod.rs` deactivates seat/attachment linkset sources before parent changes, retaining parameters and unrelated sources), mouselook and its right-button zoom (`mouselook_zoom.rs`: LLToolCompGun's held zoom, the wheel steps, the view limits), transitions, smoothing, pull-back in flight, collision sent by the simulator; camera presets (`presets.rs`, issue #1164: a saved `CameraShot` held by the avatar, a place in global metres or an object it follows, with the photo mode's lens, looks and light as optional parts; captured and applied by `app/camera_presets.rs`, listed by the viewfinder's `ui/viewfinder/presets.rs` panel and the Controls window); the photo window's free camera (`free.rs`: its own position and heading while the avatar stays, moves in the camera's frame like the Legacy Viewer's 3D mouse flycam, optional collisions that slide along objects and the ground; `Camera::update` shows it and keeps the avatar's view behind it); Legacy Viewer settings (`settings.rs`, with `SavedViews`: the Rear, Front, Side and Shoulder views the user saved over their templates, #2755), demo scenarios (`demo.rs`) |
+| `aurora-net/src/teleport_access.rs`, `world/teleport_access.rs` | A teleport refused for the region's content rating (handle_teleport_access_blocked, LLViewerMessage / llviewermessage.cpp, originally LGPL 2.1): the AlertInfo code of a TeleportFailed or TeleportEntryAccessBlocked read as `AccessBlocked`, then a prompt to change the rating and teleport again, to wait for the age check, or the adults-only notice, instead of the reason (the fork's `world/teleport_failure.rs` keeps the other failures) |
 | `camera/takeover.rs` | One hook through which the Camera Lock and the Camera Path show their own view after the normal camera's frame; the normal camera runs under it, a release glides back in half a second, RLVa camera restrictions, mouselook and teleports to another region release it |
 | `camera/history.rs` | View history: the last 32 views a deliberate camera move ended on, debounced, stepped through by Previous / Next view (Alt+Shift+Z / Y) with the takeover's glide |
 | `camera/mode_status.rs`, `app/camera_status.rs`, `ui/camera_status.rs` | The camera mode indicator (Aurora's own; the Legacy Viewer only has the mouselook instructions): `mode_status::status` folds the camera's facts into one mode (Director > Path playing/recording > Lock > Flycam > Free > Mouselook > Scripted follow > Seat camera > Object view), `Announcer` decides when a change shows a 1.8 s pill (never on the first frame in the world, never twice for one mode, no pill on leaving a seat camera or the object view); the app draws the pill, a clickable chip for the modes that stay (lock, path, free camera; a name only for the Director and a script's camera) at the top centre of the world, a note in the Controls window's header and, in the viewfinder, `Viewfinder::say`. Preferences › Camera › Show camera mode changes turns pill and chip off |
@@ -3211,13 +3082,13 @@ Scripts use a shared editor (`ui/scripts.rs`, actions in `app/scripts.rs`) for i
 | `camera/extra.rs`, `app/camera_tools.rs`, `ui/options/cameratools.rs` | Extra camera options (`camera.extra`, off by default, those placing the view turned off by RLVa camera restrictions): follow a body part, roll with the head, smooth large moves, inverted orbit, behind the avatar when sitting, mouselook offsets, realistic mouselook, shrunk own head; the Cameratools window (`phototools_view`) and Look at last chatter |
 | `script_ws.rs`, `script_ws/` | Script editor link: a WebSocket JSON-RPC server on 127.0.0.1, off by default, speaking the Legacy Viewer's protocol 1.0 to external editors (challenge handshake in `protocol.rs`, frames in `wire.rs`, the listener in `server.rs`): script subscriptions, compile results, system methods and the syntax id |
 | `settings/build_tools.rs` | Build options of the Legacy Build preferences: unlink confirmation from a number of prims, pivot point of the edit handles (percent or metres), copyable / locked / group-owned selection filters, light radius of selected lights, hide selected objects |
-| `world/` | World state received from the network: the favourites (`favorites.rs`: the Favorites folder's landmarks in the account's order, LLFavoritesOrderStorage), objects, regions, terrain, objects of the out-of-range regions set aside until these close or come back into range (`parked.rs`), environment (EEP: cycles and settings assets in `eep.rs`, choice local > parcel > region > default day, local environment and fades in `eep_env.rs`, the photo's own sky, water, day cycle, time and sun laid over it in `eep_photo.rs`, what experience controllers push (ENV_PUSH, above the parcel and under the local environment) in `eep_push.rs`, lists of the environment picker and loading of the folders in `env_select.rs`), selected parcel of "About Land", its rights and its refresh while the window is open (`land.rs`), who may freeze or eject a resident where they stand (`land_moderation.rs`), social, avatar profiles, inventory, groups (active, pinned; the open profile's members and roles in `group_data.rs`, its parcels and accounts in `group_money.rs`), contact sets and nicknames (`contact_sets.rs`; a set's own online notices and automatic responses in `contact_sets/notices.rs`), blocks, derendered objects and residents and the account's asset blacklist (`derender.rs`: their updates dropped, kept to come back at once; Show Friends Only hides the avatars that are not friends the same way, `friends_only.rs`), messages of the Legacy Viewer's LSL bridge (hidden), body orientation, gaze (LookAt), map, place profiles of "Places" and of the separate windows (`place_details.rs`: region by its name, landmark, RemoteParcelRequest, ParcelInfoRequest), the parcel snapshots of the favourites and of the Places rows without a thumbnail, by landmark or by point (`place_snapshots.rs`), landmark assets and handles of their regions (`landmarks.rs`), dated and saved teleport history (`tphistory.rs`), how long a teleport or crossing waits for the region to confirm the arrival (`arrival_wait.rs`), what an avatar wears against the worn objects its appearance lists, for the Dev Toolbox's J2 (`worn_listed.rs`, issue #2747), teleport offers and requests from other residents waiting for their answer (`teleport_invites.rs`), whether the teleport screen offers Cancel and what a cancel leaves (`teleport_cancel.rs`), our temporary attachments (an experience's or llAttachToAvatarTemp's, with no inventory item) and their names from AttachmentResources (`temp_attachments.rs`), residents' inventory offers as cards in the giver's conversation, answered through their notification, and the inventory opened on a kept offer's item (ShowInInventory) (`inventory_offers.rs`), direct payments between a resident and us as cards in their conversation, and lines in its transcript (`payments.rs`), calling cards given and received (`calling_cards.rs`), the content rating chosen during the session and its sync with the server (`maturity.rs`), experiences' details, the permission questions waiting for them and the agent's permission for each (`experiences.rs`), one text rule for the names of objects and owners in dialogs: on one line, without bidi embeddings, overrides or isolates, the name as sent kept for blocking (`dialog_names.rs`), Set Home to Here and the map's home that follows it (`home.rs`), the account settings of Preferences › Privacy the grid keeps (`user_info.rs`)… |
-| `world/` | World state received from the network: the favourites (`favorites.rs`: the Favorites folder's landmarks in the account's order, LLFavoritesOrderStorage), objects, regions, terrain, objects of the out-of-range regions set aside until these close or come back into range (`parked.rs`), environment (EEP: cycles and settings assets in `eep.rs`, choice local > parcel > region > default day, local environment and fades in `eep_env.rs`, the photo's own sky, water, day cycle, time and sun laid over it in `eep_photo.rs`, what experience controllers push (ENV_PUSH, above the parcel and under the local environment) in `eep_push.rs`, lists of the environment picker and loading of the folders in `env_select.rs`), selected parcel of "About Land", its rights and its refresh while the window is open (`land.rs`), who may freeze or eject a resident where they stand (`land_moderation.rs`), social, avatar profiles, inventory, groups (active, pinned; the open profile's members and roles in `group_data.rs`, its parcels and accounts in `group_money.rs`), contact sets and nicknames (`contact_sets.rs`), blocks, derendered objects and residents and the account's asset blacklist (`derender.rs`: their updates dropped, kept to come back at once; Show Friends Only hides the avatars that are not friends the same way, `friends_only.rs`), messages of the Legacy Viewer's LSL bridge (hidden), body orientation, gaze (LookAt), map, place profiles of "Places" and of the separate windows (`place_details.rs`: region by its name, landmark, RemoteParcelRequest, ParcelInfoRequest), the parcel snapshots of the favourites and of the Places rows without a thumbnail, by landmark or by point (`place_snapshots.rs`), landmark assets and handles of their regions (`landmarks.rs`), dated and saved teleport history (`tphistory.rs`), how long a teleport or crossing waits for the region to confirm the arrival (`arrival_wait.rs`), what an avatar wears against the worn objects its appearance lists, for the Dev Toolbox's J2 (`worn_listed.rs`, issue #2747), teleport offers and requests from other residents waiting for their answer (`teleport_invites.rs`), whether the teleport screen offers Cancel and what a cancel leaves (`teleport_cancel.rs`), what a teleport failure tells the resident: the Legacy Viewer's wording of the simulator's code and the line that explains an OpenSim Hypergrid refusal (`teleport_failure.rs`), our temporary attachments (an experience's or llAttachToAvatarTemp's, with no inventory item) and their names from AttachmentResources (`temp_attachments.rs`), residents' inventory offers as cards in the giver's conversation, answered through their notification, and the inventory opened on a kept offer's item (ShowInInventory) (`inventory_offers.rs`), direct payments between a resident and us as cards in their conversation, and lines in its transcript (`payments.rs`), calling cards given and received (`calling_cards.rs`), the content rating chosen during the session and its sync with the server (`maturity.rs`), experiences' details, the permission questions waiting for them and the agent's permission for each (`experiences.rs`), one text rule for the names of objects and owners in dialogs: on one line, without bidi embeddings, overrides or isolates, the name as sent kept for blocking (`dialog_names.rs`), Set Home to Here and the map's home that follows it (`home.rs`), the account settings of Preferences › Privacy the grid keeps (`user_info.rs`)… |
+| `world/` | World state received from the network: the favourites (`favorites.rs`: the Favorites folder's landmarks in the account's order, LLFavoritesOrderStorage), objects, regions, terrain, objects of the out-of-range regions set aside until these close or come back into range (`parked.rs`), environment (EEP: cycles and settings assets in `eep.rs`, choice local > parcel > region > default day, local environment and fades in `eep_env.rs`, the photo's own sky, water, day cycle, time and sun laid over it in `eep_photo.rs`, what experience controllers push (ENV_PUSH, above the parcel and under the local environment) in `eep_push.rs`, lists of the environment picker and loading of the folders in `env_select.rs`), selected parcel of "About Land", its rights and its refresh while the window is open (`land.rs`), who may freeze or eject a resident where they stand (`land_moderation.rs`), social, avatar profiles, inventory, groups (active, pinned; the open profile's members and roles in `group_data.rs`, its parcels and accounts in `group_money.rs`), contact sets and nicknames (`contact_sets.rs`; a set's own online notices and automatic responses in `contact_sets/notices.rs`), blocks, derendered objects and residents and the account's asset blacklist (`derender.rs`: their updates dropped, kept to come back at once; Show Friends Only hides the avatars that are not friends the same way, `friends_only.rs`), messages of the Legacy Viewer's LSL bridge (hidden), body orientation, gaze (LookAt), map, place profiles of "Places" and of the separate windows (`place_details.rs`: region by its name, landmark, RemoteParcelRequest, ParcelInfoRequest), the parcel snapshots of the favourites and of the Places rows without a thumbnail, by landmark or by point (`place_snapshots.rs`), landmark assets and handles of their regions (`landmarks.rs`), dated and saved teleport history (`tphistory.rs`), how long a teleport or crossing waits for the region to confirm the arrival (`arrival_wait.rs`), what an avatar wears against the worn objects its appearance lists, for the Dev Toolbox's J2 (`worn_listed.rs`, issue #2747), teleport offers and requests from other residents waiting for their answer (`teleport_invites.rs`), whether the teleport screen offers Cancel and what a cancel leaves (`teleport_cancel.rs`), our temporary attachments (an experience's or llAttachToAvatarTemp's, with no inventory item) and their names from AttachmentResources (`temp_attachments.rs`), residents' inventory offers as cards in the giver's conversation, answered through their notification, and the inventory opened on a kept offer's item (ShowInInventory) (`inventory_offers.rs`), direct payments between a resident and us as cards in their conversation, and lines in its transcript (`payments.rs`), calling cards given and received (`calling_cards.rs`), the content rating chosen during the session and its sync with the server (`maturity.rs`), the animation editor's stand-in Person B, a client-only mirror of our avatar and what it wears, its shape and bakes read from ours (`mirror.rs`), experiences' details, the permission questions waiting for them and the agent's permission for each (`experiences.rs`), one text rule for the names of objects and owners in dialogs: on one line, without bidi embeddings, overrides or isolates, the name as sent kept for blocking (`dialog_names.rs`), Set Home to Here and the map's home that follows it (`home.rs`), the account settings of Preferences › Privacy the grid keeps (`user_info.rs`)… |
+| `world/` | World state received from the network: the favourites (`favorites.rs`: the Favorites folder's landmarks in the account's order, LLFavoritesOrderStorage), objects, regions, terrain, objects of the out-of-range regions set aside until these close or come back into range (`parked.rs`), environment (EEP: cycles and settings assets in `eep.rs`, choice local > parcel > region > default day, local environment and fades in `eep_env.rs`, the photo's own sky, water, day cycle, time and sun laid over it in `eep_photo.rs`, what experience controllers push (ENV_PUSH, above the parcel and under the local environment) in `eep_push.rs`, lists of the environment picker and loading of the folders in `env_select.rs`), selected parcel of "About Land", its rights and its refresh while the window is open (`land.rs`), who may freeze or eject a resident where they stand (`land_moderation.rs`), social, avatar profiles, inventory, groups (active, pinned; the open profile's members and roles in `group_data.rs`, its parcels and accounts in `group_money.rs`), contact sets and nicknames (`contact_sets.rs`), blocks, derendered objects and residents and the account's asset blacklist (`derender.rs`: their updates dropped, kept to come back at once; Show Friends Only hides the avatars that are not friends the same way, `friends_only.rs`), messages of the Legacy Viewer's LSL bridge (hidden), body orientation, gaze (LookAt), map, place profiles of "Places" and of the separate windows (`place_details.rs`: region by its name, landmark, RemoteParcelRequest, ParcelInfoRequest), the parcel snapshots of the favourites and of the Places rows without a thumbnail, by landmark or by point (`place_snapshots.rs`), landmark assets and handles of their regions (`landmarks.rs`), dated and saved teleport history (`tphistory.rs`), how long a teleport or crossing waits for the region to confirm the arrival (`arrival_wait.rs`), what an avatar wears against the worn objects its appearance lists, for the Dev Toolbox's J2 (`worn_listed.rs`, issue #2747), teleport offers and requests from other residents waiting for their answer (`teleport_invites.rs`), whether the teleport screen offers Cancel and what a cancel leaves (`teleport_cancel.rs`), what a teleport failure tells the resident: the Legacy Viewer's wording of the simulator's code and the line that explains an OpenSim Hypergrid refusal (`teleport_failure.rs`), our temporary attachments (an experience's or llAttachToAvatarTemp's, with no inventory item) and their names from AttachmentResources (`temp_attachments.rs`), residents' inventory offers as cards in the giver's conversation, answered through their notification, and the inventory opened on a kept offer's item (ShowInInventory) (`inventory_offers.rs`), direct payments between a resident and us as cards in their conversation, and lines in its transcript (`payments.rs`), calling cards given and received (`calling_cards.rs`), the content rating chosen during the session and its sync with the server (`maturity.rs`), the animation editor's stand-in Person B, a client-only mirror of our avatar and what it wears, its shape and bakes read from ours (`mirror.rs`), experiences' details, the permission questions waiting for them and the agent's permission for each (`experiences.rs`), one text rule for the names of objects and owners in dialogs: on one line, without bidi embeddings, overrides or isolates, the name as sent kept for blocking (`dialog_names.rs`), Set Home to Here and the map's home that follows it (`home.rs`), the account settings of Preferences › Privacy the grid keeps (`user_info.rs`)… |
 | `camera/vr.rs` | Pure VR comfort controls: positional centering layered on native Avatar movement, horizontal zoom and delayed-authority first-person body arrival, independent from direct headset tracking. |
-| `world/` | World state received from the network: the favourites (`favorites.rs`: the Favorites folder's landmarks in the account's order, LLFavoritesOrderStorage), objects, regions, terrain, objects of the out-of-range regions set aside until these close or come back into range (`parked.rs`), environment (EEP: cycles and settings assets in `eep.rs`, choice local > parcel > region > default day, local environment and fades in `eep_env.rs`, the photo's own sky, water, day cycle, time and sun laid over it in `eep_photo.rs`, what experience controllers push (ENV_PUSH, above the parcel and under the local environment) in `eep_push.rs`, lists of the environment picker and loading of the folders in `env_select.rs`), selected parcel of "About Land", its rights and its refresh while the window is open (`land.rs`), who may freeze or eject a resident where they stand (`land_moderation.rs`), social, avatar profiles, inventory, groups (active, pinned; the open profile's members and roles in `group_data.rs`, its parcels and accounts in `group_money.rs`), contact sets and nicknames (`contact_sets.rs`), blocks, derendered objects and residents and the account's asset blacklist (`derender.rs`: their updates dropped, kept to come back at once; Show Friends Only hides the avatars that are not friends the same way, `friends_only.rs`), messages of the Legacy Viewer's LSL bridge (hidden), body orientation, gaze (LookAt), map, place profiles of "Places" and of the separate windows (`place_details.rs`: region by its name, landmark, RemoteParcelRequest, ParcelInfoRequest), the parcel snapshots of the favourites and of the Places rows without a thumbnail, by landmark or by point (`place_snapshots.rs`), landmark assets and handles of their regions (`landmarks.rs`), dated and saved teleport history (`tphistory.rs`), how long a teleport or crossing waits for the region to confirm the arrival (`arrival_wait.rs`), what an avatar wears against the worn objects its appearance lists, for the Dev Toolbox's J2 (`worn_listed.rs`, issue #2747), teleport offers and requests from other residents waiting for their answer (`teleport_invites.rs`), our temporary attachments (an experience's or llAttachToAvatarTemp's, with no inventory item) and their names from AttachmentResources (`temp_attachments.rs`), residents' inventory offers as cards in the giver's conversation, answered through their notification, and the inventory opened on a kept offer's item (ShowInInventory) (`inventory_offers.rs`), direct payments between a resident and us as cards in their conversation, and lines in its transcript (`payments.rs`), pokes: the exact poke IM recognised and sent, who may be poked, the cooldown and each resident's streak (`pokes.rs`), calling cards given and received (`calling_cards.rs`), the content rating chosen during the session and its sync with the server (`maturity.rs`), experiences' details, the permission questions waiting for them and the agent's permission for each (`experiences.rs`), one text rule for the names of objects and owners in dialogs: on one line, without bidi embeddings, overrides or isolates, the name as sent kept for blocking (`dialog_names.rs`), Set Home to Here and the map's home that follows it (`home.rs`), the account settings of Preferences › Privacy the grid keeps (`user_info.rs`)… |
+| `world/` | World state received from the network: the favourites (`favorites.rs`: the Favorites folder's landmarks in the account's order, LLFavoritesOrderStorage), objects, regions, terrain, objects of the out-of-range regions set aside until these close or come back into range (`parked.rs`), environment (EEP: cycles and settings assets in `eep.rs`, choice local > parcel > region > default day, local environment and fades in `eep_env.rs`, the photo's own sky, water, day cycle, time and sun laid over it in `eep_photo.rs`, what experience controllers push (ENV_PUSH, above the parcel and under the local environment) in `eep_push.rs`, lists of the environment picker and loading of the folders in `env_select.rs`), selected parcel of "About Land", its rights and its refresh while the window is open (`land.rs`), who may freeze or eject a resident where they stand (`land_moderation.rs`), social, avatar profiles, inventory, groups (active, pinned; the open profile's members and roles in `group_data.rs`, its parcels and accounts in `group_money.rs`), contact sets and nicknames (`contact_sets.rs`), blocks, derendered objects and residents and the account's asset blacklist (`derender.rs`: their updates dropped, kept to come back at once; Show Friends Only hides the avatars that are not friends the same way, `friends_only.rs`), messages of the Legacy Viewer's LSL bridge (hidden), body orientation, gaze (LookAt), map, place profiles of "Places" and of the separate windows (`place_details.rs`: region by its name, landmark, RemoteParcelRequest, ParcelInfoRequest), the parcel snapshots of the favourites and of the Places rows without a thumbnail, by landmark or by point (`place_snapshots.rs`), landmark assets and handles of their regions (`landmarks.rs`), dated and saved teleport history (`tphistory.rs`), how long a teleport or crossing waits for the region to confirm the arrival (`arrival_wait.rs`), what an avatar wears against the worn objects its appearance lists, for the Dev Toolbox's J2 (`worn_listed.rs`, issue #2747), teleport offers and requests from other residents waiting for their answer (`teleport_invites.rs`), our temporary attachments (an experience's or llAttachToAvatarTemp's, with no inventory item) and their names from AttachmentResources (`temp_attachments.rs`), residents' inventory offers as cards in the giver's conversation, answered through their notification, and the inventory opened on a kept offer's item (ShowInInventory) (`inventory_offers.rs`), direct payments between a resident and us as cards in their conversation, and lines in its transcript (`payments.rs`), pokes: the exact poke IM recognised and sent, who may be poked, the cooldown and each resident's streak (`pokes.rs`), calling cards given and received (`calling_cards.rs`), the content rating chosen during the session and its sync with the server (`maturity.rs`), the animation editor's stand-in Person B, a client-only mirror of our avatar and what it wears, its shape and bakes read from ours (`mirror.rs`), experiences' details, the permission questions waiting for them and the agent's permission for each (`experiences.rs`), one text rule for the names of objects and owners in dialogs: on one line, without bidi embeddings, overrides or isolates, the name as sent kept for blocking (`dialog_names.rs`), Set Home to Here and the map's home that follows it (`home.rs`), the account settings of Preferences › Privacy the grid keeps (`user_info.rs`)… |
 | `ao/`, `app/ao.rs`, `ui/ao.rs` | Built-in Animation Overrider: catalogue of the authoritative `#Aurora/Aurora AO` sets, inventory links and ZHAO import (`inventory.rs`), one startup reconstruction from `#Firestorm/#AO` when the Aurora folder is absent (`bootstrap.rs`), explicit single-set Legacy Viewer copying (`migration.rs`, on-demand picker in `ui/ao/migration.rs`), states / cycles / groups / tracks and remapping of the pose of our avatar only (`runtime.rs`), synthetic assets and transitions (`demo.rs`); AIS operations and asynchronous replies in `app/ao.rs`, management window opened by the AO button of the bottom bar. The raw signals of the simulator are still used for movement and transitions; the overrides are announced through AgentAnimation. Activation and last set saved per account UUID; pause and standing poses specific to the session. |
 | `camera/` | The camera like LLAgentCamera: view behind the avatar, Alt camera on a point or an object (`focus.rs`), seat camera, scripted camera (`follow.rs`: LLFollowCam parameters, per-object activation stack held by World and avatar-relative simulation; `world/mod.rs` deactivates seat/attachment linkset sources before parent changes, retaining parameters and unrelated sources), mouselook and its right-button zoom (`mouselook_zoom.rs`: LLToolCompGun's held zoom, the wheel steps, the view limits), transitions, smoothing, pull-back in flight, collision sent by the simulator; camera presets (`presets.rs`, issue #1164: a saved `CameraShot` held by the avatar, a place in global metres or an object it follows, with the photo mode's lens, looks and light as optional parts; captured and applied by `app/camera_presets.rs`, listed by the viewfinder's `ui/viewfinder/presets.rs` panel and the Controls window); the photo window's free camera (`free.rs`: its own position and heading while the avatar stays, moves in the camera's frame like the Legacy Viewer's 3D mouse flycam, optional collisions that slide along objects and the ground; `Camera::update` shows it and keeps the avatar's view behind it); Legacy Viewer settings (`settings.rs`), demo scenarios (`demo.rs`) |
-| `world/` | World state received from the network: the favourites (`favorites.rs`: the Favorites folder's landmarks in the account's order, LLFavoritesOrderStorage), objects, regions, terrain, objects of the out-of-range regions set aside until these close or come back into range (`parked.rs`), environment (EEP: cycles and settings assets in `eep.rs`, choice local > parcel > region > default day, local environment and fades in `eep_env.rs`, the photo's own sky, water, day cycle, time and sun laid over it in `eep_photo.rs`, what experience controllers push (ENV_PUSH, above the parcel and under the local environment) in `eep_push.rs`, lists of the environment picker and loading of the folders in `env_select.rs`), selected parcel of "About Land", its rights and its refresh while the window is open (`land.rs`), who may freeze or eject a resident where they stand (`land_moderation.rs`), social, avatar profiles, inventory, groups (active, pinned; the open profile's members and roles in `group_data.rs`, its parcels and accounts in `group_money.rs`), contact sets and nicknames (`contact_sets.rs`), blocks, derendered objects and residents and the account's asset blacklist (`derender.rs`: their updates dropped, kept to come back at once; Show Friends Only hides the avatars that are not friends the same way, `friends_only.rs`), messages of the Legacy Viewer's LSL bridge (hidden), body orientation, gaze (LookAt), map, place profiles of "Places" and of the separate windows (`place_details.rs`: region by its name, landmark, RemoteParcelRequest, ParcelInfoRequest), the parcel snapshots of the favourites and of the Places rows without a thumbnail, by landmark or by point (`place_snapshots.rs`), landmark assets and handles of their regions (`landmarks.rs`), dated and saved teleport history (`tphistory.rs`), how long a teleport or crossing waits for the region to confirm the arrival (`arrival_wait.rs`), a Legacy Viewer's teleport history, asset blacklist, media filter list and contact sets added to the account, its files only read (`legacy_lists.rs`), teleport offers and requests from other residents waiting for their answer (`teleport_invites.rs`), our temporary attachments (an experience's or llAttachToAvatarTemp's, with no inventory item) and their names from AttachmentResources (`temp_attachments.rs`), residents' inventory offers as cards in the giver's conversation, answered through their notification, and the inventory opened on a kept offer's item (ShowInInventory) (`inventory_offers.rs`), direct payments between a resident and us as cards in their conversation, and lines in its transcript (`payments.rs`), calling cards given and received (`calling_cards.rs`), the content rating chosen during the session and its sync with the server (`maturity.rs`), experiences' details, the permission questions waiting for them and the agent's permission for each (`experiences.rs`), one text rule for the names of objects and owners in dialogs: on one line, without bidi embeddings, overrides or isolates, the name as sent kept for blocking (`dialog_names.rs`), Set Home to Here and the map's home that follows it (`home.rs`), the account settings of Preferences › Privacy the grid keeps (`user_info.rs`)… |
+| `world/` | World state received from the network: the favourites (`favorites.rs`: the Favorites folder's landmarks in the account's order, LLFavoritesOrderStorage), objects, regions, terrain, objects of the out-of-range regions set aside until these close or come back into range (`parked.rs`), environment (EEP: cycles and settings assets in `eep.rs`, choice local > parcel > region > default day, local environment and fades in `eep_env.rs`, the photo's own sky, water, day cycle, time and sun laid over it in `eep_photo.rs`, what experience controllers push (ENV_PUSH, above the parcel and under the local environment) in `eep_push.rs`, lists of the environment picker and loading of the folders in `env_select.rs`), selected parcel of "About Land", its rights and its refresh while the window is open (`land.rs`), who may freeze or eject a resident where they stand (`land_moderation.rs`), social, avatar profiles, inventory, groups (active, pinned; the open profile's members and roles in `group_data.rs`, its parcels and accounts in `group_money.rs`), contact sets and nicknames (`contact_sets.rs`), blocks, derendered objects and residents and the account's asset blacklist (`derender.rs`: their updates dropped, kept to come back at once; Show Friends Only hides the avatars that are not friends the same way, `friends_only.rs`), messages of the Legacy Viewer's LSL bridge (hidden), body orientation, gaze (LookAt), map, place profiles of "Places" and of the separate windows (`place_details.rs`: region by its name, landmark, RemoteParcelRequest, ParcelInfoRequest), the parcel snapshots of the favourites and of the Places rows without a thumbnail, by landmark or by point (`place_snapshots.rs`), landmark assets and handles of their regions (`landmarks.rs`), dated and saved teleport history (`tphistory.rs`), how long a teleport or crossing waits for the region to confirm the arrival (`arrival_wait.rs`), a Legacy Viewer's teleport history, asset blacklist, media filter list and contact sets added to the account, its files only read (`legacy_lists.rs`), teleport offers and requests from other residents waiting for their answer (`teleport_invites.rs`), our temporary attachments (an experience's or llAttachToAvatarTemp's, with no inventory item) and their names from AttachmentResources (`temp_attachments.rs`), residents' inventory offers as cards in the giver's conversation, answered through their notification, and the inventory opened on a kept offer's item (ShowInInventory) (`inventory_offers.rs`), direct payments between a resident and us as cards in their conversation, and lines in its transcript (`payments.rs`), calling cards given and received (`calling_cards.rs`), the content rating chosen during the session and its sync with the server (`maturity.rs`), the animation editor's stand-in Person B, a client-only mirror of our avatar and what it wears, its shape and bakes read from ours (`mirror.rs`), experiences' details, the permission questions waiting for them and the agent's permission for each (`experiences.rs`), one text rule for the names of objects and owners in dialogs: on one line, without bidi embeddings, overrides or isolates, the name as sent kept for blocking (`dialog_names.rs`), Set Home to Here and the map's home that follows it (`home.rs`), the account settings of Preferences › Privacy the grid keeps (`user_info.rs`)… |
 | `scene/` | What is sent to the GPU: geometry and LOD, textures (streaming), avatars (skeleton, animations, silhouette), particles, water, reflection probes, world sounds, impostors, environment settings assets (`settings.rs`: sky, water, day cycle) |
 | `ui/` | egui interface: Avatar Welcome Pack (`avatar_welcome.rs`: the grid's page in a trusted `web_view.rs`, whose folder commands the app wears), bars (`bars.rs`: the Legacy Viewer's full-width bars and what both looks share; `bars/islands.rs`: Aurora's top bar, glass islands over the world sampling the windows' blur, the system island's items, detailed tooltip and right click; `bars/clock.rs`: the bars' clock, SLT or local time with its zone's abbreviation (tz database) switched by a click, with or without seconds, in 12 or 24 hours (Auto: the system's regional format); `bars/place.rs`: the place island, what it shows by the room it has, its menu; `bars/location_suggest.rs`: what the destination field and the Legacy bars' location field suggest while a place is typed (landmarks, then places of the history, Legacy matching and dictionary order) and the row Enter takes; `bars/dock.rs`: the bottom islands, the chat island with the chat bar's field and the toolbar's buttons in a centred dock, one height for both; `bars/side.rs`: the left and right toolbars; `bars/sizing.rs`: the widths of a toolbar's buttons; `bars/favorites.rs`: the favourites in the place island's menu, the row under the islands or the dock's grid, chosen by "Favourites access"; `bars/demo.rs`: `AURORA_DEMO_BARS`; `interface.rs`: the interface hidden by Alt+Shift+U, immersive mode (hidden but the chat) and the bars in mouselook), windows, options, chat, contacts (friends, groups, contact sets: `contacts.rs`), avatar profiles (`profile.rs`, the Legacy Viewer's tabbed window, and `profile/aurora.rs`, the default window with its header and cards, on the same state), world map (`worldmap/`: the full-frame layout's floating panels in `overlay.rs`, the Legacy Viewer's side panel in `mod.rs`), "Places" (`places.rs`: the Legacy Viewer's tabs of favourites, landmarks, teleport history; `places/aurora.rs`: Aurora's look, narrow with tabs and rows that open in place, widened with a rail of sources and folders and a preview; `places/model.rs`: its places, one per landmark asset, their last visit from the history, the history's places without a landmark) and place profiles (`place_details.rs`, also as separate windows), "Create landmark" (`landmark_create.rs`), "Asset blacklist" (`blacklist.rs`: the derendered objects and residents), "Region / Estate" (`region/`: the window, its roles and "View as" in `mod.rs`, the header and the overview in `overview.rs`, Manage's sections in `manage.rs`, its Interventions and their dialogs (message, teleport home, kick, objects returned, restart, schedule) in `interventions.rs`, the Top scripts / Top colliders window in `top_objects.rs`, Environment, Experiences and Covenant with their pickers and scope question in `estate_wide.rs`, the rules' and terrain's Advanced folds (telehub and spawn points, PBR terrain materials and their transforms, RAW file) in `advanced.rs`, the classic window (the Legacy Viewer's eight tabs over the same sections) in `classic.rs`, their changes waiting for "Apply" in `draft.rs`, the questions and notices in `confirm.rs`, People's four estate lists with their pickers, scope question and CSV files in `people.rs`; data in `world/estate.rs`, what the app feeds it (the selection for the telehub, the terrain's materials) in `app/region_window.rs`, protocol in `aurora-net/src/estate.rs`, `session/estate.rs` and `session/terrain_raw.rs` (the RAW file's Xfer)), "About Land" (`land/`, one file per tab, dialogs; Aurora's layout over them in `aurora.rs`, its overview in `overview.rs`, the settings by intent in `manage.rs`, the access lists and object owners in `people.rs`, Script info in `scripts.rs`), the pieces the redesigned windows share (`sheet.rs`: header on the field's face with its gauge, page tabs with "View as", pills, cards with a title and a link, lines of facts, settings rows with their sentence, amber lock banner and line, "Advanced" folds, a column of sections whose navigation follows the scrolling (a row of icons in a compact window), the bar of changes waiting for "Apply", list heads and resident rows), group profile (`group_profile.rs` and `group_profile/`: header, Home, Members, Notices, Land and L$ (`land.rs`), Experiences (`experiences.rs`) and Administration tabs, or the classic window), resident picker (`avatar_picker.rs`), experience profile with its permission (`experience_profile.rs`), the Me › Experiences window with its five lists (`experiences.rs`), web page in a window (`web_view.rs`), the media filter's question and its list in the preferences (`media_filter.rs`), the nearby media panel under the top bar's media button (`nearby_media.rs`: LLPanelNearByMedia, rows from `media/nearby.rs`, applied by `app/nearby_media.rs`), the Marketplace web site in a window (`marketplace.rs`), the toolbar's built-in web browser (`web_browser.rs`: LLFloaterWebContent on `web_view.rs`), the grid's Destination Guide (`destinations.rs`: LLFloaterDestinations on `web_view.rs`, the guide's address per grid, the Legacy style; `destinations/aurora.rs`: Aurora's window on the guide's feed, compact with category chips and rows that open in place, widened with a rail of categories, cards and a preview; the shared place rows of `place_card.rs`), texture picker, inventory, environment picker and "Personal lighting" (`environment.rs`), maps, debug overlays; sounds caused by the widgets (`sound_cues.rs`: clicks, refused keys, windows); the progress window of a selection's script actions (`script_queue.rs`); right-click menus: shared look (`menu.rs`: Tabler icon, submenus, checked boxes) and entries like the Legacy Viewer (`context.rs`: world, avatar names, groups) |
 | `build/` | Building tools like LLFloaterTools: selection and manipulators (`manip.rs`), selection regressions for linked parts and whole objects (`selection_tests.rs`), cycling through the selection under the pointer with CTRL + wheel (`cycle.rs`: units per linkset or prims of a single object, high-precision wheel), direct moving of HUDs (`hud_drag.rs`: root of the linkset, screen / attachment point conversion, local echo and position MultipleObjectUpdate on release), Move (`grab.rs`) and Align (`align.rs`) tools, a click that puts the selection against the surface under the cursor (`place.rs`, "Place on surface"), snap to objects while moving (`object_snap.rs`: the selection flush against nearby prims, a box prim by its box and a mesh or shaped prim by its visible triangles, stopped at their faces, with its guides; Aurora's own, `object_snap_tests.rs` on the demo boxes), terrain (`land.rs`), edits of the selection (`edits.rs`), materials and media (`materials.rs`), object contents (`contents.rs`) and the inventory dropped into them, one item or a whole selection with its folders, from the world or the Contents tab (`contents_drop.rs`), the texture and material ids a face, sculpt or projector copy may carry to another prim, and the limited item that follows them into its contents (`texture_copy.rs`), the script actions of a selection (`script_queue.rs`: Reset / Run / Stop / Remove scripts, object after object), impact and weights (`costs.rs`), the avatars and animated objects whose animations pause while something they carry is selected (`anim_pause.rs`), the selection saved as a Collada, OBJ or glTF file (`export/`: the rights of the Legacy Viewer's export in `rights.rs`, the prims and their shapes in `gather.rs`, faces and materials in `model.rs`, the formats in `collada.rs`, `obj.rs` and `gltf.rs` (binary glTF with its textures embedded), the texture files or embedded images in `textures.rs`; its window `build/ui/export.rs`), demo simulator (`demo_sim.rs`); the window and its tabs in `build/ui/` |
@@ -3239,6 +3110,7 @@ Scripts use a shared editor (`ui/scripts.rs`, actions in `app/scripts.rs`) for i
 | `app/contents_copy.rs` | "Copy to inventory" of an object's contents: the move warning of no-copy items, a new folder named after the object (under Clothing to wear it), MoveTaskInventory of each item, then the folder worn once all its items arrived |
 | `ui/controls.rs`, `app/controls.rs` | The Controls window (LLFloaterCamera, LLFloaterMove): camera and movement tabs whose joysticks and buttons are held keys (`App::update_move_input`), the four views, object view, saved camera positions (`camera::CameraShot`), or Firestorm's two windows (`Settings::classic_controls`); while the photo window's free camera flies, its camera tab drives it (`App::photo_free_camera` / `photo_free_move` in `app/snapshot.rs`: the movement keys and the window's buttons move the camera instead of the avatar) |
 | `ui/poke.rs` | Aurora's pokes (`world/pokes.rs`): the Poke button shared by People › Friends, both conversation heads and both profile styles (hidden, or greyed out with its reason), and the poke card's jiggle (the plates' springs from `nameplate/fidget.rs`, through `Ui::with_visual_transform`; still with Reduce animations). The card itself is a `person_card` of `ui/notifications.rs`, in both notification styles |
+| `game_control/`, `app/game_control.rs`, `ui/options/pages/game_controls.rs` | Game Controls, like the LL viewer 26.5 (LLGameControl, llgamecontrol.cpp): `mappings.rs` the actions of each mode (avatar, mouselook, flycam, seated, mouse cursor) and their default and saved bindings; `device.rs` each controller's options (offset, invert, dead zone, axis and button remapping, Auto calibrate) in LL's saved string; `engine.rs` the canonical and semantic state, the keyboard's share of it and the resend schedule of GameControlData (`aurora-net` `NetCommand::GameControlData`, sent only where the region's SimulatorFeatures carry `GameControlEnabled`); `actions.rs` what the controller does this frame; `flycam.rs` LLFlycam's flight. `app/game_control.rs` reads the joystick worker's gamepads each frame, sends the data and, while the Aurora gamepad profile is off, drives the avatar, the flycam, the cursor and simulated clicks; Preferences › Controls › Game Controls has LL's four tabs; `AURORA_DEMO_GAME_CONTROL` |
 | `ui/pay.rs`, `app/pay.rs` | Paying a resident, a group or (Aurora look) an object (LLFloaterPay): quick and free amounts, message, confirmation above a threshold, Buy L$ for what is missing, the server's answer; Firestorm's window as the classic look of Preferences › Aurora |
 | `ui/money_tracker.rs`, `ui/money_tracker/`, `app/money_tracker.rs` | Money tracker (FSMoneyTracker): the L$ received and paid during the session from MoneyBalanceReply's TransactionInfo, while open or always (Track when closed); its list, totals, selection, CSV copy and undo in `money_tracker.rs`, the Aurora look in `aurora.rs`, the Legacy Viewer's window in `legacy.rs`; what is recorded and when, the actions and the demo in the app bridge |
 | `ui/buy_currency.rs`, `app/buy_currency.rs`, `aurora-net/src/currency.rs`, `aurora-net/src/session/currency.rs` | Buying L$, opened from the balance of the top bar: window and estimate / confirmation / purchase cycle (LLFloaterBuyCurrency, LLCurrencyUIManager), choice of the grid's help page, end notification and simulated service of the demo; XML-RPC calls `getCurrencyQuote` / `buyCurrency` (sent only once, parameters never logged) |
@@ -3251,7 +3123,7 @@ Scripts use a shared editor (`ui/scripts.rs`, actions in `app/scripts.rs`) for i
 | `scene/render_types.rs` | Advanced › Rendering types (the Legacy Viewer's Develop › Rendering Types, not saved): the kind of each object (Objects, Avatars with what they wear, Animesh, Trees, Grass; never a HUD) from its skeleton (`animesh::owner`) then its pcode; a hidden kind is flagged with the photo isolation's `ObjGpu::hidden` (not drawn, no shadow, reflection nor pick), the terrain and the water are left out of `build_lists`, the sky (`FrameParams::hide_sky`) and the clouds (cloud scale 0) by the app. `AURORA_DEMO_RENDER_TYPES` |
 | `scene/rez.rs` | The rez effect (Preferences › Aurora, Aurora / Legacy): nothing loading is ever grey. A face whose texture has not come (its slot still on the shared grey placeholder) is drawn as a grid in the brand gradient by the shader itself (`rez_still_grey` in object.wgsl), near or far, from its first frame, and fades into its texture as soon as that texture shows its first pixels (`TextureStreamer::take_first_texels`, `Scene::rez_first_texels`): no CPU work per object for it. Events get a whole-object effect from a per-object state machine: a rez in the world (ours by FLAGS_CREATE_SELECTED, others' new near us in a region watched for a while) stays in the grid until loaded, then a line rises from its bottom (six at once at most, near and big enough on the screen); avatars get the grid instead of the loading cloud until complete, then one line with what they wear (shown anyway after 20 s, never a cloud again); an avatar already shown whose look changes is never the grid again: it stays as it is until its new look is complete, then a glint; objects streaming in get a glint, a line that hides nothing (`rez_mode::GLINT`), the biggest on the screen first, on four of the six lines; a line only starts for what is not behind a wall (`Scene::segment_blocked`, a few rays through the pick index); worn items rez and derez on their avatar; what the simulator kills gets the reverse, a derez, its last frame kept drawn for 0.7 s by `collect_garbage`. Every path that first syncs an object tells it (`Scene::after_full_sync`). The records carry its start, mode and bounds (`DrawRecord::rez`), `rez_apply` in object.wgsl draws it inside the existing passes and the faces of a line join the glow pass. `AURORA_REZ_EFFECT`, `AURORA_REZ_STYLE`, demo `AURORA_DEMO_REZ_EFFECT` |
 | `scene/list_index.rs` | What the draw lists look for in each object slot every frame (avatar, transparent or glowing faces, drawn object, worn HUD): one byte per slot, written where the GPU's object table is written (after the sync of an object, when its faces are reclassified for alpha, when its slot is freed), so as not to walk the `ObjGpu` of every slot ever used; `AURORA_LIST_INDEX=0|check` |
-| `app/hover_pick.rs` | Cursor target for posed objects and attachments: reuse the asynchronous left-click drawn-face query when rigged geometry is present or rigid wearer bounds meet the ray, at most once per 100 ms and one in flight. Rigged proxy bounds never rule out an extended posed surface. Share body clearance and designation with clicks; identify requests by physical pixel, retain posed targets across animated depth changes, prioritize CPU foreground surfaces, discard moved-ray answers, cancel on HUD/UI/click input, and retain the indexed CPU fallback. |
+| `app/hover_pick.rs` | Cursor target for posed objects and attachments: reuse the asynchronous left-click drawn-face query when rigged geometry is present or rigid wearer bounds meet the ray, at most once per 100 ms and one in flight. Rigged proxy bounds never rule out an extended posed surface. Share body clearance and designation with clicks; identify requests by physical pixel, retain posed targets across animated depth changes, prioritize CPU foreground surfaces, cancel on HUD/UI/click input, and retain the indexed CPU fallback. While the pointer moves, the last answer still names the posed object drawn around its pixel (`Scene::drawn_hover_under`: the blended face's when the click acts on it) and the CPU searches from the depth under the pointer at each frame (`Scene::drawn_hover_between`), or tests the answer's worn unrigged mesh alone (`Scene::drawn_hover_on`), without a further query: the cursor no longer falls back on the CPU answer, blind to those surfaces, until the pointer stops. |
 | `scene/hover.rs` | Cached object and surface point under the cursor: compact sphere index maintained by sync, candidates near the ray or displayed depth, reused while the question and nearby scene stay unchanged, refreshed at least every 100 ms; never a click cache. World Blend triangles share the left-click alpha > 32/255 rule, including automatic masks and hidden clickers; large-face hierarchies filter texels without pruning the surfaces behind holes. The cached point bounds media hover. Always-tested objects (avatars and rigged meshes in crowds) have classes computed after arrival / change to exclude irrelevant steps. AURORA_HOVER_CHECK compares the full reference search; AURORA_HOVER_LEGACY compares the index / hierarchy strategy; hover summary provides profiling. |
 | `scene/pick_accel.rs` | Triangle bounding-volume hierarchy for a picking face: the same ray distance as exhaustive triangle tests, built by a background job when a large mesh / sculpt face is first queried. Hover and indexed left/Blend queries use ready hierarchies with the same texture filter as exhaustive triangle tests. |
 | `scene/sound_occlusion.rs` | World sounds muffled by what stands between them and the listener (Aurora's own, Preferences › Sound, on): ten times a second, three rays per playing world sound from the camera to the source and beside it; the main thread gathers the objects near the rays from the pick index (`PickIndex::segment_candidates`), their transforms and shared geometry, and the terrain under the rays; a background job counts the drawn triangles crossed (large faces through their hierarchies, `Accel::crossings`) into layers, ignoring avatars, worn and rigged objects, plants and the emitting linkset; the amount goes to the mixer's per-voice low-pass and gain cut (`AudioEngine::world_occlusion`). `AURORA_DEMO_SOUND_OCCLUSION` |
@@ -3390,7 +3262,7 @@ Scripts use a shared editor (`ui/scripts.rs`, actions in `app/scripts.rs`) for i
 | `world/rlva/strings.rs` | The customizable RLVa texts (rlva_strings.xml), edited on the RLVa page and used wherever RLVa shows or sends them |
 | `ui/options/pages/aurora.rs` | Preferences › Aurora: what Aurora does differently from the Legacy Viewer, each redrawn element with its way back to the Legacy look (windows, the world and the interface, gaze, movement, animation timing); `set_all` sets every look at once (and Aurora's water); the entry of the sidebar carries the aurora gradient |
 | `ui/bidi.rs` | Right-to-left text (Arabic, Hebrew) in reading order on top of egui, which lays rows out from left to right: the Unicode Bidirectional Algorithm (`unicode-bidi`) on the rows of a text, each right-to-left word given to egui as its own section (its shaper reverses and joins it). `layout` returns a `Visual`: the galley and the box of each character of the original text (`range_rects`, `cursor_rect`, `cursor_at`) for links and selection. Texts without right-to-left characters are laid out as they are |
-| `ui/fonts.rs`, `ui/fonts/fallback.rs`, `ui/fonts/preview.rs` | Interface fonts: main font, embedded (Inter by default, Noto Sans, Roboto, OpenDyslexic, each with its semi-bold or bold face) or chosen, those of egui, then system text fallback fonts before egui's icon font for characters the main faces do not have (display names, titles, chat: Georgian, CJK, Arabic, mathematical letters…). `fallback.rs`: list per script, first installed font that draws the probe character, files memory-mapped and checked on the `aurora-fonts` thread, alignment of their baseline with the main font; installed on the next frame if the search was not finished. `AURORA_FONT_FALLBACK=0` removes them. `preview.rs`: the system font list's visible rows (and a margin), each name drawn in its own face into a picture by a thread of its own, uploaded as it is ready and dropped once the list closes; the faces never enter egui |
+| `ui/fonts.rs`, `ui/fonts/fallback.rs`, `ui/fonts/preview.rs` | Interface fonts: main font, embedded (Inter by default, Noto Sans, Roboto, OpenDyslexic, each with its semi-bold or bold face) or chosen, those of egui, PromptFont in a family of its own for the game controller pictograms (`game_control`), then system text fallback fonts before egui's icon font for characters the main faces do not have (display names, titles, chat: Georgian, CJK, Arabic, mathematical letters…). `fallback.rs`: list per script, first installed font that draws the probe character, files memory-mapped and checked on the `aurora-fonts` thread, alignment of their baseline with the main font; installed on the next frame if the search was not finished. `AURORA_FONT_FALLBACK=0` removes them. `preview.rs`: the system font list's visible rows (and a margin), each name drawn in its own face into a picture by a thread of its own, uploaded as it is ready and dropped once the list closes; the faces never enter egui |
 | `ui/emoji.rs`, `ui/emoji/codes.rs`, `ui/emoji/recent.rs` | Colour emoji: the built-in font's pictures, the text fields that draw them, and the picker (its search takes the keyboard, Escape is its own). `recent.rs`: the emojis of the messages sent and the favourites, kept for the account, and their row over the chat fields (under them with the Legacy chat style). `codes.rs`: the `:code:` shortcodes of the chat fields, converted when the closing `:` is typed, a list of suggestions from `:` and two letters (arrows, Tab / Enter, Escape), and the same rules for what is sent (not inside a word, a time or a link). |
 | `ui/exit.rs` | Translated exit modal: quit, log out to the login screen, cancel; background blurred on the GPU and interactions blocked; non-blocking wait for the end of the session, with Firestorm's six-second fallback timeout |
 | `updater.rs`, `ui/update.rs`, `app/update_notice.rs` | Asynchronous controller and update window: notes, progress, restart and errors; manual check in Help / login, ignored tag, Ask / Automatic / Required only choice and Stable / Beta channel (a change checks again). A running viewer checks again every `update_check_interval` (10 min by default): a quiet check that never blocks the login nor opens the window, whose new version becomes a notice once per session (`app/update_notice.rs`: a card of the notifications in the world, the window on the login screen), downloaded first in the Automatic mode. Isolated synthetic demo through `AURORA_DEMO_UPDATE`, the notice through `AURORA_DEMO_UPDATE_NOTICE`. |
@@ -3431,7 +3303,9 @@ Scripts use a shared editor (`ui/scripts.rs`, actions in `app/scripts.rs`) for i
 | `settings/registry.rs` | The settings by name (`camera.fov`), read from their serialised form so that the list cannot drift: kind, value, default, and a change that goes back through the settings' deserialisation and `sanitized`. Keeps out the login, this PC's values, service keys and any text holding a UUID; `Locks` is the rule for what RLVa holds |
 | `ui/debug_settings.rs`, `app/debug_settings.rs` | The Debug Settings window (LLFloaterSettingsDebug) over `settings/registry.rs`: search, changed only, the editor of each kind, Copy name, Reset, the warning; a setting's comment is what Preferences says of it (`options::describe_settings`) |
 | `ui/quick_prefs.rs`, `app/quick_prefs.rs` | The toolbar's Quick preferences command (FloaterQuickPrefs): seven of the nine default rows of the Legacy Viewer's quick_preferences.xml (Tags Offset and Color Under Cursor have no Aurora setting) bound to the typed settings Preferences edits (each row sets the same field with the same clamp), Hover Height, Max Bandwidth, Max Complexity, and the environment block shared with the Environment window (`EnvironmentUi::selector_body`); changes are applied and saved like Preferences' (`ui/quick_prefs.rs`); the window in the frame and its demo (`app/quick_prefs.rs`, `AURORA_DEMO_QUICKPREFS`) |
-| `director.rs`, `camera/track.rs`, `ui/director.rs`, `app/director.rs` | The Director (the toolbar's `director` command), Aurora's own: a camera track laid out in the world, then played with the interface out of sight, for filming. `camera/track.rs`: the keyframes (a pose: position, full rotation, view angle, as the flycam's) on a timeline, and the curve between them (cubic Hermite with Catmull-Rom tangents on an uneven timeline, the rotation on the quaternion's components kept in one hemisphere, the lens bounded by its two keyframes; `handles` gives the same span as a cubic Bézier), `even_speed`, `advance`. `director.rs`: the timeline around it (the playhead, the selected keyframe, what "Add keyframe" does, the playback with its start delay and its hold on the last view). `Camera::set_track_view` hands the view to the track while it plays or the playhead is held, in front of the flycam and the free camera, and gives it back with the roll it had; RLVa's camera limits still apply in `Camera::update`, and `Rlva::camera_restricted` refuses the playback, the scrub and "Go to". `ui/director.rs`: the window (live camera, selected keyframe, path, playback, and the environment block of Quick preferences), the timeline strip above the bottom bar, the track in the world on the world layer (path, a dot each second, a camera at each keyframe, the Bézier handles of the selected one) and the start delay's countdown. `app/director.rs`: the view taken for a keyframe, "Go to" (the flycam, the free camera or the alt-camera), the playback (`director_playing`: `draw_ui` draws the world alone, `huds_shown` drops the HUDs unless RLVa locks one, no selection outline), Escape, the free camera shared with the photo window (`photo_free_camera`), and `AURORA_DEMO_DIRECTOR`. The pace is the track's: `set_span` and `set_span_speed` give a segment its time or its mean speed and move the keyframes after it, `set_duration` stretches them all, a keyframe's `rest` stops the camera on it. The lock (`director::Lock`: a joint of an avatar or an object, a smoothing) keeps its target in the centre of the view: `App::director_target` reads the joint as it was last drawn (`Scene::joint_world`), `director::follow` smooths it, `Camera::aim_at` turns the user's own camera to it after each `Camera::update` (no keyframe needed), and the track's view is aimed by `Pose::aimed` with `Track::lock_weight` (each keyframe's `locked`, blended between two). `director::Format` is the picture's proportions (guides while editing, black bars while playing), with the rule of thirds; `App::director_pointer` hides the mouse pointer while the track plays. `director::History` keeps the track's changes for undo and redo: it notices them (`observe`, once the mouse is released) instead of being told; `App::director_key` gives Delete, Ctrl+Z and Ctrl+Y to the Director while it has the keyboard (`ui::director::keys`: the last press of a mouse button landed on its strip, its window or a keyframe in the world). The photo's isolation (`world.photo_isolation`) is open with the Director as with the photo mode (`photo_isolate_frame`): the window's section and the choosing in the scene (`ui::director::isolate_picking`) go through `photo_isolate_out`, the photo mode's own. `Director::key_color` fills the isolation's empty background with a flat color (`FrameParams::cutout_key`: the post pass mixes it where the cut-out's coverage is 0, in place of the live view's checkerboard; a snapshot keeps its alpha). `recorder.rs` records a film: `Tool::probe` asks the ffmpeg found (`find_on_path`, or chosen) for its encoders on a thread, `arguments` writes what it is run with (raw RGBA on its standard input, the picture cut by `picture`), `Recording` hands the frames to a writer thread through a short queue (`Pace`: one frame every 1 / fps second of the clock, repeated when the viewer or the encoder is late, so the film keeps real time) and `Finishing` waits for the encoder's end; `App::director_record_frame` asks the renderer for the view when a frame is due (`capture_scene`, as the photo's backdrop) and `director_recorded` takes it; `FrameParams::cutout_alpha` keeps the coverage in the live frame's alpha for a format with transparency. `Track::to_file` / `from_file` (`TrackFile`, global positions, checked as outside data) save and load a track in `<account>/director/`, on a thread; `track::hand_held` shakes the played view; `App::director_dof` gives `dof_frame` the Director's lens. |
+| `director.rs`, `director/shots.rs`, `director/group.rs`, `camera/track.rs`, `ui/director.rs`, `ui/director/shots.rs`, `app/director.rs`, `app/director/shots.rs`, `director_capture.rs`, `director_anim.rs`, `director_keys.rs`, `ui/director_capture.rs`, `ui/director_key_rows.rs`, `ui/director_drag.rs`, `app/director_extra.rs`, `director_library.rs`, `director_montage.rs`, `director_thumbs.rs`, `director_ffmpeg.rs`, `ui/director_library.rs`, `ui/director_ruler.rs`, `app/director/library.rs`, `aurora-render/src/thumbnail.rs`, `aurora-updater/src/ffmpeg_pack.rs` | The Director (the toolbar's `director` command), Aurora's own: a camera track laid out in the world, then played with the interface out of sight, for filming. `camera/track.rs`: the keyframes (a pose: position, full rotation, view angle, as the flycam's) on a timeline, and the curve between them (cubic Hermite with Catmull-Rom tangents on an uneven timeline, the rotation on the quaternion's components kept in one hemisphere, the lens bounded by its two keyframes; `handles` gives the same span as a cubic Bézier), `even_speed`, `advance`. `director.rs`: the timeline around it (the playhead, the selected keyframe, what "Add keyframe" does, the playback with its start delay and its hold on the last view). `Camera::set_track_view` hands the view to the track while it plays or the playhead is held, in front of the flycam and the free camera, and gives it back with the roll it had; RLVa's camera limits still apply in `Camera::update`, and `Rlva::camera_restricted` refuses the playback, the scrub and "Go to". `ui/director.rs`: the window (in six tabs, `Tab`: Track with the selected keyframe, the path and the playback; Camera with the live camera, the photo mode's Freeze the world, the lock, the shots and the path by hand; Look with the picture, the fades and titles, the isolation and the environment block of Quick preferences; Filters, the Photo window's looks and LUTs (`ui::looks_editor`, the same stack: `App::live_look` draws it over the Director's picture while its window is open, `director_render_look` over each frame of a render); Output; Library), the timeline strip above the bottom bar, the track in the world on the world layer (path, a dot each second, a camera at each keyframe, the Bézier handles of the selected one) and the start delay's countdown. `app/director.rs`: the view taken for a keyframe, "Go to" (the flycam, the free camera or the alt-camera), the playback (`director_playing`: `draw_ui` draws the world alone, `huds_shown` drops the HUDs unless RLVa locks one, no selection outline), Escape, the free camera shared with the photo window (`photo_free_camera`), and `AURORA_DEMO_DIRECTOR`. The pace is the track's: `set_span` and `set_span_speed` give a segment its time or its mean speed and move the keyframes after it, `set_duration` stretches them all, a keyframe's `rest` stops the camera on it. The lock (`director::Lock`: a joint of an avatar or an object, a smoothing) keeps its target in the centre of the view: `App::director_target` reads the joint as it was last drawn (`Scene::joint_world`), `director::follow` smooths it, `Camera::aim_at` turns the user's own camera to it after each `Camera::update` (no keyframe needed), and the track's view is aimed by `Pose::aimed` with `Track::lock_weight` (each keyframe's `locked`, blended between two). `director::Format` is the picture's proportions (guides while editing, black bars while playing), with the rule of thirds; `App::director_pointer` hides the mouse pointer while the track plays. `director::History` keeps the track's changes for undo and redo: it notices them (`observe`, once the mouse is released) instead of being told; `App::director_key` gives Delete, Ctrl+Z and Ctrl+Y to the Director while it has the keyboard (`ui::director::keys`: the last press of a mouse button landed on its strip, its window or a keyframe in the world). The photo's isolation (`world.photo_isolation`) is open with the Director as with the photo mode (`photo_isolate_frame`): the window's section and the choosing in the scene (`ui::director::isolate_picking`) go through `photo_isolate_out`, the photo mode's own. `Director::key_color` fills the isolation's empty background with a flat color (`FrameParams::cutout_key`: the post pass mixes it where the cut-out's coverage is 0, in place of the live view's checkerboard; a snapshot keeps its alpha). `recorder.rs` records a film: `Tool::probe` asks the ffmpeg found (`find_on_path`, or chosen) for its encoders on a thread, `arguments` writes what it is run with (raw RGBA on its standard input, the picture cut by `picture`), `Recording` hands the frames to a writer thread through a short queue (`Pace`: one frame every 1 / fps second of the clock, repeated when the viewer or the encoder is late, so the film keeps real time) and `Finishing` waits for the encoder's end; `App::director_record_frame` asks the renderer for the view when a frame is due (`capture_scene`, as the photo's backdrop) and `director_recorded` takes it; `FrameParams::cutout_alpha` keeps the coverage in the live frame's alpha for a format with transparency. `Track::to_file` / `from_file` (`TrackFile`, global positions, checked as outside data) save and load a track in `<account>/director/`, on a thread; `track::hand_held` shakes the played view; `App::director_dof` gives `dof_frame` the Director's lens. `director/shots.rs`: the shots (`make`: orbit, dolly zoom, crane, tracking, push in, pull out, fly-over, from `Here`, the current view and its centre; `lay`: one change of the track, so one undo step) and what a keyframe adds for them (`Keyframe::shot`, `KeyShot`): the easing of the way to it (`Ease`, applied to the span's time in `Track::span`, so the path, its length and its pace stay), the dolly zoom's lens (`dolly_fov`, from where the camera is on the way, in `Track::span_pose`) and the target it travels with (`anchor`, applied by `travelled` in `Director::view`); `ui/director/shots.rs` is the Shots section and the keyframe's rows, `app/director/shots.rs` the centre of a shot (`director_shots_here`), the travel's anchor and `AURORA_DEMO_DIRECTOR=orbit`. The path by hand (`director_capture.rs`: `Take` keeps the live view twenty times a second, `simplify` keeps the fewest views that leave the others within the detail's tolerance at their own time, `keyframes` lays them after the end of the track through `Track::push_keys`, one undo step; its section `ui/director_capture.rs`). A keyframe's own extras (`director_keys.rs`: `KeyExtra` on each `Keyframe`, `ExtraFile` in the track file under `extra`, absent when nothing is set): an animation started there and the later keyframe that stops it (item id and name, never the asset id), its aperture and focus (`lens`, read by `director_dof`) and its time of day (`sun`, the photo layer's sun over the local environment in `photo_light`); `director_anim.rs`: `Schedule` turns the playback's passing of the keyframes into starts and stops, and stops everything the track started when the playback ends; `app/director_extra.rs` plays them through `actions::animation_playable` and AgentAnimation, takes the path, and `ui/director_key_rows.rs` shows the selected keyframe's rows. `ui/director_drag.rs` drags a keyframe's camera in the world (`Grab`: slide, Ctrl lifts, Ctrl+Shift turns, as the build tool's grab) and draws the move and turn handles on the selected cameras (`key_gizmo`, the IK editor's `ik_edit::gizmo`). `director/group.rs`: several keyframes selected (`Director::group` beside `selected`; Ctrl + click toggles, Shift + click takes a run), moved as one (`moved`, about their `centre`), shifted in time together (`Track::move_times`), deleted together, and given the setting changed on the one shown (`spread`). The library (`director_library.rs`, pure): a montage's file (`MontageFile`, its shots by track name, in `<account>/director/montages/`), the file a montage is exported to with its tracks (`BundleFile`), the checks of every file read (size, version, finite numbers, counts), free names for an import, the rename of a track in the montages; `ui/director_library.rs` draws the saved tracks (rows with Load, Rename, Delete; Import and Export), the montage (shots moved up and down, its length, Play and Film) and, in Output while no ffmpeg is found, the help (`ffmpeg_section`); `app/director/library.rs` reads and writes the files on threads, starts a montage and keeps the thumbnails. `director_montage.rs`: `MontagePlayer` puts each shot's track in the Director's place in turn, cutting with the time left of the frame, so that its playback and its film are one; the track being edited comes back at the end. `director_thumbs.rs`: the keyframes' thumbnails by view (`PoseKey`), in memory only; the renderer copies the frame and reads it back without waiting (`aurora-render/src/thumbnail.rs`, `Renderer::thumbnail_request` and `thumbnails`), `ui/director_ruler.rs` draws them above the keyframes, with the ruler's zoom (`View`: Ctrl + wheel, the buttons, following the playhead). `director_ffmpeg.rs`: "Look again" reads the PATH as it is now (the system's and the user's, then the usual install folders), and the project's ffmpeg pack (`aurora-updater/src/ffmpeg_pack.rs`, offered only once `PACK` is filled in; size and SHA-256 checked before it is unpacked), installed beside the media plugins. |
+| `director_render.rs`, `director_titles.rs`, `film_sound.rs`, `app/director_render.rs`, `ui/director_output.rs`, `ui/director_look.rs`, `aurora-render/src/film_readback.rs`, `aurora-audio/src/record.rs` | The Director's films beyond the live recording, Aurora's own. `film_readback.rs`: a film frame (`Renderer::film_request`: the window's 3D view, or the frame drawn offscreen at the film's size) is copied into a small ring of readback buffers, mapped after the submit and answered with a later frame's result (`Renderer::films`), never waited for; the live film now takes its frames there (`App::director_film_ask`, one in flight, paced at the instant it was asked). `director_render.rs`: the offline render (Render in the Output section): `render_size` (Window, 1080p, 1440p, 4K, the track's picture format), `Schedule` (frame `n` at `n / fps`, the last on the track's end), `RenderJob::plan` (a film frame when few are in flight, the writer keeps up and its instant is in the real clock's past, else a window frame every 250 ms at most), the world's clock (`RenderJob::hold` through `App::photo_hold`: a film frame steps `1 / fps`, a window frame holds the world as a photo's later parts; network events are stamped on that clock, `App::director_render_stamp`), the writers (`Recording::offer` to ffmpeg, `PngWriter`'s threads to PNG images). `director_titles.rs`: the fades and title cards (`Finish`, saved beside the track by `SavedTrack`, the file's version unchanged), the frame tint step (`Tint`, an `OverlayEffect` of the RLVa overlay pass, reusable for a crossfade), the cards drawn on a thread with resvg from the bundled fonts and the system's, placed by `card_rect` and drawn as overlay rectangles (`overlay_rect`, `shaders/rlva_overlay.wgsl`). `record.rs`: the audio engine's own mix of the channels chosen, at the user's volumes, in blocks through a bounded queue, the frames lost counted; `film_sound.rs` writes it as raw float beside the film, silence where it was lost, fits it to the picture's length and muxes both (`recorder::mux_arguments`: AAC in MP4, PCM in MOV, Opus in WebM, FLAC in MKV); a film with sound keeps every frame (`Pace::uncapped`). `ui/director_output.rs`: the Output section (Live and Render, the format, size, sound, More options, progress and Stop); `ui/director_look.rs`: the Fades and Titles sections. |
+| `camera/second.rs`, `ui/second_camera.rs`, `app/second_camera.rs`, `aurora-render/src/second_view.rs` | The second camera (View › Second camera, the toolbar's `second_camera` command), Aurora's own; the idea comes from SnowPastel's multi-view-viewer (NOTICE.md). `camera/second.rs`: the framings (`Framing`: Face, Full body, Back), the user's turn and zoom (`Orbit`), the shot that frames our avatar (`shot`, turned with the body, not the head) and its smoothed follow (`SecondCamera::follow`). `app/second_camera.rs`: our avatar as last posed (`Scene::face_world`, the feet's joints), the view asked of the renderer once a frame before the culling (`Renderer::second_view`), whose frustum the CPU culling takes in beside the window's (`CullView::second`: terrain, water, blended faces), and why it pauses: out of the world, mouselook, an RLVa hold on the view (`Rlva::second_camera_blocked`); `AURORA_DEMO_SECOND_CAMERA`. `ui/second_camera.rs`: the window, the picture edge to edge (dragged: the orbit; the wheel: the zoom; a double click: back to the framing) and the framing's choice floating over it while hovered. `second_view.rs`: a second external `Backend`, made as an eye of VR the first time and let go 120 frames after the last request, draws after the window's frame from a copy of its packet (`packet`: the GPU culling's view of the second camera, the blended faces back to front from it by `resort_blend`, no HUD, selection, depth of field nor impostor card) into a texture of its own, which egui shows through a paint callback (`paint`, `replace`) one frame late, with no readback. |
 | `ui/surface_opacity.rs` | Opacity of what lies over the world (Preferences › Appearance › Skin): the focused, unfocused and Conversations window rules (`level`, simpler than the Legacy Viewer's), plus bars, menus, the chat over the world, name tags, the mini-map and the pie menu. `fade_after` fades a layer's surfaces by their palette colour, leaving text and pictures; nothing is walked at 1. Ignored in high contrast |
 | `ui/phototools.rs`, `ui/options/phototools.rs`, `app/phototools.rs` | The toolbar's Phototools command (FloaterPhototools, floater_phototools.xml): the window's tabs and collapsing sections in the Legacy Viewer's order (Environment, General, Light and DoF & glow so far; the others appear with their changes; the Light and DoF tabs follow the photo window while it is open: its own time of day, lights, exposure and depth of field, the rest the saved settings the photo uses too), the environment block shared with the Environment window (`EnvironmentUi::selector_body`), and the rows of Preferences it borrows (`Cx::borrow`, one call per row so that the Legacy order wins) through `options::phototools_section`, with an `OptionsUi` of its own fed by `OptionsUi::share_from`. The Legacy rows left out are listed at the top of `ui/options/phototools.rs`. `app/phototools.rs` applies a change like a change of Preferences and opens the new-preset editors. |
 | `stream_title.rs`, `ui/stream_title.rs` | World › Stream title (FSFloaterStreamTitle, FSStreamTitleManager): the parcel radio's title now and the titles played before, a new one kept when it differs from the last, at most `audio.stream_title_history` (`stream_title.rs`, fed by `App::update_audio`); the window with the sliding title and its History button, Aurora's text-only look laid over the world and dragged anywhere, and the history window with its selection, copy, Clear and maximum (`ui/stream_title.rs`) |
@@ -3442,7 +3316,6 @@ Scripts use a shared editor (`ui/scripts.rs`, actions in `app/scripts.rs`) for i
 | `world/chat_service/`, `world/chat_log/service/`, `world/direct_history.rs`, `world/direct_history/` | The Chat Service's direct (one-to-one) IM history, port of the LL viewer 26.5 (LLChatServiceHistory, LLChatServiceHistoryCore; the Legacy Viewer has no such service yet). `chat_log/service/`: the archive's CSV rows (`csv.rs`), a message captured or read back (`message.rs`), the merge with the live session without duplicates (`merge.rs`, replace_history). `chat_service/`: the sans-I/O manager (`manager.rs`: lifecycle, gates, residents, actions with tickets; `sync.rs`: the conversation list and the history pages; `delete.rs`: Delete Transcripts in steps), `storage.rs`: its files (`accounts/<uuid>/chat_service/<grid>`, beside `chat_logs`: one `chat_service_<resident uuid>.csv` archive per resident, `chat_service_index.csv`, `chat_service_state.xml`; `.tmp` then rename, durable state, torn tail truncated, corrupt archive set aside), `stitch.rs`: the read that stitches a resident's transcript and archive (200 rows for a conversation, 10 000 for the History window). `direct_history.rs`: the World's side: starts the manager at login, feeds it the region, the mute list and the names, runs its storage on the `aurora-chatlog` thread (`ChatLog::run_job`), sends its requests as `NetCommand::ChatServiceRequest`, places the stitched history in a private conversation (`Origin::Log`, never unread) and captures the live messages; setting `chat_service_history` |
 | `ui/notifications.rs`, `ui/notification_center.rs`, `ui/notification_center/presence.rs`, `ui/notification_center/aurora.rs`, `ui/friend_prompt.rs`, `world/notifications.rs`, `world/notification_history.rs`, `world/script_dialog_limit.rs` | Notifications: the list and its answers (`world/notifications.rs`, what leaves it recorded with its outcome; `world/script_dialog_limit.rs`: which older script dialog a new one of the same object replaces, the Legacy Viewer's ScriptDialogLimitations), the Legacy Viewer's toasts and bell next to the wolf and the shared cards (`ui/notifications.rs`), Aurora's center (`ui/notification_center.rs`: cards unrolling from the bell at the right end of the top bar and folding back into it (with the islands exactly under the system and bell islands, `NotifUi::column`), "To do" and "History" tabs, paused bell in do not disturb; `presence.rs`: the friends' online / offline toasts at the place chosen in Preferences › Chat, laid out in the room the bars leave (`ui::layout::bars_room`) above the nearby chat lines, waiting at the top right while the cards or the list are out), chosen by Preferences › Aurora › Notifications; the history kept per account (`notification_history.json`, 30 days or 500 entries, written on a worker thread, read with the tolerant reader); `ui/friend_prompt.rs`: a friendship offer as a card in the middle of the screen instead of its toast (#465, Preferences › Chat › Toasts, on), answered through the same list; `ui/region_message_prompt.rs`: a message to the whole region there too (#1404, same page, on), shown before the friendship offers; `aurora.rs`: the aurora's edge, halo and title of the new version's card in Aurora's center |
 | `settings/notification_options.rs`, `world/notification_options.rs`, `ui/options/pages/notification_options.rs` | Script dialogs' corner, rows and Block button (beside `world/script_dialog_limit.rs`), debit default answer, friend status flashes, small notices, offer throttle and Legacy toast times; defaults keep Aurora's behaviour |
-| `movement/water_volume.rs`, `app/water_volumes.rs`, `demo_prim_water.rs` | Swimming in prim water (#2008): the settings, the water words and their whole-word match, the upright box of a volume and the water it gives an avatar (`movement/water_volume.rs`, pure); the 2 s sweep of nearby phantom prims through `Scene::water_candidates`, the bounded name requests, the floor probe (`Scene::water_floor`) and the volume around the avatar each frame (`app/water_volumes.rs`); the raised demo pool (`AURORA_DEMO_PRIM_WATER`) |
 | `ui/notifications.rs`, `ui/notification_center.rs`, `ui/notification_center/presence.rs`, `ui/notification_center/aurora.rs`, `ui/friend_prompt.rs`, `world/notifications.rs`, `world/notification_history.rs` | Notifications: the list and its answers (`world/notifications.rs`, what leaves it recorded with its outcome), the Legacy Viewer's toasts and bell next to the wolf and the shared cards (`ui/notifications.rs`), Aurora's center (`ui/notification_center.rs`: cards unrolling from the bell at the right end of the top bar and folding back into it (with the islands exactly under the system and bell islands, `NotifUi::column`), "To do" and "History" tabs, paused bell in do not disturb; `presence.rs`: the friends' online / offline toasts at the place chosen in Preferences › Chat, laid out in the room the bars leave (`ui::layout::bars_room`) above the nearby chat lines, waiting at the top right while the cards or the list are out), chosen by Preferences › Aurora › Notifications; the history kept per account (`notification_history.json`, 30 days or 500 entries, written on a worker thread, read with the tolerant reader); `ui/friend_prompt.rs`: a friendship offer as a card in the middle of the screen instead of its toast (#465, Preferences › Chat › Toasts, on), answered through the same list; `ui/region_message_prompt.rs`: a message to the whole region there too (#1404, same page, on), shown before the friendship offers; `aurora.rs`: the aurora's edge, halo and title of the new version's card in Aurora's center |
 | `world/region_restart.rs`, `ui/region_restart.rs`, `app/region_restart.rs`, `aurora-net/src/region_restart.rs` | Region restart alert (LLFloaterRegionRestarting): the simulator's notice read from AlertInfo `RegionRestartMinutes` / `RegionRestartSeconds` or OpenSim's `/RESTART_X_…`, and the cancellation (`aurora-net/src/region_restart.rs`, pure); the countdown, its steps (5 min, 1 min, 30 s, 10 s), its sound once per step, its shakes, minimized / closed / back at 30 s, cancelled or left (`world/region_restart.rs`); the alert card in the top third of the view, its pill, the landmark menu, the managers' line and its confirmation, the bell's pinned card, Firestorm's yellow box as the legacy look (`ui/region_restart.rs`); the glue: sound, taskbar flash, Firestorm's view shake (`Camera::shake`), nearby chat line, channel announcement, `EstateOwnerMessage` "restart" -1, the order of the layers (above the toasts, below the open center), the reconnect after the restart, `AURORA_DEMO_RESTART` (`app/region_restart.rs`) |
 | `auto_relogin.rs`, `app/auto_relogin.rs`, `ui/auto_relogin.rs` | Automatic reconnection (off by default) with the saved login after a lost link or a region restart: countdown card, growing waits, give-up time, loop guard; never after a kick, a logout or a refused login |
@@ -3458,6 +3331,7 @@ Scripts use a shared editor (`ui/scripts.rs`, actions in `app/scripts.rs`) for i
 | `ui/presence.rs` | Status of a resident and the color and shape of its dot, shared by the name plates, the lists, the profiles and our own status: in our regions from the away / do not disturb animations, else a friend's online status, else an automatic response until the next message, else unknown. The shape (`Shape`, `paint_mark`: a disc online, a crescent away, a barred disc in do not disturb, a hollow ring offline) says the status without its colour (#418) |
 | `colorblind.rs`, `ui/options/pages/accessibility.rs` | Colour blindness (#418, Preferences › Accessibility): the deficiency and its strength, process-wide (`set` / `current`), read by `Theme::palette`. `palette` moves only the colours that carry a meaning and collide for the deficiency, to an Okabe–Ito hue of the same luminance (success blue for red–green, warning orange and links sky blue for blue–yellow, a ladder of greys for monochrome); `adapt` daltonises the other colours (`ui/colors.rs`, the complexity ramp of the name tags) from the simulation of Machado et al. 2009. `options/pages/accessibility.rs` is the page, with a preview of the status dots |
 | `high_contrast.rs` | High contrast (#906, Preferences › Accessibility): process-wide (`set` / `current`), read by `Theme::palette`, which then takes its palette instead of the skin's (before the colour blindness adaptation): opaque black surfaces, white text, one light violet accent, states apart by lightness. `Palette::high_contrast` gives buttons, fields, windows, islands and dividers a light border (`Theme::apply`, `widgets::border_stroke`). Its tests measure the WCAG ratios of every text / surface pair |
+| `disable_glass.rs` | Disable glass (Preferences › Accessibility › Vision, under High contrast): process-wide (`set` / `current`), applied by `Theme::palette` (`panel_alpha` 255) and `aurora_render::set_ui_blur`. Windows, bars, menus, name plates and dialogs stay opaque, without frosting the world. High contrast already does this. Off by default. Demo `AURORA_DEMO_GLASS=0` |
 | `interface_colors.rs` | Interface colours (Preferences › Appearance › Skin): the user's accent, windows' background and text, process-wide (`set` / `current`), applied by `Theme::palette` over the skin's colours (not in high contrast, before the colour blindness adaptation). The other roles follow by the skin's own relations: the accent family in OKLCH (lightness step, chroma ratio, hue turn), the surfaces and the muted texts by their place between the background and the text in OKLab, so that the skin's bases give back every colour exactly. Lightness moves until text reads 4.5:1 on the panel and the accent 3:1, and so do the states and the links' teal (hue kept); `on_panel` does the same for the chat's configurable colours and the name tags (`ui/colors.rs`, `text`); `on_accent` switches to navy when white no longer reads |
 | `theme_presets.rs` | Named colour themes (Preferences › Appearance › Theme, setting `interface_theme`): ten presets, each a stable id and the skin's colours only (never layout, radii, glass or font scale). The chosen one is the skin's base (`Theme::skin_palette` through `resolve`, unless a `theme.json` of one's own changed the colours); the accent, background and text picks, the system theme, high contrast and colour blindness apply over it. Process-wide (`set` / `current`), applied live like `interface_colors`; `AURORA_DEMO_THEME` in demo mode. `tests.rs` runs the readability rules over every preset |
 | `system_theme.rs` | Follow the system theme (Preferences › Appearance › Skin, off by default): the desktop's light or dark mode and accent colour, read from the XDG portal on Linux, from winit and `UISettings` / `NSColor` on Windows and macOS, become the interface colours (`colors`), a colour the user chose winning. Nothing runs until the option is on. Aurora's own |
@@ -4307,9 +4181,10 @@ for agent items and task items. `build/ui/item_properties.rs` pins the source
 object/item and rechecks access before saving through UpdateTaskInventory;
 task thumbnails remain unavailable because the task protocol has no thumbnail
 field. `build/ui/contents_permissions.rs` provides the eleven bulk type
-filters, three permission columns and OK/Apply/Cancel. Its request job pins
+filters, three permission columns and Apply/Close. Its request job pins
 the selected objects/options, fetches each inventory, skips failed, expired or
-no-longer-modifiable sources, and continues after OK closes the floater.
+no-longer-modifiable sources, and continues if Close hides the floater. Close
+never submits an operation and keeps the choices for reopening.
 `build/ui/contents_tests.rs` exercises task saves and the bulk UI/request path.
 `ui/color_picker.rs` composes the shared picker (RGB / LSL / Hex, HSL,
 previews, palette of 32 slots and eyedropper); `ui/color_picker/model.rs`
@@ -4344,7 +4219,9 @@ by the visible windows: copy and two blur passes on the GPU, then
 sampling within their rounded rectangles only. The resources are
 reused as long as the size and the scale stay stable, then freed when
 no surface needs them. The world around the windows stays sharp. A skin
-with `panel_alpha = 255` keeps opaque windows without these passes. A
+with `panel_alpha = 255` keeps opaque windows without these passes.
+Preferences › Accessibility › Disable glass (`panel_alpha` 255,
+`aurora_render::set_ui_blur`) skips the passes and keeps surfaces opaque. A
 GPU surface that does not allow the copy keeps the tinted frame; the markers
 stay undrawn to preserve the indices of the blur of the modals.
 What belongs to the world (name tags and name plates, floating texts,
@@ -4920,25 +4797,8 @@ contains the Avatar dependencies/read-only position tables and Journal view;
 around the scrollable five-tab body. Geometry processing and fee protocol
 remain on their existing worker/session paths.
 
-Rig graph authoring (`ik_edit/graph.rs`, `graph/motion.rs`) shares bounded
-`world/rig_graph.rs` definitions with runtime. Parent-local helper transforms,
-keyed quaternion/translation curves and procedural motion remain independent
-of the skinned rig. `scene/ik/graph.rs` resolves own-bone/attachment anchors
-from the current working pose, orders dependencies and omits cycles. Remote
-avatars remain independent parallel pose jobs; a bounded second pass for
-cross-avatar targets refreshes their current frames. `world/hand_ik/graph_wire.rs` atomically
-reassembles bounded authenticated multipart graphs, caches bundles and phase
-clocks, and applies immediate releases. `scripts/lsl/rig-contacts.lsl` is the
-complete shared export, with named-link rebinding, independent observer
-subscriptions, cached heartbeats and rate-limited UTF-8-bounded fragments
-from seated creations or owned worn roots. Adjacent fragments share a packet
-only when the sampled header leaves room within the existing 880-byte relay
-limit; cadence, atomic parsing and byte/ingress budgets remain unchanged.
-Driver and observers use the same protocol-5 contract; obsolete prototype wire
-formats are unsupported.
-
 Native animation creation (`ik_edit/clip.rs`) is a separate mode of the same
-pose editor. It retains contact definitions while keyed samples and staged
+pose editor. It keeps IK Edit's goals while keyed samples and staged
 pose goals drive the own avatar. `clip/document.rs` captures LL-local
 rotations and scaled-parent positions, records pelvis translations by default
 and other directly edited position channels, trims/rebases native tracks and
@@ -4950,7 +4810,13 @@ key/export footer. `clip/timeline.rs` draws the timeline window: one toolbar
 ruler sharing the lanes' scale, and the bone lanes with their keys.
 `clip/picker.rs` builds the Bone page's clickable Body/Hands/Face skeleton
 from the rig's rest pose (pure classification, projection and fit, cached per
-rig). `clip/files.rs` binds previews and runs the
+rig). `clip/couple.rs` is couple mode: Person B, a nearby resident who
+accepted the poser's consent, gets a document of their own; the editor
+works on one person at a time and swaps the whole editing state (document,
+undo, preview, goals, selection) with the person set aside, whose keyed
+preview the scene still plays on their avatar (`Scene::ik_edit_others`).
+`World::set_couple_partner` keeps a partner who left drawn until the mode
+ends. `clip/files.rs` binds previews and runs the
 existing `aurora_assets::import_animation` codec, full native validation,
 file dialogs and writes on background jobs. Preview revisions atomically
 replace the sample before recorded corrections are removed; later pose edits
@@ -4958,7 +4824,7 @@ are retained. Immutable draft snapshots and a bounded session draft selector
 keep concurrent worker results separate. Generated native bytes enter the
 ordinary `Imports::authored_animation` inspector with normal folder selection;
 no upload/payment command is created by this handoff. Real skeletal keys
-include captured IK results; virtual control definitions remain in rig LSL.
+include captured IK results.
 Auto-key records on pose release, waits for the rebuilt preview to replace the
 temporary edit, then advances by a saved, adjustable time step (0.5 seconds by
 default); the visible timeline range extends when needed. Timeline preview
@@ -4966,95 +4832,29 @@ looping can use the full timeline or end at the last key of an enabled authored
 track, independently of exported loop metadata. The timeline's resize container
 keeps the track list scrollable within the user's chosen panel height.
 
-`ik_edit/prim_targets.rs` keeps read-only scene designation separate from the
-object Edit selection. A single edited prim proposes a draft target; an
-explicit pick overrides that proposal until the selection changes. Bone
-binding drafts and virtual parents have distinct picker destinations. Saved
-contacts change on an explicit guided target choice. Both floaters remain
-independent, with object manipulator geometry/permission checks arbitrating
-overlapping world handles.
-The editor fetches missing target names with bounded, deduplicated
-individual property requests; concrete picks acquire their root/link identity once
-the properties arrive. A target-name action explicitly opens object Edit and
-selects the exact linked part. After drawing IK, the app queues property
-requests on the existing build command path and applies edit actions before
-drawing object tools.
-
-`world/rig_targets.rs` resolves per-association `link` targets by object root
-and unique member name. `source` inherits the publisher root; `_ROOT_` selects
-the root without a name query. Runtime declarations (including prepared inactive
-profiles) and the open editor share a bounded session cache: 64 roots, 1,024
-prims, 256 members per root, 256 bytes per name. Missing properties use the existing
-`build/property_query.rs` routing, at most four reads in every rolling second
-and three finite attempts per lookup. The first four can leave on consecutive
-frames, avoiding quarter-second gaps on small cold linksets without increasing
-the read budget. Every member, including the root, follows
-FSAreaSearch::requestObjectProperties (indra/newview/fsareasearch.cpp), sending
-ObjectSelect then immediate ObjectDeselect for that individual local ID.
-Already selected prims are never deselected, including children of a selected
-linkset. These reads do not change local selection, manipulators or object transforms.
-J8 identifies unread root/anonymous child entries and their finite attempt counts,
-without exposing object IDs or relaxing complete-map uniqueness checks.
-New unresolved declarations and topology changes
-can refresh names once; repeated profile/state packets do not. Fresh property
-replies cannot be overwritten by the build cache's older names. Previously
-verified contacts remain usable during unrelated name refreshes. Project and
-binding clipboard snapshots share canonical root/link identities.
-Admission and query scheduling prioritize the editor, local seat and local
-attachments before observers, preserving existing entries within a priority.
-Maps rebuild only on membership/name changes; pose jobs read resolved
-identities and the ordinary current-frame transforms. Deleted/unlinked targets
-fail their live parentage check. Sources and regions release unused names.
-LSL forwards root/name declarations without resolving or rebuilding child UUIDs.
-
-`ik_edit/links.rs` owns the guided Bindings tab: a highlighted, locked source bone,
-direct prim/bone and row-pencil actions, scene designation, and atomic
-replacement with pose preservation and dependency validation. Cancellation
-leaves saved contacts intact. `ik_edit/pose.rs` owns detailed posing and
-release rebasing: explicit edits clear an inactive bone's suppression, while
-passive selection/refresh does not. Released bones start manual posing from
-their displayed transform without changing their authored mode. All parented
-joints default to length-preserving chains; Detach is explicit. The parentless
-root remains directly movable and has no Detach option. Limb activation counts
-IK goals and explicitly
-converts a direct goal back to its body-assisted IK chain. Association rows
-still control either mode. Reactivation synchronizes the selected inspector;
-unchecking Detach restores an actual chain when a direct binding resolved
-with its root equal to its own bone. `ik_edit/pose/tests.rs` exercises both transforms
-through real pointer events and all existing binding formats.
+`ik_edit/pose.rs` owns detailed posing and release rebasing: explicit edits
+clear an inactive bone's suppression, while passive selection does not.
+Released bones start manual posing from their displayed transform without
+changing their authored mode. All parented joints default to
+length-preserving chains; Detach is explicit. The parentless root remains
+directly movable and has no Detach option. Limb activation counts IK goals and
+explicitly converts a direct goal back to its body-assisted IK chain.
+`ik_edit/pose/tests.rs` exercises both transforms through real pointer events.
 `ik_edit/authoring.rs` records manual, unbound edits as local joint channels
 instead of world-space pins. Rotation changes only the chosen joint; a
 translation solves its configured chain once and records the affected local
 channels. Previously edited descendants follow later parent rotations.
 `scene/ik.rs::EditRequest::joints` applies these channels after animation
 sampling and before explicit targets. Local translation deltas preserve root
-offsets and shaped proportions. Explicit limb activation and binding creation
-remove the corresponding manual ownership. Native clip authoring saves and
+offsets and shaped proportions. Explicit limb activation removes the
+corresponding manual ownership. Native clip authoring saves and
 restores this layer and records its affected channels.
 `ik_edit/segments.rs` owns visible shaft geometry, canonical terminal tips and
-narrow screen-space selection. Real segments select their origin joint;
-virtual parent connectors select their node. Endpoint/effector/bend controls,
-gizmos, foreground windows, Alt camera navigation and prim designation retain
-priority. One small background hit widget follows the nearest segment, avoiding
-large bounding rectangles intercepting object editing. Bone-target picking
-uses the same geometry without changing its locked source.
-The standard Aurora IK strip exposes Bindings, Virtual bones,
-Animations and Display; animation subinspectors use the same
-shared widget. Row pencils use standard action buttons and dropdown menus.
-Bindings groups the local script-IK mask, independent limb activations and
-the Symmetry switch, world/local space and whole-pose reset in Options
-below the saved rows. The selected source card holds Detach (direct mode),
-chain root, bone reset and numeric position/rotation. Contact and target offsets
-are in an advanced source section. Saved rows own Follow rotation toggles;
-changes preserve offsets, selection, strength and disabled state. Script import
-is collapsible under Bindings Options. There is no IK Pose tab;
-virtual rows pair each control with its named parent, without duplicate tool
-selectors or link-name fields. Native clip authoring retains chain/space/reset
-controls in Pose because it has no Bindings tab.
-The persistent IK footer exports either the complete companion or just the
-rig JSON definition. `graph_payload` shares its bounded ASCII JSON with
-the rig script's RIG value, including converted legacy contacts and virtual-only
-graphs, without exposing session state or adding LSL boilerplate to the data.
+narrow screen-space selection. Real segments select their origin joint.
+Endpoint/effector/bend controls, gizmos, foreground windows, Alt camera
+navigation and object Edit handles retain priority. One small background hit
+widget follows the nearest segment, avoiding large bounding rectangles
+intercepting object editing.
 `ik_edit/poles.rs` draws active-only bend handles at their real bend targets
 and owns bend-target orbits. Their rotation gizmos pivot at the middle joint.
 Hand/foot grips and their translation/rotation axes stay at the physical
@@ -5068,23 +4868,13 @@ Bento spine offsets retain their animation rather than becoming extra hinges.
 The shared gizmo shows translation arrows/planes by default, with no toggle.
 Ctrl exposes rotation rings; Shift hides the gizmo for free point translation.
 Ctrl wins when both modifiers are held. The grabbed gizmo operation stays
-fixed until mouse release if either modifier changes. Virtual
-and real-bone renderers share the manipulator without cancelling each other's
-drag state.
-Point hit areas take precedence over idle gizmo axes. Selected virtual points
-win virtual overlaps; covered point areas pass clicks through to the owning
-control rather than reserving an otherwise passive background layer.
-Remote-avatar authoring stays hidden while runtime compatibility is retained.
+fixed until mouse release if either modifier changes.
+Point hit areas take precedence over idle gizmo axes; covered point areas
+pass clicks through to the owning control rather than reserving an otherwise
+passive background layer.
 The default Human display shows the torso/head, arms and legs. Four auxiliary
 Bento spine joints have their own opt-in display group; hidden spine pairs
 are skipped only for overlay connections, without changing rig transforms.
-
-Authoring opens independently of script sources; imports are explicit.
-`scene/ik.rs::EditRequest::suppress_script_ik` locally masks received goals
-without suppressing editor goals or changing publisher/lease state. Runtime
-targets keep updating under the frozen animation pose, so unmasking or
-closing restores their current state. Runtime activation policy remains in
-the LSL template, outside the authoring UI.
 
 `scene/anim/legacy_grounding.rs` corrects the native standing/crouching
 motions before animation blending and captures native stand-up recovery's
@@ -5099,8 +4889,6 @@ solver shares the analytic two-segment math in `scene/hand_ik.rs`.
 Explicit IK is applied after additive animation and the selected automatic
 foot placement, without writing either correction into the held animation channels.
 IK Edit suspends automatic foot placement before capturing its frozen source.
-Cross-avatar target refresh retains terrain evaluation and advances body
-physics once from the final constrained pose, within the parallel pose jobs.
 
 ## Avatar Studio
 
@@ -5511,3 +5299,5 @@ independent. Pending or over-budget avatars draw neutral silhouette cards rather
 than disappearing; cards have a dynamically sized instance buffer.
 
 `build/linking.rs` follows LLSelectMgr::enableLinkObjects / linkObjects: full selection properties and effective rights are checked before sending, with permanent-object, region, owner, RLVa and animated-mesh limits shared by both layouts and the object menu. Scene mesh-header estimates are refreshed before editor input. `aurora-net::build::link_batches` retains the root in every 254-object packet; confirmation accounts for later batches preceding earlier children. OpenRegionInfo supplies the region link limit; SimulatorFeatures supplies the animated-object triangle budget.
+
+`imports/attachments.rs` keeps private texture/material preview bindings on inventory attachment identities across re-rez; child geometry and transforms disambiguate parts independently of arrival order. The saved library order drives the texture picker's newest-first sort.

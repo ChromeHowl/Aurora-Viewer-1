@@ -73,6 +73,7 @@ LGPL 2.1, distributed here under GPL-3.0-or-later as described above.
 | Nearby chat, `newview/fsnearbychathub.cpp`, `fsfloaternearbychat.cpp` — Copyright © 2012 Zi Ree | `aurora-net/src/message_split.rs`, `session.rs`; `aurora-viewer/src/ui/chat.rs`, `ui/chat/`, `app/gestures.rs`, `world/bridge.rs`, `world/transcripts.rs`, `world/rlva/chat.rs` | Originally LGPL 2.1 |
 | Texture tab, `newview/fspanelface.cpp` — Copyright © 2024 Zi Ree | `aurora-viewer/src/build/ui/texture.rs`, `build/ui/texture_drop.rs`, `build/contents_drop.rs` | Originally LGPL 2.1 |
 | Object message filter, `newview/omnifilterengine.h` — Copyright © 2025 Zi Ree | `aurora-viewer/src/world/object_im_filter.rs` | Originally LGPL 2.1 |
+| Face selection cycling, `newview/llviewermenu.cpp`, `LLToolsSelectNextPartFace` (`FS:Zi` contributions) — Zi Ree | `aurora-viewer/src/build/ui/mod.rs` | Originally LGPL 2.1 |
 | Quick preferences, `newview/quickprefs.cpp` — Copyright © 2011 WoLf Loonie, © 2013 Zi Ree, © 2013 Ansariel Hiller, © 2013 Cinder Biscuits | `aurora-viewer/src/ui/quick_prefs.rs`, `ui/phototools.rs`, `ui/options/phototools.rs`, `app/phototools.rs`, `ui/environment.rs`, `world/eep_photo.rs`, `world/env_select.rs` | Originally LGPL 2.1 |
 | Radar, `newview/fsradar.cpp`, `fsradarentry.cpp`, `fspanelradar.cpp` — Copyright © 2013 Ansariel Hiller; `fsradarlistctrl.cpp` — Copyright © 2011 Arrehn Oberlander | `aurora-net/src/bridge/query.rs`; `aurora-viewer/src/world/radar.rs`, `ui/people/radar.rs`, `ui/people/nearby.rs`, `world/friend_join.rs`, `app.rs` | Originally LGPL 2.1 |
 | Money tracker, `newview/fsmoneytracker.cpp` — Copyright © 2011 Arrehn Oberlander, © 2015 Ansariel Hiller | `aurora-viewer/src/ui/money_tracker.rs` | Originally LGPL 2.1 |
@@ -103,6 +104,15 @@ LGPL 2.1, distributed here under GPL-3.0-or-later as described above.
 | Script recovery, `newview/llfloaterscriptrecover.cpp` — Copyright © 2011-2012 Kitty Barnett | `aurora-net/src/session/asset_imports.rs`; `aurora-viewer/src/app/script_recovery.rs`, `ui/scripts/recovery.rs` | Originally LGPL 2.1 |
 | RLVa visual effects, `newview/rlveffects.cpp`, `app_settings/shaders/class1/deferred/rlvF.glsl` — Copyright © 2018-2021 Kitty Barnett | `aurora-render/src/rlva.rs`, `rlva/overlay.rs`, `shaders/rlva.wgsl`; `aurora-viewer/src/world/rlva/effects.rs` | Originally LGPL 2.1 |
 
+## Ideas from other viewers
+
+Some features of Aurora Viewer follow an idea first shown by another viewer,
+written anew for Aurora, without its code. Their authors are thanked here.
+
+| The idea and its author | In Aurora (`crates/`) |
+|---|---|
+| Second camera, a small window that keeps one's own avatar in view (face or whole body) while the main camera looks elsewhere: SnowPastel's [multi-view-viewer](https://github.com/snowpastel/multi-view-viewer) | `aurora-viewer/src/camera/second.rs`, `ui/second_camera.rs`, `app/second_camera.rs`; `aurora-render/src/second_view.rs` |
+
 ## Bundled assets
 
 | Asset | Location | License |
@@ -112,6 +122,7 @@ LGPL 2.1, distributed here under GPL-3.0-or-later as described above.
 | Noto Sans, Regular and SemiBold, version 2.015 (notofonts/latin-greek-cyrillic, hinted) | `crates/aurora-viewer/assets/fonts/` | SIL Open Font License 1.1 ([LICENSE-NotoSans.txt](crates/aurora-viewer/assets/fonts/LICENSE-NotoSans.txt)) |
 | Roboto, Regular and Medium, version 3.011 (googlefonts/roboto-3-classic, hinted) | `crates/aurora-viewer/assets/fonts/` | SIL Open Font License 1.1 ([LICENSE-Roboto.txt](crates/aurora-viewer/assets/fonts/LICENSE-Roboto.txt)) |
 | OpenDyslexic, Regular and Bold, version 0.910.12 — Copyright 2012-2019 Abbie Gonzalez, Reserved Font Name OpenDyslexic (antijingoist/opendyslexic, release `v0.91.12`, unmodified) | `crates/aurora-viewer/assets/fonts/` | SIL Open Font License 1.1 ([LICENSE-OpenDyslexic.txt](crates/aurora-viewer/assets/fonts/LICENSE-OpenDyslexic.txt)) |
+| PromptFont, version 1.10 — Copyright 2018-2023 Yukari Hafner, 2011-2016 Severin Meyer (Shinmera/promptfont, release `v1.10`, unmodified): the game controller pictograms of Preferences › Game Controls | `crates/aurora-viewer/assets/fonts/` | SIL Open Font License 1.1 ([LICENSE-Promptfont.txt](crates/aurora-viewer/assets/fonts/LICENSE-Promptfont.txt)) |
 | Noto Color Emoji font, version 2.057 — Copyright 2022 Google Inc. (googlefonts/noto-emoji, tag `v2026-09-24-unicode18_0`, built into the executable) | `assets/emoji/` | SIL Open Font License 1.1 ([LICENSE-OFL.txt](assets/emoji/LICENSE-OFL.txt)) |
 | MIT KEMAR HRTF measurements, diffuse-field equalized set — Copyright 1994 MIT Media Laboratory, by Bill Gardner and Keith Martin (https://sound.media.mit.edu/resources/KEMAR.html: "provided free with no restrictions on use, provided the authors are cited"); turned into minimum-phase filters by `scripts/generate-hrtf.py` (built into the executable; origin, citation and changes in [README.md](assets/hrtf/README.md)) | `assets/hrtf/kemar.bin` | Free use with credit to the authors (their terms, quoted in the README) |
 | Tycho-2 Catalogue — Høg E. et al. 2000 (A&A 355, L27; https://archive.eso.org/ASTROM/TYC-2/data/, CDS I/259); the naked-eye stars and a map of the fainter ones, made by `scripts/generate-star-catalog.py`, with V and B-V for its 50 brightest or colourless stars from the Hipparcos Catalogue (ESA 1997, ESA SP-1200) (built into the executable; origin and changes in [README.md](assets/stars/README.md)) | `assets/stars/stars.bin`, `assets/stars/milky_way.bin` | BSD-2-Clause, agreed by its lead author in 2015 ([LICENSE-TYCHO2.md](assets/stars/LICENSE-TYCHO2.md)) |
@@ -158,6 +169,24 @@ the pack does not include.
 | Chromium Embedded Framework, Dullahan (Linden Lab's prebuilt package) | BSD-3-Clause and the licenses of Chromium's third-party code |
 | LibVLC and its modules (Linden Lab's prebuilt package of VLC 3.0) | LGPL 2.1 or later; some modules GPL 2 or later |
 | Microsoft Visual C++ runtime (`msvcp140.dll`, `vcruntime140*.dll`) | Redistributable under the Visual Studio license terms |
+
+## FFmpeg pack
+
+The Director records its films with ffmpeg, a separate program. The project
+builds it from source with the "FFmpeg pack" workflow
+(`.github/workflows/ffmpeg-pack.yml`, `scripts/ffmpeg-pack.sh`) and publishes
+it as the GitHub releases `ffmpeg-<n>`; the viewer downloads it only when the
+user asks for it, and installs it in the user's data folder. Each archive
+holds the license texts (`LICENSES/`) and a `README.txt` naming the versions
+and commits; each release attaches the corresponding source (the four source
+trees and the build script). No nonfree code is built in.
+
+| Component | License |
+|---|---|
+| ffmpeg (FFmpeg/FFmpeg), built with `--enable-gpl --enable-version3` | GPL version 3 |
+| x264 (videolan/x264), linked statically | GPL version 2 or later |
+| libvpx (webmproject/libvpx), linked statically | BSD-3-Clause, with Google's patent grant (`PATENTS`) |
+| libopus (xiph/opus), linked statically | BSD-3-Clause |
 
 ## Rust dependencies
 

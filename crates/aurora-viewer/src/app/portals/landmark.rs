@@ -7,13 +7,19 @@ use crate::world::{
 };
 use aurora_net::inventory::InvItem;
 
+/// Where a dropped place leads: the region's name and the arrival in it.
+#[derive(Clone, Debug, PartialEq)]
+pub(in crate::app) struct Destination {
+    region: String,
+    position: [f32; 3],
+}
+
 pub(in crate::app) struct Pending {
     destination: DropDestination,
     agent: uuid::Uuid,
     region: u64,
     center: Vec3,
     yaw: f32,
-    access: Access,
     started: Instant,
 }
 
@@ -22,10 +28,6 @@ pub(in crate::app) fn cargo(inv: &Inventory, item: uuid::Uuid) -> Option<&InvIte
     inv.items
         .get(&id)
         .filter(|item| item.asset_type == 3 && !inv.in_folder_type(id, 53))
-}
-
-pub(in crate::app) fn access(shift: bool) -> Access {
-    if shift { Access::Everyone } else { Access::Friends }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -43,7 +45,7 @@ impl DropDestination {
         }
     }
 
-    fn resolve(&mut self, world: &mut World) -> Result<Option<aurora_net::bridge::portal::Destination>, ()> {
+    fn resolve(&mut self, world: &mut World) -> Result<Option<Destination>, ()> {
         if let Self::Parcel(id) = *self {
             let Some(parcel) = world.profiles.parcels.get(&id) else {
                 return Ok(None);
@@ -63,7 +65,7 @@ impl DropDestination {
     }
 }
 
-fn destination(world: &mut World, asset: uuid::Uuid) -> Result<Option<aurora_net::bridge::portal::Destination>, ()> {
+fn destination(world: &mut World, asset: uuid::Uuid) -> Result<Option<Destination>, ()> {
     match world.landmarks.resolve(asset) {
         Resolved::Failed => Err(()),
         Resolved::Pending => Ok(None),
@@ -71,7 +73,7 @@ fn destination(world: &mut World, asset: uuid::Uuid) -> Result<Option<aurora_net
     }
 }
 
-fn destination_at(world: &mut World, global: glam::DVec3) -> Result<Option<aurora_net::bridge::portal::Destination>, ()> {
+fn destination_at(world: &mut World, global: glam::DVec3) -> Result<Option<Destination>, ()> {
     if !global.is_finite() || global.x < 0.0 || global.y < 0.0 {
         return Err(());
     }
@@ -80,7 +82,7 @@ fn destination_at(world: &mut World, global: glam::DVec3) -> Result<Option<auror
             return Err(());
         }
         // Modulo 256 loses the internal coordinates of variable regions.
-        Ok(Some(aurora_net::bridge::portal::Destination {
+        Ok(Some(Destination {
             region: sim.name.clone(),
             position: [
                 (global.x - f64::from(x) * 256.0) as f32,
@@ -129,14 +131,14 @@ impl Pending {
 }
 
 impl App {
-    pub(in crate::app) fn queue_landmark_portal(&mut self, item: uuid::Uuid, point: Vec3, shift: bool) {
+    pub(in crate::app) fn queue_landmark_portal(&mut self, item: uuid::Uuid, point: Vec3) {
         match landmark_drop(&self.world, item) {
-            Ok(destination) => self.queue_place_portal(destination, point, shift),
+            Ok(destination) => self.queue_place_portal(destination, point),
             Err(reason) => self.portal_drop_notice(reason),
         }
     }
 
-    pub(in crate::app) fn queue_location_portal(&mut self, target: ui::places::drag::Target, point: Vec3, shift: bool) {
+    pub(in crate::app) fn queue_location_portal(&mut self, target: ui::places::drag::Target, point: Vec3) {
         let destination = match target {
             ui::places::drag::Target::History(global) => DropDestination::Location(global),
             ui::places::drag::Target::Parcel(id) if !id.is_nil() => {
@@ -147,10 +149,10 @@ impl App {
             }
             _ => return,
         };
-        self.queue_place_portal(destination, point, shift);
+        self.queue_place_portal(destination, point);
     }
 
-    fn queue_place_portal(&mut self, destination: DropDestination, point: Vec3, shift: bool) {
+    fn queue_place_portal(&mut self, destination: DropDestination, point: Vec3) {
         let Some(region) = self.world.main_region else { return };
         self.portal_drop = Some(Pending {
             destination,
@@ -158,7 +160,6 @@ impl App {
             region,
             center: point + Vec3::Z * crate::world::portals::HEIGHT,
             yaw: self.world.agent.yaw,
-            access: access(shift),
             started: Instant::now(),
         });
         self.portal_ui.notice = None;
@@ -168,7 +169,6 @@ impl App {
         let message = match key {
             "rlva-blocked" => aurora_i18n::tr!("rlva-blocked"),
             "portal-invalid" => aurora_i18n::tr!("portal-invalid"),
-            "portal-bridge-required" => aurora_i18n::tr!("portal-bridge-required"),
             "portal-landmark-unavailable" => aurora_i18n::tr!("portal-landmark-unavailable"),
             "portal-place-unavailable" => aurora_i18n::tr!("portal-place-unavailable"),
             _ => aurora_i18n::tr!("rez-no-surface"),
@@ -205,18 +205,14 @@ impl App {
         match pending.destination.resolve(&mut self.world) {
             Err(()) => self.portal_drop_notice(pending.destination.error_key()),
             Ok(None) => self.portal_drop = Some(pending),
-            Ok(Some(destination)) => self.create_portal_at(
-                destination.region,
-                Vec3::from(destination.position),
-                pending.access,
-                pending.center,
-                pending.yaw,
-            ),
+            Ok(Some(destination)) => {
+                self.create_portal_at(destination.region, Vec3::from(destination.position), pending.center, pending.yaw);
+            }
         }
     }
 }
 
-pub(in crate::app) fn preview(ctx: &egui::Context, p: &Palette, point: egui::Pos2, shift: bool, ready: bool) {
+pub(in crate::app) fn preview(ctx: &egui::Context, p: &Palette, point: egui::Pos2) {
     let offset = if egui::DragAndDrop::has_payload_of_type::<ui::places::drag::PlaceDrag>(ctx) {
         68.0
     } else {
@@ -228,22 +224,7 @@ pub(in crate::app) fn preview(ctx: &egui::Context, p: &Palette, point: egui::Pos
         .interactable(false)
         .show(ctx, |ui| {
             ui::widgets::overlay(ui, p, egui::Margin::same(8), |ui| {
-                // Laid out at a width taken from the screen, never from the
-                // area: an area lays its content out in the size it kept from
-                // the previous frame, so a wrapping label kept the narrower box
-                // of the other Shift text, taller at each toggle and on the
-                // next drag (#2636). Wider than the screen, it still wraps,
-                // inside its margins even in a very narrow window.
-                let screen = ui.ctx().content_rect().width();
-                let width = (screen - 64.0).max(160.0).min(screen - 24.0).max(1.0);
-                let text = egui::WidgetText::from(if !ready {
-                    aurora_i18n::tr!("portal-bridge-required")
-                } else if shift {
-                    aurora_i18n::tr!("portal-drop-public")
-                } else {
-                    aurora_i18n::tr!("portal-drop-friends")
-                });
-                ui.label(text.into_galley(ui, Some(egui::TextWrapMode::Wrap), width, egui::TextStyle::Body));
+                ui.label(aurora_i18n::tr!("portal-drop"));
             });
         });
 }
@@ -255,7 +236,7 @@ mod tests {
     use crate::world::worldmap::SimInfo;
 
     #[test]
-    fn portal_drag_preview_leaves_world_pointer_available_and_reads_shift_at_release() {
+    fn portal_drag_preview_leaves_world_pointer_available_until_release() {
         let ctx = egui::Context::default();
         let point = egui::pos2(700.0, 400.0);
         let frame = |shift: bool, pressed: Option<bool>| {
@@ -280,7 +261,7 @@ mod tests {
                 },
                 |ui| {
                     read = ui::inventory::world_drag(ui.ctx());
-                    preview(ui.ctx(), &crate::theme::Theme::default().palette(), point, shift, true);
+                    preview(ui.ctx(), &crate::theme::Theme::default().palette(), point);
                 },
             );
             output.textures_delta.clear();
@@ -296,60 +277,51 @@ mod tests {
         for shift in [false, true, false, true] {
             let drag = frame(shift, None).expect("preview never intercepts the world pointer");
             assert_eq!(drag.shift, shift);
-            assert_eq!(access(drag.shift), if shift { Access::Everyone } else { Access::Friends });
         }
         let drag = frame(true, Some(false)).expect("release reaches the world");
         assert!(drag.released && drag.shift);
     }
 
-    /// #2636: toggling Shift during a held landmark drag keeps the tooltip
-    /// fitted to its current text, and a later drag starts at that size; on
-    /// a screen narrower than the text it wraps, the same at every toggle,
-    /// and stays inside a window narrower than its usual minimum width.
+    /// #2636: the tooltip of a held landmark drag stays inside the screen,
+    /// wrapping on one narrower than its text, and a later drag starts at
+    /// the same size. (A portal is this viewer's own: no Shift choice of
+    /// who sees it, #4297.)
     #[test]
-    fn portal_drag_preview_fits_its_text_across_shift_toggles_and_drags() {
+    fn portal_drag_preview_fits_its_text_across_drags() {
         let palette = crate::theme::Theme::default().palette();
         for screen in [egui::vec2(1000.0, 700.0), egui::vec2(300.0, 700.0), egui::vec2(150.0, 700.0)] {
             let point = egui::pos2(screen.x * 0.65, 400.0);
-            let frame = |ctx: &egui::Context, shift: Option<bool>| {
+            let frame = |ctx: &egui::Context, shown: bool| {
                 let mut output = ctx.run_ui(
                     egui::RawInput {
                         screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, screen)),
                         ..Default::default()
                     },
                     |ui| {
-                        if let Some(shift) = shift {
-                            preview(ui.ctx(), &palette, point, shift, true);
+                        if shown {
+                            preview(ui.ctx(), &palette, point);
                         }
                     },
                 );
                 output.textures_delta.clear();
                 ctx.memory(|memory| memory.area_rect(egui::Id::unique("portal_landmark_preview")))
             };
-            let settled = |ctx: &egui::Context, shift: bool| {
+            let settled = |ctx: &egui::Context| {
                 let mut rect = None;
                 for _ in 0..3 {
-                    rect = frame(ctx, Some(shift));
+                    rect = frame(ctx, true);
                 }
                 rect.expect("preview shown")
             };
-            let fresh = |shift: bool| settled(&egui::Context::default(), shift).size();
-            let (friends, public) = (fresh(false), fresh(true));
-            assert_ne!(friends, public);
+            let first = settled(&egui::Context::default()).size();
             let ctx = egui::Context::default();
             for drag in 0..2 {
-                for shift in [false, true, false, true, false, true, false] {
-                    let rect = settled(&ctx, shift);
-                    assert_eq!(
-                        rect.size(),
-                        if shift { public } else { friends },
-                        "{screen:?}, drag {drag}, shift {shift}"
-                    );
-                    assert!(rect.width() <= screen.x, "{screen:?}: {rect:?} is wider than the screen");
-                }
+                let rect = settled(&ctx);
+                assert_eq!(rect.size(), first, "{screen:?}, drag {drag}");
+                assert!(rect.width() <= screen.x, "{screen:?}: {rect:?} is wider than the screen");
                 // Released: no preview for a few frames, then the next drag.
                 for _ in 0..3 {
-                    frame(&ctx, None);
+                    frame(&ctx, false);
                 }
             }
         }
@@ -425,8 +397,6 @@ mod tests {
             },
         ]);
         assert_eq!(cargo(&world.inventory, link).unwrap().asset_id, asset);
-        assert_eq!(access(false), Access::Friends);
-        assert_eq!(access(true), Access::Everyone);
         assert_eq!(destination(&mut world, asset), Ok(None));
         assert_eq!(world.landmarks.take_wanted().len(), 1);
         world.landmarks.on_data(asset, Some(b"Landmark version 1\nposition 700 900 30\n"));
@@ -451,7 +421,7 @@ mod tests {
                 size_y: 512,
             },
         );
-        let expected = Some(aurora_net::bridge::portal::Destination {
+        let expected = Some(Destination {
             region: "Demo wide region".into(),
             position: [444.0, 388.0, 30.0],
         });
@@ -469,7 +439,6 @@ mod tests {
             region: 256,
             center: Vec3::ONE,
             yaw: 0.0,
-            access: Access::Friends,
             started: now,
         };
         assert!(pending.valid(&world, now));
@@ -522,7 +491,6 @@ mod tests {
             region: 256,
             center: Vec3::ONE,
             yaw: 0.0,
-            access: access(true),
             started: now,
         };
         world.tp_storage.items.clear();
@@ -607,7 +575,6 @@ mod tests {
             region: 256,
             center: Vec3::ONE,
             yaw: 0.0,
-            access: access(true),
             started: now,
         };
         world.main_region = Some(256);

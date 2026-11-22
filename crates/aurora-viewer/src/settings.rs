@@ -468,6 +468,11 @@ pub struct DebugView {
     pub check_probe_sets: bool,
     pub probes: bool,
     pub skeletons: bool,
+    /// The avatars' hitboxes with the Legacy Viewer's Avatar Hitboxes parity
+    /// (Developer › Render Metadata › Avatar Hitboxes): the avatar's own
+    /// oriented box, half its scale in either direction. Visual parity only:
+    /// picking still tests the fixed click box (see `scene::picking`).
+    pub avatar_hitboxes: bool,
     /// Detail level of the objects around the pointer, with the distance
     /// and the radius it comes from (Firestorm: Develop › Render Metadata ›
     /// LOD Info).
@@ -508,7 +513,14 @@ impl DebugView {
 
     /// An overlay drawn over the 3D view is on.
     pub fn any_overlay(&self) -> bool {
-        self.bounds || self.culling || self.lights || self.glow_objects || self.probes || self.skeletons || self.lod_info
+        self.bounds
+            || self.culling
+            || self.lights
+            || self.glow_objects
+            || self.probes
+            || self.skeletons
+            || self.avatar_hitboxes
+            || self.lod_info
     }
 }
 
@@ -621,11 +633,16 @@ pub struct Settings {
     /// LLViewerJoystick: device, axis mapping and separate avatar/flycam tuning.
     pub joystick: crate::joystick::Settings,
     pub gamepad: crate::joystick::Settings,
+    /// Game Controls: GameControlData and the controller's action mappings
+    /// (the LL viewer's "GameControl" setting).
+    pub game_control: crate::game_control::Settings,
     /// Pre-split profile awaiting device classification after an upgrade.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pending_legacy_gamepad: Option<crate::joystick::Settings>,
     /// Ground foot geometry after wearing/detaching a body attachment.
     pub auto_hover_height: bool,
+    /// What the second camera frames (View › Second camera, Aurora's own).
+    pub second_camera_framing: crate::camera::second::Framing,
     /// Fixed adjustment added to each automatic grounding estimate (metres).
     pub auto_hover_offset: f32,
     /// None keeps the former shared hover options until the first login.
@@ -676,8 +693,6 @@ pub struct Settings {
     /// Requested position lock and options, independent for each avatar.
     pub bridge: std::collections::HashMap<uuid::Uuid, crate::world::bridge::Preferences>,
     pub movements: std::collections::HashMap<uuid::Uuid, crate::movement::Preferences>,
-    /// Swimming in prims named as water (#2008), for every account.
-    pub water_volumes: crate::movement::water_volume::Settings,
     /// Show Friends Only and keeping it after a teleport, for each account
     /// (FSRenderFriendsOnly, FSRenderFriendsOnlyPersistsTP: per-account settings).
     pub friends_only: std::collections::HashMap<uuid::Uuid, crate::world::friends_only::Preferences>,
@@ -1352,7 +1367,6 @@ pub struct Settings {
     /// Global RLVa opt-in. Session restrictions are never persisted.
     pub rlva_enabled: bool,
     pub rlva: crate::world::rlva::preferences::Preferences,
-    pub pose_requests: crate::world::poser_consent::Preferences,
     pub poser: crate::ik_edit::poser::Config,
     /// Our avatar's turn thresholds, head and eye limits and reset on
     /// stand-up (settings/avatar_motion.rs; Preferences › Avatars).
@@ -1485,9 +1499,6 @@ pub struct Settings {
     /// Preferences › Aurora › Behavior: make, wear and use the Aurora bridge
     /// (`world/bridge.rs`). On by default, as the Legacy Viewer's UseLSLBridge.
     pub use_bridge: bool,
-    /// Preferences › Aurora › Behavior: whose portals the bridge shows. Friends
-    /// by default; our own portals and returns are always shown.
-    pub portal_sources: crate::world::portals::Sources,
     /// Experimental filing of new deliveries by the sender's legacy name.
     pub sort_received_items: bool,
     pub received_items_since: i64,
@@ -1547,6 +1558,11 @@ pub struct Settings {
     /// (`crate::high_contrast`, #906) instead of the skin's colours, off by
     /// default.
     pub high_contrast: bool,
+    /// Preferences › Accessibility › Vision: skip the glass of windows,
+    /// bars, menus and dialogs (`crate::disable_glass`), off by default.
+    /// Surfaces stay opaque, without frosting the world. High contrast
+    /// already does this.
+    pub disable_glass: bool,
     /// Preferences › Appearance › Skin: the accent, background and text
     /// colours of the interface (`crate::interface_colors`), each the
     /// skin's by default.
@@ -1696,6 +1712,15 @@ pub struct Settings {
     /// A left click on an object whose click action is Sit does not sit
     /// (FSBlockClickSit, off); the menu's Sit still does.
     pub block_click_sit: bool,
+    /// The rigged meshes with a touch script or a click action that a left
+    /// click acts on: animated objects (animesh; on), rigged attachments we
+    /// wear (off) and those of other avatars (off). Off, the click passes
+    /// through them as in the Legacy Viewer, which has none of the three
+    /// (scene/drawn.rs; Preferences › Mouse and keyboard, "Left click on
+    /// rigged objects").
+    pub rigged_click_animesh: bool,
+    pub rigged_click_own: bool,
+    pub rigged_click_others: bool,
     /// RenderVolumeSAProtection: prims and sculpts with a very large surface
     /// stop being drawn past a total each frame (scene/surface_area.rs; off).
     pub large_surface_protection: bool,
@@ -1909,6 +1934,10 @@ pub struct Settings {
     /// Avatars still loading: 0 particle cloud + progress bar under the name
     /// (Firestorm), 1 progress bar only (drawn as they load), 2 nothing.
     pub loading_avatars: u8,
+    /// Aurora's own: while an avatar's worn objects are on their way, draw
+    /// copies of the ones kept from the last time (world/avatar_cache), then
+    /// the region's own.
+    pub avatar_cache: bool,
     /// RenderAvatarComplexityMode: 0 limit everyone, 1 always show friends
     /// fully, 2 show only friends.
     pub complexity_mode: u8,
@@ -2504,8 +2533,10 @@ impl Default for Settings {
             pointer: Default::default(),
             joystick: Default::default(),
             gamepad: crate::joystick::Settings::gamepad_defaults(),
+            game_control: Default::default(),
             pending_legacy_gamepad: None,
             auto_hover_height: false,
+            second_camera_framing: Default::default(),
             auto_hover_offset: 0.0,
             hover_height_accounts: None,
             hover_height_account: None,
@@ -2651,7 +2682,6 @@ impl Default for Settings {
             ao: Default::default(),
             bridge: Default::default(),
             movements: Default::default(),
-            water_volumes: Default::default(),
             friends_only: Default::default(),
             parcel_music_accounts: Default::default(),
             snapshot: Default::default(),
@@ -2777,7 +2807,6 @@ impl Default for Settings {
             anti_spam: Default::default(),
             rlva_enabled: false,
             rlva: Default::default(),
-            pose_requests: Default::default(),
             poser: Default::default(),
             avatar_motion: Default::default(),
             pose_stand: Default::default(),
@@ -2820,7 +2849,6 @@ impl Default for Settings {
             predict_own_motion: false,
             synchronize_animations: false,
             use_bridge: true,
-            portal_sources: Default::default(),
             sort_received_items: false,
             received_items_since: 0,
             notify_deliveries: true,
@@ -2841,6 +2869,7 @@ impl Default for Settings {
             color_blindness: crate::colorblind::Deficiency::Off,
             color_blindness_strength: 1.0,
             high_contrast: false,
+            disable_glass: false,
             interface_colors: Default::default(),
             follow_system_theme: false,
             interface_theme: crate::theme_presets::DEFAULT_ID.to_owned(),
@@ -2894,6 +2923,9 @@ impl Default for Settings {
             fly_override_warned: false,
             avatar_align_mini: false,
             block_click_sit: false,
+            rigged_click_animesh: true,
+            rigged_click_own: false,
+            rigged_click_others: false,
             large_surface_protection: false,
             large_surface_prim_threshold: 75.0,
             large_surface_sculpt_threshold: 150.0,
@@ -2956,6 +2988,7 @@ impl Default for Settings {
             max_attachment_area: 1000.0,
             complexity_notice_seconds: 0,
             loading_avatars: 0,
+            avatar_cache: true,
             complexity_mode: 0,
             avatar_physics: true,
             avatar_physics_detail: 1.0,
@@ -3855,6 +3888,7 @@ impl Settings {
         }
         self.snapshot.sanitize();
         self.dof.sanitize();
+        self.game_control.sanitize();
         self.exposure = self.exposure.clamp(0.25, 4.0);
         self.screen_indirect_intensity = if self.screen_indirect_intensity.is_finite() {
             self.screen_indirect_intensity.clamp(0.0, 4.0)
@@ -4212,6 +4246,15 @@ impl Settings {
             volume_threshold: self.large_surface_prim_threshold,
             sculpt_threshold: self.large_surface_sculpt_threshold,
             frame_max: self.large_surface_frame_max,
+        }
+    }
+
+    /// The rigged meshes a left click acts on (scene/drawn.rs).
+    pub fn rigged_clicks(&self) -> crate::scene::drawn::RiggedClicks {
+        crate::scene::drawn::RiggedClicks {
+            animesh: self.rigged_click_animesh,
+            own: self.rigged_click_own,
+            others: self.rigged_click_others,
         }
     }
 
@@ -5013,6 +5056,24 @@ mod tests {
         let saved = serde_json::to_value(&changed).expect("save preference");
         let loaded: Settings = serde_json::from_value(saved).expect("reload preference");
         assert!(!loaded.double_click_scripted);
+    }
+
+    #[test]
+    fn only_animesh_take_a_left_click_by_default_and_each_choice_round_trips() {
+        use crate::scene::drawn::RiggedClicks;
+        let missing: Settings = serde_json::from_str("{}").expect("old settings without the preferences");
+        assert_eq!(missing.rigged_clicks(), RiggedClicks::default());
+        assert!(missing.rigged_click_animesh && !missing.rigged_click_own && !missing.rigged_click_others);
+
+        for (animesh, own, others) in [(false, false, false), (true, true, false), (true, false, true)] {
+            let mut changed = missing.clone();
+            changed.rigged_click_animesh = animesh;
+            changed.rigged_click_own = own;
+            changed.rigged_click_others = others;
+            let saved = serde_json::to_value(&changed).expect("save the preferences");
+            let loaded: Settings = serde_json::from_value(saved).expect("reload the preferences");
+            assert_eq!(loaded.rigged_clicks(), RiggedClicks { animesh, own, others }, "each switch alone");
+        }
     }
 
     #[test]

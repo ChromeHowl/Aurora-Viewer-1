@@ -141,13 +141,23 @@ fn water_walk_descent_keeps_support_and_uses_ground_crouch_states() {
 
 #[test]
 fn only_a_teleport_a_load_the_free_camera_or_autopilot_suspends_the_aids() {
-    // A window without the focus has none of these: its aids keep running.
-    assert!(!aids_suspended(false, false, false, false));
-    for reason in 0..4 {
-        let mut pauses = [false; 4];
-        pauses[reason] = true;
-        let [teleporting, loading, free_camera, autopilot] = pauses;
-        assert!(aids_suspended(teleporting, loading, free_camera, autopilot), "reason {reason}");
+    // A window without the focus has none of these: its aids keep running
+    // (LLViewerWindow::handleFocusLost releases the held keys only).
+    assert!(!aids_suspended(false, false, false, false, true));
+    assert!(
+        !aids_suspended(false, false, false, false, false),
+        "losing the focus does not suspend the aids"
+    );
+    for focused in [true, false] {
+        for reason in 0..4 {
+            let mut pauses = [false; 4];
+            pauses[reason] = true;
+            let [teleporting, loading, free_camera, autopilot] = pauses;
+            assert!(
+                aids_suspended(teleporting, loading, free_camera, autopilot, focused),
+                "reason {reason}"
+            );
+        }
     }
 }
 
@@ -162,7 +172,8 @@ fn water_walk_keeps_its_support_behind_another_window_while_a_held_walk_stops() 
     let mut f = frame();
     f.position.z = 20.85;
     f.on_ground = false;
-    f.suspended = aids_suspended(false, false, false, false);
+    // the window behind another one: not focused
+    f.suspended = aids_suspended(false, false, false, false, false);
     let walking = MoveInput {
         forward: true,
         ..Default::default()
@@ -2291,44 +2302,4 @@ fn a_takeoff_under_a_ceiling_hands_back_to_swimming_and_moving_goals_never_stall
         let step = runtime.update(&prefs, &f, &MoveInput::default(), now + Duration::from_millis(10 + 50 * tick));
         assert_eq!(step.motion.mode, 8, "tick {tick}");
     }
-}
-
-/// #2008: the runtime swims in a skybox pool from the volume's top and
-/// floor alone, the region water and terrain far below.
-#[test]
-fn a_prim_water_volume_drives_swimming_and_is_left_at_its_top() {
-    use water_volume::{Volume, water_at};
-    let pool = [Volume::new(Vec3::new(128.0, 128.0, 1001.2), glam::Quat::IDENTITY, Vec3::new(8.0, 8.0, 2.4)).expect("pool")];
-    let in_pool = |z: f32, floor: f32| {
-        let mut f = frame();
-        f.position.z = z;
-        let water = water_at(&pool, f.position, f.height, Some(floor));
-        f.water = water.map(|w| w.surface).or(Some(20.0));
-        f.ground = water.map(|w| w.floor).or(Some(10.0));
-        f.on_ground = false;
-        f
-    };
-    let mut runtime = Runtime::default();
-    let now = Instant::now();
-    let mut f = in_pool(1001.8, 1000.0);
-    assert_eq!(f.water, Some(1002.4));
-    runtime.update(&prefs(), &f, &MoveInput::default(), now);
-    assert_eq!(runtime.state, State::Surface);
-    f.position.z = 1000.8;
-    let down = MoveInput {
-        down: true,
-        ..Default::default()
-    };
-    runtime.update(&prefs(), &f, &down, now);
-    assert_eq!(runtime.state, State::Submerged);
-    // above the top: the same exit as region water
-    let f = in_pool(1004.5, 1000.0);
-    runtime.update(&prefs(), &f, &MoveInput::default(), now);
-    assert!(!runtime.state.swimming());
-
-    // a wading pool (its floor 0.6 m under the top) is not deep enough to swim
-    let mut runtime = Runtime::default();
-    let f = in_pool(1002.1, 1001.8);
-    runtime.update(&prefs(), &f, &MoveInput::default(), now);
-    assert!(!runtime.state.swimming());
 }

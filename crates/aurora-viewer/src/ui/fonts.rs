@@ -2,9 +2,11 @@
 //! letters weighted at the bottom, easier to read with dyslexia; #851) are
 //! embedded with their semi-bold face (SIL OFL, see
 //! assets/fonts/LICENSE-*.txt); installed
-//! system fonts are listed too. Characters none of them has come from the
-//! system's fonts (`fallback`). Small capitals that Inter lacks come from
-//! the embedded Noto Sans, which is installed behind every chosen face.
+//! system fonts are listed too. PromptFont (SIL OFL) draws the game
+//! controller pictograms of Game Controls, in a family of its own. Characters
+//! none of them has come from the system's fonts (`fallback`). Small capitals
+//! that Inter lacks come from the embedded Noto Sans, which is installed
+//! behind every chosen face.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Once, OnceLock};
@@ -22,15 +24,18 @@ pub const OPEN_DYSLEXIC: &str = "OpenDyslexic";
 pub const DEFAULT: &str = INTER;
 
 static INTER_TTF: &[u8] = include_bytes!("../../assets/fonts/Inter-Regular.ttf");
-static INTER_SEMIBOLD_TTF: &[u8] = include_bytes!("../../assets/fonts/Inter-SemiBold.ttf");
+pub(crate) static INTER_SEMIBOLD_TTF: &[u8] = include_bytes!("../../assets/fonts/Inter-SemiBold.ttf");
 static NOTO_TTF: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
-static NOTO_SEMIBOLD_TTF: &[u8] = include_bytes!("../../assets/fonts/NotoSans-SemiBold.ttf");
+pub(crate) static NOTO_SEMIBOLD_TTF: &[u8] = include_bytes!("../../assets/fonts/NotoSans-SemiBold.ttf");
 static ROBOTO_TTF: &[u8] = include_bytes!("../../assets/fonts/Roboto-Regular.ttf");
 // Roboto has no static SemiBold: Medium is its emphasis weight
 static ROBOTO_MEDIUM_TTF: &[u8] = include_bytes!("../../assets/fonts/Roboto-Medium.ttf");
 // OpenDyslexic has no semi-bold: Bold is its emphasis weight
 static OPEN_DYSLEXIC_OTF: &[u8] = include_bytes!("../../assets/fonts/OpenDyslexic-Regular.otf");
 static OPEN_DYSLEXIC_BOLD_OTF: &[u8] = include_bytes!("../../assets/fonts/OpenDyslexic-Bold.otf");
+// the LL viewer 26.5's SecondLife-game-control family is based on it
+// (fonts.xml), with the same codepoints
+pub(crate) static PROMPTFONT_TTF: &[u8] = include_bytes!("../../assets/fonts/Promptfont.ttf");
 
 /// An embedded interface font: its regular face and the face of its
 /// semi-bold texts.
@@ -532,6 +537,8 @@ const NOTO_FALLBACK: &str = "aurora-noto";
 /// Semi-bold face of that fallback, for the semi-bold family.
 const NOTO_SEMIBOLD_FALLBACK: &str = "aurora-noto-semibold";
 const ICON_FALLBACK: &str = "emoji-icon-font";
+/// The game controller pictograms' family and face.
+const GAME_CONTROL: &str = "aurora-game-control";
 
 fn semibold_family() -> egui::FontFamily {
     egui::FontFamily::Name(SEMIBOLD.into())
@@ -544,6 +551,16 @@ fn semibold_family() -> egui::FontFamily {
 pub fn semibold(ctx: &egui::Context) -> egui::FontFamily {
     let known = ctx.fonts(|f| f.definitions().families.contains_key(&semibold_family()));
     if known { semibold_family() } else { egui::FontFamily::Proportional }
+}
+
+/// Family of the game controller pictograms (`ui/options/pages/
+/// game_controls.rs`), PromptFont alone. Its pictograms sit on real arrow
+/// codepoints, so it is never a fallback of the text families, as the LL
+/// viewer keeps SecondLife-game-control apart (fonts.xml). A context without
+/// the viewer's fonts (tests) gets `None`.
+pub fn game_control(ctx: &egui::Context) -> Option<egui::FontFamily> {
+    let family = egui::FontFamily::Name(GAME_CONTROL.into());
+    ctx.fonts(|f| f.definitions().families.contains_key(&family)).then_some(family)
 }
 
 /// Format of a text in the `semibold` family. The `wght` axis makes a
@@ -668,6 +685,11 @@ fn definitions(mut primary: egui::FontData, system: &[fallback::SystemFace]) -> 
             family.insert(before_icons, face.key.clone());
         }
     }
+    // (after the system faces, which join every family before it)
+    defs.font_data
+        .insert(GAME_CONTROL.into(), Arc::new(egui::FontData::from_static(PROMPTFONT_TTF)));
+    defs.families
+        .insert(egui::FontFamily::Name(GAME_CONTROL.into()), vec![GAME_CONTROL.into()]);
     defs
 }
 
@@ -884,6 +906,27 @@ mod tests {
     }
 
     #[test]
+    fn game_control_pictograms_keep_a_family_of_their_own() {
+        let ctx = egui::Context::default();
+        // the fonts are read in a frame, once egui has them
+        let in_frame = |ctx: &egui::Context| {
+            let mut family = None;
+            let mut output = ctx.run_ui(Default::default(), |ui| family = game_control(ui.ctx()));
+            output.textures_delta.clear();
+            family
+        };
+        assert_eq!(in_frame(&ctx), None, "a context without the viewer's fonts");
+        let defs = definitions_for(INTER, &[]);
+        // its glyphs sit on real arrow codepoints: never a fallback of the text
+        for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+            assert!(!defs.families[&family].iter().any(|f| f == GAME_CONTROL), "{family:?}");
+        }
+        install(&ctx, defs);
+        let family = in_frame(&ctx).expect("installed with the interface fonts");
+        assert_eq!(ctx.fonts(|f| f.definitions().families[&family].clone()), [GAME_CONTROL.to_owned()]);
+    }
+
+    #[test]
     fn text_scale_is_live_idempotent_and_survives_font_installation() {
         let ctx = egui::Context::default();
         set_scale(&ctx, 1.4); // theme is loaded before the chosen font
@@ -1055,7 +1098,10 @@ mod tests {
     fn system_text_faces_precede_the_icon_font_in_every_family() {
         let system = fallback::wait();
         let (without, with) = (noto(&[]), noto(system));
-        for (family, fonts) in &with.families {
+        // the controller pictograms draw no text: no system face, no icons
+        let pictograms = egui::FontFamily::Name(GAME_CONTROL.into());
+        assert_eq!(with.families[&pictograms], [GAME_CONTROL.to_owned()]);
+        for (family, fonts) in with.families.iter().filter(|(family, _)| **family != pictograms) {
             let embedded = &without.families[family];
             let text_len = embedded.len() - 1;
             assert_eq!(embedded.last().map(String::as_str), Some(ICON_FALLBACK));

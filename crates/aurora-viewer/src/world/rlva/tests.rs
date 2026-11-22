@@ -5077,3 +5077,28 @@ fn rlva_setenv_reset_is_an_unknown_command_like_the_legacy_viewer() {
     assert!(!environment::command_names(true).iter().any(|name| name == "setenv_reset"));
     assert!(!command_list("setenv_;force").split(';').any(|name| name == "setenv_reset"));
 }
+
+#[test]
+fn the_second_camera_pauses_while_rlva_holds_the_view() {
+    for restriction in [
+        "@setcam_unlock=n",
+        "@camdistmax:2=n",
+        "@camunlock=n",
+        "@setsphere=n",
+        "@setoverlay=n",
+        "@camtextures=n",
+        "@showself=n",
+        "@showselfhead=n",
+    ] {
+        let mut r = enabled();
+        assert!(!r.second_camera_blocked(), "{restriction}");
+        command(&mut r, A, restriction);
+        assert!(r.second_camera_blocked(), "{restriction}");
+        command(&mut r, A, "@clear");
+        assert!(!r.second_camera_blocked(), "{restriction} cleared");
+    }
+    // a restriction that does not touch the view leaves it alone
+    let mut r = enabled();
+    command(&mut r, A, "@tplm=n");
+    assert!(!r.second_camera_blocked());
+}
