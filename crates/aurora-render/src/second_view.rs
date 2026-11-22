@@ -168,6 +168,7 @@ pub(crate) fn packet(main: &FramePacket, job: &SecondViewJob) -> FramePacket {
             width,
             height,
             vsync: main.surface.vsync,
+            minimised: false,
         },
         settings: main.settings,
         hover: None,
