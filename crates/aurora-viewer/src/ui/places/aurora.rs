@@ -50,7 +50,7 @@ const FOOTER_H: f32 = 38.0;
 /// The last visit's column of a wide row.
 const VISIT_W: f32 = 112.0;
 /// Width of the wide list's people figure, before the rating.
-const PEOPLE_W: f32 = 44.0;
+const PEOPLE_W: f32 = 60.0;
 /// FT_TRASH.
 const FOLDER_TRASH: i32 = 14;
 /// DB_INV_ITEM_DESC_STR_LEN - 1: the longest notes a landmark keeps.

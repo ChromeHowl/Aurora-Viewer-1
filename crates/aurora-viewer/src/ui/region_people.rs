@@ -53,7 +53,9 @@ pub fn with_line(ctx: &egui::Context, region: &str, text: &str) -> String {
 pub fn figure(ui: &mut egui::Ui, p: &crate::theme::Palette, people: People) {
     ui.label(egui::RichText::new(people.figure()).size(12.0).color(p.muted))
         .on_hover_text(people.label());
-    ui.add_space(-4.0);
+    // a gap between the number and the icon: with none the two ran into each
+    // other in a dense row (the icon's strokes sat on the digits)
+    ui.add_space(4.0);
     super::widgets::glyph(ui, "users", p.muted, 13.0);
 }
 
