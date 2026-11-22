@@ -912,7 +912,7 @@ fn eye_view_proj(proj: Mat4, view: Mat4, eye: Vec3, exact: bool) -> Mat4 {
 /// the full inverse minus the camera position, both rounded to the f32 of
 /// region coordinates: at skybox heights they shook by about a pixel from one
 /// frame to the next as the camera moved (#1059).
-fn inv_view_proj_rot(proj: Mat4, view: Mat4) -> Mat4 {
+pub(crate) fn inv_view_proj_rot(proj: Mat4, view: Mat4) -> Mat4 {
     let rotation = glam::DMat4::from_mat3(glam::Mat3::from_mat4(view).as_dmat3());
     (proj.as_dmat4() * rotation).inverse().as_mat4()
 }
@@ -11082,8 +11082,8 @@ impl Backend {
                 &crate::soft_shadows::Frame {
                     cascades,
                     splits,
-                    inv_view_proj: Mat4::from_cols_array_2d(&main.inv_view_proj),
-                    camera: Vec3::from_slice(&main.camera_pos[..3]),
+                    proj: fu.proj,
+                    view: fu.view,
                     softness: f.shadow_softness,
                     // the TAA accumulates a new pattern each frame (a photo
                     // keeps one, which its tiles share)
@@ -12747,8 +12747,7 @@ impl Backend {
                     &self.queue,
                     &mut encoder,
                     &crate::fsr::FrameInputs {
-                        view_proj: fu.proj * fu.view,
-                        prev_view_proj: self.prev_view_proj.unwrap_or(unjittered_vp),
+                        motion_reproj: main.motion_reproj,
                         proj: f.proj,
                         jitter: self.taa_jitter,
                         reset: taa.reset || self.prev_view_proj.is_none(),

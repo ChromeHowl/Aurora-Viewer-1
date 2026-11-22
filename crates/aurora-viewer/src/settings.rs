@@ -686,6 +686,9 @@ pub struct Settings {
     pub parcel_music_accounts: std::collections::HashSet<uuid::Uuid>,
     /// Photo window (Firestorm's snapshot floater settings).
     pub snapshot: crate::snapshot::Settings,
+    /// The world look (Preferences › Graphics › Image): a stack of looks of
+    /// its own on the 3D view, apart from the photos' (`snapshot::looks`).
+    pub world_look: crate::snapshot::looks::WorldLook,
     /// Depth of field (Preferences › Graphics).
     pub dof: crate::dof::Settings,
     pub shape_show_hints: bool,
@@ -2105,7 +2108,7 @@ pub(crate) fn max_texture_resolution_choice(v: u32) -> u32 {
         .unwrap_or(MAX_TEXTURE_RESOLUTIONS[0])
 }
 
-const SETTINGS_VERSION: u32 = 43;
+const SETTINGS_VERSION: u32 = 45;
 
 /// The world render percentage that draws at the display's logical
 /// resolution, as the Legacy Viewer does on a Mac with RenderHiDPI 0: 50 on
@@ -2346,6 +2349,9 @@ pub struct AudioSettings {
     pub collision_sounds: bool,
     /// Sounds of other avatars' gestures (EnableGestureSounds, on).
     pub gesture_sounds: bool,
+    /// Where world sounds and media are heard from: the camera or the
+    /// avatar (MediaSoundsEarLocation, panel_preferences_sound.xml; camera).
+    pub media_sounds_ear: VoiceEar,
     /// Doppler shift of moving world sounds, 0 (off) to 2: the Legacy
     /// Viewer's is a fixed 1 (AUDIO_LEVEL_DOPPLER, llvieweraudio.cpp).
     pub doppler: f32,
@@ -2412,6 +2418,7 @@ impl Default for AudioSettings {
             mic_gain: 1.0,
             collision_sounds: true,
             gesture_sounds: true,
+            media_sounds_ear: VoiceEar::Camera,
             doppler: 1.0,
             sound_occlusion: true,
             sound_hrtf: false,
@@ -2426,7 +2433,8 @@ impl Default for AudioSettings {
     }
 }
 
-/// VoiceEarLocation (panel_preferences_sound.xml); SL exposes two choices.
+/// VoiceEarLocation and MediaSoundsEarLocation (panel_preferences_sound.xml):
+/// the same two choices for voice and for sounds and media.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub enum VoiceEar {
     #[default]
@@ -2647,6 +2655,7 @@ impl Default for Settings {
             friends_only: Default::default(),
             parcel_music_accounts: Default::default(),
             snapshot: Default::default(),
+            world_look: Default::default(),
             dof: Default::default(),
             loading_backdrop: true,
             mouse_sensitivity: 1.0,
@@ -3765,6 +3774,21 @@ impl Settings {
             // Preferences › Aurora keeps Instant as a choice
             self.predict_own_motion = false;
         }
+        if self.settings_version < 44 {
+            // Aurora Weather's main and card switches, off by default: an
+            // earlier file keeps on what it drew (upstream's own migration
+            // number was 43; the fork's 43 is the Instant movement above)
+            // (none of its own where regions set the weather)
+            self.weather.upgrade_to_switches();
+        }
+        // only the migration above reads the former region switch
+        self.weather.former_region_weather = None;
+        if self.settings_version < 45 {
+            // the wind's defaults, a breeze: a wind off and left still
+            // takes them, so that switching it on blows (upstream's number
+            // was 44, see the Aurora Weather switches above)
+            self.weather.upgrade_wind_defaults();
+        }
         if !self.audio.mic_gain.is_finite() {
             self.audio.mic_gain = 1.0;
         }
@@ -4076,6 +4100,21 @@ impl Settings {
             }
             copy.write_saved(&path);
         });
+    }
+
+    /// `save`, with the view angle `fov` (radians) written as the user's
+    /// own: the viewfinder puts its focal length in `camera.fov` while it
+    /// is on and gives the user's back when it closes, so a save made in
+    /// the meantime must not keep the focal length.
+    pub fn save_with_fov(&self, fov: Option<f32>) {
+        match fov {
+            Some(fov) if (fov - self.camera.fov).abs() > 1e-6 => {
+                let mut copy = self.clone();
+                copy.camera.fov = fov;
+                copy.save();
+            }
+            _ => self.save(),
+        }
     }
 
     /// What is written to the file: the user's own graphics values while
@@ -5559,6 +5598,41 @@ mod tests {
         assert!(!loaded.inventory.recent_sort.system_first);
         assert_eq!(loaded.inventory.sort, Settings::default().inventory.sort);
         assert_eq!(loaded.inventory.received_sort, Settings::default().inventory.received_sort);
+    }
+
+    /// A file from before Aurora Weather's switches turns on only the
+    /// weather it drew: with "Let regions set the weather" on, none of its
+    /// own, so the main switch stays off. A file from since keeps its
+    /// switch, whatever an older build wrote back.
+    #[test]
+    fn weather_from_before_the_switches_stays_off_where_regions_set_it() {
+        let read = |file: serde_json::Value| serde_json::from_value::<Settings>(file).expect("read settings").sanitized();
+        let own_weather = |regions: Option<bool>| {
+            let mut weather = serde_json::json!({ "amount": 0.6, "wind_max": 0.3, "aurora": true });
+            if let Some(on) = regions {
+                weather["region_weather"] = serde_json::json!(on);
+            }
+            weather
+        };
+        for version in [0, 41, 42, 43] {
+            let regions = read(serde_json::json!({ "settings_version": version, "weather": own_weather(Some(true)) }));
+            assert!(!regions.weather.enabled, "version {version}");
+            assert!(regions.weather.precipitation_on && regions.weather.wind_on, "version {version}");
+            for regions in [None, Some(false)] {
+                let mine = read(serde_json::json!({ "settings_version": version, "weather": own_weather(regions) }));
+                assert!(mine.weather.enabled, "version {version}, {regions:?}");
+            }
+        }
+        let saved = serde_json::to_value(read(
+            serde_json::json!({ "settings_version": 42, "weather": own_weather(Some(true)) }),
+        ))
+        .expect("serialize");
+        assert!(saved["weather"].get("region_weather").is_none());
+        // switched on since: an older build's region switch changes nothing
+        let mut since = own_weather(Some(true));
+        since["enabled"] = serde_json::json!(true);
+        let kept = read(serde_json::json!({ "settings_version": SETTINGS_VERSION, "weather": since }));
+        assert!(kept.weather.enabled && kept.weather.former_region_weather.is_none());
     }
 
     /// ArrowKeysAlwaysMove is off in the Legacy Viewer: the arrows move the

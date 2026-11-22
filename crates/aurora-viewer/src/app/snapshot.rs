@@ -261,6 +261,8 @@ pub(super) struct Snapshots {
     /// The focus distance of the depth of field last frame, for the depth
     /// looks (None: off, the middle of the photo then).
     pub look_focus: Option<f32>,
+    /// The World filters window's state (`ui/world_look.rs`).
+    pub world_ui: crate::ui::world_look::WorldLookUi,
     /// The window was closed when the photo was asked (Ctrl+`).
     quiet: bool,
     /// A photo to disk asked while the renderer draws the frame (the
@@ -276,6 +278,9 @@ pub(super) struct Snapshots {
     /// "Photo quality" was switched on for the first time: held off until
     /// its warning is answered (`Settings::quality_warned`).
     quality_ask: bool,
+    /// The shadow quality and ambient occlusion the renderer was last
+    /// given (`photo_update`).
+    quality_drawn: Option<(u8, u8)>,
     /// The photo's tone curve the renderer last had (`photo_light`): a
     /// new one is applied once.
     tone_applied: Option<u8>,
@@ -335,6 +340,9 @@ pub(super) struct Snapshots {
     /// levelled meanwhile, the next opening takes it back (feedback 585:
     /// leaving the photo mode to change a setting lost the angle).
     pub(super) roll_kept: f32,
+    /// The viewfinder's view while it shows, then when it last closed: the
+    /// next opening takes it back with the tilt (`app::viewfinder`).
+    pub(super) view_kept: Option<crate::snapshot::viewfinder::KeptView>,
     /// The session's photos (`app::photo_reel`).
     pub(super) reel: super::photo_reel::ReelState,
     /// Choosing for the isolation (`app::photo_isolate`): the points asked
@@ -532,12 +540,14 @@ impl Default for Snapshots {
             luts: None,
             lut_import: None,
             look_focus: None,
+            world_ui: Default::default(),
             quiet: false,
             to_disk: false,
             to_pano: false,
             confirm: None,
             short: None,
             quality_ask: false,
+            quality_drawn: None,
             tone_applied: None,
             upload: None,
             message_item: None,
@@ -564,6 +574,7 @@ impl Default for Snapshots {
             vf_free_up: 0.0,
             fov_before: None,
             roll_kept: 0.0,
+            view_kept: None,
             reel: Default::default(),
             isolate_picks: Vec::new(),
             isolate_point: None,
@@ -656,7 +667,7 @@ impl App {
     pub(super) fn photo_frame(&mut self, renderer: &mut Renderer) -> Option<PhotoFrame> {
         let textures = &self.scene.textures;
         let (paused, pending, passes) = (textures.drawing_paused(), textures.pending_in_view(), textures.wants_passes());
-        let occlusion = self.settings.ssao > 0;
+        let occlusion = self.photo_ambient_occlusion() > 0;
         let near = self.camera.near;
         let s = &mut self.snapshots;
         s.capturing = None;
@@ -1405,7 +1416,7 @@ impl App {
         let interface = !plain && s.interface && snapshot::same_proportions(full, window);
         let huds = !plain && s.huds;
         // (with the ambient occlusion on: GTAO may be forced over its method)
-        let context = ContextPass::plan(size, tiles.len(), self.settings.ssao > 0)
+        let context = ContextPass::plan(size, tiles.len(), self.photo_ambient_occlusion() > 0)
             .within(self.photo_max_side(renderer), self.photo_max_pixels(renderer));
         // what the photo is drawn with, for the honest list of its effects
         // (`snapshot::effects`)
@@ -1421,7 +1432,7 @@ impl App {
             bloom: reach.bloom,
             dof: reach.dof,
             contact: reach.contact,
-            ao: (self.settings.ssao > 0).then_some(false),
+            ao: (self.photo_ambient_occlusion() > 0).then_some(false),
         };
         self.snapshots.job = Some(Job {
             purpose,
@@ -2254,7 +2265,7 @@ impl App {
     }
 
     /// Every frame: the saves, thumbnails, dialogs and preview to follow.
-    pub(super) fn photo_update(&mut self, renderer: &Renderer) {
+    pub(super) fn photo_update(&mut self, renderer: &mut Renderer) {
         if std::mem::take(&mut self.snapshots.to_disk) {
             self.snapshots.quiet = !self.panels.snapshot;
             self.photo_take(renderer, None);
@@ -2266,10 +2277,18 @@ impl App {
         self.photo_pano_update();
         self.photo_long_capture();
         self.photo_demo(renderer);
+        self.world_look_demo();
         self.photo_reel_demo(renderer);
         self.photo_luts_update();
         self.photo_quality(renderer);
         self.photo_light();
+        // the photo's shadows and occlusion reach the renderer when they
+        // change (the window opening and closing included), not every frame
+        let drawn = (self.photo_shadow_quality(), self.photo_ambient_occlusion());
+        if self.snapshots.quality_drawn != Some(drawn) {
+            self.snapshots.quality_drawn = Some(drawn);
+            renderer.apply_settings(self.render_settings_now());
+        }
         self.photo_free_camera();
         if let Some(t) = self.snapshots.detail_wait {
             let pending = self.scene.textures.pending_in_view();
@@ -2484,6 +2503,43 @@ impl App {
         }
     }
 
+    /// The LUTs' actions of the looks editor: import, remove, open their
+    /// folder (the photo window's, the Director's and the World filters' window).
+    pub(super) fn photo_lut_action(&mut self, action: Action) {
+        match action {
+            Action::ImportLut => {
+                if self.snapshots.lut_import.is_some() {
+                    return;
+                }
+                let dir = self.photo_luts().dir().to_path_buf();
+                let (tx, rx) = crossbeam_channel::bounded(1);
+                std::thread::spawn(move || {
+                    let picked = rfd::FileDialog::new()
+                        .set_title(aurora_i18n::tr!("photo-lut-dialog"))
+                        .add_filter(aurora_i18n::tr!("photo-lut-files"), &["cube", "CUBE"])
+                        .pick_files();
+                    let _ = tx.send(picked.map(|paths| LutLibrary::import_all(&dir, &paths)));
+                });
+                self.snapshots.lut_import = Some(rx);
+            }
+            Action::RemoveLut(name) => {
+                if let Err(e) = self.photo_luts().remove(&name) {
+                    log::warn!("photo LUT {name} not removed: {e}");
+                }
+                let id = format!("{}{name}", looks::LUT);
+                self.settings.snapshot.looks.retain(|l| l.id != id);
+                self.settings.world_look.looks.retain(|l| l.id != id);
+                self.settings.save();
+            }
+            Action::OpenLutFolder => {
+                let dir = self.photo_luts().dir().to_path_buf();
+                let _ = std::fs::create_dir_all(&dir);
+                gallery::reveal(&dir, None);
+            }
+            _ => {}
+        }
+    }
+
     /// What the photo window asked.
     pub(super) fn photo_action(&mut self, action: Action, renderer: &Renderer) {
         match action {
@@ -2548,11 +2604,7 @@ impl App {
                 }
             }
             Action::PersonalLighting => self.panels.personal_lighting = true,
-            Action::KeepLight => {
-                if self.world.eep.keep_photo() {
-                    self.snapshots.ui.light.env = Default::default();
-                }
-            }
+            Action::KeepLight => self.keep_photo_light(),
             Action::KeepStyle => {
                 let s = &mut self.settings;
                 if snapshot::style::keep(&mut self.snapshots.ui.light, &mut s.tonemapper, &mut s.render_extras.grade) {
@@ -2628,34 +2680,7 @@ impl App {
                 self.settings.save();
             }
             Action::Saved => self.settings.save(),
-            Action::ImportLut => {
-                if self.snapshots.lut_import.is_some() {
-                    return;
-                }
-                let dir = self.photo_luts().dir().to_path_buf();
-                let (tx, rx) = crossbeam_channel::bounded(1);
-                std::thread::spawn(move || {
-                    let picked = rfd::FileDialog::new()
-                        .set_title(aurora_i18n::tr!("photo-lut-dialog"))
-                        .add_filter(aurora_i18n::tr!("photo-lut-files"), &["cube", "CUBE"])
-                        .pick_files();
-                    let _ = tx.send(picked.map(|paths| LutLibrary::import_all(&dir, &paths)));
-                });
-                self.snapshots.lut_import = Some(rx);
-            }
-            Action::RemoveLut(name) => {
-                if let Err(e) = self.photo_luts().remove(&name) {
-                    log::warn!("photo LUT {name} not removed: {e}");
-                }
-                let id = format!("{}{name}", looks::LUT);
-                self.settings.snapshot.looks.retain(|l| l.id != id);
-                self.settings.save();
-            }
-            Action::OpenLutFolder => {
-                let dir = self.photo_luts().dir().to_path_buf();
-                let _ = std::fs::create_dir_all(&dir);
-                gallery::reveal(&dir, None);
-            }
+            Action::ImportLut | Action::RemoveLut(_) | Action::OpenLutFolder => self.photo_lut_action(action),
             Action::Reel(a) => self.photo_reel_action(a, renderer),
             Action::ProfileLoad(name) => self.photo_profile_load(&name),
             Action::ProfileRename(old, new) => {
@@ -2702,7 +2727,8 @@ impl App {
     /// The tables' list for the interface, and an import that came back:
     /// the table chosen and said.
     fn photo_luts_update(&mut self) {
-        if !self.panels.snapshot {
+        // (the world's filters read a table of the library too)
+        if !(self.panels.snapshot || self.panels.world_look || self.settings.world_look.on) {
             return;
         }
         self.photo_luts().poll();
@@ -2718,6 +2744,7 @@ impl App {
         let Some(rx) = &self.snapshots.lut_import else { return };
         let Ok(result) = rx.try_recv() else { return };
         self.snapshots.lut_import = None;
+        let to_world = std::mem::take(&mut self.snapshots.world_ui.importing);
         let Some(results) = result else { return };
         // the tables kept, the first one chosen; the failures said together
         let mut first = None;
@@ -2743,7 +2770,19 @@ impl App {
                 aurora_i18n::tr!("photo-lut-imported-many", count = count)
             };
             let id = format!("{}{name}", looks::LUT);
-            self.snapshots.ui.looks.pick(&mut self.settings.snapshot, &id);
+            if to_world {
+                let world = &mut self.settings.world_look;
+                self.snapshots
+                    .world_ui
+                    .looks
+                    .pick(&mut crate::ui::looks_editor::Stack::world(world), &id);
+                world.on = true;
+            } else {
+                self.snapshots
+                    .ui
+                    .looks
+                    .pick(&mut crate::ui::looks_editor::Stack::photo(&mut self.settings.snapshot), &id);
+            }
             self.settings.save();
             self.snapshots.message = Some((text.clone(), false));
             let now = self.egui_ctx.input(|i| i.time);
@@ -3426,7 +3465,7 @@ LUT_3D_SIZE {n}
     /// the user's own as soon as it closes.
     fn photo_light(&mut self) {
         if !self.panels.snapshot {
-            self.snapshots.ui.light = snapshot::light::PhotoLight::default();
+            self.snapshots.ui.light = self.snapshots.ui.light.closed();
             // the outfit's auto portrait in its studio light
             if let Some(studio) = self.outfit_portrait_light() {
                 self.world.eep.set_photo(studio);
@@ -3449,6 +3488,15 @@ LUT_3D_SIZE {n}
         if light.tonemapper != self.snapshots.tone_applied {
             self.snapshots.tone_applied = light.tonemapper;
             self.snapshots.settings_changed = true;
+        }
+    }
+
+    /// "Keep this light" (the photo window's button and Phototools'
+    /// banner): the photo's environment becomes the user's own, and only it
+    /// (`EnvSelector::keep_photo`).
+    pub(super) fn keep_photo_light(&mut self) {
+        if self.world.eep.keep_photo() {
+            self.snapshots.ui.light.env = Default::default();
         }
     }
 
@@ -3490,7 +3538,17 @@ LUT_3D_SIZE {n}
     /// `apply_settings` takes, so that a change of settings or a GPU
     /// recovery during the photo mode keeps the photo's curve.
     pub(super) fn render_settings_now(&self) -> aurora_render::RenderSettings {
-        render_settings_with(&self.settings, &self.snapshots.ui.light)
+        render_settings_with(&self.settings, &self.snapshots.ui.light, self.panels.snapshot)
+    }
+
+    /// The shadow quality the world is drawn with (`snapshot::light`).
+    pub(super) fn photo_shadow_quality(&self) -> u8 {
+        snapshot::light::drawn_levels(&self.settings, &self.snapshots.ui.light, self.panels.snapshot).0
+    }
+
+    /// The ambient occlusion the world is drawn with (`snapshot::light`).
+    pub(super) fn photo_ambient_occlusion(&self) -> u8 {
+        snapshot::light::drawn_levels(&self.settings, &self.snapshots.ui.light, self.panels.snapshot).1
     }
 
     /// The sun's shadows the frame is drawn with: the photo's, else
@@ -3507,13 +3565,19 @@ LUT_3D_SIZE {n}
     /// Light section's rows.
     fn photo_shadow_view(&self) -> crate::ui::snapshot::ShadowView {
         crate::ui::snapshot::ShadowView {
+            quality: self.settings.shadow_quality,
+            occlusion: self.settings.ssao,
+            boost: self.settings.photo_held.is_some(),
+            held: self.photo_busy(),
             softness: self.settings.shadow_softness,
             intensity: self.settings.shadow_intensity,
             soft: self.settings.soft_shadows,
         }
     }
 
-    /// The photo's light holds the clouds still.
+    /// The clouds are held still: a switch of the session (never saved)
+    /// shared by the photo window and Phototools, kept when the photo
+    /// window closes (`PhotoLight::closed`).
     pub(super) fn photo_clouds_paused(&self) -> bool {
         self.snapshots.ui.light.clouds_paused
     }
@@ -4118,7 +4182,7 @@ pub(crate) fn photo_place(w: &crate::world::World) -> String {
 }
 
 /// The Light section's view of the environment beneath the photo's.
-fn env_view<'a>(
+pub(super) fn env_view<'a>(
     env_ui: &'a crate::ui::environment::EnvironmentUi,
     eep: &crate::world::eep_env::EnvSelector,
 ) -> crate::ui::snapshot::EnvView<'a> {
@@ -4139,8 +4203,9 @@ fn env_view<'a>(
 pub(super) fn render_settings_with(
     settings: &crate::settings::Settings,
     light: &crate::snapshot::light::PhotoLight,
+    open: bool,
 ) -> aurora_render::RenderSettings {
-    let mut r = settings.render_settings();
+    let mut r = snapshot::light::render_settings(settings, light, open);
     r.tonemapper = crate::settings::tonemapper_of(snapshot::style::tonemapper(light, settings.tonemapper));
     r
 }

@@ -455,10 +455,11 @@ pub struct ObjGpu {
     pub built_faces: usize,
     pub is_avatar: bool,
     pub parcel_hidden: bool,
-    /// Left out by the photo's isolation (`snapshot::isolate`) or by a
-    /// hidden rendering type (`render_types`): kept, only flagged for the
-    /// GPU lists (`object_flags::HIDDEN`) and left out of the CPU ones and
-    /// of the picking, so that it comes back at once.
+    /// Left out by a hidden rendering type (`render_types`), the avatar
+    /// studio or, for an avatar and what it wears, the photo's isolation
+    /// (`snapshot::isolate::View::Gone`): kept, only flagged for the GPU
+    /// lists (`object_flags::HIDDEN`) and left out of the CPU ones and of
+    /// the picking, so that it comes back at once.
     pub hidden: bool,
     /// What our avatar wears and RLVa's @showself or @showselfhead hide: not
     /// drawn, and not picked either, the ray going on to what is behind
@@ -466,6 +467,12 @@ pub struct ObjGpu {
     /// drawable type, which LLOctreeIntersect::check skips,
     /// llspatialpartition.cpp).
     pub rlva_hidden: bool,
+    /// A linkset the photo's isolation leaves out of the picture only
+    /// (`snapshot::isolate::View::Unseen`, `object_flags::UNSEEN`): out of
+    /// the main view and of the picking, still casting its shadow and in
+    /// the reflections and probes, so that the subject keeps the scene's
+    /// light (#2316).
+    pub unseen: bool,
     pub hud: bool,
     pub sculpt_wait: Option<Uuid>,
     /// Avatar wearing this object (attachments), for the avatar limit.
@@ -565,6 +572,7 @@ impl ObjGpu {
             (posed.is_some(), object_flags::POSED),
             (self.first_person_hidden, object_flags::FIRST_PERSON_HIDDEN),
             (self.hidden, object_flags::HIDDEN),
+            (self.unseen, object_flags::UNSEEN),
             (self.physical, object_flags::PHYSICAL),
         ] {
             if on {
@@ -675,7 +683,9 @@ fn object_visibility(
     if d - sr > ctx.draw_distance && !g.is_avatar {
         return None;
     }
-    let in_view = ctx.view.sphere_visible(sc, sr);
+    // (left out of the photo's picture only: out of the view, the rest
+    // as the entire scene, #2316)
+    let in_view = !g.unseen && ctx.view.sphere_visible(sc, sr);
     let casts = ctx.shadows && d - sr < ctx.shadow_distance;
     let reflects = ctx.reflections && d - sr < ctx.reflection_distance;
     let probes = ctx.reflections;
@@ -2942,13 +2952,18 @@ impl Scene {
         let types = self.hidden_types;
         // and the selection HideSelectedObjects hides (LLPipeline::markVisible)
         let selected = std::mem::take(&mut self.hidden_selected);
-        // (a HUD is no rendering type: it stays)
-        // and those the Shadow Realm hides, with what they wear and own
+        // (hidden, unseen); a HUD is no rendering type: it stays; the
+        // selection and what the Shadow Realm hides (with what they wear and
+        // own) are gone altogether
         let left_out = |idx: usize, hud: bool| {
-            !isolate::object_visible(world, idx)
-                || (!hud && types.hides_object(world, idx))
-                || selected.binary_search(&idx).is_ok()
-                || world.shadow_hides_index(idx)
+            if (!hud && types.hides_object(world, idx)) || selected.binary_search(&idx).is_ok() || world.shadow_hides_index(idx) {
+                return (true, false);
+            }
+            match isolate::object_view(world, idx) {
+                isolate::View::Drawn => (false, false),
+                isolate::View::Unseen => (false, true),
+                isolate::View::Gone => (true, false),
+            }
         };
         let studio_roots = if world.avatar_studio {
             isolate::studio_roots(world)
@@ -2970,16 +2985,16 @@ impl Scene {
             self.studio_visible = world.avatar_studio;
             self.studio_roots = studio_roots;
             for (idx, g) in self.gpu.iter_mut().enumerate() {
-                let hidden = left_out(idx, g.hud);
-                if g.hidden != hidden {
-                    g.hidden = hidden;
+                let out = left_out(idx, g.hud);
+                if (g.hidden, g.unseen) != out {
+                    (g.hidden, g.unseen) = out;
                     renderer.cull.objects.set(idx, g.cull_object(idx));
                 }
             }
         } else if iso.hides() || types.any_object() || !selected.is_empty() || world.shadow_realm.active() || world.avatar_studio {
             for &idx in synced {
                 if let Some(g) = self.gpu.get_mut(idx) {
-                    g.hidden = left_out(idx, g.hud);
+                    (g.hidden, g.unseen) = left_out(idx, g.hud);
                 }
             }
         }
@@ -3200,13 +3215,7 @@ impl Scene {
         // environment selector's items)
         for id in world.eep.wanted_settings() {
             match self.settings.get(id) {
-                settings::SettingsState::Ready(s) => {
-                    // its Aurora Weather, from its name, before it applies
-                    if let settings::MapState::Ready(map) = self.settings.map(id) {
-                        world.eep.note_asset_weather(id, crate::weather::region::of_settings(&map));
-                    }
-                    world.eep.on_settings(id, Some(s));
-                }
+                settings::SettingsState::Ready(s) => world.eep.on_settings(id, Some(s)),
                 settings::SettingsState::Failed => world.eep.on_settings(id, None),
                 settings::SettingsState::Pending => {}
             }
@@ -6476,6 +6485,15 @@ fn shrink_joint(palette: &mut [[[f32; 4]; 4]], rig: &anim::Rig, root: usize, sca
         }
     }
 }
+/// An avatar's head as a lens sees it, in the world: mHead, the way the
+/// face looks (the head's X axis) and the joints of its two eyes, left
+/// then right (None on a skeleton without them).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Face {
+    pub head: Vec3,
+    pub forward: Vec3,
+    pub eyes: Option<(Vec3, Vec3)>,
+}
 
 impl Scene {
     /// World position of an avatar's head as posed last frame.
@@ -6489,6 +6507,30 @@ impl Scene {
             Some(h) => p + r * (h - world.avatar_lib.pelvis),
             None => p + r * Vec3::new(0.0, 0.0, 0.65),
         })
+    }
+
+    /// An avatar's head as a lens sees it (`Face`), as posed last frame.
+    pub fn face_world(&self, world: &World, id: &Uuid, now: Instant) -> Option<Face> {
+        let head = self.head_world(world, id, now)?;
+        let idx = world.objects.index_of_uuid(id)?;
+        let (p, r, _) = Self::object_transform(world, idx, now, 0)?;
+        if world.avatar_studio && *id == world.agent_id && self.studio_pose != crate::avatar_studio::Pose::Animated {
+            let eyes = self
+                .joint_world(world, id, "mEyeLeft", now)
+                .zip(self.joint_world(world, id, "mEyeRight", now));
+            return Some(Face {
+                head,
+                forward: r * Vec3::X,
+                eyes,
+            });
+        }
+        let motion = self.motions.get(id);
+        let eyes = motion.and_then(|c| c.eyes_each()).map(|(left, right)| {
+            let place = |e: Vec3| p + r * (e - world.avatar_lib.pelvis);
+            (place(left), place(right))
+        });
+        let forward = r * motion.and_then(|c| c.head_rotation()).unwrap_or(Quat::IDENTITY) * Vec3::X;
+        Some(Face { head, forward, eyes })
     }
 
     /// The point between an avatar's eyes, animated (`anim::Controller::eyes_pos`),
