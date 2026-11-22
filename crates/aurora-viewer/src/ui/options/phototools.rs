@@ -348,7 +348,7 @@ pub(super) fn draw(cx: &mut Cx, section: Section, mut photo: Option<&mut PhotoLa
                     // level, which the rows' own declarations read from the
                     // saved settings. None of these settings is edited by a
                     // borrowed row of this pass.
-                    let saved = photo.as_deref().map(|photo| {
+                    let saved = photo.as_deref().map(|_| {
                         let saved = cx.s.dof.enabled;
                         cx.s.dof.enabled = cx.s.snapshot.dof.enabled;
                         saved

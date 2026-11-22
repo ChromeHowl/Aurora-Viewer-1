@@ -662,7 +662,7 @@ mod tests {
         ];
         for (name, change) in changes {
             let mut s = Settings::default();
-            let mut held = boost(&mut s);
+            let mut held = boost(&mut s, Tune::default());
             let mut changed = s.clone();
             change(&mut changed);
             assert_ne!(Values::read(&changed), Values::read(&s), "{name}: the change must differ");

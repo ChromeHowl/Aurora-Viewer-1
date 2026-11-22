@@ -132,7 +132,7 @@ fn folded(text: &str) -> impl Iterator<Item = char> + '_ {
 /// The name a row shows, as LLFolderViewModelItem::getSearchableName gives it.
 fn row_name(inv: &Inventory, id: Uuid) -> String {
     match inv.items.get(&id) {
-        Some(item) => shown_name(item).to_owned(),
+        Some(item) => item.name.clone(),
         None => folder_name(inv, id),
     }
 }

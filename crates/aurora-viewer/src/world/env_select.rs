@@ -344,7 +344,6 @@ mod tests {
             item: Uuid::from_u128(n),
             name: n.to_string(),
             asset: Uuid::from_u128(n + 100),
-            weather: false,
         };
         let mut list = vec![c(1), c(2), c(3), c(4)];
         let pbr = [Uuid::from_u128(103), Uuid::from_u128(104)];
