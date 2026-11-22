@@ -158,6 +158,8 @@ mod reset_skeleton;
 mod restart_evacuation;
 mod revoke_on_sit;
 mod rlva;
+#[cfg(test)]
+mod rlva_location_tests;
 mod rlva_selftest;
 mod safe_graphics;
 mod script_clicks;
@@ -687,6 +689,8 @@ pub struct App {
     temp_run: Option<u8>,
     /// @temprun as of the last RLVa update, to catch its changes.
     rlva_temprun: bool,
+    /// @edit as of the last RLVa update, to close the build tools as it comes.
+    rlva_edit: bool,
     /// "Always run" (Ctrl+R).
     always_run: bool,
     /// The Controls window (`ui/controls.rs`), the keys its buttons and
@@ -807,6 +811,11 @@ pub struct App {
     layout_autosave: ui::layout::Autosave,
     loading_stage: String,
     move_complete_at: Option<Instant>,
+    /// Where a teleport that keeps the camera's direction goes (the RLVa
+    /// @standtp return, LLAgent::doTeleportViaLocationLookAt with no
+    /// look-at, which sets mbTeleportKeepsLookAt): on arrival there the
+    /// avatar turns to where the camera looks.
+    tp_keeps_look_at: Option<glam::Vec3>,
     /// Teleport diagnostics still to log (seconds after the arrival).
     tp_checks: Vec<f32>,
     /// Debug: culling view kept while "Freeze culling" is on.
@@ -1805,7 +1814,7 @@ impl App {
         {
             settings.audio.mute_when_minimized = mode != "off";
         }
-        aurora_i18n::select(&settings.language, crate::cli::get().language.as_deref());
+        crate::language_file::select(&settings.language, settings.custom_language);
         if std::env::var_os("AURORA_DEMO").is_some() && std::env::var_os("AURORA_DEMO_KEYBOARD").is_some() {
             // Exercise a first launch without changing the user's bindings.
             settings.keybinds = Default::default();
@@ -1841,7 +1850,7 @@ impl App {
                 (socks.enabled && socks.user_pass).then(|| socks_credentials.get()).flatten(),
             ),
         )?;
-        net.set_agent_language(aurora_i18n::language(), settings.language_is_public);
+        net.set_agent_language(aurora_i18n::grid_language(), settings.language_is_public);
         let voice_http = net.caps_http();
         let login_info = ui::news::LoginInfo::start(net.runtime());
         let updater = crate::updater::Updater::new(net.runtime(), settings.update_channel);
@@ -2098,6 +2107,7 @@ impl App {
             last_tap: None,
             temp_run: None,
             rlva_temprun: false,
+            rlva_edit: false,
             always_run: false,
             controls_ui: Default::default(),
             camera_status: Default::default(),
@@ -2151,6 +2161,7 @@ impl App {
             layout_autosave: Default::default(),
             loading_stage: String::new(),
             move_complete_at: None,
+            tp_keeps_look_at: None,
             tp_checks: Vec::new(),
             frozen_cull: None,
             texture_motion: Default::default(),
@@ -2556,8 +2567,7 @@ impl App {
         if self.blender_live.local_command(&cmd, &self.world) {
             return;
         }
-        self.world.rlva_configure(self.settings.rlva_enabled);
-        self.world.rlva.preferences.clone_from(&self.settings.rlva);
+        self.rlva_sync_settings();
         if !self.settings.rlva_enabled {
             self.named_teleport.cancel_scripts();
             self.world.maturity.cancel_script_teleports();
@@ -2572,8 +2582,12 @@ impl App {
             crate::world::rlva::Boundary::Send => {}
             crate::world::rlva::Boundary::Dropped => return,
             crate::world::rlva::Boundary::Refused => {
-                self.world
-                    .system_notice(aurora_i18n::tr!("rlva-blocked"), crate::world::notice_topics::Topic::Warning);
+                let blocked = aurora_i18n::tr!("rlva-blocked");
+                self.world.system_notice(blocked, crate::world::notice_topics::Topic::Warning);
+                // answered at once, as the demo answers a change it applies
+                if let Some(reply) = crate::world::rlva::refused_reply(&cmd, blocked) {
+                    self.on_app_event(reply);
+                }
                 return;
             }
         }
@@ -3499,6 +3513,10 @@ impl App {
                 crate::world::social_history::grid_key(&s.grid, &s.custom_login_uri)
             };
         }
+        // ChatServiceEnabled: the manager reads it when the login starts
+        self.world.chat_service.enabled = s.chat_service_history;
+        // AURORA_DEMO_CHATLOG=service: every run fetches the same history
+        self.world.chat_service.fresh_folder = self.demo && crate::demo::chatlog::mode() == Some(crate::demo::chatlog::Mode::Service);
         let log = &mut self.world.chat_log;
         log.cfg = crate::world::chat_log::Config {
             log_im: s.log_im,
@@ -4614,13 +4632,6 @@ impl App {
                         crate::settings::account_dir(&l.agent_id).join(crate::world::hover_height::FILE),
                     )
                 };
-                self.world.rlva.last_points = if self.demo {
-                    Default::default()
-                } else {
-                    crate::world::rlva::last_points::LastPoints::load(
-                        crate::settings::account_dir(&l.agent_id).join(crate::world::rlva::last_points::FILE),
-                    )
-                };
                 self.load_region_titles(l.agent_id);
                 self.script_recovery_login(l.agent_id);
                 self.chat_ui.recent_emojis = if self.demo {
@@ -4823,6 +4834,7 @@ impl App {
                 if !self.world.arrived_by_crossing {
                     self.vr_rebase_after_travel();
                     let local = self.world.arrived_by_local_teleport;
+                    self.keep_look_at_on_arrival();
                     self.camera.on_teleport_arrival(&self.settings.camera, local);
                     self.camera_tools.on_teleport(local);
                     log::info!(
@@ -5690,21 +5702,24 @@ impl App {
             Action::PathPlayStop => self.path_play_stop(),
             Action::PathCapture => self.path_capture(),
             Action::LensZoomIn | Action::LensZoomOut | Action::LensZoomDefault => {
-                if self.world.rlva.camera_owner().is_none() {
-                    let aspect = self.view_aspect();
-                    let factor = match action {
-                        Action::LensZoomIn => Some(1.0 / 1.2),
-                        Action::LensZoomOut => Some(1.2),
-                        _ => None,
-                    };
-                    let current = self.camera.flycam.as_ref().map_or(self.settings.camera.fov, |flight| flight.fov);
-                    self.settings.camera.fov = crate::camera::zoom_lens(current, factor, aspect, self.world.rlva.camera_fov_limits(aspect));
-                    if let Some(flight) = &mut self.camera.flycam {
-                        flight.set_fov(self.settings.camera.fov);
-                    }
-                    if !self.demo {
-                        self.settings.save();
-                    }
+                // LLZoomer (indra/newview/llviewermenu.cpp): no RLVa check,
+                // the lens bounded by the fov limits only; it zooms from the
+                // lens shown, a forced one included, which it replaces
+                let aspect = self.view_aspect();
+                let factor = match action {
+                    Action::LensZoomIn => Some(1.0 / 1.2),
+                    Action::LensZoomOut => Some(1.2),
+                    _ => None,
+                };
+                let shown = self.world.rlva.camera_settings(&self.settings.camera, aspect).fov;
+                let current = self.camera.flycam.as_ref().map_or(shown, |flight| flight.fov);
+                self.settings.camera.fov = crate::camera::zoom_lens(current, factor, aspect, self.world.rlva.camera_fov_limits(aspect));
+                self.world.rlva.user_chose_fov();
+                if let Some(flight) = &mut self.camera.flycam {
+                    flight.set_fov(self.settings.camera.fov);
+                }
+                if !self.demo {
+                    self.settings.save();
                 }
             }
             Action::ResetCamera => {
@@ -5731,7 +5746,19 @@ impl App {
             Action::ContactSets => self.people_tab_shortcut(ui::people::TAB_SETS),
             Action::Inventory => ui::widgets::toggle_floater(&self.egui_ctx, "inventory", &mut self.panels.inventory),
             Action::NewInventoryWindow => self.inventory_ui.open_additional_window(&self.egui_ctx),
-            Action::Appearance => ui::widgets::toggle_floater(&self.egui_ctx, "appearance", &mut self.panels.appearance),
+            // The shortcut of Me › Appearance (menu_viewer.xml's "Outfits"),
+            // which LLEditEnableCustomizeAvatar (indra/newview/llviewermenu.cpp)
+            // greys while RlvActions::canStand refuses: a greyed entry's
+            // shortcut does nothing.
+            Action::Appearance => {
+                let held = self.world.agent.is_sitting()
+                    && !self
+                        .world
+                        .rlva_allows_command(&NetCommand::OneShotControl(control::STAND_UP), uuid::Uuid::nil());
+                if !held {
+                    ui::widgets::toggle_floater(&self.egui_ctx, "appearance", &mut self.panels.appearance);
+                }
+            }
             Action::Quit => self.request_exit(),
             Action::TextureLibrary => ui::widgets::toggle_floater(
                 &self.egui_ctx,
@@ -6889,14 +6916,10 @@ impl App {
                 );
             }
         }
-        // FSCommon::send_message_to_script_channel: a whisper
-        if a.stream_title_announce && a.stream_title_channel != 0 {
+        // FSCommon::send_message_to_script_channel: a whisper, past RLVa
+        if a.stream_title_announce {
             let channel = a.stream_title_channel;
-            self.send(NetCommand::Chat {
-                message: title.to_owned(),
-                channel,
-                chat_type: aurora_net::ChatType::Whisper,
-            });
+            self.send_to_script_channel(title, channel);
         }
     }
 
@@ -6977,7 +7000,9 @@ impl App {
         static HOLD: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
         let hold = *HOLD.get_or_init(|| std::env::var("AURORA_THUNDER_HOLD").ok().and_then(|v| v.parse().ok()));
         let flash = hold.unwrap_or(self.thunder.flash);
-        if flash <= 0.001 {
+        // @setenv owns the scene's light (RlvEnvironment, rlvenvironment.cpp):
+        // the flash lights nothing while it is held, its sound stays
+        if flash <= 0.001 || self.world.rlva.has("setenv") {
             return;
         }
         let lum = |c: Vec3| c.dot(Vec3::new(0.2126, 0.7152, 0.0722));
@@ -7012,6 +7037,8 @@ impl App {
     fn update_weather_now(&mut self) {
         use crate::weather::region::{RegionDay, SkyWeather};
         let own = &self.settings.weather;
+        // @setenv holds the weather in effect, as it holds the rest of the environment
+        let locked = self.world.rlva.has("setenv");
         let secs = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0.0, |d| d.as_secs_f64());
@@ -7028,7 +7055,11 @@ impl App {
             .or_else(|| self.day_editor.weather_preview());
         use crate::weather::WeatherSource;
         if let Some((weather, falling)) = preview {
-            self.weather_now = RegionDay::fixed(weather).apply(own, region, secs, falling);
+            rlva::rlva_hold_weather(
+                &mut self.weather_now,
+                RegionDay::fixed(weather).apply(own, region, secs, falling),
+                locked,
+            );
             self.env_ui.weather_source = WeatherSource::Preview;
             return;
         }
@@ -7040,7 +7071,7 @@ impl App {
             if due {
                 self.snow_lying = (day.snow_lying(region, secs), Some(Instant::now()));
             }
-            self.weather_now = day.apply(own, region, secs, false);
+            rlva::rlva_hold_weather(&mut self.weather_now, day.apply(own, region, secs, false), locked);
             self.env_ui.weather_source = WeatherSource::MySky;
             return;
         }
@@ -7091,7 +7122,7 @@ impl App {
         } else {
             WeatherSource::Mine
         };
-        self.weather_now = now.unwrap_or_else(|| own.clone());
+        rlva::rlva_hold_weather(&mut self.weather_now, now.unwrap_or_else(|| own.clone()), locked);
     }
 
     /// Where the footprints' map is centred: my avatar (zooming the camera
@@ -8239,11 +8270,19 @@ impl App {
                 );
             } else {
                 // the name is a link to the resident, as in the Legacy Viewer's chat;
-                // checked for keywords as nearby chat (FSRadar::radarAlertMsg)
+                // checked for keywords as nearby chat (FSRadar::radarAlertMsg).
+                // Under RLVa's `@shownames` the line is from
+                // FSRadarEntry::getRadarName, everyone's stand-in, and the
+                // chat writes it as plain text (`mRlvNamesFiltered`).
                 let name = ui::people::radar_name(&self.world, &id, s.name_format);
                 self.world
                     .keyword_alert(id, &name, &text, true, crate::world::attention::Open::NearbyChat);
-                self.world.system_message(format!("secondlife:///app/agent/{id}/about {text}"));
+                let line = if self.world.rlva.has("shownames") {
+                    format!("{name} {text}")
+                } else {
+                    format!("secondlife:///app/agent/{id}/about {text}")
+                };
+                self.world.system_message(line);
             }
         }
     }
@@ -8865,6 +8904,20 @@ impl App {
                 _ => None,
             }
         };
+        // LLToolSelect::handleObjectSelection (lltoolselect.cpp): under
+        // @fartouch, a click on a surface within 1.5 m of an object whose
+        // own place is too far leaves the build tools (leaveBuildMode); on a
+        // farther surface it selects nothing and the tools stay.
+        if let (Some(idx), Some(point)) = (target, hit)
+            && self.build.tool == crate::build::Tool::Edit
+            && crate::build::selectable_within(&self.world, idx)
+            && !self.world.rlva_within_fartouch(idx)
+            && point.distance(self.world.agent.position) <= 1.5
+        {
+            self.build.close(&mut self.world, &mut self.settings.build);
+            self.flush_build();
+            return true;
+        }
         let used = self.build.mouse_down(
             &mut self.world,
             &mut self.settings.build,
@@ -9098,8 +9151,7 @@ impl App {
 
     /// RlvActions::canTeleport*: reject before UI and demo side effects.
     fn user_teleport_allowed(&mut self, command: &NetCommand) -> bool {
-        self.world.rlva_configure(self.settings.rlva_enabled);
-        self.world.rlva.preferences.clone_from(&self.settings.rlva);
+        self.rlva_sync_settings();
         if self.world.rlva_allows_command(command, uuid::Uuid::nil()) {
             true
         } else {
@@ -9173,6 +9225,14 @@ impl App {
     fn send_deferred_teleport(&mut self, command: NetCommand, actor: uuid::Uuid, portal: bool) {
         if (portal && !self.world.rlva_allows_portal_crossing()) || (actor.is_nil() && !self.user_teleport_allowed(&command)) {
             self.world.apply(NetEvent::viewer_teleport_failed(aurora_i18n::tr!("rlva-blocked")));
+        } else if !actor.is_nil() && !self.world.rlva_allows_command(&command, actor) {
+            // an @tpto by region name, refused once the map answered
+            // (RlvHandler::onTeleportCallback, LLAgent::teleportViaLocation:
+            // RlvUtil::notifyBlocked, Blocked::Teleport)
+            self.world.system_notice(
+                aurora_i18n::tr!("rlva-blocked-teleport"),
+                crate::world::notice_topics::Topic::Warning,
+            );
         } else {
             self.send_from_origin(command, actor, portal);
         }
@@ -9836,9 +9896,8 @@ impl App {
         if self.world.rlva.has("temprun") {
             i.run = false;
         }
-        if self.world.rlva.has("jump") && !self.world.agent.flying {
-            i.up = false;
-        }
+        let up_held = i.up;
+        i.up = up_sent(i.up, self.world.rlva.has("jump"), self.world.agent.flying);
         // While seated in third person, movement keys zoom and orbit the
         // camera instead of moving the avatar or resetting the view, unless a
         // script took the control, a sit camera is set or the avatar runs
@@ -9905,7 +9964,9 @@ impl App {
         // LLAgent::setFlying, which refuses where LLAgent::canFly says no.
         // upGrabbed (llTakeControls CONTROL_UP, pass_on false) still sends
         // the hold to the script but must not start automatic fly.
-        if automatic_fly_held(&mut self.up_since, i.up, self.settings.automatic_fly, now)
+        // (held under @jump too: agent_jump still calls setFlying, only
+        // LLAgent::moveUp refuses the jump itself)
+        if automatic_fly_held(&mut self.up_since, up_held, self.settings.automatic_fly, now)
             && !self.world.script_controls.up_grabbed()
             && self.movement_runtime.native_fly_allowed()
             && !self.world.agent.flying
@@ -10062,7 +10123,11 @@ impl App {
     fn poll_names(&mut self) {
         let s = &self.settings;
         let options = crate::world::names::NameOptions {
-            use_display_names: s.use_display_names,
+            // RLVa's `@shownames` forces display names on, so that both
+            // forms of a name are known to its filter
+            // (LLAvatarNameCache::setForceDisplayNames in the toggle handler
+            // of RLV_BHVR_SHOWNAMES, indra/newview/rlvhandler.cpp)
+            use_display_names: s.use_display_names || self.world.rlva.has("shownames"),
             show_usernames: s.show_usernames,
             legacy_format: s.legacy_username_format,
             trim_resident: s.trim_resident,
@@ -10787,6 +10852,10 @@ impl App {
                 ),
         );
         crate::slurl::set_grid(crate::grids::here(self.world.home_grid.as_deref(), self.world.opensim_extras()));
+        // RLVa @showloc: every SLURL a window shows names a connected region
+        // "(Hidden region)" (LLSLURL::getSLURLString, llslurl.cpp)
+        crate::slurl::set_hidden_regions(self.world.rlva_slurl_hidden_regions());
+        self.world.map.hide_location_labels = self.world.rlva.has("showloc");
         // the region's chat ranges, for every range the interface draws or
         // counts (OpenSim regions may set their own)
         crate::world::radar::set_chat_ranges(crate::world::radar::ChatRanges::from_extras(self.world.opensim_extras()));
@@ -10883,12 +10952,17 @@ impl App {
         for (actor, c, portal) in self.world.maturity.take_commands() {
             if matches!(
                 c,
-                NetCommand::TeleportTo { .. }
-                    | NetCommand::TeleportToRegion { .. }
-                    | NetCommand::TeleportHome
-                    | NetCommand::TeleportLandmark(_)
-                    | NetCommand::AcceptLure { .. }
+                NetCommand::TeleportTo { .. } | NetCommand::TeleportHome | NetCommand::TeleportLandmark(_) | NetCommand::AcceptLure { .. }
             ) {
+                // LLAgent::startTeleportRequest: the pending request goes
+                // as it was let through (teleportViaLocation & co asked RLVa
+                // before it waited), whatever was locked meanwhile
+                self.world.rlva.teleport_already_checked = true;
+                self.send_from(c, actor);
+                self.world.rlva.teleport_already_checked = false;
+            } else if matches!(c, NetCommand::TeleportToRegion { .. }) {
+                // (a region name still has its map lookup to come, and the
+                // teleport it resolves to its check)
                 self.send_deferred_teleport(c, actor, portal);
             } else {
                 self.send_from(c, actor);
@@ -11817,6 +11891,7 @@ impl App {
                 joint_offset: None,
                 head_rotation: None,
                 follow_joint_offset: None,
+                head_offset: self.scene.head_offset(&self.world, &self.world.agent_id),
                 draw_distance: self.settings.draw_distance,
                 region_width: self.world.main().map_or(256.0, |r| r.heightmap.size_x as f32),
             };
@@ -12642,7 +12717,7 @@ impl App {
                     gaming_mode: self.gaming_mode.on,
                     net: (!self.demo).then(|| (self.net.runtime(), self.net.caps_http())),
                     cache_dir: &cache_dir,
-                    language: aurora_i18n::language(),
+                    language: aurora_i18n::grid_language(),
                 };
                 self.media.update(&mut self.world, &mut self.scene, &mut gfx.renderer, &frame);
                 for url in std::mem::take(&mut self.media.links) {
@@ -14235,10 +14310,10 @@ impl App {
         self.demo_gains_tick(Instant::now());
         if actions.settings_changed || std::mem::take(&mut self.snapshots.settings_changed) {
             crate::media::set_web_prefs(crate::media::web_prefs(&self.settings.legacy_prefs));
-            aurora_i18n::select(&self.settings.language, crate::cli::get().language.as_deref());
+            crate::language_file::select(&self.settings.language, self.settings.custom_language);
             crate::crash::update(&self.skin.theme, &self.settings);
             self.net
-                .set_agent_language(aurora_i18n::language(), self.settings.language_is_public);
+                .set_agent_language(aurora_i18n::grid_language(), self.settings.language_is_public);
             if self.settings.vsync != vsync {
                 gfx.renderer.set_vsync(self.settings.vsync);
             }
@@ -14415,7 +14490,10 @@ impl App {
                     .iter()
                     .find(|account| account.key() == key && account.agent == Some(self.world.agent_id))
                     .cloned()
-                    .map(|account| (account, self.world.region_name()));
+                    // the place of the account's card: "(Hidden region)" under
+                    // RLVa @showloc, as a place kept then (LLTeleportHistory::
+                    // updateCurrentLocation keeps no name either)
+                    .map(|account| (account, self.world.rlva_region_label()));
             }
             gfx.renderer.capture_scene = true;
             self.scene_capture_pending = true;
@@ -16750,8 +16828,13 @@ impl App {
     fn update_local_typing(&mut self) {
         self.chat_ui.type_during_emote = self.settings.type_during_emote;
         self.chat_ui.colon_emote = self.settings.colon_emote;
+        // LLAgent::startTyping (indra/newview/llagent.cpp): @redirchat and
+        // @rediremote hold back the start only; a typing begun before runs
+        // out on its own
         if !self.world.rlva.can_send_typing_start() {
-            self.stop_local_typing();
+            if let Some(typing) = self.chat_ui.local_typing_update_held(Instant::now()) {
+                self.send_local_typing(typing);
+            }
             return;
         }
         // AURORA_DEMO_TYPING: we type from our arrival on, no key needed
@@ -16929,7 +17012,7 @@ impl App {
                 .into_iter()
                 .filter(|id| self.world.rlva_can_offer_teleport(*id))
                 .collect();
-            self.contacts_ui.ask_teleport_offer(ids, &self.world.rlva_region_label());
+            self.contacts_ui.ask_teleport_offer(ids, &self.world.rlva_lure_region());
         }
         if let Some(asset) = a.landmark {
             self.record_library_asset(asset, 3);
@@ -17203,7 +17286,7 @@ impl App {
             }
             BarAction::SharedEnvironment => self.world.eep.clear_local(),
             BarAction::ImportWindlight(kind) => self.env_bulk_import(kind),
-            BarAction::AuroraWeather => self.env_ui.weather_open = true,
+            BarAction::AuroraWeather => self.env_ui.weather_open = !self.rlva_environment_windows_locked(),
             BarAction::NewEnvironment(kind) => match kind {
                 crate::world::env_select::SettingsKind::Day => self.open_new_day_editor(),
                 kind => self.open_env_editor_snapshot(kind),
@@ -17820,7 +17903,7 @@ impl App {
                 self.world.opensim_extras(),
                 login_search,
                 self.search_ui.web_query(self.settings.classic_search),
-                aurora_i18n::language(),
+                aurora_i18n::grid_language(),
                 self.world.agent_access().preferred,
             )
             .map(|url| crate::world::search::WebHome { url, identified: false });
@@ -17829,7 +17912,7 @@ impl App {
             self.search_grid(),
             self.search_ui.web_query(self.settings.classic_search),
             self.world.agent_access(),
-            aurora_i18n::language(),
+            aurora_i18n::grid_language(),
             self.search_session(),
         )
     }
@@ -17901,7 +17984,7 @@ impl App {
     /// (compact, wide, legacy, empty) have the Second Life guide's.
     fn destination_guide(&self) -> Option<String> {
         use ui::destinations::{GuideGrid, guide_url};
-        let language = aurora_i18n::language();
+        let language = aurora_i18n::grid_language();
         if self.demo {
             let page = std::env::var("AURORA_DEMO_DESTINATIONS").ok().filter(|u| !u.trim().is_empty())?;
             if page.trim() == "sl" || crate::demo::destinations::mode().is_some() {
@@ -17940,7 +18023,7 @@ impl App {
     /// demo, "sl" for the Second Life page's address.
     fn avatar_welcome_page(&self) -> Option<String> {
         use ui::avatar_welcome::{PackGrid, pack_url};
-        let language = aurora_i18n::language();
+        let language = aurora_i18n::grid_language();
         if self.demo {
             let page = std::env::var("AURORA_DEMO_AVATAR_WELCOME").ok().filter(|u| !u.trim().is_empty())?;
             return match page.trim() {
@@ -18222,12 +18305,14 @@ impl App {
                 }
                 // LLGroupActions::startCall
                 GroupAction::Call(group) => self.on_ctx_action(ui::context::CtxAction::Call(group)),
-                GroupAction::Activate(group) => self.send(NetCommand::ActivateGroup(group)),
-                GroupAction::SetTitle { group, role } => {
-                    if !self.world.rlva.has("setgroup") {
-                        self.world.group_data.set_title(group, role);
+                GroupAction::Activate(group) => {
+                    if self.world.rlva_can_change_group() {
+                        self.send(NetCommand::ActivateGroup(group));
                     }
                 }
+                // LLPanelGroupGeneral::apply (llpanelgroupgeneral.cpp): the
+                // title changes whatever @setgroup holds
+                GroupAction::SetTitle { group, role } => self.world.group_data.set_title(group, role),
                 GroupAction::SetFlags {
                     group,
                     accept_notices,
@@ -18463,7 +18548,16 @@ impl App {
                 }
             };
         }
-        if let Some(done) = self.world.chat_log.take_erased() {
+        // the transcripts' erasing, or the Chat Service's delete (its
+        // failure also shows ChatServiceHistoryDeleteFailed)
+        let deleted = self.world.chat_service.take_deleted().map(|ok| {
+            if ok {
+                Ok(self.world.chat_service.swept_files())
+            } else {
+                Err(std::io::Error::other("the Chat Service history delete failed"))
+            }
+        });
+        if let Some(done) = self.world.chat_log.take_erased().or(deleted) {
             self.options_ui.chat_log_status = match done {
                 Ok(count) if self.settings.log_import_at_login => {
                     // what was erased must not come back at the next login
@@ -18534,7 +18628,9 @@ impl App {
         self.options_ui.selected_parcel = self.world.selected_parcel_entry();
         self.options_ui.rlva_camera_preset_locked = self.world.rlva.camera_preset_locked(uuid::Uuid::nil());
         self.options_ui.rlva_sendim_locked = self.world.rlva.has("sendim");
-        self.options_ui.rlva_camera_fov_locked = self.world.rlva.camera_owner().is_some();
+        // the Legacy Viewer's CameraAngle is the user's under @setcam too
+        // (panel_preferences_move.xml): only bounded by the fov limits
+        self.options_ui.rlva_camera_fov_locked = false;
         self.options_ui.joystick = self.joystick.snapshot.clone();
         self.options_ui.flycam_active = self.joystick.active;
         if open {
@@ -18655,7 +18751,11 @@ impl App {
             } else {
                 String::new()
             };
-            self.world.chat_log.erase();
+            // logged in: the Chat Service's delete, which sweeps the
+            // transcripts too (deleteTranscriptsAsync, LL viewer 26.5)
+            if !self.world.request_history_delete() {
+                self.world.chat_log.erase();
+            }
         }
         if let Some((folder, choice)) = res.folder {
             self.choose_folder(folder, choice);
@@ -19371,11 +19471,8 @@ impl App {
                         spent: self.settings.balance_shows_spent,
                     },
                     voice: (self.voice.light, self.voice.status.clone()),
-                    slurl: if self.world.rlva.has("showloc") {
-                        String::new()
-                    } else {
-                        crate::slurl::make(&self.world.region_name(), self.world.agent.position)
-                    },
+                    // "(Hidden region)" under @showloc (LLSLURL::getSLURLString)
+                    slurl: crate::slurl::make(&self.world.region_name(), self.world.agent.position),
                     tp_back: self.world.tp_history.back_name(),
                     tp_forward: self.world.tp_history.forward_name(),
                     tp_session: self.world.tp_history.session(),
@@ -19399,7 +19496,7 @@ impl App {
                     slow_motion_animations: self.scene.slow_motion_animations,
                     parcel_landmark,
                     can_set_home: self.world.can_set_home(),
-                    can_go_home: self.world.rlva_can_teleport_home(),
+                    can_go_home: self.world.rlva_home_button_enabled(),
                     home_entry: self.world.rlva_home_entry_enabled(),
                     release_notes: self.world.main_has_cap("ServerReleaseNotes"),
                     region_console: self.world.main_has_cap("SimConsoleAsync"),
@@ -20292,7 +20389,7 @@ impl App {
                 let volume = self.media_volume();
                 self.chat_ui.previews.web = self.chat_ui.previews.playing().then(|| ui::chat::previews::WebEnv {
                     paths: self.media.plugins(&self.settings.media).cloned(),
-                    browser: crate::media::browser_settings(&crate::settings::cache_dir(), aurora_i18n::language()),
+                    browser: crate::media::browser_settings(&crate::settings::cache_dir(), aurora_i18n::grid_language()),
                     volume,
                 });
                 // who hears the nearby chat, and who of them types (the
@@ -20385,6 +20482,12 @@ impl App {
                 // friends tab
                 let people_aurora = !self.settings.classic_people && !(self.demo && crate::demo::people::legacy());
                 let friends_before = self.settings.friends_list.clone();
+                // its Groups pill is the Legacy look's Groups tab, kept in
+                // the settings
+                if people_aurora {
+                    self.contacts_people_ui.pane_groups = self.settings.contacts.tab == 1;
+                }
+                let pane_groups_before = self.contacts_people_ui.pane_groups;
                 let second_life = self.second_life();
                 let contacts_radar = ui::people::RadarData {
                     radar: &self.radar,
@@ -20503,7 +20606,11 @@ impl App {
                             self.panels.people = true;
                             self.panels.people_tab = tab;
                         }
-                        ui::chat::ConvAction::Profile(id) => self.profile_ui.open(&mut self.world, id),
+                        // a conversation's header, members and participants name their people
+                        // whoever is around (`chat::conversation_names`)
+                        ui::chat::ConvAction::Profile(id) => {
+                            self.profile_ui.open_in(&mut self.world, crate::world::names::NameScope::Roster, id)
+                        }
                         ui::chat::ConvAction::Contacts(c) => contact_actions.push(c),
                         ui::chat::ConvAction::People(pa) => contacts_people.push(pa),
                         ui::chat::ConvAction::OpenIm(id) => self.world.start_text_conference(vec![id]),
@@ -20525,6 +20632,7 @@ impl App {
                         // (LLGiveInventory::doGiveInventoryItem)
                         ui::chat::ConvAction::GiveItems { to, items } => {
                             self.inventory_ui.dialog = Some(ui::inventory::EditDialog::Share(items, vec![to]));
+                            self.inventory_ui.share_in_session = Some(to);
                         }
                         // shown and in front even when already open
                         // (LLAvatarActions::share → showInstance), else the
@@ -20583,8 +20691,25 @@ impl App {
                 } // a YouTube video playing in its window, or a card's that
                 // stopped being drawn
                 self.chat_ui.previews.player_window(&ctx, &p);
+                if self.contacts_people_ui.pane_groups != pane_groups_before {
+                    self.settings.contacts.tab = u8::from(self.contacts_people_ui.pane_groups);
+                    // (demo mode: this session only, never the file)
+                    if !self.demo {
+                        self.settings.save();
+                    }
+                }
                 if self.settings.friends_list != friends_before {
                     self.settings.save();
+                }
+                // the stitched history of a direct conversation, once read;
+                // a delete closes the window (invalidateHistory)
+                if std::mem::take(&mut self.world.chat_service.close_preview) {
+                    self.history_ui.close_stitched();
+                }
+                if let Some(id) = self.history_ui.stitched_waiting()
+                    && let Some(rows) = self.world.chat_service.take_preview(id)
+                {
+                    self.history_ui.set_stitched(crate::world::World::service_entries(&rows));
                 }
                 if let Some(ui::chat::history::HistoryAction::OpenFolder(dir)) = self.history_ui.show(
                     &ctx,
@@ -20726,11 +20851,7 @@ impl App {
                             self.search_ui.open_tab(crate::world::search::Tab::Groups);
                         }
                         ui::people::PeopleAction::GroupData(group) => self.world.group_data.open(group, true),
-                        ui::people::PeopleAction::GroupTitle { group, role } => {
-                            if !self.world.rlva.has("setgroup") {
-                                self.world.group_data.set_title(group, role);
-                            }
-                        }
+                        ui::people::PeopleAction::GroupTitle { group, role } => self.world.group_data.set_title(group, role),
                         ui::people::PeopleAction::GroupFlags { group, notices, profile } => {
                             self.world.groups.set_flags(group, notices, profile)
                         }
@@ -21115,9 +21236,13 @@ impl App {
                 let friend_allowed = prompt_allowed && region_shown.is_none();
                 if let Some((id, from)) = self.friend_prompt.next(&mut self.world.notifications, prompt_on, friend_allowed) {
                     self.notif_ui.wanted_pics.insert(from);
-                    let name = Some(self.world.social.display_name_of(&from))
+                    // an offer of friendship names who makes it whatever
+                    // `@shownames` (process_improved_im tests nothing for
+                    // IM_FRIENDSHIP_OFFERED, llimprocessing.cpp)
+                    let scope = crate::world::names::NameScope::Roster;
+                    let name = Some(self.world.social.display_name_in(scope, &from))
                         .filter(|n| n != "…")
-                        .or_else(|| self.world.avatar_name(&from));
+                        .or_else(|| self.world.person_name_in(scope, &from));
                     if name.is_none() {
                         self.world.social.want_name(from);
                     }
@@ -21188,7 +21313,9 @@ impl App {
                 }
                 match prompt_action {
                     Some(ui::friend_prompt::PromptAction::Answer(id, r)) => answers.push((id, r)),
-                    Some(ui::friend_prompt::PromptAction::Profile(id)) => self.profile_ui.open(&mut self.world, id),
+                    Some(ui::friend_prompt::PromptAction::Profile(id)) => {
+                        self.profile_ui.open_in(&mut self.world, crate::world::names::NameScope::Roster, id)
+                    }
                     None => {}
                 }
                 match region_action {
@@ -21437,12 +21564,12 @@ impl App {
                 a.currency = self.buy_currency_ui.show(&ctx, &p, &self.world);
                 a.currency.extend(self.show_buy_land(&ctx, &p));
                 // links and names clicked anywhere (LLAgentHandler)
-                if let Some(id) = ui::profile::take_open_request(&ctx) {
-                    self.profile_ui.open(&mut self.world, id);
+                if let Some((scope, id)) = ui::profile::take_open_request_in(&ctx) {
+                    self.profile_ui.open_in(&mut self.world, scope, id);
                 }
                 // the "Feed" tab: a browser on the grid's web profiles
                 let paths = self.media.plugins(&self.settings.media).cloned();
-                let browser = crate::media::browser_settings(&crate::settings::cache_dir(), aurora_i18n::language());
+                let browser = crate::media::browser_settings(&crate::settings::cache_dir(), aurora_i18n::grid_language());
                 let cookie = self.media.openid.cookie();
                 let profile_base = match self.settings.grid {
                     // AURORA_DEMO_FEED=<page>: the feed browser on a local page
@@ -21565,6 +21692,10 @@ impl App {
                     self.settings.classic_profiles,
                     self.settings.profile_rights,
                 );
+                let mut shown = std::mem::take(&mut self.world.rlva.open_profiles);
+                self.profile_ui
+                    .open_residents(&ctx, &self.world, self.settings.classic_profiles, &mut shown);
+                self.world.rlva.open_profiles = shown;
                 self.toolbar_ui.picks_active = self.profile_ui.picks_shown(self.world.agent_id);
                 self.toolbar_ui.photo_roll_empty = self.snapshots.reel.reel.is_empty();
                 self.toolbar_ui.photo_roll_active = self.snapshots.reel.quick.is_open();
@@ -21602,6 +21733,7 @@ impl App {
                         // the conversations' give confirmation (#991)
                         ui::profile::ProfileAction::Give { to, items } => {
                             self.inventory_ui.dialog = Some(ui::inventory::EditDialog::Share(items, vec![to]));
+                            self.inventory_ui.share_in_session = None;
                         }
                         // shown and in front, as the conversation's "Give an
                         // inventory item…"; RLVa @share refuses it first
@@ -21860,11 +21992,11 @@ impl App {
                 self.rlva_selftest_window(&ctx, &p);
                 self.about_window(&ctx, &p, renderer);
                 self.sysinfo_window(&ctx, &p, renderer);
-                let region = self.world.region_name();
+                let region = self.world.rlva_region_label();
                 let available = self.world.main_has_cap("SimConsoleAsync");
                 let rlva_actions = self.options_ui.rlva_tools.show(&ctx, &p, &self.world);
-                if rlva_actions.closed {
-                    self.world.rlva.close_console();
+                if rlva_actions.console_closed {
+                    self.world.rlva.close_console(self.world.agent_id);
                 }
                 if rlva_actions.clear_log {
                     self.world.rlva.diagnostics.entries.clear();
@@ -21873,8 +22005,7 @@ impl App {
                     self.world.land.group_name(&group, &self.world.groups.groups);
                 }
                 if let Some(input) = rlva_actions.input {
-                    self.world.rlva_configure(self.settings.rlva_enabled);
-                    self.world.rlva.preferences.clone_from(&self.settings.rlva);
+                    self.rlva_sync_settings();
                     self.world.rlva_console_input(&input);
                 }
                 ui::sim_console::show(
@@ -23237,6 +23368,10 @@ impl ApplicationHandler for App {
                 }
                 if let Ok(filter) = std::env::var("AURORA_DEMO_CONTACTS_FILTER") {
                     self.contacts_ui.filter_groups(&filter);
+                    // the same in Aurora's look of People, under its Groups pill
+                    if self.settings.contacts.tab == 1 {
+                        self.contacts_people_ui.filter = filter;
+                    }
                 }
             }
             // AURORA_DEMO_CONV=1: the demo group chat with its participants;
@@ -23825,7 +23960,16 @@ impl ApplicationHandler for App {
                         // not two thousand notification sounds
                         self.world.im_messages.clear();
                     }
+                    // the offline messages open Nova's conversation; the
+                    // Chat Service's pages come through `demo_reply`
                     Mode::Offline => {}
+                    // service:skew: a live IM the demo service keeps too
+                    // (#4233)
+                    Mode::Service => {
+                        if chatlog::service_skew() {
+                            self.world.apply(chatlog::skewed_live_message(me));
+                        }
+                    }
                     Mode::Shared { on } => {
                         // the synthetic Legacy Viewer folder, chosen for this
                         // run only: never saved in the demo's settings, which
@@ -23894,7 +24038,7 @@ impl ApplicationHandler for App {
                 if let Mode::History { .. } = mode {
                     self.panels.chat = false;
                     let (title, file) = self.world.transcript_of(Some(chatlog::PEER));
-                    self.history_ui.show_file(title, file);
+                    self.open_history(Some(chatlog::PEER), title, file);
                 }
                 self.chat_ui.selected = Some(if mode == Mode::Restore {
                     crate::demo::DEMO_GROUP2
@@ -26121,6 +26265,14 @@ fn apply_test_fps_limit(settings: &mut Settings, value: &str) {
 
 /// agent_jump (indra/newview/llviewerinput.cpp): AutomaticFly. Turning the
 /// option off clears the hold, so enabling it cannot reuse an old press.
+/// LLAgent::moveUp (indra/newview/llagent.cpp): under RLVa @jump a jump
+/// is not sent while standing; flying, up still climbs. The key stays held
+/// for agent_jump's automatic fly (`automatic_fly_held`), which LLAgent::
+/// setFlying alone may refuse.
+fn up_sent(up: bool, jump_blocked: bool, flying: bool) -> bool {
+    up && (flying || !jump_blocked)
+}
+
 fn automatic_fly_held(since: &mut Option<Instant>, up: bool, enabled: bool, now: Instant) -> bool {
     if !up || !enabled {
         *since = None;
@@ -26935,5 +27087,15 @@ mod tests {
         assert_eq!(actions.landmark, Some(a));
         assert_eq!(actions.gestures, vec![a, b]);
         assert!(actions.settings_changed && actions.font_changed);
+    }
+
+    /// agent_jump (indra/newview/llviewerinput.cpp): RLVa @jump stops the
+    /// jump (LLAgent::moveUp), not the automatic fly of a held key.
+    #[test]
+    fn rlva_jump_lock_keeps_the_up_key_held_for_automatic_fly() {
+        assert!(!super::up_sent(true, true, false), "no jump under @jump");
+        assert!(super::up_sent(true, true, true), "a flight still climbs");
+        assert!(super::up_sent(true, false, false));
+        assert!(!super::up_sent(false, false, true));
     }
 }

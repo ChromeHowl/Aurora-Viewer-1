@@ -649,6 +649,7 @@ mod tests {
                         source: JANE,
                         origin: crate::world::Origin::Live,
                         blocked: false,
+                        speaker: Default::default(),
                     },
                 );
             }
@@ -775,6 +776,7 @@ mod tests {
                         source: id,
                         origin: crate::world::Origin::Live,
                         blocked: false,
+                        speaker: Default::default(),
                     },
                 );
                 kit.st.popped.pop_out(Some(id), false, false, false);
@@ -1061,6 +1063,7 @@ mod tests {
                             source: JANE,
                             origin: crate::world::Origin::Live,
                             blocked: false,
+                            speaker: Default::default(),
                         },
                     );
                     kit.world.social.focus_im = Some(JANE);
@@ -1173,6 +1176,7 @@ mod tests {
                     source: BOB,
                     origin: crate::world::Origin::Live,
                     blocked: false,
+                    speaker: Default::default(),
                 },
             );
             kit.main_open = true;
@@ -1232,6 +1236,7 @@ mod tests {
                     source: BOB,
                     origin: crate::world::Origin::Live,
                     blocked: false,
+                    speaker: Default::default(),
                 },
             );
             kit.main_open = true;

@@ -1071,6 +1071,13 @@ fn history(cx: &mut Cx) {
             tr!("ui-options-chat-logs-show-help"),
             &field!(log_show_history),
         );
+        // ChatServiceEnabled (LL viewer 26.5), beside the transcripts it
+        // completes; read at login
+        cx.toggle(
+            tr!("ui-options-chat-service-history"),
+            tr!("ui-options-chat-service-history-help"),
+            &field!(chat_service_history),
+        );
         // Legacy Viewer › Chat (FSRestoreOpenIMs)
         cx.toggle(tr!("ui-options-reopen-ims"), tr!("ui-options-reopen-ims-help"), &field!(reopen_ims));
         cx.toggle(

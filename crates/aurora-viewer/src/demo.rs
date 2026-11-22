@@ -1072,6 +1072,11 @@ fn demo_raw() -> Llsd {
         let seconds = crate::ui::bars::clock::now_unix().saturating_sub(3600);
         raw.insert("seconds_since_epoch", seconds.to_string());
     }
+    // AURORA_DEMO_CHATLOG=service:skew: the computer behind the grid (#4233)
+    if chatlog::service_skew() {
+        let seconds = crate::ui::bars::clock::now_unix().saturating_add(chatlog::SKEW_SECS);
+        raw.insert("seconds_since_epoch", seconds.to_string());
+    }
     // AURORA_DEMO_PEOPLE's groups tab: "3 groups out of 42"
     if let Some(limit) = people::group_limit()
         && let Llsd::Map(m) = &mut raw
@@ -1666,6 +1671,7 @@ pub fn bubbles_lines(world: &mut crate::world::World, view: Bubbles) {
         source,
         origin: Origin::Live,
         blocked: false,
+        speaker: Default::default(),
     };
     match view {
         Bubbles::Friend | Bubbles::Legacy => {
@@ -1904,6 +1910,7 @@ pub fn conv_scroll_lines(world: &mut crate::world::World) {
             source,
             origin: Origin::Live,
             blocked: false,
+            speaker: Default::default(),
         };
         world.conversation_line(DEMO_FRIEND, line);
     }
@@ -1926,6 +1933,7 @@ pub fn conv_scroll_new(world: &mut crate::world::World, scrolled: bool) {
             source: DEMO_FRIEND,
             origin: crate::world::Origin::Live,
             blocked: false,
+            speaker: Default::default(),
         };
         world.conversation_line(DEMO_FRIEND, line);
     }
@@ -2088,6 +2096,7 @@ pub fn aurora_lines(world: &mut crate::world::World, scene: AuroraScene) {
         source,
         origin: Origin::Live,
         blocked: false,
+        speaker: Default::default(),
     };
     let names = |id: Uuid| world_name(id);
     let group = [
@@ -3799,8 +3808,12 @@ pub fn demo_reply(cmd: &aurora_net::NetCommand) -> Vec<NetEvent> {
         aurora_net::NetCommand::Call { method, session, .. } => calls::reply(method.clone(), *session),
         // the request made once after login: what the grid kept while we
         // were away (AURORA_DEMO_CHATLOG=offline), else nothing
+        // AURORA_DEMO_CHATLOG=service: the Chat Service's list and pages
+        aurora_net::NetCommand::ChatServiceRequest { id, url, body } => {
+            vec![chatlog::service_reply(DEMO_AGENT, *id, url, body.as_ref())]
+        }
         aurora_net::NetCommand::RequestOfflineMessages => match chatlog::mode() {
-            Some(chatlog::Mode::Offline) => chatlog::offline_messages(DEMO_AGENT),
+            Some(chatlog::Mode::Offline | chatlog::Mode::Service) => chatlog::offline_messages(DEMO_AGENT),
             _ => Vec::new(),
         },
         // a conference started by message (AURORA_DEMO_CALL=conference-legacy)
@@ -4881,6 +4894,7 @@ fn caps() -> std::collections::HashMap<String, String> {
         .chain(sim_extras::caps())
         .chain(crate::build::demo_sim::caps())
         .chain(region::open_settings_caps())
+        .chain(chatlog::service_caps())
         .collect();
     if crate::world::inventory::demo::big().is_some_and(|big| big.fetch) {
         for (name, url) in [
@@ -4932,7 +4946,12 @@ pub fn events() -> Vec<NetEvent> {
         NetEvent::RegionHandshake(Arc::new(RegionInfo {
             handle: HANDLE,
             name: aurora_i18n::tr!("common-aurora-demo").into(),
-            region_id: Uuid::nil(),
+            // the Chat Service's context needs the region's id
+            region_id: if chatlog::mode() == Some(chatlog::Mode::Service) {
+                chatlog::SERVICE_REGION
+            } else {
+                Uuid::nil()
+            },
             water_height: 20.0,
             sim_access: 13,
             region_flags: aurora_net::region_flags::ALLOW_VOICE | home::region_flag(),

@@ -567,6 +567,12 @@ pub struct Settings {
     pub language: String,
     /// Firestorm LanguageIsPublic, exposed through llGetAgentLanguage.
     pub language_is_public: bool,
+    /// The interface uses `custom_language_file` instead of `language`
+    /// (an Aurora addition, language_file.rs).
+    pub custom_language: bool,
+    /// The Fluent catalog file chosen for the interface, "" for none: read
+    /// at startup (language_file.rs). A path of this PC.
+    pub custom_language_file: String,
     /// The Legacy Viewer's FSBrowserHomePage: the page the built-in web browser (toolbar
     /// button) opens on (Preferences › Network and cache).
     pub browser_home_page: String,
@@ -1277,6 +1283,10 @@ pub struct Settings {
     pub reopen_ims: bool,
     /// Show the end of a conversation's file when it opens (LogShowHistory).
     pub log_show_history: bool,
+    /// The Chat Service's history of the private conversations, fetched
+    /// from the region and shown with the transcripts (the LL viewer's
+    /// ChatServiceEnabled, on). Read at login only.
+    pub chat_service_history: bool,
     /// Date in the names of these files (LogFileNamewithDate, off).
     pub log_dated_names: bool,
     /// Import the Legacy Viewer's transcripts at each login. On by default
@@ -2465,6 +2475,8 @@ impl Default for Settings {
             crash_reports: CrashReports::Ask,
             language: "default".into(),
             language_is_public: true,
+            custom_language: false,
+            custom_language_file: String::new(),
             browser_home_page: crate::ui::web_browser::DEFAULT_HOME.into(),
             browser_behavior: BrowserBehavior::default(),
             show_bug_report: true,
@@ -2733,6 +2745,7 @@ impl Default for Settings {
             conversation_log: Default::default(),
             reopen_ims: false,
             log_show_history: true,
+            chat_service_history: true,
             log_dated_names: false,
             log_import_at_login: true,
             log_legacy_layout: false,
@@ -3018,11 +3031,25 @@ fn allow_overlays_in(file: Option<&[u8]>) -> bool {
         .unwrap_or(false)
 }
 
-/// `language` of a settings file's bytes; "default" for anything else.
-fn language_in(file: Option<&[u8]>) -> String {
-    file.and_then(|bytes| serde_json::from_slice::<serde_json::Value>(bytes).ok())
+/// `language` of a settings file's bytes ("default" for anything else),
+/// and its language file when its use is chosen.
+fn language_in(file: Option<&[u8]>) -> (String, Option<String>) {
+    let value = file.and_then(|bytes| serde_json::from_slice::<serde_json::Value>(bytes).ok());
+    let language = value
+        .as_ref()
         .and_then(|value| value.get("language").and_then(serde_json::Value::as_str).map(str::to_owned))
-        .unwrap_or_else(|| "default".into())
+        .unwrap_or_else(|| "default".into());
+    (language, value.as_ref().and_then(language_file_in))
+}
+
+/// The language file of a parsed settings file, when its use is chosen.
+fn language_file_in(value: &serde_json::Value) -> Option<String> {
+    let enabled = value.get("custom_language").and_then(serde_json::Value::as_bool).unwrap_or(false);
+    let file = value
+        .get("custom_language_file")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    crate::language_file::chosen(enabled, file).map(str::to_owned)
 }
 
 fn for_mode(dir: PathBuf) -> PathBuf {
@@ -3197,8 +3224,9 @@ impl Settings {
 
     /// The saved language, read the same way for the startup splash
     /// (`splash/`), which loads nothing else; "default" (the system's) when
-    /// the file or the field is missing.
-    pub fn language_at_start() -> String {
+    /// the file or the field is missing. Also the language file, when its
+    /// use is chosen.
+    pub fn language_at_start() -> (String, Option<String>) {
         language_in(std::fs::read(Self::path()).ok().as_deref())
     }
 
@@ -3219,10 +3247,9 @@ impl Settings {
                 saved_window = saved_window_state(&value);
                 // Select before serde fills missing fields: default auto-replies
                 // must use the saved locale too, without replacing custom text.
-                aurora_i18n::select(
-                    value["language"].as_str().unwrap_or("default"),
-                    crate::cli::get().language.as_deref(),
-                );
+                let file = language_file_in(&value);
+                crate::language_file::start(file.as_deref());
+                crate::language_file::select(value["language"].as_str().unwrap_or("default"), file.is_some());
                 let (s, from_newer) = Self::read_document(value, path)?;
                 newer = from_newer;
                 Some(s)
@@ -4805,16 +4832,36 @@ mod tests {
     /// The splash's early read of the language agrees with the settings.
     #[test]
     fn the_splash_reads_the_saved_language() {
-        assert_eq!(super::language_in(Some(br#"{"draw_distance":96,"language":"fr"}"#)), "fr");
+        let language = |file: Option<&[u8]>| super::language_in(file).0;
+        assert_eq!(language(Some(br#"{"draw_distance":96,"language":"fr"}"#)), "fr");
         for file in [Some(&br#"{"language":7}"#[..]), Some(b"not json"), None] {
-            assert_eq!(super::language_in(file), "default", "{file:?}");
+            assert_eq!(language(file), "default", "{file:?}");
         }
         let saved = serde_json::to_vec(&super::Settings {
             language: "ja".into(),
             ..Default::default()
         })
         .expect("settings json");
-        assert_eq!(super::language_in(Some(&saved)), "ja");
+        assert_eq!(super::language_in(Some(&saved)), ("ja".into(), None));
+    }
+
+    /// The language file is read at startup only when its use is chosen.
+    #[test]
+    fn the_splash_reads_the_language_file_when_it_is_chosen() {
+        let saved = |on: bool, file: &str| {
+            serde_json::to_vec(&super::Settings {
+                language: "fr".into(),
+                custom_language: on,
+                custom_language_file: file.into(),
+                ..Default::default()
+            })
+            .expect("settings json")
+        };
+        let file = r"C:\translations\de.ftl";
+        assert_eq!(super::language_in(Some(&saved(true, file))), ("fr".into(), Some(file.into())));
+        assert_eq!(super::language_in(Some(&saved(false, file))).1, None, "not chosen");
+        assert_eq!(super::language_in(Some(&saved(true, ""))).1, None, "no file");
+        assert_eq!(super::language_in(Some(br#"{"custom_language":"yes"}"#)).1, None);
     }
 
     /// UTC, a clock time of the first version (#453), and an unknown name

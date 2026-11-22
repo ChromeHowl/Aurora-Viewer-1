@@ -238,7 +238,7 @@ pub(super) fn look_style(p: &Palette, look: crate::world::notification_history::
 /// The start of a message on its card: its links by their labels first,
 /// then cut, so never inside an address (#947).
 fn message_excerpt(world: &World, body: &str) -> String {
-    let body = super::chat::resolved_text(world, body);
+    let body = super::chat::resolved_text_in(world, Kind::Message.text(), body);
     let mut text: String = body.chars().take(MESSAGE_CHARS).collect();
     if body.chars().count() > MESSAGE_CHARS {
         text.push('…');
@@ -336,7 +336,17 @@ pub(super) fn person_card(
                         n.title.clone()
                     };
                     ui.allocate_ui(Vec2::new(w, 18.0), |ui| {
-                        name_hover = text::show(ui, p, &title, &n.name_links, 12.5, p.ink, true, false);
+                        name_hover = text::show(
+                            ui,
+                            p,
+                            &title,
+                            &n.name_links,
+                            12.5,
+                            p.ink,
+                            true,
+                            false,
+                            world.notifications.names_of(n),
+                        );
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let (r, resp) = ui.allocate_exact_size(Vec2::splat(16.0), egui::Sense::hover());
@@ -361,7 +371,14 @@ pub(super) fn person_card(
                     ui.horizontal(|ui| {
                         let actions = 2.0 * ACTION + 4.0;
                         ui.allocate_ui(Vec2::new((ui.available_width() - actions).max(40.0), 18.0), |ui| {
-                            name_hover = name_hover.or(text::person_body(ui, p, env.emoji, &n.body, &n.name_links));
+                            name_hover = name_hover.or(text::person_body(
+                                ui,
+                                p,
+                                env.emoji,
+                                &n.body,
+                                &n.name_links,
+                                world.notifications.names_of(n),
+                            ));
                         });
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.spacing_mut().item_spacing.x = 4.0;
@@ -373,7 +390,14 @@ pub(super) fn person_card(
                     });
                 } else if !shown.is_empty() {
                     let text = message_excerpt(world, &shown);
-                    name_hover = name_hover.or(text::person_body(ui, p, env.emoji, &text, &n.name_links));
+                    name_hover = name_hover.or(text::person_body(
+                        ui,
+                        p,
+                        env.emoji,
+                        &text,
+                        &n.name_links,
+                        world.notifications.names_of(n),
+                    ));
                 }
             });
         });
@@ -440,7 +464,7 @@ pub(super) fn person_card(
             return Some(Response::Open);
         }
         if !on_close && let Some(target) = name_hover {
-            text::open(ui.ctx(), target);
+            text::open(ui.ctx(), world.notifications.names_of(n), target);
             return None;
         }
         return Some(if on_close || !n.opens() {
@@ -532,7 +556,17 @@ pub(super) fn card(
                         let title = super::notification_center::aurora::title(ui, p, &n.title, 12.5);
                         ui.add(egui::Label::new(title).wrap());
                     } else {
-                        text::show(ui, p, &n.title, &n.name_links, 12.5, p.ink, true, true);
+                        text::show(
+                            ui,
+                            p,
+                            &n.title,
+                            &n.name_links,
+                            12.5,
+                            p.ink,
+                            true,
+                            true,
+                            world.notifications.names_of(n),
+                        );
                     }
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -573,17 +607,18 @@ pub(super) fn card(
                     let rows = options(ui.ctx()).script_dialog_rows as f32;
                     let row = ui.fonts_mut(|f| f.row_height(&egui::FontId::proportional(12.0)));
                     egui::ScrollArea::vertical().max_height(rows * row).show(ui, |ui| {
-                        super::chat::text_with_links(ui, p, world, &shown, &n.name_links, 12.0, p.ink);
+                        super::chat::text_with_links(ui, p, world, world.notifications.text_of(n), &shown, &n.name_links, 12.0, p.ink);
                     });
                 } else {
                     ui.horizontal(|ui| {
                         ui.add_space(indent);
+                        let text = world.notifications.text_of(n);
                         if matches!(n.data, Data::GroupNotice { .. }) {
                             super::chat::select::document(ui, p, n.id, &shown, |ui, line| {
-                                super::chat::text_with_links(ui, p, world, line, &n.name_links, 12.0, p.muted);
+                                super::chat::text_with_links(ui, p, world, text, line, &n.name_links, 12.0, p.muted);
                             });
                         } else {
-                            super::chat::text_with_links(ui, p, world, &shown, &n.name_links, 12.0, p.muted);
+                            super::chat::text_with_links(ui, p, world, text, &shown, &n.name_links, 12.0, p.muted);
                         }
                     });
                 }

@@ -2091,12 +2091,7 @@ impl App {
     /// place (LLSnapshotLivePreview::saveTexture).
     fn photo_upload(&mut self, data: Vec<u8>, cost: i32, pano: bool) {
         let w = &self.world;
-        let maturity = w
-            .main()
-            .and_then(|r| r.info.as_ref())
-            .map(|i| crate::ui::bars::maturity_name(i.sim_access))
-            .unwrap_or("");
-        let place = inventory::location(&w.parcel_name, &w.region_name(), w.agent.position, maturity);
+        let place = photo_place(w);
         // LLAgentUI::buildFullname: the legacy name
         let who = w
             .login
@@ -3089,6 +3084,7 @@ LUT_3D_SIZE {n}
                 shadows: self.photo_shadow_view(),
                 env: env_view(&env_ui, &self.world.eep),
                 back_key: self.settings.keybinds.get(crate::keybinds::Action::ResetCamera)[0].clone(),
+                free_refused: self.world.rlva.camera_view_held(),
                 quality_reduced,
                 prefs_grade: self.settings.render_extras.grade,
                 tone_why: self.photo_tone_why(),
@@ -3180,6 +3176,7 @@ LUT_3D_SIZE {n}
                 shadows: self.photo_shadow_view(),
                 env: env_view(&self.env_ui, &self.world.eep),
                 back_key: self.settings.keybinds.get(crate::keybinds::Action::ResetCamera)[0].clone(),
+                free_refused: self.world.rlva.camera_view_held(),
                 quality_reduced,
                 prefs_grade: self.settings.render_extras.grade,
                 tone_why: self.photo_tone_why(),
@@ -3327,6 +3324,12 @@ LUT_3D_SIZE {n}
         if !self.panels.snapshot {
             // the next opening of the window starts on the avatar
             self.snapshots.ui.free.on = false;
+        }
+        // RLVa holds the view: the free camera ends and does not start
+        // (`Rlva::camera_view_held`)
+        if self.world.rlva.camera_view_held() {
+            self.snapshots.ui.free.on = false;
+            self.director.free = false;
         }
         // (the Director's window has the same switch, `director.free`)
         let want = ((self.panels.snapshot && self.snapshots.ui.free.on) || self.director.free) && self.in_world();
@@ -4086,6 +4089,32 @@ LUT_3D_SIZE {n}
             self.photo_action(Action::Take, renderer);
         }
     }
+}
+
+/// LLAgentUI::buildLocationString(LOCATION_FORMAT_FULL), the place a photo
+/// is named after (LLSnapshotLivePreview::saveTexture): under RLVa
+/// `@showloc` "(Hidden parcel), (Hidden region) - Maturity", no position
+/// (the restriction turns FULL into LOCATION_FORMAT_NO_COORDS,
+/// indra/newview/llagentui.cpp).
+pub(crate) fn photo_place(w: &crate::world::World) -> String {
+    let maturity = w
+        .main()
+        .and_then(|r| r.info.as_ref())
+        .map(|i| crate::ui::bars::maturity_name(i.sim_access))
+        .unwrap_or("");
+    if w.rlva.has("showloc") {
+        let mut s = format!(
+            "{}, {}",
+            aurora_i18n::tr!("rlva-hidden-parcel"),
+            aurora_i18n::tr!("rlva-hidden-region")
+        );
+        if !maturity.is_empty() {
+            s.push_str(" - ");
+            s.push_str(maturity);
+        }
+        return s;
+    }
+    inventory::location(&w.parcel_name, &w.region_name(), w.agent.position, maturity)
 }
 
 /// The Light section's view of the environment beneath the photo's.

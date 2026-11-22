@@ -4,7 +4,7 @@
 //! blocked residents come after friends (LGGContactSets::colorize).
 
 use crate::settings::{ColorSettings, Rgba};
-use crate::world::{ChatKind, ChatLine, World};
+use crate::world::{ChatKind, ChatLine, Speaker, World};
 use aurora_net::ChatType;
 use egui::Color32;
 use uuid::Uuid;
@@ -79,7 +79,7 @@ pub fn resident_name(world: &World, id: &Uuid, fallback: Color32) -> Color32 {
 
 pub fn contact_chat_color(line: &ChatLine, world: &World) -> Option<Color32> {
     matches!(line.kind, ChatKind::Local(_) | ChatKind::Im | ChatKind::Own(_))
-        .then(|| world.rlva_contact_appearance(&line.source).chat_text.map(set_color))
+        .then(|| world.rlva_line_appearance(line).chat_text.map(set_color))
         .flatten()
         .map(crate::interface_colors::on_panel)
 }
@@ -92,7 +92,7 @@ pub fn contact_sender_color(line: &ChatLine, world: &World) -> Option<Color32> {
     }
     matches!(line.kind, ChatKind::Local(_) | ChatKind::Im | ChatKind::Own(_))
         .then(|| {
-            let a = world.rlva_contact_appearance(&line.source);
+            let a = world.rlva_line_appearance(line);
             a.chat_name.or(a.ui_name).map(set_color)
         })
         .flatten()
@@ -135,7 +135,18 @@ struct Relation {
 /// LGGContactSets::colorize (lggcontactsets.cpp) looks at nothing under
 /// `rlv_shownames`, and keeps the friend colour in IMs alone.
 fn relation(world: &World, id: &Uuid, linden: bool, im: bool) -> Relation {
-    let named = world.rlva_can_name(*id);
+    relation_of(world, id, world.rlva_speaker(*id), linden, im)
+}
+
+/// `relation` for someone `@shownames` left as `speaker`: right now, or
+/// when their chat line arrived (the Legacy Viewer colours a line once).
+fn relation_of(world: &World, id: &Uuid, speaker: Speaker, linden: bool, im: bool) -> Relation {
+    let named = speaker != Speaker::Hidden;
+    // A resident around us is Linden by their radar entry, which is not one
+    // while `@shownames` is set, an exception's either
+    // (`entry->getIsLinden()` in LGGContactSets::colorize;
+    // FSRadarEntry::onAvatarNameCache clears `mIsLinden`).
+    let linden = linden && speaker == Speaker::Named;
     Relation {
         own: *id == world.agent_id,
         linden: named && linden,
@@ -196,7 +207,7 @@ pub fn chat_color_near(line: &ChatLine, world: &World) -> Color32 {
         },
         ChatKind::Local(_) | ChatKind::Im => {
             let linden = is_linden_avatar(world, &line.source, &line.from);
-            let r = relation(world, &line.source, linden, line.kind == ChatKind::Im);
+            let r = relation_of(world, &line.source, line.speaker, linden, line.kind == ChatKind::Im);
             if r.linden {
                 k.chat_linden
             } else if r.friend {
@@ -246,6 +257,17 @@ pub fn sender_color(line: &ChatLine) -> Color32 {
     match line.kind {
         ChatKind::Object(_) | ChatKind::ObjectIm => text(k.sender_object),
         _ => text(k.sender_avatar),
+    }
+}
+
+/// `map_color` for the mouselook arrows, which keep the mark of a resident
+/// whose name RLVa hides: LLViewerWindow::draw (llviewerwindow.cpp) ends
+/// with LLNetMap::getAvatarMarkColor and tests no name, where the mini-map
+/// draws the others' colour.
+pub fn arrow_color(world: &World, id: &Uuid, name: &str) -> Color32 {
+    match world.avatar_marks.get(id) {
+        Some([r, g, b]) => c([r, g, b, 255]),
+        None => map_color(world, id, name),
     }
 }
 
@@ -376,6 +398,7 @@ mod tests {
             source: FRIEND,
             origin: crate::world::Origin::Live,
             blocked: false,
+            speaker: Default::default(),
         }
     }
 
@@ -422,13 +445,37 @@ mod tests {
             map_color(&world, &FRIEND, "Teagan Linden"),
             map_color(&world, &stranger, "Somebody Else")
         );
-        for kind in [ChatKind::Local(ChatType::Normal), ChatKind::Im] {
-            assert_eq!(contact_chat_color(&rlva_line(kind), &world), None);
-            assert_eq!(contact_sender_color(&rlva_line(kind), &world), None);
+        // a line that arrives now is plain; the one that came before keeps
+        // its colours (the Legacy Viewer decides it with the line:
+        // `mRlvNamesFiltered`)
+        let arrives = |world: &World, kind| {
+            let mut line = rlva_line(kind);
+            use crate::world::names::NameScope;
+            let scope = if kind == ChatKind::Im {
+                NameScope::Roster
+            } else {
+                NameScope::World
+            };
+            world.rlva_freeze_line(scope, &mut line);
+            line
+        };
+        let hidden: Vec<ChatLine> = [ChatKind::Local(ChatType::Normal), ChatKind::Im]
+            .into_iter()
+            .map(|kind| arrives(&world, kind))
+            .collect();
+        for line in &hidden {
+            assert_eq!(line.speaker, Speaker::Hidden);
+            assert_eq!(contact_chat_color(line, &world), None);
+            assert_eq!(contact_sender_color(line, &world), None);
         }
+        assert!(contact_chat_color(&local, &world).is_some());
         assert_eq!(resident_name(&world, &FRIEND, Color32::PLACEHOLDER), Color32::PLACEHOLDER);
         rlva(&mut world, &format!("@shownames:{FRIEND}=add"));
         assert_eq!(map_color(&world, &FRIEND, "Teagan Linden"), set);
-        assert!(contact_chat_color(&local, &world).is_some());
+        assert!(contact_chat_color(&arrives(&world, ChatKind::Local(ChatType::Normal)), &world).is_some());
+        // the lines that came hidden stay plain
+        for line in &hidden {
+            assert_eq!(contact_chat_color(line, &world), None);
+        }
     }
 }

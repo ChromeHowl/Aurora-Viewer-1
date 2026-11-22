@@ -1336,12 +1336,12 @@ bug-demo-expected = Die Textur sollte vollständig geladen sein.
 bug-demo-actual = Ein Panel bleibt grau. Dies ist ein Beispielbericht, kein echter Fehler.
 attachment-point = Befestigungspunkt { $point }
 font-sample = 0123456789 · éèàçù · ÆŒ · „Anführungszeichen“ · L$ 1 250
-number-decimal-separator = .
-number-thousands-separator = ,
+number-decimal-separator = ,
+number-thousands-separator = .
 profile-date = { $month }/{ $day }/{ $year }
 profile-date-hidden = { $month }/{ $day }
 date-day-month = { $day } { $month }
-date-day-month-year = { $day } { $month } { $year }
+date-day-month-year = { $day }. { $month } { $year }
 land-claim-date = { $weekday } { $day } { $month } { $year } { $time }
 land-covenant-date = { $weekday } { $month } { $day } { $time } { $year }
 map-dir-n = N
@@ -1392,8 +1392,8 @@ ui-options-content-general = Allgemein
 language-help = Änderungen gelten sofort. Fehlende Übersetzungen verwenden Englisch.
 language-item-count =
     { $count ->
-        [one] { $count } Artikel
-       *[other] { $count } Artikel
+        [one] { $count } Objekt
+       *[other] { $count } Objekte
     }
 
 # Viewer interface and notifications
@@ -1439,7 +1439,7 @@ keybinds-numpad-4 = . (Nummernblock)
 keybinds-numpad-5 = / (Nummernblock)
 ui-options-0-hide-avatar-names = 0 = Avatar-Namen ausblenden
 ui-options-0-no-chat-bubbles-above-the-chat-bar = 0 = keine Chat-Blasen über der Chat-Leiste
-demo-1-violet-wolf-0-2-spam-box-0-0 = { "1 " }{ $value0 }{ " Violetter Wolf|0\u000A2 " }{ $value1 }{ " Spam-Box|0\u000A0 " }{ $value2 }{ " Werbetafel|\u000A0 " }{ $value3 }{ " Gruppe:" }{ $value4 }{ "|\u000A" }
+demo-1-violet-wolf-0-2-spam-box-0-0 = { "1 " }{ $value0 }{ " Violetter Wolf|0\u000A2 " }{ $value1 }{ " Spam-Box|0\u000A0 " }{ $value2 }{ " Werbetafel|\u000A0 " }{ $value3 }{ " Group:" }{ $value4 }{ "|\u000A" }
 ui-land-dialogs-1-set-a-price = 1. Legen Sie einen Preis fest:
 build-ui-general-127-bytes-maximum = Maximal 127 Byte.
 ui-land-dialogs-2-sell-the-land-to = 2. Verkaufen Sie das Land an:
@@ -3335,7 +3335,7 @@ scene-particles-block-object = Blockieren Sie Partikel von diesem Objekt
 scene-particles-block-owner = Blockieren Sie Partikel vom Eigentümer
 scene-particles-unknown-object = Objekt { $id }
 ui-context-display-options = Anzeige
-ui-context-information-options = Informationen
+ui-context-information-options = Avatar-Informationen
 ui-context-reset-options = Zurücksetzen
 ui-context-moderation-options = Moderation
 ui-context-clicked-object = Angeklicktes Objekt
@@ -4062,6 +4062,7 @@ ui-land-general-script-info = Skriptinformationen
 world-profiles-joined-today = Heute beigetreten
 keybinds-insert = Einfügen
 ui-context-inspect-2 = Inspizieren
+ui-context-inspect-all-attachments = Alle Anhänge untersuchen
 inspect-title = Objekte untersuchen
 inspect-col-name = Objektname
 inspect-col-description = Beschreibung
@@ -7928,7 +7929,6 @@ ui-object-actions-no-copy = keine Kopie
 ui-object-actions-no-modify = Keine Änderung
 ui-object-actions-no-transfer = keine Übertragung
 build-ui-texture-cut-stone = Stein schneiden
-build-ui-texture-trouble = Ärger
 fetch-redirect-failed = Die Umleitung ist fehlgeschlagen
 world-mod-declined = abgelehnt
 fetch-request-failed = Die Anfrage ist fehlgeschlagen
@@ -8445,7 +8445,7 @@ extra-jul = Juli
 extra-sep = Sept
 extra-oct = Okt
 extra-nov = Nov
-extra-sun = Sonne
+extra-sun = So
 extra-mon = Mo
 extra-tue = Di
 extra-wed = Mi
@@ -9552,7 +9552,7 @@ ui-context-sit-stand = Sitzen/stehen
 ui-context-save-backup = Sicherung
 ui-context-save-collada = Collada
 ui-context-remove-from-display-exceptions = Ausnahmen aus der Anzeige entfernen
-ui-context-script-info = Skriptinformationen
+ui-context-save-obj = OBJ
 script-color-hint = Mögliche Farbe: Klicken Sie hier, um die Farbauswahl zu öffnen.
 script-edit-line-comment = Zeilenkommentare umschalten (Strg+K oder Strg+/)
 script-edit-block-comment = Blockkommentar umschalten (Strg+Umschalt+K)
@@ -9561,7 +9561,6 @@ script-edit-outdent = Einzug verkleinern (Umschalt+Tab)
 script-selection-edit-failed = Bearbeitung nicht möglich: Quelle zu groß oder vorhandener Blockkommentar. Verwenden Sie // für verschachtelte Kommentare.
 script-fold-collapse = Block einklappen
 script-fold-expand = Block erweitern
-script-fold-lines = Linien
 script-fold-all = Alles einklappen
 script-expand-all = Alles erweitern
 loading-residents =
@@ -13323,10 +13322,6 @@ rlva-im-query-title = RLVa-Einschränkungen teilen?
 rlva-im-query-body = { $name } fordert eine Liste Ihrer aktiven skriptgesteuerten Einschränkungen oder Ausnahmen an. Erlauben Sie, dass diese Informationen in einer privaten Nachricht gesendet werden?
 rlva-im-share-once = Einmal teilen
 rlva-im-share-always = Teilen und erinnern
-rlva-im-denied = Die andere Partei lehnte es ab, ihre aktiven RLVa-Beschränkungen mitzuteilen.
-rlva-im-list-suffix = (Verwenden Sie @exclusive, um die Liste der aktiven Ausnahmen anzuzeigen.)
-rlva-im-no-restriction = Die andere Partei unterliegt keiner @startim-Beschränkung.
-rlva-im-ended-remote = Das Gespräch wurde für die andere Partei beendet.
 rlva-im-ended-local = { $name } hat das Gespräch mit @stopim aus der Ferne geschlossen.
 rlva-shared-wear = Tragen Sie gemeinsame Objekte ohne Punktnamen
 rlva-auto-rename = Benennen Sie gemeinsame Anhänge beim Tragen
@@ -13404,9 +13399,6 @@ rlva-env-locks-hint = Ermöglichen Sie Skripten das Hinzufügen und Entfernen vo
 rlva-temp-controllers = Temporäre RLVa-Anhänge zulassen
 rlva-temp-controllers-hint = Erlauben Sie temporären Anhängen jeglichen Ursprungs, RLVa-Befehle auszugeben. Auch Erlebnisanhänge unterliegen der Mindestbewertung und der Sperrliste.
 rlva-im-blocked-receive = *** IM wurde von Ihrem Zuschauer blockiert
-rlva-im-blocked-send = *** IM wurde vom Betrachter des Absenders blockiert
-rlva-im-blocked-receive-remote = Der Bewohner, dem Sie eine Nachricht gesendet haben, kann Ihre Sofortnachrichten derzeit nicht lesen. Bitte versuchen Sie es später noch einmal.
-rlva-im-blocked-teleport-remote = Der Bewohner ist derzeit an der Annahme gehindert. Bitte versuchen Sie es später noch einmal.
 rlva-blocked-script-dialog = Aufgrund von RLVa-Einschränkungen kann der Skriptdialog oder das Textfeld nicht angezeigt werden.
 rlva-blocked-autopilot = Aufgrund von RLVa-Einschränkungen kann der Autopilot nicht verwendet werden.
 rlva-hidden-generic = (Versteckt)
@@ -14728,7 +14720,6 @@ demo-emotes-nova = /me sets a bench down by the fountain
 demo-emotes-orion = Looks great from here!
 login-server-error = The login server could not complete the login (HTTP { $status }). This is usually a problem on the grid's side: please try again in a few minutes, and check the grid's status page for a known problem. If it keeps happening, check your network and firewall setup.
 update-rollback-reason = Reason: { $reason }
-ui-context-save-obj = OBJ
 ui-context-save-gltf = glTF
 people-contact-sheet-collapse = Collapse the contact details
 people-contact-sheet-expand = Expand the contact details
@@ -16675,34 +16666,6 @@ rlva-selftest-run-again = Run again
 rlva-selftest-progress = { $done } of { $total } cases
 rlva-selftest-needs-rlva = Turn RLVa on in the Preferences first.
 rlva-selftest-idle = Nothing has run yet.
-rlva-anonym-a-resident = A resident
-rlva-anonym-this-resident = This resident
-rlva-anonym-that-resident = That resident
-rlva-anonym-an-individual = An individual
-rlva-anonym-this-individual = This individual
-rlva-anonym-that-individual = That individual
-rlva-anonym-a-person = A person
-rlva-anonym-this-person = This person
-rlva-anonym-that-person = That person
-rlva-anonym-a-stranger = A stranger
-rlva-anonym-this-stranger = This stranger
-rlva-anonym-that-stranger = That stranger
-rlva-anonym-a-being = A being
-rlva-anonym-this-being = This being
-rlva-anonym-that-being = That being
-rlva-anonym-an-agent = An agent
-rlva-anonym-this-agent = This agent
-rlva-anonym-that-agent = That agent
-rlva-anonym-a-soul = A soul
-rlva-anonym-this-soul = This soul
-rlva-anonym-that-soul = That soul
-rlva-anonym-somebody = Somebody
-rlva-anonym-some-people = Some people
-rlva-anonym-someone = Someone
-rlva-anonym-mysterious-one = Mysterious one
-rlva-anonym-an-unknown-being = An unknown being
-rlva-anonym-unidentified-one = Unidentified one
-rlva-anonym-an-unknown-person = An unknown person
 rlva-blocked-nearby = Unable to see the presence of nearby avatars due to RLVa restrictions.
 status-share-music = Listening to { $detail }
 status-share-music-generic = Listening to music
@@ -16935,3 +16898,68 @@ ui-sound-female-avatar-hurt = Weiblicher Avatar verletzt
 ui-sound-invalid-operation = Ungültige Operation
 ui-sound-male-avatar-hurt = Männlicher Avatar verletzt
 ui-sound-movelock-toggle = Movelock an / aus
+language-file = Sprachdatei
+language-file-help = Eine Fluent-Übersetzungsdatei (.ftl) statt der Liste verwenden, im Format der eigenen Kataloge des Viewers. Sie wird beim Start des Viewers gelesen; fehlende Texte werden auf Englisch angezeigt.
+language-file-use = Eine Sprachdatei (.ftl) verwenden
+language-file-instead = Stattdessen wird die Sprachdatei verwendet.
+language-file-browse = Durchsuchen…
+language-file-choose = Sprachdatei auswählen
+language-file-filter = Fluent-Sprachdatei
+language-file-none = Noch keine Datei ausgewählt: Es wird die Sprache der Liste verwendet.
+language-file-in-use = In Verwendung: { $name } ({ $count ->
+    [one] { $count } Text
+   *[other] { $count } Texte
+    })
+language-file-errors = { $count ->
+    [one] { $count } Eintrag konnte nicht gelesen werden und wird auf Englisch angezeigt.
+   *[other] { $count } Einträge konnten nicht gelesen werden und werden auf Englisch angezeigt.
+    }
+language-file-unnamed = Der Dateiname ist kein Sprachcode (wie de.ftl oder pt-BR.ftl): Die Pluralregeln folgen dem Englischen.
+language-file-next = Beim nächsten Start: { $name }
+language-file-failed = { $name } wird nicht verwendet ({ $reason }): Es wird die Sprache der Liste verwendet.
+language-file-missing = Datei nicht gefunden
+language-file-unreadable = die Datei kann nicht gelesen werden
+language-file-too-large = die Datei ist zu groß
+language-file-not-text = kein UTF-8-Text
+language-file-empty = keine Nachricht darin
+build-ui-texture-brightness = Helligkeit
+build-ui-texture-bricks = Ziegel
+build-ui-texture-checker = Karo
+build-ui-texture-discs = Scheiben
+build-ui-texture-gravel = Kies
+build-ui-texture-petri-dish = Petrischale
+build-ui-texture-siding = Verkleidung
+build-ui-texture-stucco = Stuck
+build-ui-texture-suction = Saugnäpfe
+build-ui-texture-weave = Gewebe
+script-fold-line-count =
+    { $count ->
+        [one] { $count } Zeile
+        *[other] { $count } Zeilen
+    }
+ui-options-chat-service-history = Verlauf des Chatdienstes
+ui-options-chat-service-history-help = Das Grid speichert Ihren privaten Nachrichtenverlauf. Diese Option lädt ihn herunter, zeigt ihn in Unterhaltungen und speichert bei aktivierten IM-Protokollen eine lokale Kopie. Beim Ausschalten bleiben die Daten im Grid erhalten. Änderungen gelten ab der nächsten Anmeldung.
+chat-service-delete-failed = Ein Teil des lokalen Verlaufs konnte nicht sicher gelöscht werden. Der Verlauf bleibt ausgeblendet, bis die Chatprotokolle erfolgreich gelöscht wurden.
+ui-chat-history-loading = Verlauf wird geladen…
+world-inventory-offers-sent-anonymous = Inventarobjekt an { $name } angeboten
+rlva-tools-child = Unterobjekt
+
+ui-chat-contacts-groups-sub = Gruppen · { $count }
+people-show-group-sheet = Gruppendetails anzeigen
+people-group-details-empty = Keine Gruppe zum Anzeigen
+
+rlva-tools-retained = Bis zur Anmeldung zurückgehalten
+rlva-read-at-login = Änderungen werden bei der nächsten Anmeldung wirksam.
+rlva-debug-commands-chat = Jeder Befehl erhält außerdem eine Zeile im Chat in der Nähe unter dem Namen des Objekts: was er ausführt, was fehlschlägt und warum, was auf die Anmeldung wartet.
+rlva-blocked-start-im = IM-Sitzung mit { $recipient } kann aufgrund von RLV-Einschränkungen nicht gestartet werden
+rlva-blocked-start-conference = Konferenz mit [RECIPIENT] kann aufgrund von RLV-Einschränkungen nicht gestartet werden
+rlva-anonym-waiting = (Wird geladen...)
+rlva-anonym-unknown = (Unbekannt)
+rlva-blocked-teleport = Teleport kann aufgrund von RLV-Einschränkungen nicht gestartet werden
+rlva-blocked-permission-attach = Der Versuch, '{ $object }' anzulegen, wurde aufgrund von RLV-Einschränkungen abgelehnt
+rlva-blocked-permission-teleport = '{ $object }' wurde die Erlaubnis, dich zu teleportieren, aufgrund von RLV-Einschränkungen verweigert
+rlva-blocked-view-notecard = Die Notiz kann aufgrund von RLVa-Einschränkungen nicht geöffnet werden.
+rlva-blocked-view-script = Das Skript kann aufgrund von RLVa-Einschränkungen nicht geöffnet werden.
+rlva-blocked-view-texture = Die Textur kann aufgrund von RLVa-Einschränkungen nicht geöffnet werden.
+rlva-debug-explicit-point = Namen von Anbringungspunkten bei Inventarobjekten und Ordnern ignorieren
+rlva-debug-explicit-point-hint = Solange ein Anbringungspunkt gesperrt ist, senden Anlegen und Hinzufügen ein Objekt an seinen Standardpunkt statt an den Punkt, den sein Name oder der Name seines Ordners angibt (unvollständig).

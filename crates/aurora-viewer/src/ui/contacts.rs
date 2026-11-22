@@ -861,7 +861,7 @@ fn picked(world: &mut World, st: &mut ContactsUi, what: PickFor, ids: Vec<Uuid>)
                 }
                 None => {
                     if let Some(id) = ids.first() {
-                        let name = world.social.name_of(id);
+                        let name = world.social.name_in(NameScope::Roster, id);
                         world.system_notice(
                             aurora_i18n::tr!("ui-contacts-is-already-your-friend", name = name.to_string()),
                             crate::world::notice_topics::Topic::People,
@@ -1685,7 +1685,7 @@ fn group_row(
     }
     if resp.double_clicked() {
         if id.is_nil() {
-            if world.groups.active != id {
+            if world.groups.active != id && world.rlva_can_change_group() {
                 actions.push(ContactsAction::Net(NetCommand::ActivateGroup(id)));
             }
         } else {
@@ -1695,7 +1695,9 @@ fn group_row(
     menu::context_menu(&resp, p, |ui| group_menu(ui, p, world, st, id, actions));
 }
 
-/// Right-click menu of a group (menu_people_groups.xml).
+/// Right-click menu of a group (menu_people_groups.xml). Under @setgroup
+/// "Activate" is greyed, and "Leave" for the active group
+/// (LLGroupList::onContextMenuItemEnable, indra/newview/llgrouplist.cpp).
 fn group_menu(ui: &mut egui::Ui, p: &Palette, world: &mut World, st: &mut ContactsUi, id: Uuid, actions: &mut Vec<ContactsAction>) {
     let real = !id.is_nil();
     if menu::item_if(
@@ -1703,7 +1705,7 @@ fn group_menu(ui: &mut egui::Ui, p: &Palette, world: &mut World, st: &mut Contac
         p,
         "circle-check-filled",
         aurora_i18n::tr!("common-activate"),
-        world.groups.active != id,
+        world.groups.active != id && world.rlva_can_change_group(),
     ) {
         actions.push(ContactsAction::Net(NetCommand::ActivateGroup(id)));
     }
@@ -1736,7 +1738,13 @@ fn group_menu(ui: &mut egui::Ui, p: &Palette, world: &mut World, st: &mut Contac
         }
     }
     menu::separator(ui, p);
-    if menu::item_if(ui, p, "logout", aurora_i18n::tr!("common-quit"), real) {
+    if menu::item_if(
+        ui,
+        p,
+        "logout",
+        aurora_i18n::tr!("common-quit"),
+        real && world.rlva_can_leave_group(id),
+    ) {
         st.ask_leave_group(id);
     }
 }
@@ -1761,7 +1769,10 @@ fn group_buttons(ui: &mut egui::Ui, p: &Palette, world: &mut World, st: &mut Con
     if side_button(ui, p, aurora_i18n::tr!("ui-contacts-titles"), "", true) {
         actions.push(ContactsAction::GroupTitles);
     }
-    if side_button(ui, p, aurora_i18n::tr!("common-activate"), "", sel != world.groups.active) {
+    // FSFloaterContacts::updateGroupButtons has no RLVa test: under
+    // @setgroup the two buttons stay, and LLGroupActions::activate and
+    // leave do nothing
+    if side_button(ui, p, aurora_i18n::tr!("common-activate"), "", sel != world.groups.active) && world.rlva_can_change_group() {
         actions.push(ContactsAction::Net(NetCommand::ActivateGroup(sel)));
     }
     let pinned = world.groups.favorites.contains(&sel);
@@ -1778,7 +1789,7 @@ fn group_buttons(ui: &mut egui::Ui, p: &Palette, world: &mut World, st: &mut Con
     ) {
         world.groups.toggle_favorite(sel);
     }
-    if side_button(ui, p, aurora_i18n::tr!("common-quit"), "", real) {
+    if side_button(ui, p, aurora_i18n::tr!("common-quit"), "", real) && world.rlva_can_leave_group(sel) {
         st.dialog = Some(Dialog::LeaveGroup(sel));
     }
     ui.add_space(6.0);
@@ -1856,7 +1867,7 @@ fn sets_tab(
     let name_of = |id: &Uuid| {
         social
             .avatar_names
-            .get(id)
+            .get_in(NameScope::Roster, id)
             .map(|n| n.complete(&o))
             .or_else(|| social.names.get(id).cloned())
             .unwrap_or_else(|| "â€¦".into())
@@ -1864,7 +1875,7 @@ fn sets_tab(
     let online = |id: &Uuid| social.shown_friend(id).is_some_and(|f| f.online);
     let count = members.len();
     let filter = st.set_filter.trim().to_lowercase();
-    members.retain(|id| super::people::matches_name(world, NameScope::World, id, &name_of(id), &filter));
+    members.retain(|id| super::people::matches_name(world, NameScope::Roster, id, &name_of(id), &filter));
     // FSPanelContactSets::updateAvatarListSorting
     if world.contact_sets.sorts_by_online(&choice) {
         members.sort_by_cached_key(|id| (!online(id), crate::natural_order::key(&name_of(id))));
@@ -2194,7 +2205,7 @@ fn dialogs(ctx: &egui::Context, p: &Palette, world: &mut World, st: &mut Contact
     let Some(d) = st.dialog.as_mut() else {
         return;
     };
-    let name = |id: &Uuid| world.social.name_of(id);
+    let name = |id: &Uuid| world.social.name_in(NameScope::Roster, id);
     // removing a friend, a set or its members is the destructive answer
     let (icon, kind) = match d {
         Dialog::RemoveFriends(_) | Dialog::RemoveSet(_) | Dialog::RemoveFromSet { .. } => ("trash-filled", widgets::ActionKind::Danger),

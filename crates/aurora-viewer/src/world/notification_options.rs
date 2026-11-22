@@ -93,6 +93,7 @@ impl World {
             source: Uuid::nil(),
             origin: Origin::Live,
             blocked: false,
+            speaker: Default::default(),
         };
         self.conversation_push(friend, line, unread);
     }

@@ -22,12 +22,14 @@ pub mod calls;
 mod chat_copies;
 pub mod chat_log;
 pub mod chat_range;
+pub mod chat_service;
 pub mod collisions;
 pub mod complexity_notice;
 pub mod contact_markers;
 pub mod contact_sets;
 pub mod derender;
 pub mod dialog_names;
+pub mod direct_history;
 pub mod edit_echo;
 pub mod eep;
 pub mod eep_env;
@@ -149,6 +151,8 @@ mod flash_tests;
 mod god_mode_tests;
 #[cfg(test)]
 mod group_notice_tests;
+#[cfg(test)]
+pub(crate) mod rlva_location_tests;
 #[cfg(test)]
 mod toasts_tests;
 
@@ -305,6 +309,18 @@ impl ChatKind {
         matches!(self, ChatKind::Invite(_) | ChatKind::InventoryOffer(_) | ChatKind::Payment(_))
     }
 
+    /// The text of a line of this kind, in a conversation that shows the
+    /// names of `names` (`names::TextScope`): what a resident typed, we
+    /// included, in the nearby chat or in an IM session, is shown as typed
+    /// under RLVa's `@shownames` and `@showloc`; an object's line, the
+    /// viewer's notices and the cards are rewritten.
+    pub fn text_in(self, names: names::NameScope) -> names::TextScope {
+        match self {
+            ChatKind::Local(_) | ChatKind::Own(_) | ChatKind::Im => names::TextScope::verbatim(names),
+            _ => names.into(),
+        }
+    }
+
     /// Not sent by a person: what an object or a script says (its owner-say
     /// and its llRegionSayTo to us included), its IMs, and the viewer's
     /// notices. The cards of residents' offers are people's (#741).
@@ -330,6 +346,26 @@ pub enum Origin {
     Copy,
 }
 
+/// What RLVa's `@shownames` made of the resident who wrote a line, decided
+/// once, when the line arrives: the Legacy Viewer writes the stand-in in
+/// `chat.mFromName`, sets `mRlvNamesFiltered` and colours the line then
+/// (process_chat_from_simulator, indra/newview/llviewermessage.cpp;
+/// LGGContactSets::colorize, indra/newview/lggcontactsets.cpp), and nothing
+/// rewrites a line already shown when the restriction comes or goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Speaker {
+    /// No restriction, or someone it does not reach.
+    #[default]
+    Named,
+    /// Named (oneself aside, an `@shownames:<uuid>` exception), but around
+    /// us under the restriction: not coloured as Linden staff
+    /// (`World::rlva_speaker`).
+    Around,
+    /// `!RlvActions::canShowName(SNC_DEFAULT, id)`: no contact colour, and
+    /// in the nearby chat the stand-in for a name, in plain text.
+    Hidden,
+}
+
 #[derive(Debug, Clone)]
 pub struct ChatLine {
     pub time: SystemTime,
@@ -342,6 +378,44 @@ pub struct ChatLine {
     /// (FSShowMutedChatHistory, `settings::BlockedChat`): never above the
     /// chat bar, never counted, logged or alerted.
     pub blocked: bool,
+    /// How RLVa's `@shownames` left the resident who wrote the line when it
+    /// arrived (`World::rlva_freeze_line`).
+    pub speaker: Speaker,
+}
+
+impl ChatLine {
+    /// The line shows the stand-in of its speaker, which `from` holds
+    /// (`mRlvNamesFiltered` of a resident's line): plain text, no picture,
+    /// no menu. The nearby chat's alone: an IM session names its people.
+    pub fn anonymous(&self) -> bool {
+        self.speaker == Speaker::Hidden && matches!(self.kind, ChatKind::Local(_))
+    }
+
+    /// How the text of the line is shown in a conversation that shows the
+    /// names of `names`: as it is, a mention in it naming its resident.
+    /// What RLVa's `@shownames` and `@showloc` hide of a line said during
+    /// this session is rewritten once, when it arrives
+    /// (`World::rlva_freeze_line`:
+    /// LLFloaterIMNearbyChatHandler::processChat,
+    /// indra/newview/llfloaterimnearbychathandler.cpp, sets `mRlvNamesFiltered`
+    /// and `mRlvLocFiltered` so that nothing runs twice), and a line already
+    /// shown is left alone when a restriction comes or goes. The card of an
+    /// offer or a payment is a notice with a state of its own: its text
+    /// follows its kind (`ChatKind::text_in`) while it is shown. Nothing
+    /// rewrites a line read back either:
+    /// LLLogChat::loadChatHistory (indra/newview/lllogchat.cpp),
+    /// FSFloaterNearbyChat::loadHistory
+    /// (indra/newview/fsfloaternearbychat.cpp) and
+    /// LLIMModel::LLIMSession::chatFromLogFile (indra/newview/llimview.cpp)
+    /// have no RLVa test, and RlvUtil::filterMentions runs on the lines the
+    /// simulator sends. What a restriction hid when the line was said is
+    /// hidden in the file already (`World::transcript_text`).
+    pub fn wording(&self, names: names::NameScope) -> names::TextScope {
+        match (self.origin, self.kind) {
+            (Origin::Live, ChatKind::Invite(_) | ChatKind::InventoryOffer(_) | ChatKind::Payment(_)) => self.kind.text_in(names),
+            _ => names::TextScope::as_received(names),
+        }
+    }
 }
 
 /// Drawn speed (m/s) under which our walk stops after a release, with
@@ -473,6 +547,8 @@ pub struct World {
     pub notice_topics: notice_topics::Topics,
     /// Conversation transcripts of the account logged in.
     pub chat_log: chat_log::ChatLog,
+    /// The Chat Service's direct-IM history (direct_history.rs).
+    pub chat_service: direct_history::ChatService,
     /// The last import's result, for the app.
     pub import_report: Option<chat_log::import::Report>,
     /// History of the nearby chat (asked once per login).
@@ -642,6 +718,12 @@ pub struct World {
     pub lsl_bridge: lslbridge::LslBridge,
     pub rlva: rlva::Rlva,
     pub rlva_privacy: rlva::privacy::TextFilter,
+    /// `rlva_privacy` without the places: the names alone, for the name of
+    /// an object that speaks (`rlva_object_name`).
+    pub rlva_name_privacy: rlva::privacy::TextFilter,
+    /// `rlva_privacy` without the names: what the places that name their
+    /// residents (`NameScope::Roster`) still hide under `@showloc`.
+    pub rlva_place_privacy: rlva::privacy::TextFilter,
     pub rlva_hover_privacy: rlva::privacy::TextFilter,
     rlva_location_hidden: bool,
     /// Derendered objects and residents, and the asset blacklist.
@@ -838,10 +920,11 @@ pub struct World {
     /// "Teleport completed from <SLURL>" in nearby chat after a teleport to
     /// another region (FSShowBackSLURL, from the settings).
     pub show_back_slurl: bool,
-    /// The SLURL of the place a teleport leaves, taken at its TeleportFinish
-    /// (LLAgent::setTeleportState(TELEPORT_MOVING) saves the "back" SLURL
-    /// there) and said on its arrival.
-    tp_back_slurl: Option<String>,
+    /// The place a teleport leaves (grid, region, position), taken at its
+    /// TeleportFinish (LLAgent::setTeleportState(TELEPORT_MOVING) saves the
+    /// "back" SLURL there) and said on its arrival, its SLURL made then as
+    /// the Legacy Viewer's getSLURLString is.
+    tp_back_slurl: Option<(Option<String>, String, Vec3)>,
     /// Recent participants and open tabs, saved for this account and grid.
     social_history: social_history::History,
     /// Chosen before login; fixed until this session ends.
@@ -1061,6 +1144,7 @@ impl World {
             fly_override: false,
             notice_topics: Default::default(),
             chat_log: Default::default(),
+            chat_service: Default::default(),
             import_report: None,
             nearby_history: Default::default(),
             script_debug: script_debug::Messages::default(),
@@ -1139,6 +1223,8 @@ impl World {
             ik_targets: rig_targets::Targets::default(),
             rlva: rlva::Rlva::default(),
             rlva_privacy: Default::default(),
+            rlva_name_privacy: Default::default(),
+            rlva_place_privacy: Default::default(),
             rlva_hover_privacy: Default::default(),
             rlva_location_hidden: false,
             derender: derender::Derender::default(),
@@ -1246,6 +1332,10 @@ impl World {
         self.flush_social_history();
         let lib = self.avatar_lib.clone();
         let cache_dir = self.cache_dir.take();
+        // LLChatServiceHistory::stop; the manager stays, so that no ticket
+        // of this login is taken for one of the next
+        self.chat_service_logout();
+        let chat_service = std::mem::take(&mut self.chat_service);
         let mut chat_log = std::mem::take(&mut self.chat_log);
         chat_log.logout();
         // a setting, not the session's: the arrival's lines follow it too
@@ -1258,6 +1348,7 @@ impl World {
         *self = World::new(lib);
         self.omnifilter = omnifilter;
         self.chat_log = chat_log;
+        self.chat_service = chat_service;
         self.cache_dir = cache_dir;
         self.quiet_automated_chat = quiet;
         self.chat_display = display;
@@ -1331,23 +1422,74 @@ impl World {
     }
 
     /// LLAgentUI::buildSLURL (indra/newview/llagentui.cpp): where the agent
-    /// is now, on the main region's grid. None before the first arrival,
-    /// with no region name yet, or under RLVa `@showloc` (stricter than the
-    /// Legacy Viewer, whose line names the place left even then).
+    /// is now, on the main region's grid. None before the first arrival or
+    /// with no region name yet. Under RLVa `@showloc` a connected region is
+    /// "(Hidden region)" (`rlva_slurl_on`).
     pub(crate) fn back_slurl(&self) -> Option<String> {
-        if !self.arrived_once || self.rlva.has("showloc") {
+        let (grid, region, pos) = self.back_place()?;
+        Some(self.rlva_slurl_on(grid.as_deref(), &region, pos))
+    }
+
+    /// Where the agent is now: grid, region and position of `back_slurl`.
+    fn back_place(&self) -> Option<(Option<String>, String, Vec3)> {
+        if !self.arrived_once {
             return None;
         }
         let handle = self.main_region?;
         let name = self.regions.get(&handle).map(|r| r.name.as_str()).filter(|n| !n.is_empty())?;
-        Some(crate::slurl::make_on(self.grid_of(handle).as_deref(), name, self.agent.position))
+        Some((self.grid_of(handle), name.to_owned(), self.agent.position))
+    }
+
+    /// LLSLURL::getSLURLString (indra/newview/llslurl.cpp, fsslurl.cpp):
+    /// the SLURL of a place on `grid`, "(Hidden region)" with no position
+    /// under RLVa `@showloc` for a region the agent is connected to
+    /// (RlvUtil::isNearbyRegion, rlvcommon.cpp: the exact name).
+    pub(crate) fn rlva_slurl_on(&self, grid: Option<&str>, region: &str, pos: Vec3) -> String {
+        if self.rlva_hides_region(region) {
+            crate::slurl::hidden_on(grid, aurora_i18n::tr!("rlva-hidden-region"))
+        } else {
+            crate::slurl::make_on(grid, region, pos)
+        }
+    }
+
+    /// The region a teleport offer names ("Join me in [REGION]"): "(Hidden)"
+    /// under RLVa `@showloc` (handle_lure, indra/newview/llviewermessage.cpp:
+    /// Hidden::Generic, not Hidden::Region).
+    pub fn rlva_lure_region(&self) -> String {
+        if self.rlva.has("showloc") {
+            aurora_i18n::tr!("rlva-hidden-generic").to_owned()
+        } else {
+            self.region_name()
+        }
+    }
+
+    /// RLVa `@showloc` hides `region`, one the agent is connected to:
+    /// `hasBehaviour(RLV_BHVR_SHOWLOC) && RlvUtil::isNearbyRegion`
+    /// (rlvcommon.cpp: the exact name of a region of LLWorld).
+    pub(crate) fn rlva_hides_region(&self, region: &str) -> bool {
+        self.rlva.has("showloc") && !region.is_empty() && self.regions.values().any(|r| r.name == region)
+    }
+
+    /// What `slurl::make` hides under RLVa `@showloc`: the "(Hidden
+    /// region)" label and the names of the regions the agent is connected
+    /// to (`slurl::set_hidden_regions`); None without the restriction.
+    pub fn rlva_slurl_hidden_regions(&self) -> Option<(String, Vec<String>)> {
+        self.rlva.has("showloc").then(|| {
+            (
+                aurora_i18n::tr!("rlva-hidden-region").to_owned(),
+                self.regions.values().map(|r| r.name.clone()).filter(|n| !n.is_empty()).collect(),
+            )
+        })
     }
 
     /// process_agent_movement_complete (indra/newview/llviewermessage.cpp,
     /// FSShowBackSLURL): the teleport's "completed_from" message
     /// (teleport_strings.xml) in nearby chat, a ChatSystemMessageTip.
+    /// Under RLVa `@showloc` the line is said too, the place left
+    /// "(Hidden region)" while still connected (`rlva_slurl_on`, as
+    /// getSLURLString makes `[T_SLURL]` there).
     fn say_back_slurl(&mut self, slurl: &str) {
-        if !self.show_back_slurl || self.rlva.has("showloc") {
+        if !self.show_back_slurl {
             return;
         }
         self.system_notice(
@@ -2451,6 +2593,7 @@ impl World {
             source: Uuid::nil(),
             origin: Origin::Live,
             blocked: false,
+            speaker: Default::default(),
         };
         self.notice_topics.note(&line, topic);
         self.push_chat(line);
@@ -2467,6 +2610,7 @@ impl World {
             source: Uuid::nil(),
             origin: Origin::Live,
             blocked: false,
+            speaker: Default::default(),
         };
         self.notice_topics.note(&line, topic);
         self.conversation_push(session, line, false);
@@ -3027,6 +3171,8 @@ impl World {
                 self.script_controls = Default::default();
                 // the account is known: its transcripts open
                 self.chat_log.login_named(l.agent_id, Some((&l.first_name, &l.last_name)));
+                // LLChatServiceHistory::start, in the account's own folder
+                self.chat_service_login();
                 if self.chat_log.cfg.import_at_login
                     && let Some(grid) = self.chat_log.identity().map(|id| id.grid.clone())
                 {
@@ -3274,7 +3420,7 @@ impl World {
                     // @showloc: the session keeps neither the name nor the
                     // way back to the place (LLTeleportHistory::updateCurrentLocation)
                     let entry = if self.rlva.has("showloc") {
-                        tphistory::TpEntry::hidden(aurora_i18n::tr!("rlva-hidden-region"), at)
+                        tphistory::TpEntry::hidden(aurora_i18n::tr!("rlva-hidden-parcel"), at)
                     } else {
                         tphistory::TpEntry {
                             region: self.regions.get(&handle).map(|r| r.name.clone()).unwrap_or_default(),
@@ -3308,7 +3454,8 @@ impl World {
                     self.friends_only_teleport_arrival();
                     self.tp_cancel.on_end();
                 }
-                if let Some(slurl) = self.tp_back_slurl.take().filter(|_| self.teleporting) {
+                if let Some((grid, region, pos)) = self.tp_back_slurl.take().filter(|_| self.teleporting) {
+                    let slurl = self.rlva_slurl_on(grid.as_deref(), &region, pos);
                     self.say_back_slurl(&slurl);
                 }
                 self.teleporting = false;
@@ -3709,7 +3856,7 @@ impl World {
                 }
                 // the region left is still the main one: the session changes
                 // it right after this event (switch_region)
-                self.tp_back_slurl = self.back_slurl();
+                self.tp_back_slurl = self.back_place();
                 self.teleporting = true;
                 let remote = Some(handle) != self.main_region;
                 // TeleportStart has no destination. Unlike Firestorm's
@@ -3915,7 +4062,12 @@ impl World {
                 experience,
                 region,
             } => {
+                let requested = questions;
                 let (questions, auto_accept) = self.rlva_script_permissions(task_id, questions);
+                // process_script_question keeps what RLVa stripped for the
+                // answer (RlvUtil::filterScriptQuestions, "rlv_blocked")
+                let notice = self.rlva_permission_notice(requested, questions, &object_name);
+                self.rlva_hold_permission_notice(task_id, item_id, notice);
                 if auto_accept && experience.is_nil() {
                     self.rlva.out.push(aurora_net::NetCommand::ScriptAnswer {
                         task_id,
@@ -3923,6 +4075,8 @@ impl World {
                         questions,
                         region,
                     });
+                    // forceResponse(YES): answered yes at once
+                    self.rlva_answer_permission_notice(task_id, item_id, true);
                     return None;
                 }
                 // process_script_question: an experience's question waits
@@ -4912,6 +5066,10 @@ impl World {
                 self.host_images.push((id, bytes));
                 None
             }
+            NetEvent::ChatServiceResponse { id, status, body } => {
+                self.chat_service_response(id, status, body);
+                None
+            }
             other => Some(other),
         }
     }
@@ -4929,32 +5087,50 @@ impl World {
     }
 
     fn on_chat(&mut self, c: ChatMessage) {
+        // process_chat_from_simulator (llviewermessage.cpp) returns for a
+        // blocked object, or an object of a blocked owner, before anything
+        // else: its RLVa commands never reach RlvHandler either.
+        if c.source_type == aurora_net::ChatSourceType::Object && self.chat_blocked(&c) {
+            return;
+        }
         let controller_allowed = self.rlva_controller_chat_allowed(c.source_id);
         if c.source_type == aurora_net::ChatSourceType::Object
             && c.chat_type == aurora_net::ChatType::OwnerSay
             && c.message.starts_with('@')
             && controller_allowed
         {
-            self.rlva_bind_controller(c.source_id);
             self.rlva_prepare_version(c.source_id, &c.message);
         }
-        if controller_allowed && self.rlva.receive(&c) {
+        let inventory = &self.inventory;
+        let shared_folder = |path: &str| rlva::shared_folder_exists(inventory, path);
+        if controller_allowed && self.rlva.receive_with(&c, Some(&shared_folder)) {
             self.rlva_resolve_sources();
-            self.eep.rlva_locked = self.rlva.has("setenv");
-            let environment_owner = self.rlva.rules_for("setenv", Uuid::nil()).next().map(|(id, _)| id);
-            if self.eep.rlva_locked
-                && self.rlva.environment.is_none()
-                && let Some(actor) = environment_owner
-            {
-                self.rlva.environment = Some((actor, self.eep.current().0));
-            }
+            self.rlva_sync_environment_lock();
             self.inventory.rlva_preview_mask = self.rlva.preview_mask();
             self.refresh_rlva_privacy();
             self.rlva_watchdog_tick(Instant::now());
+            // RestrainedLoveDebug: process_chat_from_simulator shows what
+            // ran, failed or was retained as the object's chat line
+            let Some(line) = self.rlva.take_debug_line() else {
+                return;
+            };
+            let mut c = c;
+            c.message = line;
+            self.on_chat_line(c);
             return;
         }
+        self.on_chat_line(c);
+    }
+
+    /// An object's or a resident's chat line, past the RLVa commands.
+    fn on_chat_line(&mut self, c: ChatMessage) {
         let mut c = c;
-        if let std::borrow::Cow::Owned(text) = self.rlva_filter_text(&c.message) {
+        // `@shownames` and `@showloc` rewrite what an object or the system
+        // says, never what a resident typed ("avatar => filter only their
+        // name", process_chat_from_simulator; `names::TextScope`)
+        if c.source_type != aurora_net::ChatSourceType::Agent
+            && let std::borrow::Cow::Owned(text) = self.rlva_filter_text(&c.message)
+        {
             c.message = text;
         }
         let own_attachment = self.rlva.enabled()
@@ -5004,7 +5180,11 @@ impl World {
                     self.nearby_typing.remove(&c.source_id);
                     // LLNearbyChatHandler::processChat: the speaker joins
                     // the recent people
-                    self.met(c.source_id);
+                    // (not one whose name is hidden: RlvActions::canShowName
+                    // there, llfloaterimnearbychathandler.cpp)
+                    if self.rlva_can_name(c.source_id) {
+                        self.met(c.source_id);
+                    }
                     // LLAgent::heardChat (half the time, ll_rand(2))
                     let coin = Uuid::new_v4().as_bytes()[0] & 1 == 0;
                     self.look_at.heard_chat(c.source_id, coin);
@@ -5029,9 +5209,23 @@ impl World {
         };
         // IDEVO: avatars by their complete name ("Jane Doe (janedoe)")
         let from = match c.source_type {
-            ChatSourceType::Agent => self.social.avatar_names.complete(&c.source_id).unwrap_or(c.from_name),
+            ChatSourceType::Agent => {
+                // a name not cached yet stays the one the line came with:
+                // under `@shownames` its stand-in is RlvStrings::getAnonym
+                // of it (`rlva_sender`), not the one `complete` gives the id
+                let names = &self.social.avatar_names;
+                let complete = names.complete(&c.source_id);
+                match names.raw(&c.source_id) {
+                    Some(_) => complete.unwrap_or(c.from_name),
+                    None => c.from_name,
+                }
+            }
             _ => c.from_name,
         };
+        // RLVa `@shownames`: who the line names is decided now, once
+        // (`Speaker`): the stand-in of a hidden speaker, the name of an
+        // object rewritten
+        let (speaker, from) = self.rlva_sender(names::NameScope::World, kind, c.source_id, from);
         // a resident's line that mentions the agent
         // (LLUrlRegistry::containsAgentMention)
         if matches!(kind, ChatKind::Local(_)) && crate::ui::chat::mentions(&c.message, &self.agent_id) {
@@ -5099,9 +5293,15 @@ impl World {
                 .unwrap_or_default();
             time = self.remember_chat_object(crate::slapp::RemoteObject {
                 id: c.source_id,
-                name: from.clone(),
+                // as the line keeps it (`rlva_sender`): the `name` of the
+                // objectim link is chat.mFromName, rewritten already
+                name: self.rlva_object_name(&from).into_owned(),
                 owner: c.owner_id,
                 group_owned: false,
+                // the `rlv_shownames` of the line's objectim link
+                // (process_chat_from_simulator): an owner hidden now, who
+                // is not us
+                owner_hidden: self.rlva.has("shownames") && !self.rlva_can_name(c.owner_id),
                 slurl,
             });
         }
@@ -5117,6 +5317,7 @@ impl World {
             source: c.source_id,
             origin: Origin::Live,
             blocked: false,
+            speaker,
         };
         self.translate_chat(&line);
         self.push_chat(line);
@@ -5207,10 +5408,12 @@ impl World {
                 poke: self.takes_poke(&im.message, im.offline),
                 mention: crate::ui::chat::mentions(&im.message, &self.agent_id),
             });
+            // named whatever `@shownames`: an instant message is not the
+            // nearby chat (process_improved_im tests nothing for it)
             let from = self
                 .social
                 .avatar_names
-                .complete(&im.from_agent_id)
+                .complete_in(names::NameScope::Roster, &im.from_agent_id)
                 .unwrap_or_else(|| im.from_name.clone());
             self.social.session_mut(im.from_agent_id);
             let open = attention::Open::Conversation(im.from_agent_id);
@@ -5230,10 +5433,15 @@ impl World {
                 source: im.from_agent_id,
                 origin: Origin::Live,
                 blocked: false,
+                speaker: Default::default(),
             };
             let opened = !self.chat_log.conversations.known.contains(&im.from_agent_id);
+            let (line_time, line_text) = (line.time, line.text.clone());
             self.conversation_push(im.from_agent_id, line, true);
             self.notifications.offline_message(im.offline);
+            // the Chat Service's capture and activity, offline too
+            // (processNewMessage, LL viewer 26.5)
+            self.direct_incoming(im.from_agent_id, line_time, &line_text, &im.message, im.offline, im.timestamp);
             // sessionAdded with has_offline_msg: the log marks it unread
             if im.offline && opened {
                 self.log_conversation(im.from_agent_id, true);
@@ -5266,6 +5474,17 @@ impl World {
         // muted the owner, hiding all their chat and objects. An older
         // region gives no session id: no object to link then.
         let source = if im.dialog == 19 { im.session_id } else { im.from_agent_id };
+        // RLVa `@shownames`, IM_FROM_TASK of LLIMProcessing::processNewMessage
+        // (indra/newview/llimprocessing.cpp): the owner of the object is
+        // hidden, and the object's name rewritten, when they stand around
+        // us now, an `@shownames:<uuid>` exception included; a group's
+        // object keeps both. Kept with the line (`rlv_shownames`).
+        let owner_hidden = im.dialog == 19 && self.rlva.has("shownames") && !im.from_group && self.rlva_is_nearby(im.from_agent_id);
+        let from = if owner_hidden {
+            self.rlva_object_name(&from).into_owned()
+        } else {
+            from
+        };
         let mut time = SystemTime::now();
         if im.dialog == 19 && !im.session_id.is_nil() {
             // RLVa @showloc masks the location of an object's IM from a
@@ -5289,6 +5508,7 @@ impl World {
                 name: from.clone(),
                 owner: im.from_agent_id,
                 group_owned: im.from_group,
+                owner_hidden,
                 slurl,
             });
         }
@@ -5327,6 +5547,7 @@ impl World {
             source,
             origin: Origin::Live,
             blocked: false,
+            speaker: Default::default(),
         };
         // an object's message is translated as its nearby lines are
         self.translate_chat(&line);
@@ -5391,9 +5612,22 @@ impl World {
                     });
                 }
                 let what = inventory_offers::item_label(&im.message);
+                // Who gives is named or not now, once
+                // (inventory_offer_handler, indra/newview/llimprocessing.cpp):
+                // the notice is written with their name or with their
+                // stand-in in its place, the NAME and `rlvanonym` NAME_SLURL
+                // of UserGiveItem. Nothing else of its text is rewritten:
+                // the item keeps the name it was given with.
+                let named = self.rlva_names_giver(im.from_agent_id, false);
+                let giver = if named {
+                    from.to_string()
+                } else {
+                    self.rlva_anonymous(im.from_agent_id).display_name.clone()
+                };
+                let n = &mut self.notifications;
                 let entry = n.push(
                     Kind::Inventory,
-                    aurora_i18n::tr!("world-mod-gives-you", from = from.to_string(), what = what.to_string()),
+                    aurora_i18n::tr!("world-mod-gives-you", from = giver, what = what.to_string()),
                     String::new(),
                     Data::Inventory {
                         from: im.from_agent_id,
@@ -5404,7 +5638,9 @@ impl World {
                         task_offer: None,
                     },
                 );
-                n.link_name(entry, from.clone(), notifications::NameTarget::Avatar(im.from_agent_id));
+                if named {
+                    n.link_name(entry, from.clone(), notifications::NameTarget::Avatar(im.from_agent_id));
+                }
                 if self.receive_inventory_offer(im, entry) {
                     return true;
                 }
@@ -5465,12 +5701,25 @@ impl World {
                 } else {
                     aurora_i18n::tr!("world-mod-declined")
                 };
-                n.push(
+                // Named or not as an offer of theirs would be, decided
+                // now: IM_INVENTORY_ACCEPTED and IM_INVENTORY_DECLINED of
+                // process_improved_im (indra/newview/llimprocessing.cpp)
+                // write RlvStrings::getAnonym in place of the name.
+                let named = self.rlva_names_giver(im.from_agent_id, false);
+                let who = if named {
+                    from.to_string()
+                } else {
+                    self.rlva_anonymous(im.from_agent_id).display_name.clone()
+                };
+                let id = self.notifications.push(
                     Kind::Inventory,
-                    aurora_i18n::tr!("world-mod-has-your-object", from = from.to_string(), verb = verb.to_string()),
+                    aurora_i18n::tr!("world-mod-has-your-object", from = who, verb = verb.to_string()),
                     String::new(),
                     Data::None,
                 );
+                if named {
+                    self.notifications.name_resident(id);
+                }
             }
             d::MESSAGEBOX | d::FROM_TASK_AS_ALERT => {
                 n.push(Kind::Alert, from, im.message.clone(), Data::None);
@@ -5503,7 +5752,14 @@ impl World {
                 | d::MESSAGEBOX
         );
         let last = self.notifications.last_id();
+        // The notice that hides who gave, or who answered what we gave,
+        // links no one: their stand-in is plain text, as the `rlvanonym`
+        // link of the Legacy Viewer is (`name_giver_notice`).
+        let hidden = self.rlva.enabled()
+            && matches!(im.dialog, d::INVENTORY_OFFERED | d::INVENTORY_ACCEPTED | d::INVENTORY_DECLINED)
+            && !self.notifications.names_resident(last);
         if last != before
+            && !hidden
             && !matches!(
                 im.dialog,
                 d::TASK_INVENTORY_OFFERED | d::GROUP_NOTICE | d::FROM_TASK_AS_ALERT | d::GOTO_URL | d::MESSAGEBOX
@@ -5801,6 +6057,19 @@ impl World {
             }
             return (Vec::new(), None);
         }
+        // script_question_cb: a yes says what RLVa stripped from the
+        // question (RlvUtil::notifyBlocked with its "rlv_blocked")
+        if let Some(notifications::Data::Permissions { task, item, .. }) = &data
+            && matches!(
+                r,
+                notifications::Response::Accept
+                    | notifications::Response::Decline
+                    | notifications::Response::Block
+                    | notifications::Response::BlockExperience
+            )
+        {
+            self.rlva_answer_permission_notice(*task, *item, matches!(r, notifications::Response::Accept));
+        }
         // notify_cautioned_script_question: the answer to a caution
         // question is told in the nearby chat
         if let Some(notifications::Data::Permissions {
@@ -6068,6 +6337,12 @@ impl World {
         if !id.is_nil() && !self.rlva_can_name(*id) {
             return Some(self.rlva_anonymous(*id).display_name.clone());
         }
+        self.scene_name(id)
+    }
+
+    /// The name the scene gives an avatar, whatever RLVa hides: for the
+    /// callers that applied `@shownames` themselves.
+    fn scene_name(&self, id: &Uuid) -> Option<String> {
         let idx = self.objects.index_of_uuid(id)?;
         self.objects.get(idx)?.display_name()
     }
@@ -6097,8 +6372,11 @@ impl World {
             // never during login, in do not disturb nor for a blocked resident
             if toast && self.notifications.started && !self.status.dnd && !self.mutes.is_muted_id(&id) {
                 let notification = self.notifications.push_presence(id, n.clone(), online);
-                self.notifications
-                    .link_name(notification, self.social.name_of(&id), notifications::NameTarget::Avatar(id));
+                self.notifications.link_name(
+                    notification,
+                    self.social.name_in(names::NameScope::Roster, &id),
+                    notifications::NameTarget::Avatar(id),
+                );
             }
             // FriendOnlineOffline for the system (never during login)
             if self.notifications.started && !self.mutes.is_muted_id(&id) {
@@ -6115,7 +6393,7 @@ impl World {
                 // checked as nearby chat (LLAvatarTracker::processNotify),
                 // unless notices are kept quiet (#741)
                 if self.alerts(ChatKind::System) {
-                    let from = self.social.name_of(&id);
+                    let from = self.social.name_in(names::NameScope::Roster, &id);
                     self.keyword_alert(id, &from, &n, true, attention::Open::NearbyChat);
                 }
                 // the name is a link to the resident (social::online_chat_line)
@@ -6183,8 +6461,11 @@ impl World {
             (line.from.clone(), emote.unwrap_or(text))
         };
         let notification = self.notifications.push_message(m.session, from, title, body, prefs.im_in_bell);
-        self.notifications
-            .link_name(notification, self.social.name_of(&from), notifications::NameTarget::Avatar(from));
+        self.notifications.link_name(
+            notification,
+            self.social.name_in(names::NameScope::Roster, &from),
+            notifications::NameTarget::Avatar(from),
+        );
         if m.kind == ImKind::Group {
             self.notifications.link_name(
                 notification,
@@ -6254,10 +6535,17 @@ impl World {
     /// Complete name of an avatar ("Jane Doe (janedoe)"), else its legacy
     /// name (name-values, UUIDNameReply).
     pub fn person_name(&self, id: &Uuid) -> Option<String> {
+        self.person_name_in(names::NameScope::World, id)
+    }
+
+    /// `person_name` for a name shown in `scope`.
+    pub fn person_name_in(&self, scope: names::NameScope, id: &Uuid) -> Option<String> {
         self.social
             .avatar_names
-            .complete(id)
-            .or_else(|| self.avatar_name(id))
+            // (the stand-in of a resident `scope` hides: the names below
+            // are those of the residents it shows)
+            .complete_in(scope, id)
+            .or_else(|| self.scene_name(id))
             .or_else(|| self.social.names.get(id).cloned())
     }
 
@@ -6361,6 +6649,9 @@ impl World {
             .map(|l| social::format_name(&l.first_name, &l.last_name))
             .unwrap_or_default();
         self.social.session_mut(to);
+        // the newest service id known before it is sent
+        // (History::outgoingContext, LL viewer 26.5)
+        let context = self.direct_outgoing_context(to);
         let line = ChatLine {
             time: SystemTime::now(),
             from: me,
@@ -6369,8 +6660,13 @@ impl World {
             source: Uuid::nil(),
             origin: Origin::Live,
             blocked: false,
+            speaker: Default::default(),
         };
+        let (line_time, line_text) = (line.time, line.text.clone());
         self.conversation_push(to, line, false);
+        if let Some(context) = context {
+            self.direct_outgoing(to, context, line_time, &line_text);
+        }
     }
 
     /// Add a line said at its own time to a conversation, opening it (the
@@ -8123,8 +8419,10 @@ mod motion_tests {
     }
 
     /// FSShowBackSLURL: a teleport through TeleportFinish says, on its
-    /// arrival, the SLURL of the place left; a local teleport, a failed one,
-    /// the setting off or RLVa `@showloc` say nothing.
+    /// arrival, the SLURL of the place left; a local teleport, a failed one
+    /// or the setting off say nothing. Under RLVa `@showloc` the place left,
+    /// still connected, is "(Hidden region)" (LLSLURL::getSLURLString in
+    /// process_agent_movement_complete, llviewermessage.cpp).
     #[test]
     fn a_teleport_to_another_region_says_where_it_came_from() {
         fn back_lines(world: &World) -> Vec<String> {
@@ -8199,6 +8497,9 @@ mod motion_tests {
         assert!(world.rlva.has("showloc"));
         hop(&mut world, handle, false);
         assert!(back_lines(&world).is_empty(), "@showloc");
+        let hidden = format!("http://maps.secondlife.com/secondlife/{}", aurora_i18n::tr!("rlva-hidden-region"));
+        let said: Vec<&str> = world.chat.iter().map(|l| l.text.as_str()).filter(|t| t.contains(&hidden)).collect();
+        assert_eq!(said.len(), 1, "the place left, hidden: {said:?}");
     }
 
     #[test]

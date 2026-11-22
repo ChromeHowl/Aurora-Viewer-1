@@ -3655,7 +3655,9 @@ Scene menu customization: `customize` unlocks the object menu at frame 740;
 scenarios simulate nearby voice membership without starting an audio session:
 verify the volume stays above all movable rows, including while editing, and
 does not overlap Profile. Technical actions are grouped under Display,
-Information, Reset, Moderation (with rights) and Disturbance. A clicked
+Avatar information, Reset, Moderation (with rights) and Disturbance.
+Avatar information offers Inspect all attachments; Clicked object offers
+Inspect for that object. Both use Script information for their own target. A clicked
 attachment's object actions are separate from its wearer's actions.
 `customize-hud` additionally needs
 `AURORA_DEMO_HUDS=1`. Capture at frame 820 or later. `pbr` opens the object's
@@ -6709,6 +6711,7 @@ before (`amis`, `groupes`, `repere`, `historique`…) are still accepted.
 | `AURORA_DEMO_SET_NOTICES=config\|config-responses\|config-bottom\|chat` | A contact set's own online notices and automatic responses |
 | `AURORA_DEMO_CHATLOG=<mode>` | Conversation history, offline IMs and saved private/group conversation restoration |
 | `AURORA_DEMO_LEGACY_LISTS=1\|run\|again\|none\|unreadable\|other-grid` | The import of a Legacy Viewer's lists in Preferences |
+| `AURORA_DEMO_CHATLOG=<mode>` | Conversation history, offline IMs, the Chat Service's direct history (`service`) and saved private/group conversation restoration |
 | `AURORA_DEMO_GLYPHS=1\|2\|rtl\|rtl2` | Names, titles and chat in extended characters (system fonts); `rtl`, `rtl2`: right-to-left text |
 | `AURORA_DEMO_EMOJI_PICKER=1\|<text>` | Conversations open on the emoji picker, a text in the input field |
 | `AURORA_DEMO_EMOJI_CODES=<text>` | Conversations input holding a text with the keyboard: emoji code suggestions |
@@ -6907,18 +6910,22 @@ before (`amis`, `groupes`, `repere`, `historique`…) are still accepted.
   direction with FOV limits. `camera-prefs` opens Camera preferences under
   an exclusive camera lock: preset, offset, distance and viewing-angle
   controls must be disabled while unrelated options remain editable.
-  `camera-zoom-max` sets `setcam_origindistmax:8` on an alt camera 7.6 m
-  from its focus point and scrolls out five clicks from frame 740, then one
-  back in at frame 810; `camera-zoom-min` does the same inward with
-  `setcam_origindistmin:6`. The log gives the camera's distance to the focus
-  at frames 800 and 840: held at the limit at 800, already back inside at
-  840 (the zoom past the limit is not kept). `camera-zoom-both` sets
-  `setcam_avdistmax:7` and `setcam_origindistmin:7.2`, which both hold the
-  camera, then scrolls one click out at frame 760 and one back in at 810;
-  the log gives both distances and the zoom fraction at frames 750, 800 and
-  840: the camera stays held at 7.2 m from the focus, the click out changes
-  the zoom fraction (the zoom is not refused both ways) and the click back
-  in is refused, since the focus limit still holds.
+  The `camera-zoom-*` scenarios start from an alt camera 7.6 m from its
+  focus point, which is over the avatar: 5.2 m from where the avatar's own
+  view would put the camera (its origin) and 7.6 m from the head. They
+  scroll five clicks past the limit from frame 740 and one back at frame
+  810, and the log gives the three distances at frames 730, 800 and 840.
+  `camera-zoom-max` sets `setcam_origindistmax:8`: 8.000 m from the origin
+  at 800 (10.5 m from the head: the origin's limit is not measured from the
+  avatar), 6.7 m at 840 (the zoom past the limit is not kept).
+  `camera-zoom-min` sets `setcam_origindistmin:5` and scrolls in: 5.000 m
+  at 800, 5.3 m at 840. `camera-zoom-both` sets `setcam_avdistmax:5` with
+  `setcam_origindistmax:8`: the same figures as `camera-zoom-max`, 10.5 m
+  from the head at 800, since the origin's limit holds the camera alone
+  while the avatar's two ends differ. `camera-zoom-locked` sets
+  `setcam_avdistmin:5`, `setcam_avdistmax:5` and `setcam_origindistmax:8`:
+  the avatar's limits made equal hold the camera alone, 5.000 m from the
+  head at the three frames, whatever the wheel does.
   `offset-zoom` sets `setcam_eyeoffset:-6/0/1` and
   `setcam_eyeoffsetscale:1.5` on the avatar's own view (9.12 m behind it),
   then scrolls four clicks out from frame 740 and four back in from frame
@@ -6928,14 +6935,16 @@ before (`amis`, `groupes`, `repere`, `historique`…) are still accepted.
   does not come back. `no-mouselook` sets `camdistmin:1`, presses the
   mouselook key at frame 740 and scrolls nineteen clicks in from frame 752.
   The log at frames 741, 790 and 880 must say `mouselook=false` and
-  `cursor held=false`, the camera about 1.4 m from the avatar at 880 (the
-  closest zoom): mouselook is refused up front instead of entered and left
-  a frame later. `avatar-zoom` sets `camdistmax:5` on the avatar's own
-  view, scrolls four clicks out from frame 740 (the second already reaches
-  the limit) and one back in at frame 800. The log gives the camera's
-  distance to the avatar at frames 730, 790 and 880: about 3.3 m, 5 m (held
-  at the limit) and about 4.3 m (the click in moved the camera at once: no
-  zoom was kept past the limit).
+  `cursor held=false`, the camera 1.000 m from the head at 880 (the limit,
+  measured from the head): mouselook is refused up front
+  (RlvActions::canChangeToMouselook) instead of entered and left a frame
+  later, and the wheel all the way in does not enter it either.
+  `avatar-zoom` sets `camdistmax:5` on the avatar's own view, scrolls four
+  clicks out from frame 740 (the third reaches the limit) and one back in
+  at frame 800. The log gives the camera's distance to the head at frames
+  730, 790 and 880: about 3.0 m, 5.000 m (held at the limit) and about
+  4.2 m (the click in moved the camera at once: no zoom was kept past the
+  limit).
   `sitting` sends a forced object sit at frame 700, then sitground at 740.
   The native demo simulator must confirm the stand before the ground sit.
   At frame 810 its log reports `ground_sit=true, object_seated=false`;
@@ -6962,6 +6971,8 @@ before (`amis`, `groupes`, `repere`, `historique`…) are still accepted.
   all), so capture late: `AURORA_FPS_LIMIT=60` and
   `AURORA_CAPTURE_FRAMES=360,2400`, or read the log. Expected: every case `PASS` but
   B05 `SKIPPED` (the demo avatar wears no bridge). The refusal
+  `AURORA_CAPTURE_FRAMES=360,2400`, or read the log. Expected: 65 `PASS`,
+  A02b and B05 `SKIPPED` (the demo avatar wears no HUD and no bridge). The refusal
   notices that pile up during the run are the cases' own refused attempts;
   the avatar ends beside where its seat was. No grid is contacted.
 
@@ -9926,6 +9937,7 @@ Human grid validation: remember MFA for account A and B, restart the viewer, the
   right of the sheet's head; `collapsed` opens the same window with the
   sheet collapsed: the list takes the whole pane and the expand button ends
   its toolbar, in the same place. Combine with `AURORA_DEMO_CONTACTS_FILTER=<query>` to prefill the groups filter when `AURORA_DEMO_CONTACTS=groups` (e.g. confirming that "None (no group tag)" stays visible while filtering groups; only the groups filter is filled). The detached window has the look of the tab it
+  picker of "Add...". Combine with `AURORA_DEMO_CONTACTS_FILTER=<query>` to prefill the groups filter when `AURORA_DEMO_CONTACTS=groups` (e.g. confirming that "None (no group tag)" stays visible while filtering groups; only the groups filter is filled). In Aurora's look of People, `groups` opens the Groups pill of the Contacts tab, and the filter fills its search. The detached window has the look of the tab it
   left (#961): People's friends tab in Aurora's look of People with the
   Aurora or Compact conversation style, the contact list otherwise (add
   `AURORA_DEMO_PEOPLE=legacy` to see it). These modes enable the optional Contacts entry for
@@ -9994,6 +10006,8 @@ Human grid validation: remember MFA for account A and B, restart the viewer, the
   four lists are in memory during the run, and the account's transcripts are
   wiped.
 - **`AURORA_DEMO_CHATLOG=im|find|history[:find]|offline|restore[:slow]|import[:run|again|login|same|none]|long:<n>[:scroll]`**:
+- **`AURORA_DEMO_CHATLOG=im|find|history[:find]|offline|service|restore[:slow]|import[:run|again|login|same|none]|shared[:on]|long:<n>[:scroll]`**:
+- **`AURORA_DEMO_CHATLOG=im|find|history[:find]|offline|service[:skew]|restore[:slow]|import[:run|again|login|same|none]|shared[:on]|long:<n>[:scroll]`**:
   the conversation history without a grid. The demo is its own
   "grid": its files are in
   `config\demo\accounts\<demo account uuid>\chat_logs\demo\`, never in
@@ -10021,6 +10035,32 @@ Human grid validation: remember MFA for account A and B, restart the viewer, the
     `import:same`: the list also has the folder Aurora writes to, unticked
     and greyed. `import:none`: no folder found, the window says so
     and offers the folder dialog.
+  - `service`: the Chat Service's history of the direct conversations (LL
+    viewer 26.5). The demo answers `PersistentChatConversationsRequest` and
+    `PersistentChatHistoryRequest` (`demo://chat-service/…`) itself, in
+    pages of 100 rows; the service's own folder,
+    `config\demo\accounts\<demo account uuid>\chat_service\demo\`, starts
+    empty at each launch. Nova's transcript is written as for `im`, and the
+    three offline messages of `offline` open her conversation. What to see:
+    "Loading history…" with a spinner under Nova's conversation while the pages
+    come in, then her history in grey, with no separator line before the live ones:
+    the weeks before the transcript (118 numbered rows, more than one
+    page), the transcript's lines and the offline messages each once, the
+    live offline messages last. No unread count, toast or sound comes
+    from the history. History (the conversation's menu) shows the same
+    stitched history, searchable. The Conversation log (toolbar) lists
+    Orion, who has no open conversation, and Tess. Preferences › Chat ›
+    History, "Chat Service history" off at the next login shows no service rows
+    (the transcript alone) while the requests still run. Erase (Delete
+    Transcripts) removes the transcripts and the service's archives; a
+    failure shows the LL notice and keeps the history hidden.
+  - `service:skew` (#4233): `service` on a demo grid whose clock is 133 s
+    ahead of the computer's (the login's `seconds_since_epoch`), as the
+    reporter's computer was behind the grid. Nova also sends a live IM at
+    the start, which the demo service keeps stamped on the grid's clock.
+    What to see: that message once in her conversation, live and not
+    greyed, with no grey copy of it a little later, also after the
+    refresh 15 s after it.
   - `restore` (#1683): write and read back the demo account's `open_ims.xml`
     with a resident, a typed group and an older untyped group entry. Both
     quiet groups must show their names and group controls without receiving

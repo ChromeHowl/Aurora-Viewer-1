@@ -62,6 +62,7 @@ impl Messages {
             source: message.source_id,
             origin: super::Origin::Live,
             blocked: false,
+            speaker: Default::default(),
         });
         let error = message.chat_type == ChatType::Debug;
         if error && let Some(channel) = self.channel {

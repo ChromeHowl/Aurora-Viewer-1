@@ -1100,12 +1100,48 @@ pub fn select_type(world: &World, mut idx: usize) -> SelectType {
     SelectType::World
 }
 
+/// What RLVa lets stay selected: @edit's rules (RlvActions::canEdit), and
+/// under @interact only a HUD (LLSelectMgr::deselectAllIfTooFar, whose
+/// fall-back drops any other selection; LLViewerWindow::cursorIntersect
+/// refuses the pick).
+pub fn rlva_selectable(world: &World, idx: usize) -> bool {
+    world.rlva_can_edit(idx) && (!world.rlva.has("interact") || world.hud_root(idx).is_some())
+}
+
 /// World objects and what our avatar wears, HUDs included; the attachments
 /// of other avatars cannot be edited.
 pub fn selectable(world: &World, idx: usize) -> bool {
-    if !world.rlva_can_edit(idx) || !world.rlva_within_fartouch(idx) {
-        return false;
-    }
+    world.rlva_within_fartouch(idx) && selectable_within(world, idx)
+}
+
+/// [`selectable`] without @fartouch's distance: what the build tools open
+/// on from the menu of a right click on a surface within 1.5 m.
+pub fn selectable_within(world: &World, idx: usize) -> bool {
+    rlva_selectable(world, idx) && selectable_kind(world, idx)
+}
+
+/// What a right click selects for the time of its menu (`temp_select` in
+/// LLToolSelect::handleObjectSelection, indra/newview/lltoolselect.cpp):
+/// an object RLVa keeps from edits too (RlvActions::canEdit only refuses a
+/// selection that is not temporary), and under @fartouch one whose own
+/// place is too far when the surface clicked is within 1.5 m (`near`).
+/// @interact leaves a HUD alone.
+pub fn menu_selectable(world: &World, idx: usize, near: bool) -> bool {
+    (!world.rlva.has("interact") || world.hud_root(idx).is_some())
+        && (near || world.rlva_within_fartouch(idx))
+        && selectable_kind(world, idx)
+}
+
+/// What RLVa lets the menu's own selection keep
+/// (LLSelectMgr::deselectAllIfTooFar: a transient node is not asked
+/// RlvActions::canEdit; under @interact only a HUD stays).
+pub fn rlva_keeps_menu_selection(world: &World, idx: usize) -> bool {
+    !world.rlva.has("interact") || world.hud_root(idx).is_some()
+}
+
+/// An object of a kind that can be selected: a prim or a tree, in the world
+/// or worn by our avatar.
+fn selectable_kind(world: &World, idx: usize) -> bool {
     let mut i = idx;
     for _ in 0..64 {
         let Some(o) = world.objects.get(i) else {
@@ -1409,7 +1445,20 @@ impl BuildTool {
             self.deselect_all(world);
         }
         self.selection_linked = s.edit_linked;
+        // LLToolSelect::handleObjectSelection: a click on an object RLVa
+        // keeps from edits (RlvActions::canEdit) leaves the selection as it
+        // is, where a click on nothing clears it.
+        if let Some(i) = idx
+            && !world.rlva_can_edit(i)
+            && selectable_kind(world, i)
+        {
+            return;
+        }
         let unit = idx.and_then(|i| Self::unit_of(world, i, s.edit_linked));
+        self.click_select_unit(world, s, idx, unit, extend);
+    }
+
+    fn click_select_unit(&mut self, world: &mut World, s: &BuildSettings, idx: Option<usize>, unit: Option<ObjKey>, extend: bool) {
         let Some(unit) = unit else {
             if !extend {
                 self.deselect_all(world);
@@ -1493,14 +1542,51 @@ impl BuildTool {
     /// (`extend_select` in LLToolSelect::handleObjectSelection, which
     /// LLToolPie::handleRightClickPick calls with the click's mask).
     pub fn select_for_menu_with(&mut self, world: &mut World, s: &BuildSettings, idx: usize, extend: bool) -> bool {
-        if Self::unit_of(world, idx, s.edit_linked).is_none() {
+        self.select_for_menu_near(world, s, idx, extend, false)
+    }
+
+    /// Whether the right click's selection of `idx` can only be temporary:
+    /// RLVa keeps the object from edits, or @fartouch finds it too far. The
+    /// build tools close first on such an object
+    /// (LLToolMgr::leaveBuildMode in LLToolSelect::handleObjectSelection).
+    pub fn menu_only(world: &World, idx: usize) -> bool {
+        !world.rlva_can_edit(idx) || !world.rlva_within_fartouch(idx)
+    }
+
+    /// As [`Self::select_for_menu_with`], with `near`: the surface clicked
+    /// is within 1.5 m. The selection is temporary, so it takes what RLVa
+    /// keeps from edits and, with `near`, what @fartouch finds too far
+    /// (`menu_selectable`), once the build tools are closed (`menu_only`).
+    pub fn select_for_menu_near(&mut self, world: &mut World, s: &BuildSettings, idx: usize, extend: bool, near: bool) -> bool {
+        if !menu_selectable(world, idx, near) || self.replacement_active() || (self.open && Self::menu_only(world, idx)) {
             return false;
         }
-        self.click_select(world, s, Some(idx), extend);
+        if self.selection_linked != s.edit_linked && !self.selection.is_empty() {
+            self.deselect_all(world);
+        }
+        self.selection_linked = s.edit_linked;
+        let unit = world
+            .objects
+            .get(if s.edit_linked { idx } else { root_of(world, idx) })
+            .map(|o| o.key);
+        self.click_select_unit(world, s, Some(idx), unit, extend);
         if !self.open {
             self.menu_selection = true;
         }
         !self.selection.is_empty()
+    }
+
+    /// The object an entry of the right-click menu acts on (Take, Delete,
+    /// Return…), selected for the time of the action. The Legacy Viewer
+    /// still holds the menu's temporary selection when the entry runs; here
+    /// the menu released it as it closed, so it is taken again the same
+    /// way, and not as a click of the build tools, which selects nothing of
+    /// what RLVa keeps from edits (`click_select`). The entry was enabled
+    /// on its own test, @fartouch included (rlvCanDeleteOrReturn for Take,
+    /// Delete and Return), and what is sent is tested again
+    /// (`World::rlva_allows_command`).
+    pub fn select_for_action(&mut self, world: &mut World, s: &BuildSettings, idx: usize) -> bool {
+        self.select_for_menu_near(world, s, idx, false, true)
     }
 
     /// The right-click menu closed: drop its selection unless the build
@@ -2130,6 +2216,14 @@ impl BuildTool {
         if !rect_dragged(a, b) {
             return; // a click, handled by `mouse_up`
         }
+        // LLToolSelectRect::handleRectangleSelection (llglsandbox.cpp): no
+        // rectangle selects anything under @interact, a HUD's included
+        if world.rlva_drops_picks() {
+            return;
+        }
+        // …and under @fartouch its distance stands for MaxSelectDistance,
+        // whether "Limit select distance" is on or not, farther or nearer
+        let limit = world.rlva_select_limit().or(s.select_limit());
         let rect = egui::Rect::from_two_pos(egui::pos2(a.0, a.1), egui::pos2(b.0, b.1));
         let now = Instant::now();
         self.selection_linked = s.edit_linked;
@@ -2142,7 +2236,7 @@ impl BuildTool {
             let Some((p, rot, hud)) = Scene::object_transform(world, idx, now, 0) else {
                 continue;
             };
-            if hud != self.cam.hud.is_some() || (!hud && s.select_limit().is_some_and(|max| p.distance(world.agent.position) > max)) {
+            if hud != self.cam.hud.is_some() || (!hud && limit.is_some_and(|max| p.distance(world.agent.position) > max)) {
                 continue;
             }
             // what avatars wear is left out of a rectangle drawn in the

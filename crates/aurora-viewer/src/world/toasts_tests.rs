@@ -36,6 +36,7 @@ fn receive(w: &mut World, session: Uuid, from: Uuid, text: &str, kind: ImKind, i
             source: from,
             origin: Origin::Live,
             blocked: false,
+            speaker: Default::default(),
         },
         true,
     );
@@ -78,6 +79,7 @@ fn nearby_chat_does_not_raise_the_conversations_button_count() {
         source: TOM,
         origin: Origin::Live,
         blocked: false,
+        speaker: Default::default(),
     });
     // the conversation list still counts it on its nearby chat row
     assert_eq!(w.chat_unread, 1);
@@ -100,6 +102,7 @@ fn nearby_chat_alone_lights_neither_the_outline_nor_the_pill() {
         source: TOM,
         origin: Origin::Live,
         blocked: false,
+        speaker: Default::default(),
     });
     assert!(w.chat_unread > 0);
     assert_eq!(w.conversations_badge(), 0);

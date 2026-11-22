@@ -49,8 +49,9 @@ here under GPL-3.0-or-later as described above. Rows are retained top-down.
 
 The RLVa command parser, restriction rules, inventory conventions and camera
 behaviors in `crates/aurora-viewer/src/world/rlva/` and `world/rlva.rs` follow
-the Legacy Viewer's `indra/newview/rlv*.cpp` and `rlv*.h`: Copyright ©
-2009-2020 Kitty Barnett, originally LGPL 2.1, distributed here under
+the Legacy Viewer's `indra/newview/rlv*.cpp` and `rlv*.h`, and
+`world/rlva/legacy_strings.rs` the texts of its
+`skins/default/xui/*/rlva_strings.xml`: Copyright © 2009-2020 Kitty Barnett, originally LGPL 2.1, distributed here under
 GPL-3.0-or-later as described above.
 
 ## Authors of the ported code
@@ -87,7 +88,7 @@ LGPL 2.1, distributed here under GPL-3.0-or-later as described above.
 | Search, `newview/fsfloatersearch.cpp` — Copyright © 2012 Cinder Roxley | `aurora-net/src/search.rs`; `aurora-viewer/src/ui/search.rs`, `ui/search/details.rs`, `world/search.rs` | Originally LGPL 2.1 |
 | Avatar search menu, `newview/fsavatarsearchmenu.cpp` — Copyright © 2014 Ansariel Hiller | `aurora-viewer/src/ui/context.rs` | Originally LGPL 2.1 |
 | Object export, `newview/daeexport.cpp` — Copyright © 2013 Latif Khalifa, with Cinder Biscuits; `fsexportperms.cpp` — Copyright © 2013 Cinder Biscuits | `aurora-viewer/src/build/export/`, `build/ui/export.rs`, `app/object_export.rs`, `world/inventory/actions.rs` | Originally LGPL 2.1 |
-| Contact sets, `newview/lggcontactsets.cpp` — Copyright © 2011 Greg Hendrickson (LordGregGreg Back); `fspanelcontactsets.cpp`, `fsfloatercontactsetconfiguration.cpp` — Copyright © 2013 Cinder Roxley | `aurora-viewer/src/world/contact_sets.rs`, `world/contact_sets/`, `ui/contacts.rs`, `ui/people/sets.rs` | Originally LGPL 2.1 |
+| Contact sets, `newview/lggcontactsets.cpp` — Copyright © 2011 Greg Hendrickson (LordGregGreg Back); `fspanelcontactsets.cpp`, `fsfloatercontactsetconfiguration.cpp` — Copyright © 2013 Cinder Roxley | `aurora-viewer/src/world/contact_sets.rs`, `world/contact_sets/`, `ui/contacts.rs`, `ui/people/sets.rs`, `ui/colors.rs` | Originally LGPL 2.1 |
 | Poser, `newview/fsfloaterposer.cpp`, `fsposeranimator.cpp`, `fsjointpose.h` — Copyright © 2024 Angeldark Raymaker | `aurora-viewer/src/ik_edit/poser.rs`, `ik_edit/poser/`, `scene/avatar_studio.rs` | Originally LGPL 2.1 |
 | Area search, `newview/fsareasearch.cpp` — Copyright © 2012 Techwolf Lupindo | `aurora-viewer/src/app/area_search.rs`, `ui/area_search.rs`, `ui/area_search/`, `settings/area_search.rs`, `build/property_query.rs` | Originally LGPL 2.1 |
 | Local mesh, `newview/vjlocalmesh.cpp` — Copyright © 2022 Vaalith Jinn | `aurora-viewer/src/blender_live/protocol.rs`, `aurora-viewer/src/imports/local.rs`, `aurora-viewer/src/imports/local/scene.rs`, `aurora-viewer/src/app/imports.rs` | Originally LGPL 2.1 |

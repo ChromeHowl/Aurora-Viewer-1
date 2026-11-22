@@ -49,6 +49,7 @@ impl World {
             source: line.source,
             origin: Origin::Copy,
             blocked: false,
+            speaker: Default::default(),
         };
         if console {
             self.console_copies.push_back(copy.clone());
@@ -119,6 +120,7 @@ mod tests {
                 source: JANE,
                 origin: Origin::Live,
                 blocked: false,
+                speaker: Default::default(),
             },
             true,
         );

@@ -55,7 +55,7 @@ fn identity(world: &World, st: &ChatUi) -> Identity {
     let title = match kind {
         sidebar::Kind::Private => {
             let names = &world.social.avatar_names;
-            let cached = names.get(&id);
+            let cached = names.get_in(crate::world::names::NameScope::Roster, &id);
             if let Some(user) = cached.and_then(|n| n.chat_username(&names.options)) {
                 parts.push(user);
             }
@@ -132,8 +132,8 @@ pub(super) fn show(
             if status != presence::Status::Unknown {
                 presence::paint_dot(ui.painter(), p, pic, status, p.panel);
             }
-            let r = ui.interact(pic, ui.scope_id().with("head_pic"), egui::Sense::click());
-            super::name_menu(&r, p, world, a);
+            let r = ui.interact(pic, sidebar::control_id("head-pic"), egui::Sense::click());
+            super::name_menu(&r, p, world, a, crate::world::names::NameScope::Roster);
             if r.on_hover_cursor(egui::CursorIcon::PointingHand)
                 .on_hover_text(status.label())
                 .clicked()
@@ -147,6 +147,15 @@ pub(super) fn show(
                 st.wanted_images.insert(i);
             }
             sidebar::paint_group_picture(ui, p, pic, insignia.and_then(|i| images.get(&i)), PIC - 16.0);
+            if let Some(g) = st.selected {
+                let r = ui.interact(pic, sidebar::control_id("head-pic"), egui::Sense::click());
+                if r.on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .on_hover_text(aurora_i18n::tr!("ui-group-profile-view"))
+                    .clicked()
+                {
+                    crate::ui::group_profile::request_open(ui.ctx(), g);
+                }
+            }
         }
         (None, Some(_)) => {
             ui.painter().rect_filled(pic, radius, p.raised);
@@ -393,12 +402,19 @@ pub(super) fn show(
         );
     }
     let names = egui::Rect::from_x_y_ranges(text_left..=text_right, rect.y_range());
-    let r = ui.interact(names, ui.scope_id().with("head_names"), egui::Sense::click());
+    let r = ui.interact(names, sidebar::control_id("head-names"), egui::Sense::click());
     if let Some(a) = who.avatar {
-        super::name_menu(&r, p, world, a);
+        super::name_menu(&r, p, world, a, crate::world::names::NameScope::Roster);
         let r = tips.show(r.on_hover_cursor(egui::CursorIcon::PointingHand));
         if r.clicked() {
             actions.push(ConvAction::Profile(a));
+        }
+    } else if who.kind == Some(sidebar::Kind::Group)
+        && let Some(g) = st.selected
+    {
+        let r = tips.show(r.on_hover_cursor(egui::CursorIcon::PointingHand));
+        if r.on_hover_text(aurora_i18n::tr!("ui-group-profile-view")).clicked() {
+            crate::ui::group_profile::request_open(ui.ctx(), g);
         }
     } else {
         tips.show(r);

@@ -291,9 +291,13 @@ fn names_allowed(world: &World, id: &Uuid) -> bool {
     world.rlva_can_name(*id) && world.social.avatar_names.shows(crate::world::names::NameScope::World, id)
 }
 
-/// A saved mark, even its presence in a menu, can identify an anonymous dot.
+/// The mini-map's "Markers" menu of a dot: for an avatar that is visible
+/// (not one a parcel hides), their name hidden by RLVa or not.
+/// LLNetMap::handleRightMouseDown (indra/newview/llnetmap.cpp) shows
+/// "MarkAvatar" for any agent under the pointer and leaves it out of the
+/// entries `@shownames` greys.
 pub(super) fn can_mark(world: &World, id: &Uuid) -> bool {
-    names_allowed(world, id) && visible_avatar(world, id).is_some()
+    visible_avatar(world, id).is_some()
 }
 
 fn avatar_name(world: &World, id: &Uuid, format: MiniAvatarNameFormat) -> String {
@@ -460,7 +464,8 @@ mod name_format_tests {
         }
         world.social.avatar_names.set_rlva_privacy(true, Default::default());
         for id in [first, second] {
-            assert!(!can_mark(&world, &id));
+            // a hidden name keeps its "Markers" menu, as in the Legacy Viewer
+            assert!(can_mark(&world, &id));
             assert_eq!(
                 avatar_name(&world, &id, format),
                 world.social.avatar_names.anonymous(&id).display_name
@@ -1476,6 +1481,7 @@ impl MiniMap {
     /// The mini-map's image of a region for another window (the header of
     /// "About Land"): its map tile, else the terrain drawn from
     /// the heights received (no map server, or the tile is not there yet).
+    /// None under RLVa `@showworldmap` or `@showminimap` (`header_image_shown`).
     pub fn region_image(
         &mut self,
         ctx: &egui::Context,
@@ -1483,6 +1489,9 @@ impl MiniMap {
         tiles: &mut MapTiles,
         handle: RegionHandle,
     ) -> Option<egui::TextureHandle> {
+        if !header_image_shown(world) {
+            return None;
+        }
         let (ox, oy) = aurora_net::handle_to_origin(handle);
         let (size_x, size_y) = world
             .regions
@@ -1502,6 +1511,15 @@ impl MiniMap {
     pub fn prune(&mut self, world: &World) {
         self.terrain.retain(|h, _| world.regions.contains_key(h));
     }
+}
+
+/// The map image of the About Land and Region headers, an Aurora-only
+/// picture: the Legacy Viewer's floaters have none, so the rules of the
+/// nearest pictures of the region apply, the world map's tiles
+/// (`@showworldmap`, RlvActions::canShowWorldMap) and the mini-map's
+/// (`@showminimap`, RlvActions::canShowMinimap; rlvactions.cpp).
+pub(crate) fn header_image_shown(world: &World) -> bool {
+    !world.rlva.has("showworldmap") && !world.rlva.has("showminimap")
 }
 
 /// Ground under a global position, else our own height (teleport target).
@@ -2082,5 +2100,24 @@ mod selection_tests {
         // unlike the Legacy Viewer, an emptied list leaves no ring behind
         map.set_selected([]);
         assert!(map.selected.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod rlva_header_tests {
+    use super::*;
+
+    /// The About Land and Region headers' map image follows RLVa's map
+    /// pictures: none under `@showworldmap` or `@showminimap`.
+    #[test]
+    fn map_restrictions_hide_the_header_image() {
+        let mut w = crate::world::rlva_location_tests::showloc_world();
+        assert!(header_image_shown(&w), "@showloc alone keeps it");
+        for rule in ["showworldmap", "showminimap"] {
+            w.rlva_console_input(&format!("@{rule}=n"));
+            assert!(!header_image_shown(&w), "{rule}");
+            w.rlva_console_input(&format!("@{rule}=y"));
+            assert!(header_image_shown(&w), "{rule} lifted");
+        }
     }
 }
