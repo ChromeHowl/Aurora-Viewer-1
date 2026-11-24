@@ -2143,6 +2143,7 @@ when unfocused") is ignored during a screenshot.
 | `AURORA_DEMO_BOM_REZZED=1\|pbr` | Ground BOM placeholders, or PBR BOM maps on a ground box and an attachment |
 | `AURORA_DEMO_OBJECT_MENU=<mode>` | Object actions, scene menu customization/notecards, object profile and pathfinding readers |
 | `AURORA_DEMO_OBJECT_EXPORT=collada\|obj\|gltf` | Object › Save as › Collada / OBJ / glTF on a linked lamp, its rights and texture files |
+| `AURORA_DEMO_OBJECT_EXPORT=collada\|obj\|backup` | Object › Save as › Collada / OBJ / Backup on a linked lamp, its rights and texture files |
 | `AURORA_DEMO_OBJECT_EXPORT_FILE=<path>` | With the above: Save as writes that file without the file dialog |
 
 **Beacon details.** `AURORA_DEMO_BEACONS=1` adds seven labelled sources, including an invisible scripted cube. `lines`, `highlights` and `off` isolate the two render modes; `hidden-particles` keeps the source marker while hiding emitted particles. `parcels` frames the terrain boundaries and ownership colours. `owned` opens My land with an offline parcel and group contributions. `guides` adds a light prim and turns on Bounding boxes for lights, Region corners and Chat range spheres: look for the white bounds and the yellow radius box of the light, the whisper, say and shout rings around the avatar (hidden by the ground and objects in front of them), and the labelled amber beacons of the region's far corners. Check each source switch, Scripted versus Touch, width, both master switches off, and closing/reopening the floater without losing the active filters. The grid check compares real sound/particle/media sources, linked children, attachments, neighbouring parcels and the personal holdings list with the Legacy Viewer.
@@ -4033,6 +4034,7 @@ ordinary inventory HUDs, and is stored per account in `hud_locks.json`.
 Temporary attachments without a stable inventory item keep an instance lock.
 
 **`AURORA_DEMO_OBJECT_EXPORT=collada|obj|gltf`** — at frame 600 a garden lamp of
+**`AURORA_DEMO_OBJECT_EXPORT=collada|obj|backup`** — at frame 600 a garden lamp of
 four linked prims of ours stands ahead, a little to the right: a tiled base
 (our own texture, its bottom face fully transparent), a post, a violet ring
 another resident created, and a globe with a texture we bought. At frame 700
@@ -4048,6 +4050,12 @@ tiles are fetched first ("Saving textures") and written inside `<path>`
 (a single `.glb`, nothing beside it). Import the file in Blender: the lamp
 stands upright on its base (Collada is Z up, OBJ and glTF Y up), the tiles on
 the base, the globe and the post in their face colours. On the grid, the human compares with the Legacy Viewer's Save as ›
+written beside it, and a notification names the file. With `backup` the
+window lists the same prims for the creator rule (no model options) and Save
+as writes one `.oxp` file holding the textures' JPEG 2000 data (the log says
+"object export: backup of … prims"). Import the file in
+Blender: the lamp stands upright on its base (Collada is Z up, OBJ Y up),
+the tiles on the base, the globe and the post in their face colours. On the grid, the human compares with the Legacy Viewer's Save as ›
 Collada on an object of their own (prim, sculpt and mesh), on a bought one
 (nothing exportable) and on a megaprim, and checks that a texture they did not
 upload, or have no item of, is never written.

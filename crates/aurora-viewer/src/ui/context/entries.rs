@@ -1028,12 +1028,16 @@ fn derender_items(ui: &mut Builder, id: Uuid, temporary: &str, enabled: bool) {
 
 /// "Save as" (Export Menu) on the prim `id`: Collada, OBJ and glTF open the
 /// export window, which shows what the rights let through
-/// (Object.EnableExport only asks for a selection). Backup waits for its
-/// own task.
+/// (Object.EnableExport only asks for a selection). Backup is for the
+/// creator: the window says what its rule lets through.
 fn save_as_submenu(ui: &mut Builder, id: Uuid) {
     use crate::build::export::Format;
     ui.submenu("device-floppy-filled", aurora_i18n::tr!("common-save-as"), true, |ui| {
-        ui.todo("device-floppy-filled", aurora_i18n::tr!("ui-context-save-backup"));
+        ui.item(
+            "device-floppy-filled",
+            aurora_i18n::tr!("ui-context-save-backup"),
+            CtxAction::SaveAs(id, Format::Backup),
+        );
         ui.item(
             "box",
             aurora_i18n::tr!("ui-context-save-collada"),
@@ -2031,9 +2035,8 @@ mod tests {
             .filter(|e| matches!(e.kind, Kind::Unavailable))
             .map(|e| e.label)
             .collect();
-        // The backup exporter is a separate subsystem. Script info is
-        // available through the Aurora bridge.
-        let expected = tr(&["ui-context-save-backup"]);
+        // Script info is available through the Aurora bridge.
+        let expected = tr(&[]);
         let mut left_sorted = left.clone();
         left_sorted.sort();
         let mut expected_sorted = expected;
@@ -2052,6 +2055,8 @@ mod tests {
         assert!(obj.enabled && matches!(obj.kind, Kind::Action(CtxAction::SaveAs(id, Format::Obj)) if id == ID));
         let gltf = row(menu(), "ui-context-save-gltf");
         assert!(gltf.enabled && matches!(gltf.kind, Kind::Action(CtxAction::SaveAs(id, Format::Gltf)) if id == ID));
+        let backup = row(menu(), "ui-context-save-backup");
+        assert!(backup.enabled && matches!(backup.kind, Kind::Action(CtxAction::SaveAs(id, Format::Backup)) if id == ID));
     }
 
     #[test]

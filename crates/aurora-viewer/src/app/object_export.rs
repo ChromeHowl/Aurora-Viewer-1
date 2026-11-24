@@ -1,17 +1,22 @@
-//! Object › Save as › Collada / OBJ / glTF on the app's side: the window
+//! Object › Save as › Collada / OBJ / glTF / Backup on the app's side: the window
 //! opened on the menu's selection, the rights read again as properties,
 //! shapes and texture comments arrive, then Save as: the file dialog, the
 //! shapes gathered and the file written on a worker, the textures beside it
 //! (for glTF, fetched first and written inside the file).
 //! Port of ColladaExportFloater (indra/newview/daeexport.cpp, Latif Khalifa
-//! and Cinder Biscuits, LGPL 2.1); the rules are in `build/export/`.
+//! and Cinder Biscuits, LGPL 2.1); the rules are in `build/export/`. A
+//! backup (`.oxp`, FSFloaterObjectExport) skips the shapes: it keeps the
+//! prims' parameters and the JPEG 2000 data of the textures the creator rule
+//! lets through.
 
 use super::App;
+use crate::build::export::backup;
 use crate::build::export::gather::{self, PrimInput, Waiting};
 use crate::build::export::gltf::Embedded;
+use crate::build::export::j2c::J2cFetch;
 use crate::build::export::rights::{self, Context};
 use crate::build::export::textures::TextureSaver;
-use crate::build::export::{Format, Settings, TextureFiles, collada, gltf, model, obj};
+use crate::build::export::{Format, Settings, TextureFiles, collada, gltf, model, obj, oxp};
 use crate::build::ui::export::{Action, Progress, Summary};
 use crate::world::inventory::actions::ExportGrid;
 use crate::world::objects::ObjKey;
@@ -75,15 +80,29 @@ enum Stage {
         path: PathBuf,
         saver: TextureSaver,
     },
+    /// A backup: the textures' JPEG 2000 data is read.
+    Backup {
+        path: PathBuf,
+        plan: backup::Plan,
+        /// Name and description of the item that lets each texture pass.
+        items: HashMap<Uuid, (String, String)>,
+        fetch: J2cFetch,
+    },
+    BackupWriting {
+        path: PathBuf,
+        reply: Receiver<Result<(), String>>,
+        missing: usize,
+    },
 }
 
 impl Job {
     pub(super) fn wanted_images(&mut self) -> impl Iterator<Item = Uuid> + '_ {
-        let saving = match &mut self.stage {
-            Stage::Textures { saver, .. } | Stage::Embedding { saver, .. } => Some(saver.wanted_images.drain()),
-            _ => None,
+        let saving: Vec<Uuid> = match &mut self.stage {
+            Stage::Textures { saver, .. } | Stage::Embedding { saver, .. } => saver.wanted_images.drain().collect(),
+            Stage::Backup { fetch, .. } => fetch.wanted_images.drain().collect(),
+            _ => Vec::new(),
         };
-        saving.into_iter().flatten()
+        saving.into_iter()
     }
 }
 
@@ -171,13 +190,19 @@ impl App {
         let job = &mut self.object_export_job;
         job.refreshed = Some(now);
         self.collect_comments(now);
-        let grid = self.export_grid();
+        // a backup is for its creator: the Second Life rule on every grid,
+        // and whole linksets
+        let is_backup = self.settings.build.export.format == Format::Backup;
+        let grid = if is_backup { ExportGrid::SecondLife } else { self.export_grid() };
+        let keys: Vec<ObjKey> = if is_backup {
+            backup::linksets_of(&self.world, &self.object_export_job.prims)
+        } else {
+            self.object_export_job.prims.clone()
+        };
         let props = |id: Uuid| self.object_export_props(id);
         // every texture and sculpt map of the selection, its items read in
         // one pass of the inventory
-        let assets: HashSet<Uuid> = self
-            .object_export_job
-            .prims
+        let assets: HashSet<Uuid> = keys
             .iter()
             .filter_map(|k| self.world.objects.index_of(k).and_then(|i| self.world.objects.get(i)))
             .flat_map(|o| {
@@ -199,7 +224,7 @@ impl App {
         let mut maps = HashSet::new();
         let mut meshes = HashSet::new();
         let mut ask = Vec::new();
-        for key in &self.object_export_job.prims {
+        for key in &keys {
             let Some(facts) = gather::facts(&self.world, &self.scene, *key, &props, &self.object_export_job.comments) else {
                 continue;
             };
@@ -230,7 +255,7 @@ impl App {
                 }
             };
             // a mesh whose header is not read yet: asked for, counted later
-            if let rights::Shape::Mesh { creator: None } = facts.shape {
+            if !is_backup && matches!(facts.shape, rights::Shape::Mesh { creator: None }) {
                 waiting = true;
                 if let Some(s) = self
                     .world
@@ -242,7 +267,12 @@ impl App {
                     meshes.insert(s.texture);
                 }
             }
-            if rights::prim(&cx, &facts) {
+            let may = if is_backup {
+                rights::backup_prim(&cx, &facts)
+            } else {
+                rights::prim(&cx, &facts)
+            };
+            if may {
                 allowed.push(*key);
             }
         }
@@ -274,7 +304,15 @@ impl App {
                     None
                 }
             };
-            if let Some(name) = rights::texture(&cx, *id, uploader) {
+            let name = if is_backup {
+                // the backup carries the data of what its creator made; the
+                // tooltip names the item that lets it through
+                rights::backup_asset_allowed(&cx, *id, uploader)
+                    .then(|| rights::file_stem(rights::backup_item(&cx, *id).map_or("", |i| i.name.as_str())))
+            } else {
+                rights::texture(&cx, *id, uploader)
+            };
+            if let Some(name) = name {
                 files.push((*id, name));
             }
         }
@@ -409,6 +447,10 @@ impl App {
             ),
             Format::Obj => (aurora_i18n::tr!("object-export-obj-files"), aurora_i18n::tr!("object-export-obj")),
             Format::Gltf => (aurora_i18n::tr!("object-export-gltf-files"), aurora_i18n::tr!("object-export-gltf")),
+            Format::Backup => (
+                aurora_i18n::tr!("object-export-backup-files"),
+                aurora_i18n::tr!("object-export-backup"),
+            ),
         };
         let (filter, title) = (filter.to_owned(), title.to_owned());
         let (tx, rx) = crossbeam_channel::bounded(1);
@@ -439,10 +481,14 @@ impl App {
             Stage::Choosing(rx) => match rx.try_recv() {
                 Ok(Some(path)) => {
                     self.object_export.progress = Some(Progress::Writing);
-                    Stage::Gathering {
-                        path,
-                        since: now,
-                        inputs: HashMap::new(),
+                    if self.settings.build.export.format == Format::Backup {
+                        self.object_export_backup_start(path)
+                    } else {
+                        Stage::Gathering {
+                            path,
+                            since: now,
+                            inputs: HashMap::new(),
+                        }
                     }
                 }
                 Ok(None) | Err(crossbeam_channel::TryRecvError::Disconnected) => {
@@ -516,6 +562,38 @@ impl App {
                     missing,
                 },
             },
+            Stage::Backup {
+                path,
+                plan,
+                items,
+                mut fetch,
+            } => {
+                fetch.poll(ctx, &mut self.scene, now);
+                self.object_export.progress = Some(Progress::Textures {
+                    left: fetch.left(),
+                    total: fetch.total,
+                });
+                if fetch.done() {
+                    self.object_export_backup_write(ctx, path, plan, items, fetch)
+                } else {
+                    Stage::Backup { path, plan, items, fetch }
+                }
+            }
+            Stage::BackupWriting { path, reply, missing } => match reply.try_recv() {
+                Ok(Ok(())) => {
+                    self.object_export_done(&path, Ok(missing));
+                    Stage::Idle
+                }
+                Ok(Err(reason)) => {
+                    self.object_export_done(&path, Err(reason));
+                    Stage::Idle
+                }
+                Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                    self.object_export_done(&path, Err("stopped".into()));
+                    Stage::Idle
+                }
+                Err(crossbeam_channel::TryRecvError::Empty) => Stage::BackupWriting { path, reply, missing },
+            },
             Stage::Textures { path, mut saver } => {
                 saver.poll(ctx, &mut self.scene, now);
                 self.object_export.progress = Some(Progress::Textures {
@@ -530,6 +608,87 @@ impl App {
                 }
             }
         };
+    }
+
+    /// A backup after the file is chosen: the plan of the whole linksets
+    /// under the creator rule, then the data of the textures it keeps. The
+    /// rule reads the inventory and the texture comments as they are now.
+    fn object_export_backup_start(&mut self, path: PathBuf) -> Stage {
+        let keys = backup::linksets_of(&self.world, &self.object_export_job.prims);
+        let prims = backup::inputs(&self.world, &keys, &|id| self.object_export_props(id));
+        let assets = backup::assets(&prims);
+        // Second Life's rule on every grid (see `rights::backup_prim`)
+        let cx = Context::new(
+            self.world.agent_id,
+            ExportGrid::SecondLife,
+            self.world.prim_limits().max,
+            &self.world.inventory,
+            &assets,
+        );
+        let plan = backup::plan(&cx, prims, &self.object_export_job.comments);
+        let items: HashMap<Uuid, (String, String)> = plan
+            .textures
+            .iter()
+            .filter_map(|id| rights::backup_item(&cx, *id).map(|i| (*id, (i.name.clone(), i.desc.clone()))))
+            .collect();
+        if plan.prims() == 0 {
+            self.object_export_done(&path, Err("nothing the creator rule lets through".into()));
+            return Stage::Idle;
+        }
+        log::info!(
+            "object export: backup of {} prims in {} linksets, {} textures, {} prims left out",
+            plan.prims(),
+            plan.linksets.len(),
+            plan.textures.len(),
+            plan.left_out
+        );
+        let fetch = J2cFetch::new(&plan.textures);
+        Stage::Backup { path, plan, items, fetch }
+    }
+
+    /// The backup's file, encoded and written on a worker.
+    fn object_export_backup_write(
+        &mut self,
+        ctx: &egui::Context,
+        path: PathBuf,
+        plan: backup::Plan,
+        mut items: HashMap<Uuid, (String, String)>,
+        fetch: J2cFetch,
+    ) -> Stage {
+        let missing = fetch.missing;
+        let assets: Vec<oxp::Asset> = fetch
+            .data
+            .into_iter()
+            .map(|(id, j2c)| {
+                let (name, description) = items.remove(&id).unwrap_or_default();
+                oxp::Asset {
+                    id,
+                    name,
+                    description,
+                    j2c,
+                }
+            })
+            .collect();
+        let author = Some(self.world.own_name()).filter(|n| !n.is_empty()).unwrap_or_else(|| "Unknown".into());
+        let meta = oxp::Meta {
+            client: format!("Aurora Viewer {}", aurora_version::version()),
+            date: chrono::Utc::now().format("%Y-%m-%d").to_string(),
+            author,
+            grid: crate::world::chat_log::grid_name(&self.settings.grid, &self.settings.custom_login_uri, self.demo),
+        };
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        let wake = ctx.clone();
+        let target = path.clone();
+        let spawned = std::thread::Builder::new().name("object-export".into()).spawn(move || {
+            let result = oxp::encode(&oxp::manifest(&plan, &assets, &meta)).and_then(|bytes| crate::atomic_file::write(&target, &bytes));
+            let _ = tx.send(result.map_err(|e| e.to_string()));
+            wake.request_repaint();
+        });
+        if let Err(e) = spawned {
+            self.object_export_done(&path, Err(e.to_string()));
+            return Stage::Idle;
+        }
+        Stage::BackupWriting { path, reply: rx, missing }
     }
 
     /// The textures this export may save, named for their files.
@@ -595,6 +754,8 @@ impl App {
                     let text = collada::write(&model, &files, &settings, &header);
                     crate::atomic_file::write(&target, text.as_bytes())
                 }
+                // a backup has its own steps (`object_export_backup_start`)
+                Format::Backup => Err(std::io::Error::other("not a model")),
                 Format::Obj => {
                     let mtl = target.with_extension("mtl");
                     let mtl_name = mtl.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
@@ -692,6 +853,7 @@ impl App {
                 let format = match mode {
                     "obj" => Format::Obj,
                     "gltf" => Format::Gltf,
+                    "backup" => Format::Backup,
                     _ => Format::Collada,
                 };
                 self.open_object_export(root, format);
@@ -708,12 +870,16 @@ impl App {
                         self.object_export.summary.textures.len(),
                         self.object_export.summary.textures_total
                     );
-                    self.object_export_job.stage = Stage::Gathering {
-                        path,
-                        since: Instant::now(),
-                        inputs: HashMap::new(),
-                    };
                     self.object_export.progress = Some(Progress::Writing);
+                    self.object_export_job.stage = if self.settings.build.export.format == Format::Backup {
+                        self.object_export_backup_start(path)
+                    } else {
+                        Stage::Gathering {
+                            path,
+                            since: Instant::now(),
+                            inputs: HashMap::new(),
+                        }
+                    };
                 }
             }
             _ => {}
