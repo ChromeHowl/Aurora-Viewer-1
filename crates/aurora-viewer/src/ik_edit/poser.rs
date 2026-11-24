@@ -9,8 +9,8 @@ use std::{
     sync::Arc,
 };
 
+mod bd_pose;
 mod bones;
-mod bvh;
 mod compact;
 mod controls;
 mod data;
@@ -23,6 +23,7 @@ mod silhouette;
 mod storage;
 mod subjects;
 mod together;
+mod total;
 mod trackball;
 mod ui;
 mod world_hints;
@@ -78,8 +79,9 @@ pub struct Config {
     pub natural: bool,
     pub dof: bool,
     pub sensitivity: f32,
-    pub also_bvh: bool,
-    pub unlock_pelvis: bool,
+    /// Save as animation… writes a looping animation (the pose is held for
+    /// its whole length) instead of a one-shot.
+    pub animation_loop: bool,
     pub confirm_overwrite: bool,
     /// Ask before a close that stops the pose and loses its edited joints.
     pub confirm_close: bool,
@@ -97,8 +99,7 @@ impl Default for Config {
             natural: true,
             dof: false,
             sensitivity: super::gizmo::DEFAULT_SENSITIVITY,
-            also_bvh: false,
-            unlock_pelvis: false,
+            animation_loop: true,
             confirm_overwrite: false,
             confirm_close: true,
         }
@@ -114,6 +115,8 @@ pub enum Request {
     Cancel(Uuid),
     /// The bridge's Repair, offered when its query service is silent or failed.
     RepairBridge,
+    /// Show the inventory folder of the uploaded poses in the inventory window.
+    RevealCreatedPoses,
     /// Fetch the simulator name for an owned animesh shown in the subject picker.
     ObjectName(Uuid),
 }
@@ -149,6 +152,8 @@ pub(super) struct State {
     preset: usize,
     drag_checkpoint: bool,
     name: String,
+    /// Each subject's own name for the field above (`data::Names`).
+    names: data::Names,
     priority: i32,
     pub(super) group: usize,
     filter: String,
@@ -557,6 +562,7 @@ impl Editor {
         }
         self.leave_clip();
         let clip = std::mem::take(&mut self.clip);
+        let names = std::mem::take(&mut self.poser.names).reopened(&self.poser.name);
         *self = Self {
             clip,
             open: true,
@@ -564,6 +570,7 @@ impl Editor {
                 active: true,
                 open_frame_pending: true,
                 name: aurora_i18n::tr!("poser-new-name").to_string(),
+                names,
                 priority: 4,
                 ..Default::default()
             },
@@ -612,6 +619,16 @@ impl Editor {
             self.toggle();
         }
     }
+    /// The session ends (back to the login screen, whatever the cause: the
+    /// Logout bar, the server, a lost link): nothing of the editors stays
+    /// for the next login, neither a pose that "stop when closed" off kept
+    /// nor goals, animations or selections. The animation editor's document
+    /// is the account's file and stays.
+    pub fn end_session(&mut self) {
+        self.stop_editing();
+        let clip = std::mem::take(&mut self.clip);
+        *self = Self { clip, ..Self::default() };
+    }
     pub fn stop_editing(&mut self) {
         self.poser.active = false;
         self.leave_clip();
@@ -638,21 +655,19 @@ impl Editor {
             match loaded {
                 storage::Loaded::Pose(document, mode) => {
                     if document.apply(&world.avatar_lib.rig, session, mode, model) {
-                        self.poser.name = document.name;
+                        self.poser.names.set(subject, &mut self.poser.name, document.name.clone());
                         self.poser.priority = document.priority;
                     }
                 }
-                storage::Loaded::Animation(animation, mode) => {
-                    let mut pose = ik::LocalPose {
+                storage::Loaded::Animation(animation, mode, name) => {
+                    if !name.is_empty() {
+                        self.poser.names.set(subject, &mut self.poser.name, name);
+                    }
+                    let start = ik::LocalPose {
                         rotations: session.pose.rotations.clone(),
                         positions: session.pose.positions.clone(),
                     };
-                    let sample = ik::animations::Sample {
-                        animation: Arc::new(BoundAnim::bind(animation, &world.avatar_lib.rig)),
-                        frame: 0,
-                        time_seconds: None,
-                    };
-                    ik::animations::apply(&world.avatar_lib.rig, &mut pose, Vec3::ZERO, &[sample]);
+                    let pose = total::load(&world.avatar_lib.rig, animation, start);
                     let selective = matches!(mode, document::LoadMode::Selective | document::LoadMode::SelectiveRotations);
                     let rotations = matches!(mode, document::LoadMode::Rotations | document::LoadMode::SelectiveRotations);
                     let edited: Vec<_> = (0..world.avatar_lib.rig.len()).map(|b| session.edited(b)).collect();
@@ -677,7 +692,6 @@ impl Editor {
             }
             self.refresh = true;
         }
-        self.clip.prepared.append(&mut self.poser.storage.prepared);
     }
     fn poser_transform(&mut self, rig: &Rig, frame: &Frame, position: Vec3, rotation: Quat, rotated: bool) {
         let Some(bone) = self.selected else { return };

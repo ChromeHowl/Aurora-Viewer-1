@@ -7,6 +7,8 @@ pub struct Prepared {
     pub name: String,
     pub bytes: Arc<Vec<u8>>,
     pub animation: Arc<Animation>,
+    /// Staged by the poser: it uploads to its own folder by default.
+    pub pose: bool,
 }
 #[derive(Clone, Copy)]
 pub(super) enum Action {
@@ -197,6 +199,7 @@ pub(super) fn start(
                     name,
                     bytes: Arc::new(bytes),
                     animation: Arc::new(animation),
+                    pose: false,
                 }),
                 Action::Save { .. } => {
                     let Some(path) = rfd::FileDialog::new()

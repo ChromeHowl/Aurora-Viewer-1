@@ -3658,6 +3658,13 @@ impl App {
         // before the settings are saved and the account state replaced
         self.close_pose_stand();
         self.panels.pose_stand = false;
+        // no pose or edit of the poser and the animation editors outlives the
+        // session: the next login starts with none (a finger or joint held
+        // by a kept pose stayed stuck after a relog)
+        self.ik_editor.end_session();
+        self.scene.ik_edit = Default::default();
+        self.scene.ik_edit_others.clear();
+        self.scene.poser.clear();
         self.parcel_music.enter(false);
         self.stream_url.clear();
         self.music_fade.reset();
@@ -19644,6 +19651,7 @@ impl App {
                         prepared.name,
                         prepared.bytes,
                         prepared.animation,
+                        prepared.pose,
                     );
                 }
                 {
