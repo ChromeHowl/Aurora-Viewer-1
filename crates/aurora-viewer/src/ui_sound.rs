@@ -264,6 +264,8 @@ pub struct ImMessage {
     pub new_session: bool,
     /// The message mentions the agent (LLUrlRegistry::containsAgentMention).
     pub mention: bool,
+    /// A poke (`world/pokes.rs`): its card instead of the message's toast.
+    pub poke: bool,
 }
 
 /// Per-sound choices (only the ones changed from Firestorm's defaults are
@@ -521,6 +523,7 @@ mod tests {
             session: Uuid::nil(),
             new_session: false,
             mention: true,
+            poke: false,
         };
         // off by default, like PlayModeUISndChatMention: the mode decides
         assert_eq!(s.im_sound(m, false), None);
@@ -582,6 +585,7 @@ mod tests {
             session: Uuid::nil(),
             new_session: true,
             mention: false,
+            poke: false,
         };
         assert_eq!(s.im_sound(m, false), None);
         s.set_im_plays(S::NewIncomingImSession, true);

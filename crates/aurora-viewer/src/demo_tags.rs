@@ -60,13 +60,19 @@ pub fn apply_distance_preferences(settings: &mut crate::settings::Settings) {
 
 pub fn mode() -> Option<Mode> {
     static MODE: std::sync::OnceLock<Option<Mode>> = std::sync::OnceLock::new();
-    *MODE.get_or_init(|| match std::env::var("AURORA_DEMO_TAGS").ok()?.trim() {
-        "status" => Some(Mode::Status),
-        "cycle" => Some(Mode::Cycle),
-        "wall" => Some(Mode::Wall),
-        "height" => Some(Mode::Height),
-        "render" => Some(Mode::Render),
-        _ => Some(Mode::Voice),
+    *MODE.get_or_init(|| {
+        // AURORA_DEMO_STATUS brings the row of plates its chips sit on
+        let tags = std::env::var("AURORA_DEMO_TAGS")
+            .ok()
+            .or_else(|| std::env::var_os("AURORA_DEMO_STATUS").map(|_| String::new()));
+        match tags?.trim() {
+            "status" => Some(Mode::Status),
+            "cycle" => Some(Mode::Cycle),
+            "wall" => Some(Mode::Wall),
+            "height" => Some(Mode::Height),
+            "render" => Some(Mode::Render),
+            _ => Some(Mode::Voice),
+        }
     })
 }
 

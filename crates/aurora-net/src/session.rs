@@ -2400,6 +2400,13 @@ impl Session<'_> {
                 m.effect.push(reset_skeleton_effect(self.agent_id(), effect, target, animations));
                 self.send_main(&m, false);
             }
+            NetCommand::AvatarStatus { effect, status, duration } => {
+                let mut m = ViewerEffect::default();
+                m.agent_data.agent_id = self.agent_id();
+                m.agent_data.session_id = self.session_id();
+                m.effect.push(status_effect(self.agent_id(), effect, &status, duration));
+                self.send_main(&m, false);
+            }
             NetCommand::Beam {
                 effect,
                 target,
@@ -5776,6 +5783,15 @@ impl Session<'_> {
                             animations,
                         },
                     );
+                } else if let Some(status) = parse_status(e) {
+                    emit(
+                        self.sh,
+                        NetEvent::AvatarStatus {
+                            source: e.agent_id,
+                            status,
+                            duration: e.duration,
+                        },
+                    );
                 } else if let Some((source, target, position, color)) = parse_beam(e) {
                     emit(
                         self.sh,
@@ -6286,6 +6302,66 @@ fn parse_reset_skeleton(e: &msgs::viewer_effect::Effect) -> Option<(uuid::Uuid, 
     let target = uuid::Uuid::from_slice(&e.type_data[0..16]).ok()?;
     let target = if target.is_nil() { e.agent_id } else { target };
     Some((target, e.type_data[16] & 1 != 0))
+}
+
+/// An Aurora status effect (`avatar_status`): the Legacy Viewer's block with
+/// Aurora's own type. The colour is reserved (opaque black, as
+/// LLHUDEffect's default).
+fn status_effect(
+    agent: uuid::Uuid,
+    effect: uuid::Uuid,
+    status: &crate::avatar_status::AvatarStatus,
+    duration: f32,
+) -> msgs::viewer_effect::Effect {
+    msgs::viewer_effect::Effect {
+        id: effect,
+        agent_id: agent,
+        type_: crate::avatar_status::HUD_EFFECT_AURORA_STATUS,
+        duration,
+        color: vec![0, 0, 0, 255],
+        type_data: crate::avatar_status::encode(status),
+    }
+}
+
+/// The status of an Aurora status effect; None for another type or a packet
+/// `avatar_status::decode` refuses.
+fn parse_status(e: &msgs::viewer_effect::Effect) -> Option<crate::avatar_status::AvatarStatus> {
+    if e.type_ != crate::avatar_status::HUD_EFFECT_AURORA_STATUS {
+        return None;
+    }
+    crate::avatar_status::decode(&e.type_data)
+}
+
+#[cfg(test)]
+mod status_effect_tests {
+    use super::*;
+    use crate::avatar_status::{AvatarStatus, Category};
+
+    #[test]
+    fn a_status_effect_round_trips_through_the_message() {
+        let me = uuid::Uuid::new_v4();
+        let status = AvatarStatus {
+            seq: 3,
+            clear: false,
+            paused: false,
+            category: Category::Custom,
+            program: 0,
+            detail: "Building a skybox".into(),
+        };
+        let mut packet = ViewerEffect::default();
+        packet.effect.push(status_effect(me, uuid::Uuid::from_u128(5), &status, 180.0));
+        let mut data = aurora_msg::Writer::new();
+        packet.encode_body(&mut data);
+        let decoded = ViewerEffect::decode(&data.buf).expect("decode effect");
+        let e = &decoded.effect[0];
+        assert_eq!((e.type_, e.agent_id, e.duration), (0xA7, me, 180.0));
+        assert_eq!(parse_status(e), Some(status));
+        // the other parsers leave it alone, and it leaves theirs alone
+        assert!(parse_lookat(e).is_none() && parse_reset_skeleton(e).is_none());
+        let mut other = e.clone();
+        other.type_ = HUD_EFFECT_RESET_SKELETON;
+        assert!(parse_status(&other).is_none());
+    }
 }
 
 /// LLHUDObject::LL_HUD_EFFECT_BEAM: the selection and give beams.

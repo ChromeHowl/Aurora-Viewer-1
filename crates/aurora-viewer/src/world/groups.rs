@@ -383,6 +383,7 @@ impl World {
             session,
             new_session,
             mention,
+            poke: false,
         });
     }
 
@@ -663,6 +664,7 @@ impl World {
                 session: group,
                 new_session: true,
                 mention: false,
+                poke: false,
             });
         }
     }

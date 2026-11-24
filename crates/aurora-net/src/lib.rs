@@ -5,6 +5,7 @@ pub mod abuse_report;
 mod agent_pause;
 mod agent_update;
 mod attachment_detach;
+pub mod avatar_status;
 pub mod bridge;
 pub mod build;
 pub mod caps;

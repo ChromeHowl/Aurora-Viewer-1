@@ -254,11 +254,28 @@ pub(super) fn show(
             if tool(ui, p, slot(), "send-filled", aurora_i18n::tr!("common-offer-teleport"), Tone::Plain).clicked() {
                 actions.push(ConvAction::OfferTeleport(other));
             }
+            // a poke (`ui/poke.rs`), greyed out while they are offline or
+            // just poked
+            let poke = crate::ui::poke::button(ui.ctx(), world, &other);
+            if let Some(b) = &poke
+                && tool(
+                    ui,
+                    p,
+                    slot(),
+                    crate::ui::poke::ICON,
+                    b.tip,
+                    if b.enabled { Tone::Plain } else { Tone::Off },
+                )
+                .clicked()
+                && b.enabled
+            {
+                crate::ui::context::request(ui.ctx(), crate::ui::context::CtxAction::Poke(other));
+            }
             // the other direction, greyed for an offline friend as
             // FSFloaterIM::changed greys teleport_btn; a head too narrow
             // for it leaves it to the row of the "…" menu
             let friend = world.social.is_friend(&other);
-            let slots = 7 + usize::from(!friend) + usize::from(can_add_people(world, &other));
+            let slots = 7 + usize::from(!friend) + usize::from(can_add_people(world, &other)) + usize::from(poke.is_some());
             if request_fits(width, slots) {
                 let request = if world.social.can_request_teleport(&other) {
                     Tone::Plain

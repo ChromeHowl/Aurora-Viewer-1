@@ -46,6 +46,7 @@ fn receive(w: &mut World, session: Uuid, from: Uuid, text: &str, kind: ImKind, i
         session,
         new_session: false,
         mention: false,
+        poke: false,
     };
     w.notify_message(&m, in_sight);
 }

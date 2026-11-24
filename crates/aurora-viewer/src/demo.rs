@@ -24,6 +24,9 @@ pub mod parcel_env;
 pub mod parcel_visibility;
 #[path = "demo_pointing.rs"]
 pub mod pointing;
+/// A demo friend's pokes, and pokes back to ours (AURORA_DEMO_POKE).
+#[path = "demo_poke.rs"]
+pub mod poke;
 #[path = "demo_pose_stand.rs"]
 pub mod pose_stand;
 #[path = "demo_poser.rs"]
@@ -362,6 +365,9 @@ pub mod source;
 /// The Aurora team's marks on demo residents (AURORA_DEMO_STAFF).
 #[path = "demo_staff.rs"]
 pub mod staff;
+/// Status chips beside the name plates (AURORA_DEMO_STATUS).
+#[path = "demo_status.rs"]
+pub mod status;
 /// Streaming hitch test: objects and textures arriving in waves
 /// (AURORA_DEMO_STREAM).
 #[path = "demo_stream.rs"]

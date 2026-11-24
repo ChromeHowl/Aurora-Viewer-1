@@ -113,6 +113,8 @@ pub fn show_seconds(n: &Notification, message_seconds: f64) -> f64 {
         Data::Message { .. } => message_seconds.clamp(1.0, SHOW_INFO),
         // ShowMyComplexityChanges (the notice's expiry)
         Data::Complexity { seconds } => f64::from(seconds),
+        // long enough to poke back
+        Data::Poke { .. } => SHOW_ANSWER,
         _ if n.interactive() => SHOW_ANSWER,
         _ => SHOW_INFO,
     }
@@ -133,10 +135,10 @@ fn may_show(n: &Notification, m: &Moment) -> bool {
 }
 
 /// Rolls out as a card: what is listed, and a message kept out of the bell
-/// (`ToastPrefs::im_in_bell` off) or the complexity notice, whose card
-/// leaves with its time.
+/// (`ToastPrefs::im_in_bell` off), a poke or the complexity notice, whose
+/// card leaves with its time.
 fn card(n: &Notification) -> bool {
-    !n.transient || matches!(n.data, Data::Message { .. } | Data::Complexity { .. })
+    !n.transient || matches!(n.data, Data::Message { .. } | Data::Poke { .. } | Data::Complexity { .. })
 }
 
 /// The count on the bell: what waits in "To do", without the cards still
@@ -825,7 +827,7 @@ fn center_card(
     }
     let read = n.read;
     let inner = ui.scope(|ui| {
-        if matches!(n.data, Data::Message { .. }) {
+        if matches!(n.data, Data::Message { .. } | Data::Poke { .. }) {
             cards::person_card(ui, p, icons, world, env, wanted, n, false)
         } else {
             cards::card(ui, p, icons, world, env.images, wanted_images, n, false, true)

@@ -46,6 +46,7 @@ impl World {
             new_session: true,
             // the announcement carries no text of theirs yet
             mention: false,
+            poke: false,
         });
         self.social.session_mut(from);
         let line = ChatLine {

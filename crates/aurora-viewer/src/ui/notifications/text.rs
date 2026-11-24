@@ -348,6 +348,7 @@ mod tests {
                             presence_at: Default::default(),
                             classic_bars: false,
                             toast_gap: crate::settings::TOAST_GAP,
+                            still: false,
                         };
                         answer = person_card(ui, &p, &icons, &world, &mut env, &mut wanted, &list.list[0], false);
                     },
