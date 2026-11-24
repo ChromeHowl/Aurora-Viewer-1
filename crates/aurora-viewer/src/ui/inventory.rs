@@ -44,6 +44,7 @@ pub(crate) mod drag;
 mod embedded;
 mod find;
 mod folder_colors;
+pub(crate) mod hidden_folders;
 pub(crate) mod groups;
 pub use folder_colors::{demo as folder_colors_demo, demo_frame as folder_colors_demo_frame};
 mod hover;
@@ -57,6 +58,7 @@ pub use document::document_demo_events;
 pub(crate) mod permissions;
 mod progress;
 pub(crate) mod properties;
+mod protected_folders;
 mod received;
 mod replace_links;
 mod rows;
@@ -69,6 +71,7 @@ pub(crate) mod smart_store;
 pub(crate) mod task_drop;
 pub(crate) mod task_selection;
 pub mod thumbnail;
+mod thumbnails_helper;
 pub(crate) mod tree;
 pub(crate) mod view;
 pub use aurora::{DEMO_FOLDER_WINDOW as AURORA_DEMO_FOLDER_WINDOW, demo_place as aurora_demo};
@@ -602,6 +605,8 @@ fn keeps_window(w: &InventoryWindow) -> bool {
         || w.state.move_to.is_some()
         || w.state.thumbnail.item.is_some()
         || w.state.bulk_permissions.active()
+        || w.state.protected_folders.open
+        || w.state.thumbnails_helper.open
         || w.state.detach_delete.is_some()
 }
 
@@ -739,6 +744,10 @@ pub struct InventoryUi {
     /// for every pane (`Facts::pane_texts`).
     pub pane_texts: std::sync::Arc<std::collections::HashMap<PaneKey, PaneText>>,
     bulk_permissions: bulk_permissions::State,
+    /// The protected folders manager (`protected_folders.rs`).
+    protected_folders: protected_folders::State,
+    /// The bulk item image helper (`thumbnails_helper.rs`).
+    thumbnails_helper: thumbnails_helper::State,
     menu_editor: context_customize::State,
     menu_notecards: context_notecards::State,
     /// Library wearables being copied to be worn: copy request → replace.
@@ -1077,7 +1086,12 @@ impl InventoryUi {
 
     /// A dialog of this pane that stays on screen with the window closed.
     fn has_dialog(&self) -> bool {
-        self.dialog.is_some() || self.move_to.is_some() || self.thumbnail.item.is_some() || self.bulk_permissions.active()
+        self.dialog.is_some()
+            || self.move_to.is_some()
+            || self.thumbnail.item.is_some()
+            || self.bulk_permissions.active()
+            || self.protected_folders.open
+            || self.thumbnails_helper.open
     }
 
     pub(crate) fn additional_open(&self) -> bool {
@@ -1250,6 +1264,16 @@ impl InventoryUi {
         };
         self.filters_initialized = true;
         self.filters_open = true;
+    }
+
+    /// Opens the protected folders manager (FSFloaterProtectedFolders).
+    pub(crate) fn open_protected_folders(&mut self) {
+        self.protected_folders.open = true;
+    }
+
+    /// Opens the inventory thumbnails helper.
+    pub(crate) fn open_thumbnails_helper(&mut self) {
+        self.thumbnails_helper.open = true;
     }
 
     /// show_item_original: clear filters, expand ancestors, select and scroll to the original.
@@ -3121,6 +3145,8 @@ pub fn show(
                 || w.state.move_to.is_some()
                 || w.state.thumbnail.item.is_some()
                 || w.state.bulk_permissions.active()
+                || w.state.protected_folders.open
+                || w.state.thumbnails_helper.open
         });
     let mut facts = if shown {
         Facts::from_world(world, appearance_busy)
@@ -3277,6 +3303,7 @@ pub fn show(
             }
         }
     }
+    let show_inv = !world.rlva.has("showinv");
     let inv = &mut world.inventory;
     // the split view: each pane knows the other's folder (`other_pane`)
     // (None while it lists Recent, Worn, Favorites or results: no folder
@@ -3320,6 +3347,8 @@ pub fn show(
     context_catalog::process_deferred(inv, st, prefs, &facts, &mut actions);
     delete::finish_detach(inv, st, prefs, &facts, &mut actions);
     bulk_permissions::show(ctx, p, inv, st, world.agent_id, &mut actions);
+    protected_folders::show(ctx, p, inv, st, prefs, show_inv);
+    thumbnails_helper::show(ctx, p, inv, st, &mut actions);
     st.visible.clear();
     fetch_whole_inventory(inv, st);
     // Copied folders load their whole tree for the paste; once loaded, they
@@ -3697,6 +3726,8 @@ pub fn show(
             .show(p, &world.inventory, prefs, hover_images, &mut w.state.wanted_hover_images);
         w.state.was_open = w.open && !super::widgets::floater_minimized(ctx, &window_id);
         bulk_permissions::show(ctx, p, &mut world.inventory, &mut w.state, world.agent_id, &mut actions);
+        protected_folders::show(ctx, p, &world.inventory, &mut w.state, prefs, !world.rlva.has("showinv"));
+        thumbnails_helper::show(ctx, p, &world.inventory, &mut w.state, &mut actions);
         if w.id != listings::PANEL {
             finish_hidden_rename(&world.inventory, &mut w.state, &mut actions);
         }
