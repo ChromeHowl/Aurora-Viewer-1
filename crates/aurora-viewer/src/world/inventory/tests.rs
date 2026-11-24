@@ -1716,3 +1716,32 @@ mod outgoing_offers {
         assert!(inv.items.contains_key(&item));
     }
 }
+
+#[test]
+fn an_items_content_needs_full_rights_by_what_the_agent_holds() {
+    let (agent, other, library) = (id(9921), id(9922), id(9923));
+    let inv = Inventory {
+        owner: agent,
+        ..Default::default()
+    };
+    let item = |owner, group_owned, owner_mask, everyone_mask| InvItem {
+        owner,
+        group_owned,
+        owner_mask,
+        everyone_mask,
+        ..Default::default()
+    };
+    let cases = [
+        ("the owner's, full", item(agent, false, FULL, 0), 0),
+        ("the owner's, no copy", item(agent, false, FULL & !COPY, 0), COPY),
+        ("the owner's, no modify", item(agent, false, FULL & !MODIFY, 0), MODIFY),
+        ("the owner's, no transfer", item(agent, false, FULL & !TRANSFER, 0), TRANSFER),
+        ("group-owned counts by everyone", item(agent, true, FULL, 0), FULL),
+        ("someone else's", item(other, false, FULL, COPY), MODIFY | TRANSFER),
+        ("a Library item, full for everyone", item(library, false, 0, FULL), 0),
+        ("a Library item, copy and transfer", item(library, false, FULL, COPY | TRANSFER), MODIFY),
+    ];
+    for (what, item, missing) in cases {
+        assert_eq!(content_missing(&inv, &item), missing, "{what}");
+    }
+}

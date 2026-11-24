@@ -105,6 +105,18 @@ impl Stack {
             }
         }
     }
+    /// Whether the motion of every enabled row may be read into an editor:
+    /// the rule of the poser's Inventory load (`actions::content_missing`).
+    /// A row with no item (a demo clip) belongs to no one.
+    pub fn readable(&self, inv: &Inventory) -> bool {
+        self.rows.iter().filter(|r| r.enabled).all(|r| {
+            r.item.is_none_or(|id| {
+                actions::original(inv, id)
+                    .and_then(|original| inv.items.get(&original))
+                    .is_some_and(|it| actions::content_missing(inv, it) == 0)
+            })
+        })
+    }
     pub fn samples(&self) -> Vec<Sample> {
         self.rows
             .iter()
@@ -183,10 +195,15 @@ impl Stack {
         }
     }
     pub fn show(&mut self, ui: &mut egui::Ui, p: &Palette, inv: &Inventory) {
+        widgets::switch_labeled(ui, p, &mut self.suppress_live, aurora_i18n::tr!("ik-edit-animation-suppress"))
+            .on_hover_text(aurora_i18n::tr!("ik-edit-animation-local"));
+        self.show_rows(ui, p, inv);
+    }
+    /// The rows, the add button and the picker, without the IK editor's
+    /// switch (the poser's Animations panel).
+    pub fn show_rows(&mut self, ui: &mut egui::Ui, p: &Palette, inv: &Inventory) {
         let response = ui
             .vertical(|ui| {
-                widgets::switch_labeled(ui, p, &mut self.suppress_live, aurora_i18n::tr!("ik-edit-animation-suppress"))
-                    .on_hover_text(aurora_i18n::tr!("ik-edit-animation-local"));
                 let mut movement = None;
                 let mut removed = None;
                 let mut dragged = None;
@@ -333,8 +350,12 @@ fn frame_controls(ui: &mut egui::Ui, frame: &mut u32, last: u32) {
 
 impl Editor {
     pub fn tick_animations(&mut self, streamer: &mut AnimStreamer, inv: &mut Inventory) {
-        if self.open && !self.poser.active {
+        // the poser's Animations panel plays the same stack, also while its
+        // window is closed and the pose kept ("stop posing when closed"
+        // off): an animation still loading then arrives and plays
+        if self.open || self.poser.active {
             self.animations.tick(streamer, inv);
+            self.tick_inventory_load(streamer, inv);
         }
     }
 }

@@ -1576,6 +1576,7 @@ file pickers start in the account-local poses directory (#3169).
 files into those documents, from Open a file or a whole folder converted into
 the library; the animation ids such a file records are not kept. Poser does not
 start IK-project autosaves or object imports.
+`poser/playback.rs` is the Animations panel (the IK editor's animation stack played on the subject, locally) and `poser/inventory_load.rs` is Load › Inventory animation: the picker, the rights rule (`actions::content_missing`), the asset through `AnimStreamer`, and the notes on what a pose cannot hold; it loads through `Editor::apply_loaded`, as a file does.
 The poser's part under Ctrl is drawn and picked from the subject's meshes:
 `poser/world_hints.rs` turns the part into a 256-bit palette joint mask
 (collision volumes, attachment points and the inner spine follow their bone;

@@ -165,11 +165,13 @@ impl Editor {
                 session.rebase(base);
             }
         }
+        let rig = &world.avatar_lib.rig;
+        let now = std::time::Instant::now();
         self.poser
             .sessions
             .iter()
-            .filter(|(_, s)| s.enabled && s.pose.valid(&world.avatar_lib.rig))
-            .map(|(id, s)| (*id, s.pose.clone()))
+            .filter(|(_, s)| s.enabled && s.pose.valid(rig))
+            .map(|(id, s)| (*id, self.played_pose(rig, *id, now).unwrap_or_else(|| s.pose.clone())))
             .collect()
     }
     /// Who else a click can pose: those already posed, and the nearby
@@ -195,6 +197,9 @@ impl Editor {
         }
         // a Ctrl + click in the world names it as the menu does
         self.request_subject_name(world, id);
+        if self.poser.subject != id {
+            self.poser.playback = playback::Transport::Stopped;
+        }
         self.poser.subject = id;
         self.selected = None;
         self.poser.unselected = false;

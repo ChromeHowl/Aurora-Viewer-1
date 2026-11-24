@@ -15699,3 +15699,34 @@ game-control-action-boom-down = Grua ↓
 game-control-action-escape = ESC
 picker-local-newest = Mais recentes primeiro
 picker-local-name = Nome A–Z
+
+# Poser: Animations panel (playback of inventory animations)
+b4-poser-animations = Animations
+b4-poser-play = Play the animations on the subject (only in this viewer)
+b4-poser-pause = Pause
+b4-poser-stop = Stop: the pose comes back as edited
+b4-poser-apply = Apply
+b4-poser-apply-tip = Keep the frame shown as the pose (undo brings the pose back)
+b4-poser-apply-rights = Some of these animations lack the rights to read their motion into the poser (copy, modify and transfer are all needed), so they can be played but not applied.
+b4-poser-override = Manual edits override animation
+b4-poser-override-tip = On: the joints you edited keep your edit and the animation moves the others. Off: the animation drives every joint it animates
+
+# Poser: Load › Inventory animation
+poser-inv-menu = Inventory animation…
+poser-inv-title = Load an animation from your inventory
+poser-inv-empty = No animation to show. Open your Animations folder in Inventory to load it here.
+poser-inv-hint = Greyed-out animations lack the rights to read their motion into the poser (copy, modify and transfer are all needed).
+poser-inv-right-copy = copy
+poser-inv-right-modify = modify
+poser-inv-right-transfer = transfer
+poser-inv-refused = Cannot be loaded into the poser: you lack the { $rights } permission(s) on this animation.
+poser-inv-unavailable = This animation is not available.
+poser-inv-loading = Loading { $name } from your inventory…
+poser-inv-loaded = Loaded { $name } from your inventory.
+poser-inv-failed = Could not get the animation { $name }. Try again in a moment.
+poser-inv-note-frame = Only its first frame was read: the poser holds one pose, not a timeline.
+poser-inv-note-joints = { $count ->
+    [one] { $count } joint of this animation is not on this skeleton and was skipped.
+   *[other] { $count } joints of this animation are not on this skeleton and were skipped.
+    }
+poser-inv-note-extras = Loop, easing, priority and constraint settings do not carry into a pose.

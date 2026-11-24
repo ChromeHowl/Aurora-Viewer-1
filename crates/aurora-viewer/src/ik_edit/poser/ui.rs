@@ -35,6 +35,7 @@ impl Editor {
         self.follow_selected_side(rig);
         let (mut library, mut settings, mut undo, mut redo, mut switch) = (false, false, false, false, false);
         let mut markers = false;
+        let mut anims = false;
         self.poser.edited_total = self
             .poser
             .sessions
@@ -68,6 +69,7 @@ impl Editor {
                 ("arrow-forward-up", aurora_i18n::text("poser-redo"), &mut redo),
                 ("arrow-back-up", aurora_i18n::text("poser-undo"), &mut undo),
                 ("book-filled", aurora_i18n::text("poser-library"), &mut library),
+                ("player-play-filled", aurora_i18n::text("b4-poser-animations"), &mut anims),
             ];
             self.full_window(ctx, p, world, frame, &mut open, actions);
         }
@@ -82,7 +84,12 @@ impl Editor {
                 self.poser.options_open = !self.poser.options_open;
             } else {
                 self.poser.settings_open = !self.poser.settings_open;
+                self.poser.animations_open &= !self.poser.settings_open;
             }
+        }
+        if anims {
+            self.poser.animations_open = !self.poser.animations_open;
+            self.poser.settings_open &= !self.poser.animations_open;
         }
         // after the gear's click, so that the click that closes it does not
         // open it again
@@ -104,6 +111,7 @@ impl Editor {
             session.history(redo);
             self.refresh = true;
         }
+        self.inventory_picker_ui(ctx, p, &world.inventory);
         if let Some((document, pose, bvh, unlock)) = self.poser.storage.overwrite.clone() {
             widgets::Modal::new(egui::Id::unique("poser-overwrite-confirm")).show(ctx, |ui| {
                 ui.heading(aurora_i18n::tr!("poser-overwrite"));
@@ -396,6 +404,18 @@ impl Editor {
             .max_height(joint.height())
             .auto_shrink([false, false])
             .show(&mut right, |ui| self.joint_controls(ui, p, rig, frame));
+        if self.poser.animations_open && !self.poser.settings_open {
+            let panel = egui::Rect::from_min_max(egui::pos2((joint.right() - SETTINGS_W).max(joint.left()), joint.top()), joint.max);
+            ui.interact(panel, ui.scope_id().with("poser-animations-cover"), Sense::click_and_drag());
+            let mut over = pane(ui, "poser-animations-pane", panel);
+            widgets::overlay(&mut over, p, egui::Margin::same(14), |ui| {
+                ui.set_min_size(panel.size() - egui::vec2(28.0, 28.0));
+                egui::ScrollArea::vertical()
+                    .id_salt("poser-animations")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| self.playback_ui(ui, p, world));
+            });
+        }
         if self.poser.settings_open {
             let panel = egui::Rect::from_min_max(egui::pos2((joint.right() - SETTINGS_W).max(joint.left()), joint.top()), joint.max);
             // the joint's controls under the panel do not take its clicks
@@ -490,6 +510,9 @@ impl Editor {
                 menu::separator(ui, p);
                 if menu::item(ui, p, "folder-filled", aurora_i18n::text("poser-open-file")) {
                     self.poser.storage.job = Some(storage::Job::Load(None, LoadMode::All, self.poser.subject));
+                }
+                if menu::item(ui, p, "archive-filled", aurora_i18n::text("poser-inv-menu")) {
+                    self.poser.inventory_load.open = true;
                 }
                 if menu::item(ui, p, "file-import", aurora_i18n::text("poser-import-legacy")) {
                     self.poser.storage.job = Some(storage::Job::ImportLegacyFolder(None));
