@@ -16319,3 +16319,10 @@ phototools-director-lens = The Director's lens is shown while its window is open
 phototools-view-angle-viewfinder = The viewfinder owns the view angle: yours comes back when it closes.
 ui-options-dof-show-focus-point = Show focus point
 ui-options-dof-show-focus-point-help = A small crosshair on the point the lens focuses on: yellow when it is free, red when it is locked.
+
+# People in region: the Region Tracker's figure beside a place (place details, About Land, search, Places, favorites, mini-map)
+people-region-title = People in region
+# $count is already written out: a number, "…" while it is asked, "?" when the map did not answer
+people-region-label = People in region: { $count }
+ui-options-aurora-people-in-region = People in region beside places
+ui-options-aurora-people-in-region-help = Show how many people are in a region beside its places: place details, About Land, search results, Places, favorites and the mini-map. Off, the viewer asks the map for nothing.

@@ -61,6 +61,11 @@ pub(super) fn show(ui: &mut egui::Ui, p: &Palette, s: &mut LandUi, v: &View, wor
         text(ui, p, super::product_name(v.region.as_ref().map_or("", |r| r.product.as_str())));
     });
     row(ui, p, aurora_i18n::tr!("common-category"), |ui| super::maturity(ui, p, v));
+    // the Region Tracker's figure for the parcel's region; hidden under
+    // RLVa @showloc
+    if let Some(people) = v.region.as_ref().and_then(|r| world.people_in_region(&r.name)) {
+        row(ui, p, aurora_i18n::tr!("people-region-title"), |ui| text(ui, p, &people.figure()));
+    }
     row(ui, p, aurora_i18n::tr!("common-owner-2"), |ui| {
         if is_public {
             dim(ui, p, aurora_i18n::tr!("status-public"));

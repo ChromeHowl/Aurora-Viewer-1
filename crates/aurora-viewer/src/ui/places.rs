@@ -646,6 +646,7 @@ impl PlacesUi {
             ui.add(egui::Label::new(RichText::new(text).size(12.0).color(p.muted)).wrap());
             return;
         }
+        let wanted = std::cell::RefCell::new(Vec::<Uuid>::new());
         for row in rows {
             let sel = match row.folder {
                 Some(_) => Sel::Folder(row.id),
@@ -672,6 +673,26 @@ impl PlacesUi {
                 &row.name,
                 self.selected == Some(sel),
                 false,
+                &|| {
+                    // the people of a landmark's region once its asset is
+                    // read; the asset of a row drawn is asked for once (a
+                    // known one is never asked again), as the Aurora list
+                    // does for all of them
+                    if row.folder.is_some() {
+                        return None;
+                    }
+                    let it = crate::world::landmarks::inventory_item(&world.inventory, row.id)?;
+                    match world.landmarks.peek(it.asset_id) {
+                        Resolved::Ready { global, .. } => world.people_at_global(global.x, global.y),
+                        Resolved::Pending => {
+                            if !world.rlva.has("showloc") && world.show_region_people {
+                                wanted.borrow_mut().push(it.asset_id);
+                            }
+                            None
+                        }
+                        _ => None,
+                    }
+                },
             );
             if row.folder.is_none() {
                 drag::source(&r.response, || drag::PlaceDrag {
@@ -723,6 +744,7 @@ impl PlacesUi {
                 }
             }
         }
+        self.want_landmarks.extend(wanted.into_inner());
     }
 
     fn want_fetch(&mut self, inv: &Inventory, folder: Uuid, deep: bool, depth: usize) {
@@ -970,6 +992,7 @@ impl PlacesUi {
                     &it.title,
                     self.selected == Some(Sel::History(i)),
                     true,
+                    &|| world.people_at_global(it.global.x, it.global.y),
                 );
                 drag::source(&r.response, || drag::PlaceDrag {
                     target: drag::Target::History(it.global),
@@ -1270,6 +1293,7 @@ fn list_row(
     name: &str,
     selected: bool,
     info_button: bool,
+    people: &dyn Fn() -> Option<crate::world::region_people::People>,
 ) -> RowResponse {
     let w = ui.available_width();
     let sense = if folder.is_none() {
@@ -1337,6 +1361,31 @@ fn list_row(
         }
         info = response.clicked() && response.interact_pointer_pos().is_some_and(|pos| r.contains(pos));
         right -= 20.0;
+    }
+    // the people of the place's region: asked only for a row drawn (the
+    // closure is called after the visibility check above), nothing when
+    // there is no figure (setting off, RLVa @showloc, no place)
+    if let Some(n) = people() {
+        let galley = painter.layout_no_wrap(n.figure(), egui::FontId::proportional(11.5), p.muted);
+        let icon = 13.0;
+        let width = galley.size().x + icon + 2.0;
+        let slot = egui::Rect::from_min_size(
+            egui::pos2(right - width, rect.center().y - 8.0),
+            Vec2::new(width, 16.0),
+        );
+        // the name keeps at least a third of the row
+        if slot.left() > x + (right - x) / 3.0 {
+            painter.galley(egui::pos2(slot.left(), rect.center().y - galley.size().y * 0.5), galley, p.muted);
+            if let Some(t) = super::icons::global("users") {
+                painter.image(
+                    t.id(),
+                    egui::Rect::from_center_size(egui::pos2(slot.right() - icon * 0.5, rect.center().y), Vec2::splat(icon)),
+                    uv,
+                    p.muted,
+                );
+            }
+            right = slot.left() - 8.0;
+        }
     }
     let galley = painter.layout(name.to_owned(), egui::FontId::proportional(12.5), p.ink, f32::INFINITY);
     let clip = egui::Rect::from_min_max(egui::pos2(x, rect.top()), egui::pos2(right, rect.bottom()));

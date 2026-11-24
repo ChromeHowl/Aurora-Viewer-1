@@ -16158,3 +16158,10 @@ phototools-director-lens = ディレクターのウィンドウが開いてい�
 phototools-view-angle-viewfinder = 視野角はファインダーが管理しています。ファインダーを閉じると元の値に戻ります。
 ui-options-dof-show-focus-point = フォーカス点を表示
 ui-options-dof-show-focus-point-help = レンズがピントを合わせている点に小さな十字を表示します。自由なときは黄色、ロック中は赤です。
+
+# People in region: the Region Tracker's figure beside a place (place details, About Land, search, Places, favorites, mini-map)
+people-region-title = People in region
+# $count is already written out: a number, "…" while it is asked, "?" when the map did not answer
+people-region-label = People in region: { $count }
+ui-options-aurora-people-in-region = People in region beside places
+ui-options-aurora-people-in-region-help = Show how many people are in a region beside its places: place details, About Land, search results, Places, favorites and the mini-map. Off, the viewer asks the map for nothing.

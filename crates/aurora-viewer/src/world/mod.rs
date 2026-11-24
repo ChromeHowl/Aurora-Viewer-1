@@ -98,6 +98,7 @@ pub mod received_items;
 pub mod recent;
 pub mod region_alerts;
 pub mod region_messages;
+pub mod region_people;
 pub mod region_restart;
 pub mod region_titles;
 pub mod region_tracker;
@@ -902,6 +903,10 @@ pub struct World {
     pub map: worldmap::WorldMap,
     /// Regions watched by the per-account Region Tracker window.
     pub region_tracker: region_tracker::RegionTracker,
+    /// "People in region" beside the places shown outside the map.
+    pub region_people: region_people::RegionPeople,
+    /// "People in region" beside the places shown (from the settings).
+    pub show_region_people: bool,
     region_tracker_path: Option<std::path::PathBuf>,
     /// Place details windows of place links (their parcel requests).
     pub place_details: place_details::PlaceDetails,
@@ -1244,6 +1249,8 @@ impl World {
             landmarks: Default::default(),
             map: worldmap::WorldMap::default(),
             region_tracker: Default::default(),
+            region_people: Default::default(),
+            show_region_people: true,
             region_tracker_path: None,
             place_details: Default::default(),
             place_snapshots: Default::default(),

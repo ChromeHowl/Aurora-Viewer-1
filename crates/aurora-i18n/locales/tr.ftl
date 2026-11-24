@@ -15656,3 +15656,10 @@ game-control-action-boom-down = Vinç ↓
 game-control-action-escape = ESC
 picker-local-newest = Önce en yeni
 picker-local-name = Ad A–Z
+
+# People in region: the Region Tracker's figure beside a place (place details, About Land, search, Places, favorites, mini-map)
+people-region-title = People in region
+# $count is already written out: a number, "…" while it is asked, "?" when the map did not answer
+people-region-label = People in region: { $count }
+ui-options-aurora-people-in-region = People in region beside places
+ui-options-aurora-people-in-region-help = Show how many people are in a region beside its places: place details, About Land, search results, Places, favorites and the mini-map. Off, the viewer asks the map for nothing.
