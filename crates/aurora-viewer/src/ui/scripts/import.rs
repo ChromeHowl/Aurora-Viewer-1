@@ -86,7 +86,11 @@ fn status(p: &Palette, row: &Row, object: bool) -> (&'static str, Color32, Strin
     match &row.state {
         State::Ready => ("clock-filled", p.muted, aurora_i18n::tr!("script-import-state-ready").into()),
         State::Queued => ("hourglass-filled", p.muted, aurora_i18n::tr!("script-import-state-queued").into()),
-        State::Working => ("hourglass-filled", p.violet_light, aurora_i18n::tr!("script-import-state-working").into()),
+        State::Working => (
+            "hourglass-filled",
+            p.violet_light,
+            aurora_i18n::tr!("script-import-state-working").into(),
+        ),
         State::Saved | State::Unchecked => {
             let text = match (&row.state, object && row.placed) {
                 (State::Unchecked, _) => aurora_i18n::tr!("script-import-state-unchecked"),
@@ -216,7 +220,10 @@ fn row_ui(ui: &mut egui::Ui, p: &Palette, row: &Row, lsl: Kind, object: bool) ->
                 ui.label(RichText::new(kind_label(row.kind(lsl))).color(p.muted).small());
                 ui.label(RichText::new(size_label(row.bytes)).color(p.muted).small());
             }
-            if let Some(item) = row.item.filter(|_| row.state.saved() || matches!(row.state, State::Failed { kept: true, .. })) {
+            if let Some(item) = row
+                .item
+                .filter(|_| row.state.saved() || matches!(row.state, State::Failed { kept: true, .. }))
+            {
                 let response = ui.small_button(aurora_i18n::tr!("script-import-open"));
                 if response.on_hover_text(aurora_i18n::tr!("script-import-open-tip")).clicked() {
                     open = Some(item);
