@@ -15,6 +15,7 @@ pub mod inventory;
 pub mod isolate;
 pub mod knobs;
 pub mod light;
+pub mod long_capture;
 pub mod look_thumbs;
 pub mod looks;
 pub mod lut_packs;
@@ -623,6 +624,13 @@ impl GpuCost {
         true
     }
 
+    /// How long passes of `pixels` in all are expected to keep the GPU
+    /// busy; None until a frame was timed.
+    pub fn estimate(&self, pixels: u64) -> Option<std::time::Duration> {
+        let ns = self.ns?;
+        Some(std::time::Duration::from_secs_f64(pixels as f64 * f64::from(ns) * 1e-9))
+    }
+
     /// The most pixels one pass may draw within `ms` ([`PASS_GPU_MS`] or
     /// [`OVERLAY_PASS_GPU_MS`]), never fewer than the `window`'s frame,
     /// which is drawn every frame. Unmeasured: [`UNTIMED_PASS_PIXELS`]
@@ -981,6 +989,22 @@ fn civil(t: &(impl chrono::Datelike + chrono::Timelike)) -> (u16, u16, u16, u16,
         t.minute() as u16,
         t.second() as u16,
     )
+}
+
+/// The messages a photo's worker sent so far (an encoder, a post on the
+/// network's runtime), and whether it is gone: ended, or stopped by a
+/// panic or a cancelled task, without its last message. A photo whose
+/// worker is gone ends as failed, so that the window's buttons come back
+/// after every save, whatever ended it.
+pub fn drain<T>(rx: &crossbeam_channel::Receiver<T>) -> (Vec<T>, bool) {
+    let mut got = Vec::new();
+    loop {
+        match rx.try_recv() {
+            Ok(v) => got.push(v),
+            Err(crossbeam_channel::TryRecvError::Empty) => return (got, false),
+            Err(crossbeam_channel::TryRecvError::Disconnected) => return (got, true),
+        }
+    }
 }
 
 #[cfg(test)]

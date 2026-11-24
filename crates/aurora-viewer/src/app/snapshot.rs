@@ -29,10 +29,11 @@ const ANIM_AGENT_SNAPSHOT: Uuid = Uuid::from_u128(0xeae8905b_271a_99e2_4c0e_3110
 const PREVIEW_SIDE: u32 = 720;
 /// The preview follows the camera once it has been still this long.
 const SETTLE: Duration = Duration::from_millis(250);
-/// How long a part of a photo waits for a render thread still busy with
-/// the frame before (a pipeline made for the photo quality, a slow part)
-/// before the photo is given up: far past any frame, short of forever.
-const PHOTO_WAIT: Duration = Duration::from_secs(30);
+/// A part of a photo still waiting for the render thread (a pipeline made
+/// for the photo quality, a slow part) after this long is logged. It is
+/// never given up for being slow: only a lost GPU or a render thread gone
+/// ends it (a photo of minutes must not be thrown away near its end).
+const PART_WAIT_WARN: Duration = Duration::from_secs(60);
 /// Bytes a photo may take when the driver does not report its memory.
 const DEFAULT_TARGET_BYTES: u64 = 1_600_000_000;
 
@@ -121,9 +122,13 @@ struct Job {
     /// The current tile's frame is asked.
     asked: bool,
     /// Frames the current tile waited for the render thread (said once),
-    /// since when.
+    /// since when, and whether that wait was logged as long.
     waited: u32,
     waiting: Option<Instant>,
+    wait_warned: bool,
+    /// How long its passes are expected to keep the GPU busy, from the
+    /// GPU's measured cost (`snapshot::GpuCost::estimate`).
+    estimate: Option<Duration>,
     pixels: Vec<u8>,
     interface: bool,
     huds: bool,
@@ -299,12 +304,19 @@ pub(super) struct Snapshots {
     pub(super) isolate_picks: Vec<(u64, super::photo_isolate::Pick)>,
     pub(super) isolate_point: Option<((f32, f32), super::photo_isolate::Pick)>,
     pub(super) isolate_hover: Option<Uuid>,
+    /// A long photo and the agent paused for it (`snapshot::long_capture`).
+    long: snapshot::long_capture::LongCapture,
 }
 
 impl Snapshots {
     /// A photo is being drawn (the crash report's effects list).
     pub(super) fn drawing(&self) -> bool {
         self.job.is_some()
+    }
+
+    /// A photo, not a preview, is being drawn.
+    pub(super) fn drawing_photo(&self) -> bool {
+        self.job.as_ref().is_some_and(|j| !j.purpose.quiet())
     }
 
     /// After a GPU recovery (gpu_recovery.rs): a photo under way is given up,
@@ -511,6 +523,7 @@ impl Default for Snapshots {
             isolate_picks: Vec::new(),
             isolate_point: None,
             isolate_hover: None,
+            long: Default::default(),
         }
     }
 }
@@ -637,18 +650,15 @@ impl App {
             // switched on, a part that took long): no frame was built and the
             // part is still asked, so this frame carries it again
             let since = *job.waiting.get_or_insert_with(Instant::now);
-            if since.elapsed() > PHOTO_WAIT {
-                // a GPU that never finishes, though not lost: the photo
-                // is given up, not drawn later for nobody
+            if since.elapsed() > PART_WAIT_WARN && !job.wait_warned {
+                // slow, not lost: the part is still drawn (a lost GPU or a
+                // render thread gone ends the photo above)
+                job.wait_warned = true;
                 log::warn!(
-                    "photo: part {} waited {:?} for the render thread: given up",
+                    "photo: part {} has waited {} s for the render thread: still waiting",
                     job.next + 1,
-                    PHOTO_WAIT
+                    since.elapsed().as_secs()
                 );
-                renderer.drop_snapshot();
-                s.job = None;
-                s.message = Some((aurora_i18n::tr!("photo-draw-failed").to_owned(), true));
-                return None;
             }
             if job.waited == 0 {
                 log::info!("photo: part {} waits for the render thread", job.next + 1);
@@ -1120,11 +1130,17 @@ impl App {
             return;
         };
         let mut done = None;
-        while let Ok(step) = rx.try_recv() {
+        let (steps, gone) = snapshot::drain(rx);
+        for step in steps {
             match step {
                 PostcardStep::Encoded => *encoded = true,
                 PostcardStep::Done(result) => done = Some(result),
             }
+        }
+        if done.is_none() && gone {
+            done = Some(Err(aurora_net::postcard::Error::Failed(
+                "the sending ended without an answer".into(),
+            )));
         }
         let Some(result) = done else {
             return;
@@ -1203,6 +1219,9 @@ impl App {
         }
         self.snapshots.gpu_cost.new_photo();
         let tiles = self.photo_tiles(renderer, size);
+        // (what its passes draw, for the time the GPU is expected to need)
+        let drawn: u64 = tiles.iter().map(|t| u64::from(t.draw.width) * u64::from(t.draw.height)).sum();
+        let estimate = self.snapshots.gpu_cost.estimate(drawn);
         if !purpose.quiet() {
             log::info!(
                 "photo: {} x {} planned in {} part(s), at most {} Mpx a pass (memory and GPU time; {} bytes a pixel, {})",
@@ -1234,6 +1253,8 @@ impl App {
             asked: false,
             waited: 0,
             waiting: None,
+            wait_warned: false,
+            estimate,
             pixels: Vec::new(),
             interface,
             huds: !outfit && s.huds,
@@ -1701,11 +1722,16 @@ impl App {
             return;
         };
         let mut done = None;
-        while let Ok(step) = rx.try_recv() {
+        let (steps, gone) = snapshot::drain(rx);
+        for step in steps {
             match step {
                 ProfileStep::Encoded(n) => *bytes = Some(n),
                 ProfileStep::Done(result) => done = Some(result),
             }
+        }
+        if done.is_none() && gone {
+            // (the PNG's encoder stopped, or the task was dropped)
+            done = Some(Err(profile::Error::ConfigData));
         }
         let Some(result) = done else {
             return;
@@ -1765,6 +1791,36 @@ impl App {
     }
 
     /// Every frame: the saves, thumbnails, dialogs and preview to follow.
+    /// Each frame: AgentPause while a long photo is drawn, AgentResume once
+    /// it ends however it ends (`snapshot::long_capture`).
+    fn photo_long_capture(&mut self) {
+        use snapshot::long_capture::Step;
+        let job = self.snapshots.job.as_ref().filter(|j| !j.purpose.quiet());
+        let capturing = job.is_some() || self.capture_360.capturing();
+        let estimate = job.and_then(|j| j.estimate);
+        let connected = matches!(self.screen, super::Screen::World);
+        for step in self.snapshots.long.update(Instant::now(), capturing, estimate, connected) {
+            match step {
+                Step::Pause => {
+                    log::info!("photo: a long photo, the regions are told the agent is paused");
+                    self.send(NetCommand::AgentPause);
+                }
+                Step::Resume => self.send(NetCommand::AgentResume),
+                Step::Warn { elapsed, longest } => log::warn!(
+                    "photo: still drawing after {} s (longest frame {} ms); the agent is paused, the link kept",
+                    elapsed.as_secs(),
+                    longest.as_millis()
+                ),
+                Step::Ended { elapsed, longest } if elapsed >= snapshot::long_capture::LONG => log::info!(
+                    "photo: ended after {} s, the longest frame {} ms",
+                    elapsed.as_secs(),
+                    longest.as_millis()
+                ),
+                Step::Ended { .. } => {}
+            }
+        }
+    }
+
     pub(super) fn photo_update(&mut self, renderer: &mut Renderer) {
         // every opening (toolbar, menu, shortcut, Phototools…) draws a fresh
         // preview, as LLFloaterSnapshot::onOpen's updateSnapshot(true); the
@@ -1776,6 +1832,7 @@ impl App {
             self.snapshots.quiet = !self.panels.snapshot;
             self.photo_take(renderer, None);
         }
+        self.photo_long_capture();
         self.photo_demo(renderer);
         self.world_look_demo();
         self.photo_reel_demo(renderer);
@@ -1807,9 +1864,14 @@ impl App {
                 self.snapshots.detail_ready = false;
             }
         }
-        // the texture encoded on its worker: its upload
+        // the texture encoded on its worker: its upload (a worker that
+        // stopped without its texture fails the photo)
         if let Some(Upload::Encoding { rx, cost, pano }) = &self.snapshots.upload
-            && let Ok(encoded) = rx.try_recv()
+            && let Some(encoded) = match snapshot::drain(rx) {
+                (mut got, _) if !got.is_empty() => Some(got.remove(0)),
+                (_, true) => Some(Err("the encoder stopped".to_owned())),
+                _ => None,
+            }
         {
             let (cost, pano) = (*cost, *pano);
             match encoded {
@@ -1826,6 +1888,12 @@ impl App {
         }
         self.photo_profile_poll();
         self.photo_postcard_poll();
+        // an upload whose session ended never gets its answer: the photo
+        // ends as failed (its outcome unknown), the buttons come back
+        if matches!(self.snapshots.upload, Some(Upload::Sent(_))) && !self.in_world() {
+            log::warn!("photo: the session ended before the upload's answer");
+            self.photo_uploaded(Err(upload::Error::Unknown));
+        }
         self.photo_reel_update();
         let viewfinder = self.viewfinder_on();
         let s = &mut self.snapshots;
