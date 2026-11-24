@@ -1023,6 +1023,10 @@ impl Editor {
             if menu::item(ui, p, "folder-filled", aurora_i18n::text("poser-open-file")) {
                 load = Some(None);
             }
+            if menu::item(ui, p, "archive-filled", aurora_i18n::text("poser-inv-menu")) {
+                self.poser.inventory_load.open = true;
+                ui.close();
+            }
             if menu::item(ui, p, "file-import", aurora_i18n::text("poser-import-legacy")) {
                 self.poser.storage.job = Some(storage::Job::ImportLegacyFolder(None));
                 ui.close();

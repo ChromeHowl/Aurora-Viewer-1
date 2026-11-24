@@ -156,6 +156,21 @@ pub fn gesture_asset_allowed(inv: &Inventory, item: &InvItem) -> bool {
         && !in_type(inv, item.id, 14)
 }
 
+/// The rights of [`FULL`] the agent lacks on an item before the contents of
+/// its asset may be read into an editor (the poser's Inventory load): none
+/// when the result is 0. The Legacy Viewer has no animation editor to copy:
+/// its poser reads its own pose files only, and an animation's preview only
+/// plays it. The nearest rule is the one that lets an asset UUID be seen
+/// (LLViewerInventoryItem::getIsFullPerm and getProtectedAssetUUID,
+/// indra/newview/llviewerinventory.cpp: modify, copy and transfer), because
+/// the motion read into an editor can be saved and uploaded as a new asset;
+/// the stricter reading is taken. Group-owned and Library items count by
+/// what they allow everyone, as [`agent_mask`] says. A caller resolves a
+/// link to its original first ([`original`]).
+pub fn content_missing(inv: &Inventory, item: &InvItem) -> u32 {
+    FULL & !held(inv, item)
+}
+
 /// GOD_MAINTENANCE (indra/llcommon/indra_constants.h): the god level from
 /// which LLAgent::allowOperation, at its default `god_minimum`, lets a god
 /// past an item's permissions.

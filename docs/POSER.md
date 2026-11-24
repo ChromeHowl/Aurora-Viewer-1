@@ -230,6 +230,24 @@ unlock and the priority. Load's menu holds the four modes, applied to the
 selected library entry while the library is shown or to a file chosen
 otherwise, and "Open a file".
 
+**Inventory animation.** Load › "Inventory animation…" (both windows) opens a
+picker of the animation items of your inventory (a link counts as its
+original), with a search and the load mode. The motion is read into the poser
+like a `.anim` file: its first frame is the pose, the item's name fills the
+name field, one undo step, the same four load modes. The asset comes through
+the animation streamer (disk cache, then the simulator). Only an animation
+you hold with copy, modify and transfer all granted can be read
+(`actions::content_missing`; stricter than the Legacy Viewer, which has no
+animation editor to copy): the others stay in the list, greyed out, and their
+tip names the rights you lack. No asset id is ever shown.
+
+**Animations panel.** The full window's play button opens a panel that plays
+the animations of the IK editor's stack (add them from the inventory, or drop
+them on the list) on the subject, on your screen only: play, pause, stop and a
+position slider. "Manual edits override animation" keeps the joints you
+edited; Apply keeps the frame shown as the pose, with an undo step, and is
+refused while an animation of the stack lacks the rights above.
+
 Load accepts Aurora pose documents, native `.anim` files and `.bvh` files,
 up to 4 MiB. Animation imports sample their first frame. The four load modes
 are All, Rotations only, Unedited joints and Selective rotations. Selective

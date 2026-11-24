@@ -31,7 +31,7 @@ impl Entry {
 }
 pub(super) enum Loaded {
     Pose(Document, LoadMode),
-    Animation(aurora_assets::Animation, LoadMode),
+    Animation(aurora_assets::Animation, LoadMode, String),
 }
 enum Output {
     Listed(Vec<Entry>),
@@ -108,6 +108,9 @@ pub(super) struct Service {
     pub ready: bool,
     pub prepared: Vec<clip::Prepared>,
     pub overwrite: Option<(Document, Arc<SubjectPose>, bool, bool)>,
+    /// Loads that arrived without a job (an inventory animation), applied
+    /// by the next `tick` like the files'.
+    injected: Vec<(Uuid, Loaded)>,
     tx: crossbeam_channel::Sender<Output>,
     rx: crossbeam_channel::Receiver<Output>,
 }
@@ -126,6 +129,7 @@ impl Default for Service {
             ready: false,
             prepared: Vec::new(),
             overwrite: None,
+            injected: Vec::new(),
             tx,
             rx,
         }
@@ -236,6 +240,9 @@ fn list(root: &Path, rig: &Rig) -> Result<Vec<Entry>, String> {
     Ok(out)
 }
 impl Service {
+    pub(super) fn inject(&mut self, subject: Uuid, loaded: Loaded) {
+        self.injected.push((subject, loaded));
+    }
     pub fn tick(
         &mut self,
         jobs: &Jobs,
@@ -244,7 +251,7 @@ impl Service {
         rig: Arc<Rig>,
         skeleton: Option<&aurora_assets::Skeleton>,
     ) -> Vec<(Uuid, Loaded)> {
-        let mut loaded = Vec::new();
+        let mut loaded = std::mem::take(&mut self.injected);
         while let Ok(output) = self.rx.try_recv() {
             self.busy = false;
             match output {
@@ -337,6 +344,7 @@ impl Service {
                                 Loaded::Animation(
                                     aurora_assets::anim::parse_animation_upload(&bytes).map_err(|e| e.to_string())?,
                                     mode,
+                                    String::new(),
                                 ),
                             )
                         } else if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("bvh")) {
@@ -348,6 +356,7 @@ impl Service {
                                         .map_err(|e| e.to_string())?
                                         .animation,
                                     mode,
+                                    String::new(),
                                 ),
                             )
                         } else if legacy_pose::is_pose_file(&path) {
