@@ -219,8 +219,10 @@ pub fn avatars(world: &World) -> Vec<(Uuid, Vec3, bool)> {
     let now = Instant::now();
     let mut out: Vec<(Uuid, Vec3, bool)> = Vec::new();
     for (idx, o) in world.objects.avatars() {
+        // (nobody the Shadow Realm hides: `world/shadow_realm.rs`)
         if o.full_id != world.agent_id
             && !world.is_mirror(&o.full_id)
+            && !world.shadow_hides(&o.full_id)
             && let Some((p, _, _)) = Scene::object_transform(world, idx, now, 0)
         {
             out.push((o.full_id, p, true));
@@ -231,7 +233,7 @@ pub fn avatars(world: &World) -> Vec<(Uuid, Vec3, bool)> {
             continue;
         };
         for (id, p) in list {
-            if *id == world.agent_id || out.iter().any(|e| e.0 == *id) {
+            if *id == world.agent_id || world.shadow_hides(id) || out.iter().any(|e| e.0 == *id) {
                 continue;
             }
             let known = p.z > 0.0 && p.z < COARSE_MAX_Z;
@@ -1113,11 +1115,16 @@ impl MiniMap {
                 pos.truncate().distance(me.truncate())
             };
             let name = avatar_name(world, &id, opts.mini_avatar_name_format);
-            resp.clone().on_hover_text_at_pointer(aurora_i18n::tr!(
+            let text = aurora_i18n::tr!(
                 "status-name-distance-d-m",
                 name = name.to_string(),
                 d = aurora_i18n::number_text(&format!("{:.2}", d))
-            ));
+            );
+            // in the Shadow Realm's red when they are one of its residents
+            match super::colors::shadow_red(world, &id) {
+                Some(red) => resp.clone().on_hover_text_at_pointer(egui::RichText::new(text).color(red)),
+                None => resp.clone().on_hover_text_at_pointer(text),
+            };
         } else if let Some(m) = pointer.filter(|_| resp.hovered() && !resp.dragged()) {
             let g = view.to_global(m);
             let mut lines = Vec::new();

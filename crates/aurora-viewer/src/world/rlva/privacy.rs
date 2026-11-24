@@ -690,7 +690,7 @@ impl World {
         // erased with the others' when `@shownearby` clears them, and is
         // shown under `@shownames` (RlvActions::canShowName)
         let me = (!self.agent_id.is_nil()).then_some(self.agent_id);
-        let around = super::super::radar::sightings(self)
+        let around = super::super::radar::sightings_all(self)
             .into_iter()
             .map(|s| s.id)
             .filter(|id| *id != self.agent_id);

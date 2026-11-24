@@ -16153,3 +16153,22 @@ game-control-action-boom-down = Опустить камеру ↓
 game-control-action-escape = Esc
 picker-local-newest = Сначала новые
 picker-local-name = Имя А–Я
+
+
+# Shadow Realm (World › Shadow Realm…)
+sr-title = Shadow Realm
+sr-menu-enabled = Shadow Realm enabled
+sr-menu-window = Shadow Realm…
+sr-menu-add = Add to Shadow Realm
+sr-menu-remove = Remove from Shadow Realm
+sr-enabled = Enabled
+sr-enabled-tip = The residents of this list appear nowhere while they are farther than the distance: not drawn, not listed, not heard nearby, their objects silent. Their instant messages and calls still come through.
+sr-distance = Shown within
+sr-distance-tip = Within this distance a resident of the list shows again, with their name in red. They hide again one metre farther.
+sr-metres-suffix = { " " }m
+sr-filter = Filter residents
+sr-empty = Nobody is in the Shadow Realm. Add residents here or from their menu.
+sr-state-off = Shown (off)
+sr-state-shown = In range: shown
+sr-state-hidden = Hidden
+sr-remove = Remove

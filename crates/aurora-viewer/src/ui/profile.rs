@@ -1778,6 +1778,7 @@ fn overflow_menu(
             menu::separator(ui, p);
             crate::ui::chat::moderation::ban_all_entries(ui, p, world, id, true);
         }
+        super::context::shadow_realm_item(ui, p, world, id);
         menu::separator(ui, p);
         if menu::item(ui, p, "copy-filled", aurora_i18n::tr!("common-copy-name")) {
             ui.ctx().copy_text(world.social.name_in(scope, &id));

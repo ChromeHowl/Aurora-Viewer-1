@@ -160,6 +160,7 @@ mod scripts;
 mod second_camera;
 mod selection_turn;
 mod settings_backup;
+mod shadow_realm;
 mod shape_editor;
 mod shortcuts;
 mod snapshot;
@@ -971,6 +972,7 @@ pub struct App {
     animation_explorer_ui: ui::animation_explorer::AnimationExplorer,
     animation_explorer: animation_explorer::ExplorerState,
     avatar_render_settings_ui: ui::avatar_render_settings::AvatarRenderSettings,
+    shadow_realm_ui: ui::shadow_realm::ShadowRealmUi,
     area_search_feed: area_search::Feed,
     /// "Asset blacklist" (World menu).
     blacklist_ui: ui::blacklist::BlacklistUi,
@@ -2257,6 +2259,7 @@ impl App {
             animation_explorer_ui: Default::default(),
             animation_explorer: Default::default(),
             avatar_render_settings_ui: Default::default(),
+            shadow_realm_ui: Default::default(),
             area_search_feed: Default::default(),
             blacklist_ui: Default::default(),
             group_titles_ui: Default::default(),
@@ -3820,6 +3823,7 @@ impl App {
         self.animation_explorer_ui = Default::default();
         self.animation_explorer = Default::default();
         self.avatar_render_settings_ui = Default::default();
+        self.shadow_realm_ui = Default::default();
         self.blender_live.stop();
         self.clear_blender_preview();
         self.blender_live = Default::default();
@@ -6458,13 +6462,9 @@ impl App {
     /// sound message (the order LL handles them in).
     fn flush_object_sounds(&mut self) {
         let engine = self.audio_engine.as_ref();
-        // the block list changed: silence / restore the sounds it covers
-        let version = self
-            .world
-            .mutes
-            .version
-            .wrapping_add(self.world.anti_spam.version)
-            .wrapping_add(self.world.derender.generation);
+        // the block list, the blacklist or the Shadow Realm changed: silence
+        // / restore the sounds they cover
+        let version = self.world.sound_rules_version();
         let recheck = self.sound_blocks.0 != version;
         self.sound_blocks.0 = version;
         let blocked = |world: &World, o: &crate::world::objects::Object| {
@@ -7908,6 +7908,11 @@ impl App {
         // the alerts to scripts: ScriptDialogReply from ourselves, a chat on
         // a negative channel that reaches our attachments
         let script_alerts = self.radar.script_alerts(s.enter_scripts, s.leave_scripts);
+        // no alert names someone of the Shadow Realm: hidden they were never
+        // seen, in range their coming and going would point at them (the
+        // alerts to our own scripts come from the sweep, which never sees
+        // them hidden)
+        self.world.shadow_filter_radar_events(&mut events);
         if self.world.rlva.has("shownearby") {
             events.clear();
         } else {
@@ -8085,7 +8090,11 @@ impl App {
             self.mic_was = false;
         }
         let world = &self.world;
-        self.voice.apply_blocks(|id| world.voice_blocked(id));
+        // the Shadow Realm mutes only the nearby channel: private and group
+        // calls always come through
+        let spatial = self.voice.on_spatial();
+        self.voice
+            .apply_blocks(|id| crate::world::shadow_realm::voice_muted(world.voice_blocked(id), spatial, world.shadow_hides(id)));
         self.voice_connected = self.voice.connected;
         self.voice_level = self.voice.own_level;
         self.options_ui.mic_level = self.voice.mic_meter;
@@ -10563,6 +10572,7 @@ impl App {
         {
             crate::demo::parcel_visibility::update_agent_parcel(&mut self.world, &mode, self.frame_count);
         }
+        self.world.tick_shadow_realm(&self.settings.shadow_realm, Instant::now());
         for command in self
             .world
             .update_parcel_visibility(&self.settings.parcel_visibility, Instant::now())
@@ -14974,6 +14984,7 @@ impl App {
         self.demo_derender_steps();
         self.demo_reload_avatar_steps();
         self.demo_friends_only_steps();
+        self.demo_shadow_realm_steps();
         self.demo_social_menu_steps();
         self.demo_land_moderation();
         self.demo_admin_status();
@@ -16843,6 +16854,12 @@ impl App {
             BarAction::ToggleFriendsOnly => {
                 let on = !self.world.friends_only();
                 self.world.set_friends_only(on);
+            }
+            BarAction::ToggleShadowRealm => {
+                self.settings.shadow_realm.enabled = !self.settings.shadow_realm.enabled;
+                self.settings.save();
+                // at once, not at the next frame's tick
+                self.world.tick_shadow_realm(&self.settings.shadow_realm, Instant::now());
             }
             BarAction::BuyCurrency => self.open_buy_currency(),
             // FSLoadSLMarketplace (llviewermenu.cpp): the system browser when
@@ -19106,6 +19123,7 @@ impl App {
                     double_click: self.double_click_action(),
                     quickjump: self.settings.quickjump,
                     friends_only: self.world.friends_only(),
+                    shadow_realm: self.settings.shadow_realm.enabled,
                     show_name_tags: self.settings.show_name_tags,
                     fly_override: self.world.fly_override,
                     quiet_snapshots: !self.settings.snapshot.sound,
@@ -21078,6 +21096,7 @@ impl App {
                 self.sound_explorer_window(&ctx, &p);
                 self.animation_explorer_window(&ctx, &p);
                 self.avatar_render_settings_window(&ctx, &p);
+                self.shadow_realm_window(&ctx, &p);
                 self.bumps_ui.show(&ctx, &p, &self.world, &mut self.panels.bumps);
                 self.grid_status_window(&ctx, &p);
                 self.pose_stand_window(&ctx, &p);
