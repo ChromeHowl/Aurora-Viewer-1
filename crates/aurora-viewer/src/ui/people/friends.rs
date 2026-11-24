@@ -929,7 +929,7 @@ mod tests {
                             fixed_name = Some(layout);
                         }
                         if hot {
-                            assert_eq!(quick.len(), 6, "{width}: every quick action remains visible");
+                            assert_eq!(quick.len(), 7, "{width}: every quick action remains visible");
                             if width <= 400.0 {
                                 assert!(
                                     name.pos.x + name.galley.size().x > quick[0].rect.right(),

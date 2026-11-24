@@ -176,7 +176,6 @@ fn theme_strip(ui: &mut egui::Ui, preset: &crate::theme_presets::Preset) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(size.x * 3.0, size.y), egui::Sense::hover());
     for (i, color) in preset.swatches().into_iter().enumerate() {
         let cell = egui::Rect::from_min_size(rect.min + egui::vec2(size.x * i as f32, 0.0), size);
-        // theme-guard: content — a preset's own colours, square swatches
         ui.painter().rect_filled(cell, 0.0, color);
     }
 }

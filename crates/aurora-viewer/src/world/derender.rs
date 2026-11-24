@@ -1172,9 +1172,12 @@ mod tests {
         let wolf_update = crate::build::replace::demo_update(back);
         let dir = std::env::temp_dir().join(format!("aurora-derender-relog-{}", Uuid::new_v4()));
         let path = dir.join(FILE);
+        std::fs::create_dir_all(&dir).expect("dir");
         world.derender = Derender::load(path.clone());
         assert!(!world.derender(wolf, entry(Kind::Resident, false)));
         assert!(!world.derender(hat, entry(Kind::Object, true)));
+        // the save thread writes it
+        assert!(crate::saves::wait_for(&path, std::time::Duration::from_secs(10)));
         assert!(path.exists(), "the permanent entry is saved");
         world.derender = Derender::load(path);
         assert!(!world.derender.contains(&wolf), "a temporary entry never survives a relog");
