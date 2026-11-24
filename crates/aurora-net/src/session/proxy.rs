@@ -68,6 +68,7 @@ pub(super) fn login_failed(error: String) -> NetEvent {
         critical_required: false,
         bad_credentials: false,
         previous_session: false,
+        network: false,
         next_server: None,
     }
 }
