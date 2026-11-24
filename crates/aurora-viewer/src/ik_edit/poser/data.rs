@@ -88,6 +88,56 @@ pub(super) fn bounded_scale(scale: Vec3) -> Vec3 {
     scale.signum() * scale.abs().clamp(Vec3::splat(0.001), Vec3::splat(10.0))
 }
 
+/// The save name each posed subject keeps, keyed as the sessions are (the
+/// subject's id). The name field shows the selected subject's own.
+#[derive(Default)]
+pub(super) struct Names {
+    shown: Option<Uuid>,
+    by_subject: HashMap<Uuid, String>,
+}
+impl Names {
+    /// The field `text` follows `subject`: the one it showed keeps what the
+    /// field held, the new one gets its own (kept across a close and reopen).
+    /// The very first time, the field keeps its text unless the subject
+    /// already has a name.
+    pub fn follow(&mut self, subject: Uuid, text: &mut String) {
+        if self.shown == Some(subject) {
+            return;
+        }
+        if let Some(previous) = self.shown {
+            self.by_subject.insert(previous, std::mem::take(text));
+            *text = self.by_subject.get(&subject).cloned().unwrap_or_default();
+        } else if let Some(own) = self.by_subject.get(&subject) {
+            text.clone_from(own);
+        }
+        self.shown = Some(subject);
+    }
+    /// A saved or loaded name for `subject`, shown at once when it is the
+    /// one the field follows.
+    pub fn set(&mut self, subject: Uuid, text: &mut String, name: String) {
+        if self.shown == Some(subject) {
+            *text = name;
+        } else {
+            self.by_subject.insert(subject, name);
+        }
+    }
+    /// A new window starts from the names kept, with the field not yet
+    /// following anyone.
+    pub fn reopened(mut self, text: &str) -> Self {
+        if let Some(shown) = self.shown.take() {
+            self.by_subject.insert(shown, text.to_owned());
+        }
+        self
+    }
+    /// Drop the names of subjects that are gone.
+    pub fn retain(&mut self, keep: impl Fn(&Uuid) -> bool) {
+        self.by_subject.retain(|id, _| keep(id));
+        if self.shown.is_some_and(|id| !keep(&id)) {
+            self.shown = None;
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(super) struct Session {
     /// Shape and worn-mesh rest from which the local pose channels are based.
@@ -168,12 +218,40 @@ impl Session {
     /// getJointExportRotation, indra/newview/fsposeranimator.cpp, writes the
     /// change and not the base too). A change, not a filter on edited joints,
     /// so that touching a joint does not bring its captured rotation along.
+    #[cfg(test)]
     pub fn authored(&self, rig: &Rig, model: Mat4) -> Option<Pose> {
         let resolved = self.pose.snapshot(rig, model)?;
         let pose = Pose {
             rotations: (0..rig.len()).map(|b| resolved.authored_rotation(rig, b)).collect(),
             positions: (0..rig.len())
                 .map(|b| rig.local_pos[b] + resolved.positions[b] - self.base.positions[b])
+                .collect(),
+            scales: rig.scale.clone(),
+            locks: HashMap::new(),
+            origin: rig.local_rot.clone(),
+            hold_rotation: resolved.hold_rotation,
+        };
+        pose.valid(rig).then_some(pose)
+    }
+    /// The whole pose on the rest skeleton, as Save writes it: the complete
+    /// rotation of every joint (what the captured pose or a loaded file
+    /// brought stays), the positions the user moved, the locks baked.
+    pub fn whole(&self, rig: &Rig, model: Mat4) -> Option<Pose> {
+        let resolved = self.pose.snapshot(rig, model)?;
+        let pose = Pose {
+            rotations: resolved.rotations.clone(),
+            // A joint the user did not move keeps the rest position exactly:
+            // the float noise of the snapshot would otherwise read as a move
+            // when the file is loaded, and shift the joints around it.
+            positions: (0..rig.len())
+                .map(|b| {
+                    let moved = resolved.positions[b] - self.base.positions[b];
+                    if moved.length_squared() < 1e-10 {
+                        rig.local_pos[b]
+                    } else {
+                        rig.local_pos[b] + moved
+                    }
+                })
                 .collect(),
             scales: rig.scale.clone(),
             locks: HashMap::new(),

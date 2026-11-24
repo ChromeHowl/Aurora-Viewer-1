@@ -329,6 +329,9 @@ pub struct Entry {
     pub name: String,
     pub description: String,
     pub folder: Uuid,
+    /// Staged by the poser: with the default folders it goes to
+    /// `created_poses_folder` when that folder exists.
+    pub created_pose: bool,
     /// Relative disk folders and the editable inventory path (including the selected root).
     pub source_folders: Vec<String>,
     pub upload_path: Option<Vec<String>>,
@@ -455,6 +458,7 @@ impl Entry {
             from_live: false,
             description: String::new(),
             folder: Uuid::nil(),
+            created_pose: false,
             source_folders: Vec::new(),
             upload_path: None,
             selected: source.is_some(),
@@ -558,6 +562,11 @@ struct Step {
 
 pub struct Imports {
     pub open: bool,
+    /// When the folder of the uploaded poses was last asked for
+    /// (`CREATED_POSES`), not to make it twice while the reply travels.
+    pub created_poses_asked: Option<std::time::Instant>,
+    /// A pose was staged: the app makes that folder when it is missing.
+    pub created_poses_wanted: bool,
     pub launcher_open: bool,
     pub windows: [windows::Window; 6],
     window_scope: Option<Choice>,
@@ -621,6 +630,8 @@ impl Default for Imports {
         let (tx, rx) = crossbeam_channel::unbounded();
         Self {
             open: false,
+            created_poses_asked: None,
+            created_poses_wanted: false,
             launcher_open: false,
             windows: std::array::from_fn(|_| Default::default()),
             window_scope: None,
@@ -679,6 +690,22 @@ impl Default for Imports {
         }
     }
 }
+/// The folder of the poses uploaded from the poser, in the Animations
+/// system folder.
+pub const CREATED_POSES: &str = "! Created Poses";
+
+/// The Animations system folder, when uploads may go into it.
+pub fn animations_folder(inv: &crate::world::inventory::Inventory) -> Option<Uuid> {
+    use crate::world::inventory::actions;
+    actions::system(inv, Kind::Animation.asset_type()).filter(|id| actions::destination(inv, *id))
+}
+
+/// `CREATED_POSES` in the Animations system folder, when it exists.
+pub fn created_poses_folder(inv: &crate::world::inventory::Inventory) -> Option<Uuid> {
+    use crate::world::inventory::actions;
+    crate::ao::inventory::child(inv, animations_folder(inv)?, CREATED_POSES).filter(|id| actions::destination(inv, *id))
+}
+
 impl Imports {
     /// Stage a locally authored, already validated native file in the ordinary
     /// inspector. Upload/payment still follows the existing explicit action.
@@ -689,6 +716,7 @@ impl Imports {
         name: String,
         bytes: Arc<Vec<u8>>,
         animation: Arc<Animation>,
+        pose: bool,
     ) {
         let mut entry = Entry::new(
             PathBuf::from(format!("{name}.anim")),
@@ -699,7 +727,9 @@ impl Imports {
             }),
             self.load_preferences.texture(),
         );
-        entry.folder = Self::default_folder(world, prefs, Kind::Animation);
+        entry.created_pose = pose;
+        self.created_poses_wanted |= pose;
+        entry.folder = Self::entry_folder(world, prefs, &entry, Kind::Animation);
         self.active = Some(entry.id);
         self.entries.push(entry);
         self.open(Choice::Animation);
@@ -817,6 +847,19 @@ impl Imports {
                 self.discarded_quotes.append(&mut draft.discarded_quotes);
             }
         }
+    }
+    /// The default folder of one entry: the poser's own uploads have theirs.
+    pub(crate) fn entry_folder(
+        world: &crate::world::World,
+        prefs: &crate::ui::inventory::InventoryPreferences,
+        entry: &Entry,
+        kind: Kind,
+    ) -> Uuid {
+        entry
+            .created_pose
+            .then(|| created_poses_folder(&world.inventory))
+            .flatten()
+            .unwrap_or_else(|| Self::default_folder(world, prefs, kind))
     }
     // LLInventoryModel::findUserDefinedCategoryUUIDForType (llinventorymodel.cpp):
     // a user lock keeps the folder in place; it does not redirect uploads (#1981).

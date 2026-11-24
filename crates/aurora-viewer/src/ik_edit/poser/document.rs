@@ -134,6 +134,46 @@ impl Document {
             channels: Channels::Aurora,
         }
     }
+    /// A pose read from another format: complete rotations, with each
+    /// joint's position offset and scale ratio (name, rotation, offset, ratio).
+    pub fn from_joints(name: String, priority: i32, joints: Vec<(String, Quat, Vec3, Vec3)>) -> Self {
+        Self {
+            version: 1,
+            name,
+            priority,
+            joints: joints
+                .into_iter()
+                .map(|(name, rotation, translation, scale)| Joint {
+                    name,
+                    rotation: rotation.to_array(),
+                    translation: translation.to_array(),
+                    scale: scale.to_array(),
+                    locked: false,
+                    change: Some(false),
+                })
+                .collect(),
+            channels: Channels::Aurora,
+        }
+    }
+    /// Save: the whole pose, every joint of the subject with its complete
+    /// rotation, including joints that were never edited. `whole` is
+    /// `Session::whole`: the pose on the rest skeleton with the locks baked.
+    pub fn whole(rig: &Rig, session: &data::Session, whole: &data::Pose, name: String, priority: i32) -> Self {
+        let mut document = Self::capture(rig, session, name, priority);
+        for (bone, joint) in document.joints.iter_mut().enumerate() {
+            joint.rotation = whole.rotations[bone].to_array();
+            joint.translation = (whole.positions[bone] - rig.local_pos[bone]).to_array();
+            joint.change = Some(false);
+        }
+        document
+    }
+    #[cfg(test)]
+    pub fn joint_rotation(&self, name: &str) -> [f32; 4] {
+        self.joints
+            .iter()
+            .find(|j| j.name == name)
+            .map_or([0.0, 0.0, 0.0, 1.0], |j| j.rotation)
+    }
     pub fn valid(&self, rig: &Rig) -> bool {
         let mut seen = HashSet::new();
         self.version == 1

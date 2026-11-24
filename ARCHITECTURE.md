@@ -1568,10 +1568,13 @@ holds the joints added with Shift + click and gives them the selected joint's
 change (rotation, move, scale ratio). Poser visibility
 uses the active Body/Face/Hands/Misc/Physics group for markers, shafts and hits;
 changing tabs replaces selection before drawing the scene overlay.
-`poser/{document,storage,bvh}.rs` keep identity-free, shape-relative pose
-documents, bounded file I/O and BVH export on the background pool. Native
-animation preparation reuses the existing document/codec and human-controlled
-import preview. `poser/storage.rs` returns the successful save path to the UI;
+`poser/{document,storage}.rs` keep identity-free, shape-relative pose
+documents and bounded file I/O on the background pool. Save writes the whole
+pose (`Session::whole`, `Document::whole`); `poser/total.rs` turns it into a
+one-frame held-pose animation through the animation editor's recorder, for
+Save as animation… (a `.anim` file) and Upload, which reuse the existing codec
+and the human-controlled import preview. `poser/bd_pose.rs` reads the older
+Black Dragon pose layout. `poser/storage.rs` returns the successful save path to the UI;
 the refreshed library selects that entry and reports its full path, and native
 file pickers start in the account-local poses directory (#3169).
 `poser/legacy_pose.rs` reads the Legacy Viewer's (and Alchemy's) `.xml` pose

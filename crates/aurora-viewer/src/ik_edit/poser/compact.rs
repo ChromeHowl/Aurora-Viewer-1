@@ -836,9 +836,10 @@ impl Editor {
                 let tag = (aurora_i18n::text("poser-tip-load"), aurora_i18n::text("poser-tip-load-detail"));
                 let load = square(ui, p, "folder-open-filled", tag, false, free);
                 self.load_list(&load, p);
-                let tag = (aurora_i18n::text("poser-upload"), aurora_i18n::text("poser-export-hint"));
-                if square(ui, p, "file-upload-filled", tag, false, free).clicked() {
-                    self.import_pose(rig, frame);
+                let tag = (aurora_i18n::text("poser-upload"), aurora_i18n::text("poser-upload-hint"));
+                let named = !self.poser.name.trim().is_empty();
+                if square(ui, p, "file-upload-filled", tag, false, free && named).clicked() {
+                    self.upload_pose(rig, frame);
                 }
             });
         });
@@ -889,6 +890,7 @@ impl Editor {
 
     /// Save's form: the name, the export options, Save, and Save as….
     fn save_form(&mut self, anchor: &egui::Response, p: &Palette, rig: &Rig, frame: &Frame) {
+        self.follow_name();
         menu::dropdown(anchor, p, egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
             ui.set_width(260.0);
             ui.add_space(4.0);
@@ -913,20 +915,6 @@ impl Editor {
                     field.request_focus();
                 }
             });
-            menu::toggle(
-                ui,
-                p,
-                "file-upload-filled",
-                aurora_i18n::text("poser-also-bvh"),
-                &mut self.poser.also_bvh,
-            );
-            menu::toggle(
-                ui,
-                p,
-                "accessible-filled",
-                aurora_i18n::text("poser-unlock-pelvis"),
-                &mut self.poser.unlock_pelvis,
-            );
             ui.horizontal(|ui| {
                 ui.add_space(8.0);
                 ui.label(aurora_i18n::tr!("poser-priority"));
@@ -944,7 +932,7 @@ impl Editor {
                     ui,
                     p,
                     "device-floppy-filled",
-                    aurora_i18n::text("poser-save-library"),
+                    aurora_i18n::text("poser-save-whole"),
                     widgets::ActionKind::Primary,
                     egui::vec2(244.0, 28.0),
                     ready,
@@ -962,6 +950,16 @@ impl Editor {
             if menu::item_if(ui, p, "device-floppy-filled", aurora_i18n::text("poser-save-as"), ready) {
                 self.save_pose(rig, frame, true);
             }
+            if menu::item_if(ui, p, "movie", aurora_i18n::text("poser-save-animation"), ready) {
+                self.save_animation(rig, frame);
+            }
+            menu::toggle(
+                ui,
+                p,
+                "repeat",
+                aurora_i18n::text("poser-animation-loop"),
+                &mut self.poser.animation_loop,
+            );
             ui.add_space(4.0);
         });
     }
@@ -1020,7 +1018,7 @@ impl Editor {
                     }
                 },
             );
-            if menu::item(ui, p, "folder-filled", aurora_i18n::text("poser-open-file")) {
+            if menu::item(ui, p, "folder-filled", aurora_i18n::text("poser-open-file-all")) {
                 load = Some(None);
             }
             if menu::item(ui, p, "archive-filled", aurora_i18n::text("poser-inv-menu")) {

@@ -31,16 +31,18 @@ impl Entry {
 }
 pub(super) enum Loaded {
     Pose(Document, LoadMode),
+    /// The animation, how it loads, and the name its file gives the field.
     Animation(aurora_assets::Animation, LoadMode, String),
 }
 enum Output {
     Listed(Vec<Entry>),
     Loaded(Uuid, Loaded),
-    Overwrite(Document, Arc<SubjectPose>, bool, bool),
+    Overwrite(Save),
     Saved(PathBuf),
+    /// A standalone `.anim` written by Save as animation…
+    AnimationSaved(PathBuf),
     /// Saved outside the library by Save as…
     SavedTo(PathBuf),
-    Prepared(clip::Prepared),
     /// A folder of Legacy Viewer poses converted into the library.
     ImportedFolder(legacy_pose::Imported),
     Failed(String),
@@ -50,7 +52,8 @@ pub(super) enum Job {
     List,
     Load(Option<PathBuf>, LoadMode, Uuid),
     Save(Save),
-    Import(Arc<SubjectPose>, String, i32),
+    /// Save as animation…: the animation and the name the dialog offers.
+    SaveAnimation(Arc<aurora_assets::Animation>, String),
     /// Convert a folder of Legacy Viewer or Alchemy poses into the library:
     /// the one given, or the one chosen in the folder dialog.
     ImportLegacyFolder(Option<PathBuf>),
@@ -63,11 +66,9 @@ pub(super) fn filter_matches(name: &str, filter: &str) -> bool {
 /// A save request. `pick` asks for the file in the system dialog (Save as…)
 /// instead of the library; the dialog asks about an existing file itself, so
 /// `confirm` only applies to the library.
+#[derive(Clone)]
 pub(super) struct Save {
     pub document: Document,
-    pub pose: Arc<SubjectPose>,
-    pub bvh: bool,
-    pub unlock: bool,
     pub confirm: bool,
     pub pick: bool,
 }
@@ -84,16 +85,28 @@ fn pose_file(path: PathBuf) -> PathBuf {
         path.with_file_name(name)
     }
 }
-/// The `.bvh` written next to a pose file: its name without
-/// `.aurora-pose.json` (or `.json`).
-fn bvh_file(pose: &Path) -> PathBuf {
-    let name = pose.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let lower = name.to_lowercase();
-    let stem = [".aurora-pose.json", ".json"]
-        .iter()
-        .find(|ext| lower.ends_with(*ext))
-        .map_or(name.as_str(), |ext| &name[..name.len() - ext.len()]);
-    pose.with_file_name(format!("{stem}.bvh"))
+/// The file a Save as animation… writes: the chosen name, with `.anim`
+/// added unless it already ends in it.
+fn anim_file(path: PathBuf) -> PathBuf {
+    let name = path.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+    if name.ends_with(".anim") {
+        path
+    } else {
+        let mut name = path.file_name().unwrap_or_default().to_os_string();
+        name.push(".anim");
+        path.with_file_name(name)
+    }
+}
+/// Write the `.anim` of `animation` at `path` (extension added when missing),
+/// checked with the reader the upload window uses, through a temporary file
+/// so that a failure leaves nothing half written. Never uploads.
+pub(super) fn write_animation(path: PathBuf, animation: &aurora_assets::Animation) -> Result<PathBuf, String> {
+    let bytes = total::encode(animation)?;
+    let path = anim_file(path);
+    let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    write_atomic(&dir, &path, &bytes)?;
+    Ok(path)
 }
 pub(super) struct Service {
     pub entries: Vec<Entry>,
@@ -106,8 +119,7 @@ pub(super) struct Service {
     pub scroll_to_selected: bool,
     pub job: Option<Job>,
     pub ready: bool,
-    pub prepared: Vec<clip::Prepared>,
-    pub overwrite: Option<(Document, Arc<SubjectPose>, bool, bool)>,
+    pub overwrite: Option<Save>,
     /// Loads that arrived without a job (an inventory animation), applied
     /// by the next `tick` like the files'.
     injected: Vec<(Uuid, Loaded)>,
@@ -127,7 +139,6 @@ impl Default for Service {
             scroll_to_selected: false,
             job: None,
             ready: false,
-            prepared: Vec::new(),
             overwrite: None,
             injected: Vec::new(),
             tx,
@@ -157,56 +168,6 @@ pub(super) fn read(path: &Path) -> Result<Vec<u8>, String> {
         return Err(aurora_i18n::tr!("poser-file-too-large").to_string());
     }
     Ok(bytes)
-}
-/// Encode the local channels returned by Session::authored. As with the
-/// Legacy BVH importer's reference frame, a joint at rest needs no track.
-/// Rotation and translation are independent in the native animation format.
-pub(super) fn native(rig: &Rig, pose: &SubjectPose, name: String, priority: i32) -> Result<clip::Prepared, String> {
-    use aurora_assets::anim::{JointMotion, PosKey, RotKey};
-    let mut animation = clip::document::Document::new().meta;
-    animation.base_priority = priority;
-    let times = [0.0, animation.duration];
-    for (bone, joint_name) in rig.canonical_names.iter().enumerate().filter(|(_, name)| name.starts_with('m')) {
-        let rotation = pose.rotations[bone];
-        let rest = rig.local_rot[bone];
-        // q and -q encode the same rotation. Compare their components to
-        // retain small facial edits below the resolution of a quaternion dot.
-        let rotated = pose.hold_rotation[bone] || (rotation - rest).length_squared().min((rotation + rest).length_squared()) > 1e-10;
-        let offset = pose.positions[bone] - rig.local_pos[bone];
-        // A complete native pose also anchors the pelvis at its neutral
-        // offset. Ordinary rotation-only poses leave its translation free.
-        let moved = offset.length_squared() > 1e-10 || (bone == rig.pelvis && pose.hold_rotation[bone]);
-        if rotated || moved {
-            let position = if bone == rig.pelvis { offset } else { pose.positions[bone] };
-            if moved && position.abs().max_element() > 5.0 {
-                return Err(aurora_i18n::text("anim-edit-pelvis-bound").to_owned());
-            }
-            animation.joints.push(JointMotion {
-                joint_name: joint_name.clone(),
-                priority: -1,
-                rot_keys: if rotated {
-                    times.map(|time| RotKey { time, rotation }).to_vec()
-                } else {
-                    Vec::new()
-                },
-                pos_keys: if moved {
-                    times.map(|time| PosKey { time, position }).to_vec()
-                } else {
-                    Vec::new()
-                },
-            });
-        }
-    }
-    if animation.joints.is_empty() {
-        return Err(aurora_i18n::text("anim-edit-no-bones").to_owned());
-    }
-    let bytes = aurora_assets::import_animation::encode(&animation).map_err(|e| e.to_string())?;
-    let animation = aurora_assets::anim::parse_animation_upload(&bytes).map_err(|e| e.to_string())?;
-    Ok(clip::Prepared {
-        name,
-        bytes: Arc::new(bytes),
-        animation: Arc::new(animation),
-    })
 }
 fn list(root: &Path, rig: &Rig) -> Result<Vec<Entry>, String> {
     let mut out = Vec::new();
@@ -273,13 +234,16 @@ impl Service {
                     self.ready = true;
                 }
                 Output::Loaded(subject, value) => loaded.push((subject, value)),
-                Output::Overwrite(document, pose, bvh, unlock) => self.overwrite = Some((document, pose, bvh, unlock)),
-                Output::Prepared(value) => self.prepared.push(value),
+                Output::Overwrite(save) => self.overwrite = Some(save),
                 Output::Saved(path) => {
                     self.ready = false;
                     self.selected = None;
                     self.message = Some(aurora_i18n::tr!("poser-saved-to", path = path.display().to_string()).to_string());
                     self.saved_path = Some(path);
+                }
+                Output::AnimationSaved(path) => {
+                    self.message = Some(aurora_i18n::tr!("poser-animation-saved", path = path.display().to_string()).to_string());
+                    self.ready = true;
                 }
                 Output::SavedTo(path) => {
                     self.ready = false;
@@ -329,7 +293,7 @@ impl Service {
                                     dialog = dialog.set_directory(&root);
                                 }
                                 let Some(p) = dialog
-                                    .add_filter(aurora_i18n::tr!("poser-file-filter"), &["json", "xml", "anim", "bvh"])
+                                    .add_filter(aurora_i18n::tr!("poser-file-filter-all"), &["json", "xml", "anim", "bvh"])
                                     .pick_file()
                                 else {
                                     return Ok(Output::Cancelled);
@@ -338,13 +302,22 @@ impl Service {
                             }
                         };
                         let bytes = read(&path)?;
+                        // the field's name: the file's, as the field takes it
+                        let stem: String = path
+                            .file_stem()
+                            .map(|s| s.to_string_lossy().into_owned())
+                            .unwrap_or_default()
+                            .chars()
+                            .filter(|c| !c.is_control() && *c != '|')
+                            .take(100)
+                            .collect();
                         if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("anim")) {
                             Output::Loaded(
                                 subject,
                                 Loaded::Animation(
                                     aurora_assets::anim::parse_animation_upload(&bytes).map_err(|e| e.to_string())?,
                                     mode,
-                                    String::new(),
+                                    stem,
                                 ),
                             )
                         } else if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("bvh")) {
@@ -356,11 +329,37 @@ impl Service {
                                         .map_err(|e| e.to_string())?
                                         .animation,
                                     mode,
-                                    String::new(),
+                                    stem,
                                 ),
                             )
-                        } else if legacy_pose::is_pose_file(&path) {
-                            let document = legacy_pose::document(&bytes, legacy_pose::pose_name(&path), &rig)?;
+                        } else if legacy_pose::is_pose_file(&path) || bd_pose::looks_like(&bytes) {
+                            let name: String = legacy_pose::pose_name(&path)
+                                .chars()
+                                .filter(|c| !c.is_control())
+                                .take(100)
+                                .collect();
+                            let document = match bd_pose::parse(&bytes) {
+                                // a Black Dragon pose of the several-documents layout
+                                Ok(entries) => {
+                                    let joints = bd_pose::document_joints(&rig, &entries);
+                                    let name = if name.trim().is_empty() {
+                                        aurora_i18n::tr!("poser-bd-unnamed").to_string()
+                                    } else {
+                                        name
+                                    };
+                                    let document = Document::from_joints(name, 4, joints);
+                                    if !document.valid(&rig) {
+                                        return Err(aurora_i18n::tr!("poser-bd-invalid").to_string());
+                                    }
+                                    document
+                                }
+                                // the Legacy Viewer's, Alchemy's and Black Dragon's
+                                // single-map poser files
+                                Err(_) if legacy_pose::is_pose_file(&path) => {
+                                    legacy_pose::document(&bytes, legacy_pose::pose_name(&path), &rig)?
+                                }
+                                Err(e) => return Err(e),
+                            };
                             Output::Loaded(subject, Loaded::Pose(document, mode))
                         } else {
                             let document: Document = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
@@ -370,14 +369,9 @@ impl Service {
                             Output::Loaded(subject, Loaded::Pose(document, mode))
                         }
                     }
-                    Job::Save(Save {
-                        document,
-                        pose,
-                        bvh,
-                        unlock,
-                        confirm,
-                        pick,
-                    }) => {
+                    Job::Save(save) => {
+                        let Save { document, confirm, pick } = &save;
+                        let (confirm, pick) = (*confirm, *pick);
                         if !document.valid(&rig) {
                             return Err(aurora_i18n::tr!("anim-edit-invalid").to_string());
                         }
@@ -397,25 +391,31 @@ impl Service {
                         } else {
                             root.join(format!("{name}.aurora-pose.json"))
                         };
-                        let bvh_path = bvh_file(&path);
-                        if confirm && !pick && (path.exists() || bvh && bvh_path.exists()) {
-                            return Ok(Output::Overwrite(document, pose, bvh, unlock));
+                        if confirm && !pick && path.exists() {
+                            return Ok(Output::Overwrite(save));
                         }
-                        let bytes = serde_json::to_vec_pretty(&document).map_err(|e| e.to_string())?;
-                        let bvh = if bvh { Some(bvh::encode(&rig, &pose, unlock)?) } else { None };
-                        let dir = path.parent().unwrap_or(&root);
-                        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-                        write_atomic(dir, &path, &bytes)?;
-                        if let Some(bvh) = bvh {
-                            std::fs::write(&bvh_path, bvh).map_err(|e| e.to_string())?;
-                        }
+                        let bytes = serde_json::to_vec_pretty(document).map_err(|e| e.to_string())?;
+                        let dir = path.parent().unwrap_or(&root).to_path_buf();
+                        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+                        write_atomic(&dir, &path, &bytes)?;
                         if pick && dir != root {
                             Output::SavedTo(path)
                         } else {
                             Output::Saved(path)
                         }
                     }
-                    Job::Import(pose, name, priority) => Output::Prepared(native(&rig, &pose, name, priority)?),
+                    Job::SaveAnimation(animation, name) => {
+                        let _ = std::fs::create_dir_all(&root);
+                        let Some(path) = rfd::FileDialog::new()
+                            .set_directory(&root)
+                            .set_file_name(format!("{}.anim", clip::files::basename(&name)))
+                            .add_filter(aurora_i18n::tr!("poser-animation-filter"), &["anim"])
+                            .save_file()
+                        else {
+                            return Ok(Output::Cancelled);
+                        };
+                        Output::AnimationSaved(write_animation(path, &animation)?)
+                    }
                     Job::ImportLegacyFolder(folder) => {
                         let folder = match folder {
                             Some(folder) => folder,
@@ -442,7 +442,7 @@ impl Service {
 }
 #[cfg(test)]
 mod save_as_tests {
-    use super::{bvh_file, pose_file};
+    use super::{anim_file, pose_file};
     use std::path::{Path, PathBuf};
 
     #[test]
@@ -457,9 +457,13 @@ mod save_as_tests {
     }
 
     #[test]
-    fn bvh_sits_next_to_the_pose_without_its_extension() {
-        assert_eq!(bvh_file(Path::new("/d/Wave.aurora-pose.json")), Path::new("/d/Wave.bvh"));
-        assert_eq!(bvh_file(Path::new("/d/Wave.Aurora-Pose.JSON")), Path::new("/d/Wave.bvh"));
-        assert_eq!(bvh_file(Path::new("/d/Wave.json")), Path::new("/d/Wave.bvh"));
+    fn anim_file_adds_the_extension_unless_anim() {
+        assert_eq!(anim_file(PathBuf::from("/d/Wave")), Path::new("/d/Wave.anim"));
+        assert_eq!(anim_file(PathBuf::from("/d/Wave.v2")), Path::new("/d/Wave.v2.anim"));
+        assert_eq!(anim_file(PathBuf::from("/d/Wave.ANIM")), Path::new("/d/Wave.ANIM"));
+        assert_eq!(
+            anim_file(PathBuf::from("/d/Wave.aurora-pose.json")),
+            Path::new("/d/Wave.aurora-pose.json.anim")
+        );
     }
 }
