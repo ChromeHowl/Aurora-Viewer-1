@@ -272,7 +272,27 @@ impl BuildTool {
     /// independent of the parcel's rez group (indra/newview/llviewerobject.cpp);
     /// an SLua script carries SST_LUA in its flags and the server then
     /// writes its default SLua script.
+    ///
+    /// With a template chosen (FSBuildPrefs_UseCustomScript), the template
+    /// goes in instead of an LSL script, running, as a drop would put it
+    /// (LLToolDragAndDrop::dropScript from onClickNewScript); a template no
+    /// longer in the inventory, or one we may not copy, falls back to the
+    /// default script.
     pub fn new_script(&mut self, world: &World, idx: usize, lua: bool) {
+        if !lua
+            && let Some(template) = self.new_script_template
+            && let Some(item) = world.inventory.items.get(&template)
+            && crate::settings::new_objects::script_template_allowed(item, world.agent_id)
+            && let Ok(drops) = super::contents_drop::plan(world, &[template], idx, false, super::contents_drop::Target::Panel)
+            && let Some(object_id) = world.objects.get(idx).map(|o| o.full_id)
+        {
+            // copyable: nothing leaves the inventory
+            for drop in drops {
+                self.send(drop.command);
+            }
+            self.contents_changed(object_id);
+            return;
+        }
         let Some(o) = world.objects.get(idx) else { return };
         let mut item = Self::new_task_item(
             world,

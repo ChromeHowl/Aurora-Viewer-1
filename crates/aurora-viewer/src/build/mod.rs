@@ -53,6 +53,7 @@ pub mod silhouette;
 mod take_tests;
 pub mod task_inventory;
 pub mod texture_copy;
+mod texture_drag;
 pub mod ui;
 
 use crate::scene::Scene;
@@ -271,6 +272,13 @@ pub struct BuildSettings {
     pub land_brush_force: f32,
     /// Actual-root pivot: primary linkset root, or primary prim in linked editing.
     pub actual_root: bool,
+    /// The unlink confirmation (settings/build_tools.rs).
+    pub tools: crate::settings::build_tools::BuildTools,
+    /// The default texture of new prims, the item put inside them and the
+    /// "New Script" template (settings/new_objects.rs).
+    pub new_objects: crate::settings::new_objects::NewObjects,
+    /// Smaller Legacy build options (settings/build_extras.rs).
+    pub extras: crate::settings::build_extras::BuildExtras,
     /// SelectReflectionProbes: off at each start (settings.xml, Persist=0).
     #[serde(skip)]
     pub select_probes: bool,
@@ -824,6 +832,9 @@ impl Default for BuildSettings {
             land_brush_size: 2.0,
             land_brush_force: 1.0,
             actual_root: false,
+            tools: Default::default(),
+            new_objects: Default::default(),
+            extras: Default::default(),
             select_probes: false,
             select_owned_only: false,
             select_movable_only: false,
@@ -1046,6 +1057,16 @@ pub struct BuildTool {
     /// Prims the Create tool asked for whose new objects' look is still to
     /// be given (new_defaults.rs).
     new_defaults_pending: u32,
+    /// The build options of `BuildSettings::tools` as last shown (the
+    /// unlink confirmation reads them where no settings are passed).
+    pub options: crate::settings::build_tools::BuildTools,
+    /// The account's "New Script" template while its option is on
+    /// (settings/new_objects.rs), taken each frame from the settings.
+    new_script_template: Option<Uuid>,
+    /// The face texture held by the mouse (texture_drag.rs).
+    texture_drag: Option<texture_drag::TextureDrag>,
+    /// Caps Lock held down: a texture drag changes the repeats (set by the app).
+    pub caps_lock_held: bool,
     /// Selection rectangle being dragged (start, current in pixels, extend).
     pub rect: Option<((f32, f32), (f32, f32), bool)>,
     /// The press behind `rect`, until it is known to be a click: the object
@@ -1122,6 +1143,10 @@ impl Default for BuildTool {
             silhouettes: silhouette::Cache::default(),
             pending_create: None,
             new_defaults_pending: 0,
+            options: Default::default(),
+            new_script_template: None,
+            texture_drag: None,
+            caps_lock_held: false,
             rect: None,
             press: None,
             press_face: None,
@@ -2159,7 +2184,10 @@ impl BuildTool {
         }
     }
 
-    /// Ctrl+Shift+L: every selected prim (SEND_INDIVIDUALS).
+    /// Ctrl+Shift+L: every selected prim (SEND_INDIVIDUALS). Asked first
+    /// when a linkset would come apart and the confirmation is on
+    /// (LLSelectMgr::unlinkObjects, FSUnlinkConfirmEnabled): the prims are
+    /// kept for the answer (`unlink_confirmed`).
     pub fn unlink(&mut self, world: &mut World) {
         if self.attachment_selected(world) || !self.roots(world).iter().all(|&r| world.rlva_can_unlink(r)) {
             return;
@@ -2173,7 +2201,31 @@ impl BuildTool {
         if prims.is_empty() {
             return;
         }
-        for (handle, ids) in self.group_by_region(world, &prims) {
+        // getRootObjectCount: the selected prims that are roots themselves
+        let roots = prims.iter().filter(|&&i| root_of(world, i) == i).count();
+        if self.options.unlink_needs_confirm(prims.len(), roots) {
+            let keys = prims.iter().filter_map(|&i| world.objects.get(i).map(|o| o.key)).collect();
+            self.ui.unlink_ask = Some(keys);
+            return;
+        }
+        self.unlink_prims(world, &prims);
+    }
+
+    /// The answer to the unlink confirmation: the prims asked about, those
+    /// still there, ours to modify and that RLVa lets us unlink.
+    pub fn unlink_confirmed(&mut self, world: &mut World, keys: &[ObjKey]) {
+        let prims: Vec<usize> = keys
+            .iter()
+            .filter_map(|k| world.objects.index_of(k))
+            .filter(|&i| self.can_modify(world, i) && world.rlva_can_unlink(root_of(world, i)))
+            .collect();
+        if !prims.is_empty() {
+            self.unlink_prims(world, &prims);
+        }
+    }
+
+    fn unlink_prims(&mut self, world: &mut World, prims: &[usize]) {
+        for (handle, ids) in self.group_by_region(world, prims) {
             self.send(BuildCmd::Delink { handle, local_ids: ids });
         }
         // with "Edit linked" the selection already holds each prim
@@ -2404,6 +2456,7 @@ impl BuildTool {
             .unwrap_or(0.016)
             .clamp(0.001, 0.25);
         self.last_frame = Some(now);
+        self.new_script_template = s.new_objects.script_template(world.agent_id);
         self.update_replacement(world, now);
         self.advance_bulk_permissions(world, now);
         self.advance_deep_permissions(world, now);
@@ -2418,6 +2471,11 @@ impl BuildTool {
             return;
         }
         self.prune(world, s, now);
+        if self.tool == Tool::Edit && self.effective_mode(mods) == EditMode::Face {
+            self.texture_drag_update(world, cursor, mods);
+        } else {
+            self.texture_release(world);
+        }
         self.pick_up_created(world, s);
         self.sync_hud_zoom(world);
         self.refresh_costs(world);
@@ -2559,6 +2617,9 @@ impl BuildTool {
                 match mode {
                     EditMode::Face => {
                         let face = surface.and_then(|s| u8::try_from(s.face).ok());
+                        if let (Some(idx), Some(face), false) = (pick, face, mods.shift) {
+                            self.texture_grab(world, idx, face, cursor, s.extras.drag_texture);
+                        }
                         self.face_click(world, pick, face, mods.shift);
                         true
                     }
@@ -2755,6 +2816,7 @@ impl BuildTool {
         }
         let mut cmds = Vec::new();
         self.manip.release(world, s, self.selection_linked, &mut cmds);
+        self.texture_release(world);
         self.land.mouse_up();
         for c in cmds {
             self.send(c);

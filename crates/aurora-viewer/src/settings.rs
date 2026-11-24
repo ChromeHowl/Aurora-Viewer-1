@@ -7,8 +7,11 @@ use std::path::{Path, PathBuf};
 pub mod area_search;
 pub mod autotune;
 pub mod backup;
+pub mod build_extras;
+pub mod build_tools;
 pub mod draw_stepping;
 mod hover_height;
+pub mod new_objects;
 pub mod registry;
 pub mod stream_list;
 
@@ -3847,6 +3850,7 @@ impl Settings {
             0.0
         };
         // the ranges of the Legacy Viewer's Build preferences
+        self.build.tools.sanitize();
         let b = &mut self.build;
         b.new_prim_transparency = if b.new_prim_transparency.is_finite() {
             b.new_prim_transparency.clamp(0.0, 100.0)

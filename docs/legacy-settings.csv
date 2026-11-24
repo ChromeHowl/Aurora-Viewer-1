@@ -528,7 +528,7 @@ FSCopyObjKeySeparator,String,in-aurora,,build.copy_key_separator,This chunk of t
 FSCreateCallingCards,Boolean,to-add,low,,Don't create calling cards when friending other avatars (requires restart)
 FSCreateGiveInventoryParticleEffect,Boolean,to-add,low,,"If enabled, the viewer will create particle effects around the avatar if inventory is transferred to another avatar."
 FSCreateOctreeLog,Boolean,not-applicable,,a log of the Legacy renderer's octree,Create a log of octree operation. This can cause huge frame stalls on edit
-FSDefaultObjectTexture,String,to-add,low,an asset id: the permission rules apply,Default texture that will be applied to rezzed prims. (UUID texture reference)
+FSDefaultObjectTexture,String,in-aurora,,"ported (2026-11), `build.new_objects.texture` (an asset id: only a full-permission texture; the permission rules apply)",Default texture that will be applied to rezzed prims. (UUID texture reference)
 FSDestroyGLTexturesImmediately,Boolean,not-applicable,,read nowhere in the Legacy sources,"If enabled, GL textures will be removed from memory immediately when its fetched texture is removed. This might result in textures behind yo"
 FSDestroyGLTexturesThreshold,F32,not-applicable,,read nowhere in the Legacy sources,"Threshold, at what texture memory load level GL textures will be removed from memory if FSDestroyGLTexturesImmediately is set to TRUE."
 FSDisableAvatarTrackerAtCloseIn,Boolean,to-add,low,,Disables the tracking beacon if distance to target avatar is less than 3m.
@@ -572,7 +572,7 @@ FSEnabledLanguages,LLSD,not-applicable,,the Legacy installer's languages; Aurora
 FSEnforceStrictObjectCheck,Boolean,to-add,low,,"Force malformed prims to be treated as invalid. This setting derenders all malformed prims, even those that might not cause obvious issues. "
 FSEnvironmentManualTransitionTime,F32,in-aurora,,env_manual_transition,Timespan for blending between day/water/sky settings when manually changed. 0 is immediate.
 FSEventPollCoreRetries,U32,not-applicable,,a switch between two Legacy versions' network retries,DEBUG: EventQueueGet llcorehttp retry count. 0 keeps current 7.2.3 behavior; 5 matches 7.2.2 behaviour.
-FSExperimentalDragTexture,Boolean,to-add,low,,"If enabled, allows to click-drag or click-scale (together with caps lock) a texture face in build mode. This feature is still experimental a"
+FSExperimentalDragTexture,Boolean,in-aurora,,"ported (2026-11), `build.extras.drag_texture`","If enabled, allows to click-drag or click-scale (together with caps lock) a texture face in build mode. This feature is still experimental a"
 FSExperimentalLostAttachmentsFix,Boolean,check,,named in world/mod.rs: may be built in,Enables the experimental fix for attachments getting detached on teleports and region crossings.
 FSExperimentalLostAttachmentsFixKillDelay,F32,check,,may be built in with the fix,Delay in seconds after a teleport for that kill object messages to detach attachments are being ignored.
 FSExperimentalLostAttachmentsFixReport,Boolean,to-add,low,,"If enabled, reports attachments that were attempted to get detached during a teleport or region crossing to nearby chat."
@@ -903,7 +903,7 @@ FSTypeDuringEmote,Boolean,in-aurora,,type_during_emote,Enables the typing animat
 FSTypingChevronPrefix,Boolean,in-aurora,,typing_chevron,Adds an additional chevron prefix to the IM window as typing indicator
 FSUndeformUUID,String,fixed,,the animation id is built in (app/avatar_health),Animation UUID to use for the undeform
 FSUnfocusChatHistoryOnReturn,Boolean,to-add,low,,De-focus chat history after sending a message
-FSUnlinkConfirmEnabled,Boolean,to-add,low,,Unlink confirmation dialog functionality enabled?
+FSUnlinkConfirmEnabled,Boolean,in-aurora,,"ported (2026-11), `build.tools.unlink_confirm`",Unlink confirmation dialog functionality enabled?
 FSUploadAnimationOnOwnAvatar,Boolean,in-aurora,,imports.preview_on_avatar,"Uploading an animation preview on own avatar if set to true, preview on dummy if false. Both plays only on the local machine."
 FSUseAis3Api,Boolean,to-add,low,OpenSim only,Option to disable the use of the AISv3 inventory API. NOTE: This setting has NO EFFECT in Second Life!
 FSUseAltOOC,Boolean,to-add,low,,Set to TRUE to use the keyboard shortcut Alt+Enter to send ((OOC)) messages to Nearby Chat.
@@ -1316,7 +1316,7 @@ MeshUploadTimeOut,S32,unreviewed,,field `timeout_secs`,Maximum time in seconds f
 MeshUseGetMesh1,Boolean,unreviewed,,,"If TRUE, use the legacy GetMesh capability for mesh download requests. Semi-dynamic (read at region crossings)."
 MeshUseHttpRetryAfter,Boolean,unreviewed,,,"If TRUE, use Retry-After response headers when rescheduling a mesh request that fails with an HTTP 503 status. Static."
 MigrateCacheDirectory,Boolean,unreviewed,,,Check for old version of disk cache to migrate to current location
-MinObjectsForUnlinkConfirm,S32,unreviewed,,,Minimum amount of objects in linkset for showing confirmation dialog
+MinObjectsForUnlinkConfirm,S32,in-aurora,,"ported (2026-11), `build.tools.unlink_confirm_min`",Minimum amount of objects in linkset for showing confirmation dialog
 MinWindowHeight,U32,unreviewed,,,SL viewer minimum window height in pixels
 MinWindowWidth,U32,unreviewed,,,SL viewer minimum window width in pixels
 MiniMapAutoCenter,Boolean,unreviewed,,field `mini_auto_center`,Center the focal point of the minimap.
