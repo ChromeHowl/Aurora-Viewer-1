@@ -92,7 +92,7 @@ impl App {
 
     /// FSCommon::report_cmdline_result: a line in the local chat, also
     /// whispered on the announce channel when that option is on.
-    fn report_command(&mut self, text: impl Into<String>) {
+    pub(super) fn report_command(&mut self, text: impl Into<String>) {
         let text = text.into();
         let s = &self.settings.chat_commands;
         if s.announce_to_channel {
@@ -335,6 +335,7 @@ impl App {
                 ));
             }
             Command::PasteCamera(spec) => self.paste_camera(spec),
+            Command::Take(take) => self.run_take_command(take),
         }
         true
     }

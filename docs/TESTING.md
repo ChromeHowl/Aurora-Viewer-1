@@ -2086,6 +2086,15 @@ when unfocused") is ignored during a screenshot.
   default): Enter on the empty bar leaves the keyboard in the bar. Escape, or
   a click in the world, returns to moving. With that preference off: Enter
   after a message lets the bar go, and the next Enter takes it back.
+- **Chat bar inventory commands** (`zdrop`, `ztake`, `mtake`, `ktake`, `kcopy`): no new demo variable, use `AURORA_DEMO_CHATCMD`. They answer without a grid: `zdrop`, `ztake` and `mtake`
+  alone print their help, `ztake on No Such Folder` says the folder is not
+  found, `ztake off` says it is already deactivated, `ktake` alone says
+  nothing, `ztake on <a folder of the demo inventory>` starts the countdown
+  (5 lines, one per 0.66 s) and then takes what is selected: select a demo
+  prim with the build tools first, and the DeRezObject goes to the demo
+  simulator. `zdrop on <demo prim UUID> <folder>` drops that folder's items one
+  per second through the inventory drop rules (a refused item is said, not
+  sent).
 
 ## Objects and building
 

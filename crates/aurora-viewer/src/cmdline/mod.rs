@@ -11,6 +11,7 @@
 pub mod calc;
 pub mod dice;
 mod scan;
+pub mod take;
 
 use glam::Vec3;
 use scan::Scanner;
@@ -243,6 +244,8 @@ pub enum Command {
     ClearChat,
     CopyCamera,
     PasteCamera(CameraSpec),
+    /// `zdrop`, `ztake`, `mtake`, `ktake`, `kcopy`.
+    Take(take::TakeCommand),
 }
 
 fn hover_usage() -> &'static str {
@@ -309,6 +312,9 @@ pub fn parse(text: &str, s: &ChatCommandSettings, mut roll: impl FnMut(u32) -> u
     }
     if is(&s.key_to_name) {
         return Some(i.uuid().map_or(Command::Report(Vec::new()), Command::KeyToName));
+    }
+    if let Some(take) = take::parse(command, &mut i) {
+        return Some(Command::Take(take));
     }
     match command {
         "/touch" => return Some(i.uuid().map_or(Command::Report(Vec::new()), Command::Touch)),
@@ -590,6 +596,18 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(parse("/zoffset_up", &off, |_| 0), None);
+    }
+
+    #[test]
+    fn inventory_commands_are_recognised() {
+        assert!(matches!(cmd("zdrop"), Some(Command::Take(take::TakeCommand::Help(take::Verb::Zdrop)))));
+        assert!(matches!(cmd("ztake off"), Some(Command::Take(take::TakeCommand::Off(take::Verb::Ztake)))));
+        assert!(matches!(cmd("kcopy Box"), Some(Command::Take(take::TakeCommand::Packager { copy: true, .. }))));
+        let off = ChatCommandSettings {
+            enabled: false,
+            ..Default::default()
+        };
+        assert_eq!(parse("ztake on Box", &off, |_| 0), None);
     }
 
     #[test]
