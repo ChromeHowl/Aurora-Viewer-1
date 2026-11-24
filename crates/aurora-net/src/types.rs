@@ -577,6 +577,8 @@ pub enum NetEvent {
     /// its own flag in the next request; `error` is then the server's text.
     /// `next_server`: the login server sends the login on to this other
     /// server (`LoginError::NextServer`), which the user agrees to first.
+    /// `network`: the login server gave no answer to read (no connection, a
+    /// timeout, a page that is not a login reply): nothing was refused.
     LoginFailed {
         error: String,
         mfa_required: bool,
@@ -584,6 +586,7 @@ pub enum NetEvent {
         critical_required: bool,
         bad_credentials: bool,
         previous_session: bool,
+        network: bool,
         next_server: Option<String>,
     },
     LoggedIn(Arc<LoginResponse>),

@@ -462,6 +462,9 @@ pub struct OptionsUi {
     pub parcel_environments: Vec<crate::world::parcel_env::Row>,
     /// "Remove every environment saved for a parcel?" confirmation open.
     confirm_remove_parcel_environments: bool,
+    /// The landmarks of the inventory (item, name) the backup list of the
+    /// restart evacuation is chosen from; empty before login.
+    pub restart_landmarks: Vec<(uuid::Uuid, String)>,
     /// The page shown and its tab.
     pub page: Page,
     pub tab: usize,

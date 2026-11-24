@@ -102,6 +102,7 @@ pub mod region_people;
 pub mod region_restart;
 pub mod region_titles;
 pub mod region_tracker;
+pub mod restart_evacuation;
 pub mod rlva;
 pub mod rlva_selftest;
 pub mod script_debug;
