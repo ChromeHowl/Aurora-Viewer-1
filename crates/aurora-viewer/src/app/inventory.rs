@@ -501,6 +501,7 @@ impl App {
             InvAction::Panel { editor, action } => self.apply_inventory_action_from(editor, *action),
             InvAction::DualPanel => self.toggle_dual_inventory(),
             InvAction::DefaultPermissions => self.inventory_ui.default_permissions_open = true,
+            InvAction::ImportScripts { parent } => self.open_script_import_folder(parent),
             InvAction::ExportMenuNotecard { name, text } => {
                 let inv = &self.world.inventory;
                 let pane = pane_of(&mut self.inventory_ui, &mut self.dual_inventory_ui, editor);

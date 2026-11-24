@@ -155,6 +155,7 @@ mod rlva_location_tests;
 mod rlva_selftest;
 mod safe_graphics;
 mod script_clicks;
+mod script_import;
 mod script_recovery;
 mod scripts;
 mod second_camera;
@@ -1304,6 +1305,8 @@ pub struct App {
     script_editors: ui::scripts::Editors,
     /// The scripts an earlier session left unsaved (app/script_recovery.rs).
     script_recovery: script_recovery::Recovery,
+    /// The Import scripts window and its queue (app/script_import.rs).
+    script_import: script_import::Import,
     demo_script_sources: std::collections::HashMap<aurora_net::scripts::ScriptTarget, String>,
     demo_script_experiences: std::collections::HashMap<aurora_net::scripts::ScriptTarget, uuid::Uuid>,
     inventory_images: inventory_thumbnail::ImageJobs,
@@ -2461,6 +2464,7 @@ impl App {
             demo_documents: Default::default(),
             script_editors: Default::default(),
             script_recovery: Default::default(),
+            script_import: Default::default(),
             demo_script_sources: Default::default(),
             demo_script_experiences: Default::default(),
             inventory_images: Default::default(),
@@ -3208,6 +3212,19 @@ impl App {
             } = &cmd
             {
                 self.demo_create_script(*request, *parent, name, description, source);
+                return;
+            }
+            if let NetCommand::ImportScriptItem {
+                request,
+                parent,
+                name,
+                description,
+                source,
+                compile,
+                permissions,
+            } = &cmd
+            {
+                self.demo_import_script(*request, *parent, name, description, source, *compile, *permissions);
                 return;
             }
             if let NetCommand::CreateInventoryItem {
@@ -4059,6 +4076,10 @@ impl App {
                 Ok(merchant) => self.inventory_ui.merchant = merchant,
                 Err(reason) => self.inventory_ui.message = reason,
             }
+            return;
+        }
+        if let NetEvent::ScriptItemImported { request, item, result } = ev {
+            self.script_import_event(request, item, result);
             return;
         }
         if let NetEvent::InventoryContentSaved { request, item, result } = ev {
@@ -8189,6 +8210,7 @@ impl App {
                 }
             }
             Request::CopyContents { object, items } => self.copy_selected_contents(object, items),
+            Request::ImportScripts { object } => self.open_script_import_object(object),
             Request::ZoomFraction(f) => self.camera.set_zoom_fraction(f),
             Request::AboutLand => self.panels.about_land = true,
             // LLPanelLandInfo::onClickBuy: the land tool's selection
@@ -8254,6 +8276,7 @@ impl App {
         self.demo_script_steps();
         self.demo_editor_sync_steps();
         self.demo_script_recovery_steps();
+        self.demo_script_import_steps();
         self.world_click_demo_steps();
         self.object_menu_demo_steps();
         self.object_export_demo_steps();
@@ -20745,6 +20768,7 @@ impl App {
                 self.show_task_notecards(&ctx, &p);
                 self.show_scripts(&ctx, &p);
                 self.show_script_recovery(&ctx, &p);
+                self.show_script_import(&ctx, &p);
                 for action in ui::inventory::task_drop::confirm(&ctx, &p, &mut self.task_transfer) {
                     self.apply_inventory_action(action);
                 }

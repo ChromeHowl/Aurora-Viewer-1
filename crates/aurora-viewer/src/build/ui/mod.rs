@@ -93,6 +93,10 @@ pub enum Request {
         feedback: egui::Id,
         anchor: egui::Rect,
     },
+    /// Build > Contents > Import scripts: the object's id.
+    ImportScripts {
+        object: Uuid,
+    },
     Script {
         object: Uuid,
         item: Uuid,

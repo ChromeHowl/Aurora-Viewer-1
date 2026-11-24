@@ -10,7 +10,7 @@ use egui::{RichText, Vec2};
 
 const IMPORT_POSITION: egui::Pos2 = egui::Pos2 { x: 48.0, y: 80.0 };
 
-pub(super) mod destination;
+pub(crate) mod destination;
 mod folder_panel;
 mod folder_preview;
 mod footer;

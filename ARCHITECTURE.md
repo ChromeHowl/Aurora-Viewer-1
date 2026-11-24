@@ -2985,6 +2985,18 @@ when its editor saves or closes, and stays when the connection is lost.
 `ui/scripts/recovery.rs` lists those copies at the next login, and
 `app/script_recovery.rs` recreates the chosen ones in Lost and Found
 (`NetCommand::CreateScriptItem`: CreateInventoryItem, then UpdateScriptAgent).
+"Import scripts" (an Aurora addition, no Legacy Viewer equivalent) makes scripts
+of several files of the disk: `ui/scripts/import_rules.rs` holds the pure
+rules (reading and limits, names, numbering, SLua detection, the one-at-a-time
+queue), `ui/scripts/import.rs` the window, and `app/script_import.rs` the file
+dialog on a worker, the queue's pump, the demo and the drop of each saved
+script into an object (`contents_drop::plan`). The network side is
+`NetCommand::ImportScriptItem` (CreateInventoryItem with the creation
+defaults' next owner rights, then UpdateScriptAgent; answered by
+`NetEvent::ScriptItemImported` with the compile answer) and
+`NetCommand::SetItemRights` (the group and everyone rights, sent once the text
+is saved). Entries: the inventory folder's New menu (both menu paths,
+`context.rs` and `context_catalog.rs`) and Build > Contents.
 `reference.rs` exposes the signatures and descriptions of the Firestorm
 catalogue embedded in `assets/lsl/reference.json`.
 `files.rs` carries out the dialogs, the imports/exports and the watching of
