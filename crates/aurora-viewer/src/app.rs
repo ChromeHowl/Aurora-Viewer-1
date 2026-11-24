@@ -170,6 +170,7 @@ mod stand_fly;
 mod stream_list;
 mod suggest_demo;
 mod task_notecards;
+mod teleport_comfort;
 mod teleport_lookup;
 mod teleport_screen;
 mod texture_library;
@@ -881,6 +882,9 @@ pub struct App {
     scene_capture_place: Option<(crate::login_accounts::Account, String)>,
     /// Teleport screen: start, end (fade out), destination.
     tp_overlay: Option<TpOverlay>,
+    /// When the logout began, for its screen or its small progress bar
+    /// (FSDisableLogoutScreens).
+    logging_out: Option<Instant>,
     was_teleporting: bool,
     /// Offline demo teleport: started at.
     demo_tp_start: Option<Instant>,
@@ -2196,6 +2200,7 @@ impl App {
             scene_capture_pending: false,
             scene_capture_place: None,
             tp_overlay: None,
+            logging_out: None,
             was_teleporting: false,
             demo_tp_start: None,
             demo_tp_triggered: false,
@@ -3670,6 +3675,7 @@ impl App {
         // the next login's arrival steps again; steps under way end with
         // the session, the user's draw distance back
         self.first_arrival_done = false;
+        self.logging_out = None;
         if let Some(steps) = self.settings.draw_stepping.take() {
             self.settings.draw_distance = steps.user;
         }
@@ -4720,6 +4726,7 @@ impl App {
                 self.stop_local_typing();
                 // (TeleportFinish is the arrival in another region)
                 self.start_draw_stepping("teleport");
+                self.teleport_comfort_leaving();
                 if self.world.tp_show_progress && matches!(self.screen, Screen::World) && !self.was_teleporting {
                     // Finish and arrival can be drained in the same frame.
                     // Start the screen here so a fast remote teleport still
@@ -7401,6 +7408,9 @@ impl App {
             self.want_scene_capture = true;
             self.release_bridge();
             self.net.send(NetCommand::Logout);
+            if action == ui::exit::Action::Logout {
+                self.logging_out = Some(Instant::now());
+            }
         }
     }
 
@@ -8959,6 +8969,7 @@ impl App {
         self.release_object_hold();
         self.tp_dest = Some(dest);
         self.media.on_teleport();
+        self.teleport_comfort_begin();
         self.world.begin_teleport(show_progress);
         // LLAgent::teleportCore runs before the teleport request is sent: the
         // stops of the seat's animations (LLVOAvatarSelf::stopMotionFromSource)
@@ -9003,7 +9014,47 @@ impl App {
         );
     }
 
+    /// The logout screen (LLAppViewer::requestLogout shows the progress
+    /// view), or with FSDisableLogoutScreens its small progress bar, until
+    /// the login screen comes back.
+    fn draw_logout_progress(&mut self, ctx: &egui::Context, p: &crate::theme::Palette) {
+        let Some(since) = self.logging_out else { return };
+        if !matches!(self.screen, Screen::World) {
+            self.logging_out = None;
+            return;
+        }
+        let elapsed = since.elapsed().as_secs_f32();
+        let fraction = teleport_screen::logout_fraction(elapsed);
+        let text = aurora_i18n::tr!("app-logging-out");
+        if self.settings.teleport.no_logout_screen {
+            ui::loading::mini_progress(ctx, p, text, fraction, false);
+        } else {
+            // the place left, hidden under RLVa @showloc like the teleport screen's
+            let (region, _) = ui::loading::banner_place(&self.world, "");
+            ui::loading::teleport_overlay(
+                ctx,
+                p,
+                self.logo.as_ref(),
+                self.settings.loading_backdrop.then_some(&self.backdrop),
+                aurora_i18n::tr!("tpmap-logout-title"),
+                &region,
+                text,
+                Some(fraction),
+                (elapsed / 0.25).clamp(0.0, 1.0),
+                &ui::loading::Place::default(),
+                false,
+            );
+        }
+    }
+
     fn show_teleport_progress(&mut self) {
+        if self.settings.teleport.no_teleport_screen {
+            // FSDisableTeleportScreens: the world stays in view, with the
+            // small progress bar
+            self.tp_dest = None;
+            self.was_teleporting = true;
+            return;
+        }
         if self.settings.loading_backdrop {
             self.want_scene_capture = true;
         }
@@ -12513,16 +12564,20 @@ impl App {
         if let Screen::Loading { since } = self.screen {
             let moved = self.move_complete_at.map(|t| t.elapsed().as_secs_f32()).unwrap_or(0.0);
             let terrain = self.world.terrain_progress();
-            if self.world.movement_complete && since.elapsed() > Duration::from_millis(1500) && (terrain > 0.97 || moved > 6.0) {
+            let skip = self.settings.teleport.no_login_screen;
+            if teleport_comfort::loading_screen_ends(skip, self.world.movement_complete, since.elapsed(), terrain, moved) {
                 self.screen = Screen::World;
                 self.world.notifications.started = true;
                 self.camera.snap();
-                // the loading screen fades out over the world
-                let mut o = TpOverlay::new(String::new(), true);
-                o.start = since;
-                o.shown = 1.0;
-                o.end = Some(Instant::now());
-                self.tp_overlay = Some(o);
+                // the loading screen fades out over the world (gone at once
+                // without it, FSDisableLoginScreens)
+                if !skip {
+                    let mut o = TpOverlay::new(String::new(), true);
+                    o.start = since;
+                    o.shown = 1.0;
+                    o.end = Some(Instant::now());
+                    self.tp_overlay = Some(o);
+                }
                 self.was_teleporting = self.world.teleporting;
             }
         }
@@ -16758,6 +16813,7 @@ impl App {
                 self.want_scene_capture = true;
                 self.release_bridge();
                 self.net.send(NetCommand::Logout);
+                self.logging_out = Some(Instant::now());
                 self.world.system_message(aurora_i18n::tr!("app-logging-out"));
             }
             BarAction::Quit => {
@@ -21344,6 +21400,8 @@ impl App {
                     favorites: &favorites_order,
                 });
                 self.places_ui.history_zone = self.places_ui.demo_zone.unwrap_or(self.settings.tp_history_zone);
+                self.places_ui.history_position = self.settings.teleport.history_position;
+                self.places_ui.history_date = self.settings.teleport.history_date;
                 let places_acts = self.places_ui.show(
                     &ctx,
                     &mut c,
@@ -21409,6 +21467,11 @@ impl App {
                         PlacesAction::HistoryZone(zone) => {
                             self.places_ui.demo_zone = None;
                             self.settings.tp_history_zone = zone;
+                            self.settings.save();
+                        }
+                        PlacesAction::HistoryColumns { position, date } => {
+                            self.settings.teleport.history_position = position;
+                            self.settings.teleport.history_date = date;
                             self.settings.save();
                         }
                     }
@@ -21502,6 +21565,8 @@ impl App {
                     avatars: &self.avatar_pics,
                 };
                 self.worldmap_ui.history_zone = self.places_ui.demo_zone.unwrap_or(self.settings.tp_history_zone);
+                self.worldmap_ui.region_info = self.settings.teleport.map_region_info;
+                self.worldmap_ui.unique_landmarks = self.settings.teleport.map_unique_landmarks;
                 let wm = self.worldmap_ui.show(
                     &ctx,
                     &p,
@@ -21527,10 +21592,9 @@ impl App {
                             self.region_tracker_ui.track_region(&self.world, name);
                             self.panels.region_tracker = true;
                         }
-                        ui::worldmap::WorldMapAction::TeleportHome => {
-                            a.bar = BarAction::TeleportHome;
-                            self.panels.world_map = false;
-                        }
+                        // the map closes as the teleport starts, unless asked to
+                        // stay (teleport_comfort_begin)
+                        ui::worldmap::WorldMapAction::TeleportHome => a.bar = BarAction::TeleportHome,
                         ui::worldmap::WorldMapAction::TeleportLandmark(asset) => a.landmark = Some(asset),
                         ui::worldmap::WorldMapAction::TeleportHistory(global) => self.teleport_saved_place(global),
                         ui::worldmap::WorldMapAction::OpenPlace(source) => self.show_place_profile(source),
@@ -21706,9 +21770,20 @@ impl App {
                         o.leaving = Some(text);
                     }
                 }
+                if self.tp_overlay.is_none()
+                    && self.settings.teleport.no_teleport_screen
+                    && self.world.teleporting
+                    && self.world.tp_show_progress
+                    && matches!(self.screen, Screen::World)
+                {
+                    // FSDisableTeleportScreens: the small progress bar
+                    let cancel = self.world.tp_cancel.offered(self.settings.always_show_tp_cancel);
+                    tp_cancel_pressed = ui::loading::mini_progress(&ctx, &p, &self.world.tp_status, self.world.tp_progress, cancel);
+                }
                 if tp_cancel_pressed {
                     self.cancel_teleport();
                 }
+                self.draw_logout_progress(&ctx, &p);
             }
         }
         // Bug report form (disabled, see main.rs):

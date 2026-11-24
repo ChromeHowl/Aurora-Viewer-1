@@ -394,7 +394,7 @@ ExternalWebsocketSyncPort,S32,in-aurora,,field `script_editor.websocket_port`; 9
 FMODProfilerEnable,Boolean,unreviewed,,,Enable profiler tool if using FMOD Studio
 FMODResampleMethod,U32,unreviewed,,,"Sets the method used for internal resampler 0(Linear), 1(Cubic), 2(Spline) for FMOD Studio"
 FSAdvancedTooltips,Boolean,check,,hover_tips.form may cover it,Show extended information in hovertips about objects (classic Phoenix style)
-FSAdvancedWorldmapRegionInfo,Boolean,to-add,low,,Shows additional region infos on the world map (agent count and maturity level)
+FSAdvancedWorldmapRegionInfo,Boolean,in-aurora,,teleport.map_region_info,Shows additional region infos on the world map (agent count and maturity level)
 FSAllowDoubleClickOnScriptedObjects,Boolean,in-aurora,,double_click_scripted,"If enabled, allows double-click movement action (walk/teleport) to scripted objects"
 FSAllowEEPWaterDerender,Boolean,to-add,low,,Allow EEP assets to disable water rendering to increase FPS
 FSAlwaysFly,Boolean,in-aurora,,"a session toggle (fly override), not saved, as in the Legacy Viewer","Fly Override, for no-fly zones. Must be activated each time."
@@ -532,25 +532,25 @@ FSDefaultObjectTexture,String,to-add,low,an asset id: the permission rules apply
 FSDestroyGLTexturesImmediately,Boolean,not-applicable,,read nowhere in the Legacy sources,"If enabled, GL textures will be removed from memory immediately when its fetched texture is removed. This might result in textures behind yo"
 FSDestroyGLTexturesThreshold,F32,not-applicable,,read nowhere in the Legacy sources,"Threshold, at what texture memory load level GL textures will be removed from memory if FSDestroyGLTexturesImmediately is set to TRUE."
 FSDisableAvatarTrackerAtCloseIn,Boolean,to-add,low,,Disables the tracking beacon if distance to target avatar is less than 3m.
-FSDisableBeaconAfterTeleport,Boolean,to-add,low,,Disables the beacon of the teleport destination after a teleport.
+FSDisableBeaconAfterTeleport,Boolean,in-aurora,,teleport.clear_beacon,Disables the beacon of the teleport destination after a teleport.
 FSDisableBlockListAutoOpen,Boolean,to-add,low,,Disables automatic opening of the block list when muting people or objects.
 FSDisableIMChiclets,Boolean,check,,named in settings.rs: Aurora's interface has no chiclets,"If enabled, the Legacy Viewer will not show any group / IM chat chiclets (notifications envelope and sum of IMs will remain on the screen)."
 FSDisableLabeledChatLinks,Boolean,to-add,low,,"When true, wiki-style bracketed links ([https://host label]) in IMs, group chat, ad-hoc conferences and group notices keep their label, but "
 FSDisableLabeledChatLinksNearbyChat,Boolean,to-add,low,,"When true, wiki-style bracketed links ([https://host label]) in nearby (local) chat and object text keep their label, but hovering shows an "
-FSDisableLoginScreens,Boolean,to-add,low,,Disable login screen progress bar
-FSDisableLogoutScreens,Boolean,to-add,low,,Disable logout screen progress bar
+FSDisableLoginScreens,Boolean,in-aurora,,teleport.no_login_screen,Disable login screen progress bar
+FSDisableLogoutScreens,Boolean,in-aurora,,teleport.no_logout_screen,Disable logout screen progress bar
 FSDisableMouseWheelCameraZoom,Boolean,in-aurora,,camera.disable_wheel_zoom,"If true, the Legacy Viewer will not use mouse wheel to zoom in/out the camera."
 FSDisableNeighbourRegionConnections,Boolean,in-aurora,,no_neighbour_regions,"Do not connect to neighbouring regions, only to the current region (limits region crossing) - experimental"
 FSDisableReturnObjectNotification,Boolean,to-add,low,,Disable 'Object has been returned to your inventory Lost and Found folder' notifications
 FSDisableRiggedMeshMatrixCaching,Boolean,not-applicable,,read nowhere in the Legacy sources,Disable the caching of Rigged mesh matrix pallettes.Non-persistant.
-FSDisableTeleportScreens,Boolean,to-add,low,,Disable teleport screens
+FSDisableTeleportScreens,Boolean,in-aurora,,teleport.no_teleport_screen,Disable teleport screens
 FSDisableTurningAroundWhenWalkingBackwards,Boolean,in-aurora,,walk_backwards_without_turning,Disables your avatar turning around locally when moving backwards.
 FSDisableWMIProbing,Boolean,not-applicable,,Windows video memory probing through WMI; Aurora reads it from the graphics API,Disables VRAM detection via WMI probing on Windows systems
 FSDiskCacheHighWaterPercent,F32,check,,Aurora's cache has its own housekeeping,Trigger point above which we should start to clear out older cache entries
 FSDiskCacheLowWaterPercent,F32,check,,Aurora's cache has its own housekeeping,Level to drain cache to once it goes over the high water limit.
 FSDiskCacheSize,U32,in-aurora,,cache_size_mb,Controls amount of hard drive space reserved for local asset caching in MB
 FSDismissGroupNoticeAttachmentsToTrash,Boolean,to-add,low,,"If enabled, dismissing group notices with attachments will move attachment to trash folder"
-FSDoNotHideMapOnTeleport,Boolean,to-add,low,,"If enabled, the world map won't be closed when teleporting"
+FSDoNotHideMapOnTeleport,Boolean,in-aurora,,"teleport.keep_map_open (on by default: Aurora kept the map open)","If enabled, the world map won't be closed when teleporting"
 FSDontIgnoreAdHocFromFriends,Boolean,in-aurora,,autoresponse.adhoc_from_friends,Allow my friends to start conference chats with me.
 FSDontNagWhenPurging,Boolean,to-add,low,,"If enabled, emptying trash will not double check before deleting. WARNING: You should only use this if you are a regular trash emptier and a"
 FSDoubleClickAddInventoryClothing,Boolean,in-aurora,,inventory.double_click_add_clothes,Whether or not to add clothes instead of wearing them
@@ -883,14 +883,14 @@ FSStreamList,LLSD,in-aurora,,"audio.saved_streams (a list, not listed in Debug S
 FSStreamtitleHistoryLength,U32,in-aurora,,audio.stream_title_history,The maximum number of stream titles shown in the history
 FSSupportGroupChatPrefix3,Boolean,not-applicable,,the Legacy Viewer's support groups,Adds (FS 1.2.3) to support group chat
 FSSupportGroupChatPrefixTesting,Boolean,not-applicable,,the Legacy Viewer's support groups,Adds (W 56789f* os) to testing group chat
-FSTPHistoryTZ,String,check,,named in world/tphistory: may be built in,"Select the timezone to be used with Teleport History. ('utc' = Coordinated Universal Time, 'slt' = Second Life Time (default), 'local' = the"
+FSTPHistoryTZ,String,in-aurora,,"tp_history_zone (UTC by default: the owner's choice)","Select the timezone to be used with Teleport History. ('utc' = Coordinated Universal Time, 'slt' = Second Life Time (default), 'local' = the"
 FSTagShowARW,Boolean,in-aurora,,tag_complexity,"If enabled, the avatar complexity will be shown in the nametag for every avatar."
 FSTagShowDistance,Boolean,to-add,low,,"If enabled, show distance to other avatars in their nametag."
 FSTagShowDistanceColors,Boolean,to-add,low,,"If enabled, color other avatars' nametags based on their distance"
 FSTagShowOwnARW,Boolean,in-aurora,,tag_complexity_own,"If enabled, the avatar complexity for the own avatar will be shown in the nametag."
 FSTagShowTooComplexOnlyARW,Boolean,in-aurora,,tag_complexity_too_complex_only,"If enabled, the avatar complexity will be shown in the nametag only for too complex avatars (Jelly Dolls)"
-FSTeleportHistoryShowDate,Boolean,to-add,low,,Shows the exact date and time in the teleport history.
-FSTeleportHistoryShowPosition,Boolean,to-add,low,,Shows the local position within a region in the teleport history.
+FSTeleportHistoryShowDate,Boolean,in-aurora,,teleport.history_date,Shows the exact date and time in the teleport history.
+FSTeleportHistoryShowPosition,Boolean,in-aurora,,teleport.history_position,Shows the local position within a region in the teleport history.
 FSTeleportToOffsetLateral,F32,check,,named in chat commands: may be built in,Horizontal distance from the target avatar that is used for teleporting to them.
 FSTeleportToOffsetVertical,F32,check,,may be built in with the lateral offset,Vertical distance from the target avatar that is used for teleporting to them.
 FSTempDerenderUntilTeleport,Boolean,check,,named in world/derender: may be built in,"If enabled, temporary derendered objects will stay derendered until teleport. If disabled, they stay derendered until the end of the session"
@@ -2360,7 +2360,7 @@ WindowMaximized,Boolean,unreviewed,,field `window_x`,SL viewer window maximized 
 WindowWidth,U32,unreviewed,,,SL viewer window width
 WindowX,S32,unreviewed,,field `window_x`,"X coordinate of upper left corner of SL viewer window, relative to upper left corner of primary display (pixels)"
 WindowY,S32,unreviewed,,field `window_x`,"Y coordinate of upper left corner of SL viewer window, relative to upper left corner of primary display (pixels)"
-WorldmapFilterDuplicateLandmarks,Boolean,unreviewed,,,Filter duplicate Landmarks in the Landmark list on the world map.
+WorldmapFilterDuplicateLandmarks,Boolean,in-aurora,,teleport.map_unique_landmarks,Filter duplicate Landmarks in the Landmark list on the world map.
 XferThrottle,F32,unreviewed,,,Maximum allowable downstream bandwidth for asset transfers (bits per second)
 YawFromMousePosition,F32,unreviewed,,field `head_yaw`,Horizontal range over which avatar head tracks mouse position (degrees of head rotation from left of window to right)
 YieldTime,S32,unreviewed,,,Yield some time to the local host.

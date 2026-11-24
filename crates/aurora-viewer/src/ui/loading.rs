@@ -623,6 +623,40 @@ pub fn teleport_overlay(
     pressed
 }
 
+/// The small progress bar of the Legacy Viewer's "no teleport screen" and
+/// "no logout screen" (LLProgressViewMini, panel_progress_mini.xml): the
+/// step and its progress, with Cancel for a teleport that allows it, at the
+/// foot of the world. True when Cancel is pressed.
+pub fn mini_progress(ctx: &egui::Context, p: &Palette, text: &str, fraction: f32, cancel: bool) -> bool {
+    let mut pressed = false;
+    egui::Area::new(egui::Id::new("progress_mini"))
+        .order(egui::Order::Foreground)
+        .anchor(egui::Align2::CENTER_BOTTOM, Vec2::new(0.0, -96.0))
+        .show(ctx, |ui| {
+            super::widgets::overlay(ui, p, egui::Margin::symmetric(12, 8), |ui| {
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label(egui::RichText::new(text).size(12.5).color(p.ink));
+                        super::widgets::progress(ui, p, "progress_mini_bar", fraction, 220.0, "", None);
+                    });
+                    if cancel {
+                        pressed = super::widgets::action_button(
+                            ui,
+                            p,
+                            "x",
+                            aurora_i18n::tr!("common-cancel"),
+                            super::widgets::ActionKind::Flat,
+                            Vec2::new(0.0, 28.0),
+                        )
+                        .clicked();
+                    }
+                });
+            });
+        });
+    ctx.request_repaint();
+    pressed
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -630,6 +630,21 @@ pub fn history_section_lookup(now: f64, offset: f64) -> impl Fn(f64) -> usize {
     move |date| lower.iter().position(|&start| date >= start).unwrap_or(lower.len())
 }
 
+/// A date at `offset` seconds from UTC: year, month, day, hour, minute
+/// (the parts of the history's DateFmt).
+pub fn date_parts(date: f64, offset: i64) -> (i64, u32, u32, i64, i64) {
+    let t = date.floor() as i64 + offset;
+    let (y, m, d) = aurora_net::profile::civil_from_days(t.div_euclid(86_400));
+    let secs = t.rem_euclid(86_400);
+    (y, m, d, secs / 3600, (secs / 60) % 60)
+}
+
+/// The position column of LLTeleportHistoryFlatItem::updateTitle: the
+/// position in the region, "%.0f, %.0f, %.0f".
+pub fn position_text(local: Vec3) -> String {
+    format!("{:.0}, {:.0}, {:.0}", local.x, local.y, local.z)
+}
+
 /// LLAgentUI::buildLocationString(LOCATION_FORMAT_NORMAL): "Parcel, Region",
 /// the region alone when the parcel has no name.
 pub fn location_title(parcel: &str, region: &str) -> String {
@@ -894,6 +909,17 @@ mod tests {
             assert_eq!(history_section(month, now, offset), 6);
             assert_eq!(history_section(month - 1.0, now, offset), 7);
         }
+    }
+
+    #[test]
+    fn date_and_position_columns() {
+        use aurora_net::profile::days_from_civil;
+        let t = days_from_civil(2026, 1, 1) as f64 * DAY + 5.0 * 3600.0 + 7.0 * 60.0 + 30.0;
+        assert_eq!(date_parts(t, 0), (2026, 1, 1, 5, 7));
+        // SLT in winter: the previous evening
+        assert_eq!(date_parts(t, -8 * 3600), (2025, 12, 31, 21, 7));
+        assert_eq!(date_parts(t, 5 * 3600 + 1800), (2026, 1, 1, 10, 37));
+        assert_eq!(position_text(Vec3::new(128.4, 64.6, 22.0)), "128, 65, 22");
     }
 
     #[test]
