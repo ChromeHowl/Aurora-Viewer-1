@@ -106,6 +106,9 @@ pub enum PlacesAction {
     Sort(model::PlacesSort),
     /// The history's time zone (FSTPHistoryTZ).
     HistoryZone(HistoryZone),
+    /// The history's position and date columns, from its gear menu
+    /// (FSTeleportHistoryShowPosition, FSTeleportHistoryShowDate).
+    HistoryColumns { position: bool, date: bool },
 }
 
 /// One line of a landmarks tab.
@@ -290,6 +293,64 @@ fn history_zone_menu(ui: &mut egui::Ui, p: &Palette, zone: HistoryZone, actions:
     });
 }
 
+/// The Show... sub-menu of the history's gear menu
+/// (menu_teleport_history_gear.xml: FSTeleportHistoryShowPosition,
+/// FSTeleportHistoryShowDate).
+fn history_show_menu(ui: &mut egui::Ui, p: &Palette, position: bool, date: bool, actions: &mut Vec<PlacesAction>) {
+    super::menu::submenu(ui, p, "eye-filled", aurora_i18n::tr!("tpmap-show"), true, |ui| {
+        if super::menu::check(ui, p, "map-pin-filled", aurora_i18n::tr!("tpmap-show-position"), position, true) {
+            actions.push(PlacesAction::HistoryColumns {
+                position: !position,
+                date,
+            });
+        }
+        if super::menu::check(ui, p, "clock-filled", aurora_i18n::tr!("tpmap-show-date"), date, true) {
+            actions.push(PlacesAction::HistoryColumns {
+                position,
+                date: !date,
+            });
+        }
+    });
+}
+
+/// The date column of a history entry (LLTeleportHistoryFlatItem::
+/// getTimestamp, DateFmt / DateFmtAMPM): month / day / year, the time in 12
+/// or 24 hours as the bars' clock writes it (Use24HourClock), and the zone.
+pub fn history_date(date: f64, zone: HistoryZone) -> String {
+    use crate::settings::ClockZone;
+    let unix = date as i64;
+    let offset = history_offset(zone, date) as i64;
+    let label = match zone {
+        HistoryZone::Utc => "UTC".to_owned(),
+        HistoryZone::Slt => super::bars::clock::zone_name(ClockZone::Slt, unix),
+        HistoryZone::Local => super::bars::clock::zone_name(ClockZone::Local, unix),
+    };
+    let (y, m, d, h, min) = tphistory::date_parts(date, offset);
+    let time = super::bars::clock::hour_text(h, min, "", super::bars::clock::chat_twelve_hours());
+    aurora_i18n::tr!(
+        "tpmap-history-date",
+        year = y.to_string(),
+        month = format!("{m:02}"),
+        day = format!("{d:02}"),
+        time = time,
+        zone = label
+    )
+    .to_owned()
+}
+
+/// The position and date columns of a history entry, as asked.
+fn history_detail(world: &World, it: &HistoryItem, position: bool, date: bool, zone: HistoryZone) -> String {
+    let mut parts = Vec::new();
+    if position {
+        let (x, y) = world.map.local_xy(it.global.x, it.global.y);
+        parts.push(tphistory::position_text(glam::Vec3::new(x as f32, y as f32, it.global.z as f32)));
+    }
+    if date {
+        parts.push(history_date(it.date, zone));
+    }
+    parts.join("   ")
+}
+
 #[derive(Default)]
 pub struct PlacesUi {
     pub tab: usize,
@@ -323,6 +384,10 @@ pub struct PlacesUi {
     /// The history's time zone, `Settings::tp_history_zone`, set by the app
     /// before each frame.
     pub history_zone: HistoryZone,
+    /// The history's position and date columns of the Legacy tabs
+    /// (`Settings::teleport`), set by the app before each frame.
+    pub history_position: bool,
+    pub history_date: bool,
     /// AURORA_DEMO_PLACES=…:utc / :local: that zone for the run, until one
     /// is chosen in the menu (not saved).
     pub demo_zone: Option<HistoryZone>,
@@ -671,6 +736,7 @@ impl PlacesUi {
                 icon,
                 rating,
                 &row.name,
+                "",
                 self.selected == Some(sel),
                 false,
                 &|| {
@@ -956,6 +1022,9 @@ impl PlacesUi {
             ui.add(egui::Label::new(RichText::new(text).size(12.0).color(p.muted)).wrap());
             return;
         }
+        // RLVa @showloc: no position of a place (stricter than the Legacy
+        // Viewer, whose column stays)
+        let show_position = self.history_position && !world.rlva.has("showloc");
         let popup_open = egui::Popup::is_any_open(ui.ctx());
         for (section, indices) in sections {
             // every section opens while filtering
@@ -972,6 +1041,7 @@ impl PlacesUi {
             }
             for i in indices {
                 let it = &items[i];
+                let detail = history_detail(world, it, show_position, self.history_date, self.history_zone);
                 // the region where the entry led, by its position, else by
                 // the name at the end of its title (asked once if unknown)
                 let rating = world
@@ -990,6 +1060,7 @@ impl PlacesUi {
                     "map-pin-filled",
                     rating,
                     &it.title,
+                    &detail,
                     self.selected == Some(Sel::History(i)),
                     true,
                     &|| world.people_at_global(it.global.x, it.global.y),
@@ -1094,6 +1165,7 @@ impl PlacesUi {
             self.selected = None;
         }
         history_zone_menu(ui, p, self.history_zone, actions);
+        history_show_menu(ui, p, self.history_position, self.history_date, actions);
         // FIRE-31025
         if super::menu::item_if(
             ui,
@@ -1280,8 +1352,9 @@ struct RowResponse {
 }
 
 /// One line of a list: indentation, caret for a folder, icon, the rating
-/// badge of the place's region when known, name; the history lines show an
-/// "i" button while hovered.
+/// badge of the place's region when known, name, then `detail` in grey at
+/// the right (the history's position and date columns); the history lines
+/// show an "i" button while hovered.
 #[allow(clippy::too_many_arguments)]
 fn list_row(
     ui: &mut egui::Ui,
@@ -1291,6 +1364,7 @@ fn list_row(
     icon: &str,
     rating: Option<u8>,
     name: &str,
+    detail: &str,
     selected: bool,
     info_button: bool,
     people: &dyn Fn() -> Option<crate::world::region_people::People>,
@@ -1385,6 +1459,15 @@ fn list_row(
                 );
             }
             right = slot.left() - 8.0;
+        }
+    }
+    if !detail.is_empty() {
+        let galley = painter.layout_no_wrap(detail.to_owned(), egui::FontId::proportional(11.5), p.muted);
+        let at = egui::pos2(right - galley.size().x, rect.center().y - galley.size().y * 0.5);
+        // the name keeps at least a third of the row
+        if at.x > x + (right - x) / 3.0 {
+            painter.galley(at, galley, p.muted);
+            right = at.x - 8.0;
         }
     }
     let galley = painter.layout(name.to_owned(), egui::FontId::proportional(12.5), p.ink, f32::INFINITY);

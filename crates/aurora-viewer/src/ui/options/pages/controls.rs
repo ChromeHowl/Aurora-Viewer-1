@@ -127,6 +127,65 @@ pub fn page(cx: &mut Cx) {
             tr!("ui-options-show-back-slurl-help"),
             &field!(show_back_slurl),
         );
+        // The Legacy Viewer's teleport and world map options
+        // (panel_preferences_move.xml, panel_preferences_firestorm.xml)
+        cx.toggle(
+            tr!("tpmap-opt-keep-map-open"),
+            tr!("tpmap-opt-keep-map-open-help"),
+            &field!(teleport.keep_map_open),
+        );
+        cx.toggle(
+            tr!("tpmap-opt-clear-beacon"),
+            tr!("tpmap-opt-clear-beacon-help"),
+            &field!(teleport.clear_beacon),
+        );
+        cx.toggle(
+            tr!("tpmap-opt-no-teleport-screen"),
+            tr!("tpmap-opt-no-teleport-screen-help"),
+            &field!(teleport.no_teleport_screen),
+        );
+        cx.toggle(
+            tr!("tpmap-opt-no-login-screen"),
+            tr!("tpmap-opt-no-login-screen-help"),
+            &field!(teleport.no_login_screen),
+        );
+        cx.toggle(
+            tr!("tpmap-opt-no-logout-screen"),
+            tr!("tpmap-opt-no-logout-screen-help"),
+            &field!(teleport.no_logout_screen),
+        );
+        cx.toggle(
+            tr!("tpmap-opt-history-position"),
+            tr!("tpmap-opt-history-position-help"),
+            &field!(teleport.history_position),
+        );
+        cx.toggle(
+            tr!("tpmap-opt-history-date"),
+            tr!("tpmap-opt-history-date-help"),
+            &field!(teleport.history_date),
+        );
+        // FSTPHistoryTZ
+        let zones = [
+            (crate::settings::HistoryZone::Utc, tr!("ui-places-history-zone-utc")),
+            (crate::settings::HistoryZone::Slt, tr!("ui-options-clock-zone-slt")),
+            (crate::settings::HistoryZone::Local, tr!("ui-options-clock-zone-local")),
+        ];
+        cx.combo(
+            tr!("tpmap-opt-history-zone"),
+            tr!("tpmap-opt-history-zone-help"),
+            &field!(tp_history_zone),
+            &zones,
+        );
+        cx.toggle(
+            tr!("tpmap-opt-map-region-info"),
+            tr!("tpmap-opt-map-region-info-help"),
+            &field!(teleport.map_region_info),
+        );
+        cx.toggle(
+            tr!("tpmap-opt-map-unique-landmarks"),
+            tr!("tpmap-opt-map-unique-landmarks-help"),
+            &field!(teleport.map_unique_landmarks),
+        );
         friends_only_row(cx);
         friends_only_keep_row(cx);
         cx.link(

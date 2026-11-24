@@ -18,6 +18,7 @@ pub mod new_objects;
 pub mod registry;
 pub mod stream_list;
 pub mod text_tuning;
+pub mod teleport;
 
 /// Where a contact-set marker stands on an avatar (`ui/contact_markers.rs`).
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -194,23 +195,24 @@ pub enum ClockZone {
 }
 
 /// The time zone of the teleport history's days and hours (the Legacy
-/// Viewer's FSTPHistoryTZ, SLT by default): UTC, Second Life time (US
-/// Pacific) or the computer's own.
+/// Viewer's FSTPHistoryTZ): UTC, Second Life time (US Pacific) or the
+/// computer's own. UTC by default, the owner's choice: the Legacy Viewer's
+/// default is SLT.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub enum HistoryZone {
-    Utc,
     #[default]
+    Utc,
     Slt,
     Local,
 }
 
-/// A saved history zone: anything unknown falls back to SLT rather than
+/// A saved history zone: anything unknown falls back to UTC rather than
 /// failing the whole file.
-fn history_zone_or_slt<'de, D: serde::Deserializer<'de>>(d: D) -> Result<HistoryZone, D::Error> {
+fn history_zone_or_utc<'de, D: serde::Deserializer<'de>>(d: D) -> Result<HistoryZone, D::Error> {
     Ok(match String::deserialize(d)?.as_str() {
-        "Utc" => HistoryZone::Utc,
+        "Slt" => HistoryZone::Slt,
         "Local" => HistoryZone::Local,
-        _ => HistoryZone::Slt,
+        _ => HistoryZone::Utc,
     })
 }
 
@@ -612,6 +614,9 @@ pub struct Settings {
     /// Line spacing, the notecard editor's font and the inventory's picture
     /// tooltip delay (Preferences › Layout, `settings/text_tuning.rs`).
     pub text_tuning: text_tuning::TextTuning,
+    /// Teleport history columns, world map extras and teleport and logout
+    /// screen options (settings/teleport.rs).
+    pub teleport: teleport::Teleport,
     pub crash_reports: CrashReports,
     /// Firestorm Language: default follows the OS.
     pub language: String,
@@ -900,8 +905,8 @@ pub struct Settings {
     /// LandmarksSortedByDate: the Landmarks tab of Places sorted by date.
     pub landmarks_by_date: bool,
     /// FSTPHistoryTZ: the time zone of the teleport history's days, chosen
-    /// in its menu (`ui/places.rs`).
-    #[serde(deserialize_with = "history_zone_or_slt")]
+    /// in its menu (`ui/places.rs`) or in Preferences; UTC by default.
+    #[serde(deserialize_with = "history_zone_or_utc")]
     pub tp_history_zone: HistoryZone,
     /// Ask before a teleport to a landmark, a history entry or a place link
     /// (TeleportFromLandmark, TeleportToHistoryEntry, TeleportViaSLAPP; the
@@ -2516,6 +2521,7 @@ impl Default for Settings {
             area_search: Default::default(),
             legacy_prefs: Default::default(),
             text_tuning: Default::default(),
+            teleport: Default::default(),
             crash_reports: CrashReports::Ask,
             language: "default".into(),
             language_is_public: true,
@@ -2633,7 +2639,7 @@ impl Default for Settings {
             standalone_place_details: false,
             inspect_columns: crate::ui::inspect::ALL_COLUMNS,
             landmarks_by_date: true,
-            tp_history_zone: HistoryZone::Slt,
+            tp_history_zone: HistoryZone::Utc,
             confirm_teleports: true,
             warn_hypergrid_suitcase: true,
             confirm_no_transfer_settings: true,
@@ -5075,12 +5081,13 @@ mod tests {
         assert_eq!(super::language_in(Some(br#"{"custom_language":"yes"}"#)).1, None);
     }
 
-    /// The teleport history's zone: SLT by default (FSTPHistoryTZ), each
-    /// choice kept, anything unknown back to SLT with the rest of the file.
+    /// The teleport history's zone: UTC by default (the owner's choice; the
+    /// Legacy Viewer's FSTPHistoryTZ is SLT), each choice kept, anything
+    /// unknown back to UTC with the rest of the file.
     #[test]
-    fn the_history_zone_is_slt_unless_chosen() {
+    fn the_history_zone_is_utc_unless_chosen() {
         let read = |json: &str| serde_json::from_str::<super::Settings>(json).expect("settings");
-        assert_eq!(read("{}").tp_history_zone, super::HistoryZone::Slt);
+        assert_eq!(read("{}").tp_history_zone, super::HistoryZone::Utc);
         for zone in [super::HistoryZone::Utc, super::HistoryZone::Slt, super::HistoryZone::Local] {
             let saved = serde_json::to_string(&super::Settings {
                 tp_history_zone: zone,
@@ -5090,7 +5097,7 @@ mod tests {
             assert_eq!(read(&saved).tp_history_zone, zone);
         }
         let odd = read(r#"{"tp_history_zone":"Mars","landmarks_by_date":false}"#);
-        assert_eq!(odd.tp_history_zone, super::HistoryZone::Slt);
+        assert_eq!(odd.tp_history_zone, super::HistoryZone::Utc);
         assert!(!odd.landmarks_by_date);
     }
 

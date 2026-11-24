@@ -93,6 +93,12 @@ pub struct WorldMapUi {
     /// The teleport history's days in the drawer: the zone of Places
     /// (`tp_history_zone`), set by the app before each frame.
     pub history_zone: crate::settings::HistoryZone,
+    /// The people and the rating under each region's name
+    /// (FSAdvancedWorldmapRegionInfo) and the landmarks listed once per
+    /// place (WorldmapFilterDuplicateLandmarks): `Settings::teleport`, set
+    /// by the app before each frame.
+    pub region_info: bool,
+    pub unique_landmarks: bool,
 }
 
 impl Default for WorldMapUi {
@@ -118,6 +124,8 @@ impl Default for WorldMapUi {
             want_folders: HashSet::new(),
             demo_style: None,
             history_zone: crate::settings::HistoryZone::default(),
+            region_info: true,
+            unique_landmarks: false,
         }
     }
 }
@@ -391,38 +399,41 @@ impl WorldMapUi {
             if s.is_down() {
                 painter.rect_filled(r, 0.0, DOWN_FILL);
             }
+            let region_info = self.region_info;
             if scale >= DRAW_TEXT_THRESHOLD && aurora && !world.rlva.has("showloc") {
                 let n: i32 = world.map.agents.get(key).map(|v| v.iter().map(|a| a.2).sum()).unwrap_or(0) + i32::from(my_sim == Some(*key));
                 let coords = opts.world_grid_coords.then_some(*key);
-                region_label(&painter.with_clip_rect(r.intersect(rect)), p, r, s, n, coords);
+                region_label(&painter.with_clip_rect(r.intersect(rect)), p, r, s, n, coords, region_info);
             } else if scale >= DRAW_TEXT_THRESHOLD && !world.rlva.has("showloc") {
                 let lp = painter.with_clip_rect(r.intersect(rect));
                 let mut y = r.bottom() - 2.0;
                 if opts.world_grid_coords {
                     text_shadow(
                         &lp,
-                        pos2(r.left() + 3.0, y - 28.0),
+                        pos2(r.left() + 3.0, y - if region_info { 28.0 } else { 14.0 }),
                         egui::Align2::LEFT_BOTTOM,
                         &format!("({}, {})", key.0, key.1),
                         11.0,
                         Color32::WHITE,
                     );
                 }
-                let n: i32 = world.map.agents.get(key).map(|v| v.iter().map(|a| a.2).sum()).unwrap_or(0) + i32::from(my_sim == Some(*key));
-                let second = if s.is_down() || n == 0 {
-                    format!("({})", s.access_label())
-                } else {
-                    format!("({n} - {})", s.access_label())
-                };
-                text_shadow(
-                    &lp,
-                    pos2(r.left() + 3.0, y),
-                    egui::Align2::LEFT_BOTTOM,
-                    &second,
-                    11.0,
-                    Color32::WHITE,
-                );
-                y -= 14.0;
+                if region_info {
+                    let n: i32 = world.map.agents.get(key).map(|v| v.iter().map(|a| a.2).sum()).unwrap_or(0) + i32::from(my_sim == Some(*key));
+                    let second = if s.is_down() || n == 0 {
+                        format!("({})", s.access_label())
+                    } else {
+                        format!("({n} - {})", s.access_label())
+                    };
+                    text_shadow(
+                        &lp,
+                        pos2(r.left() + 3.0, y),
+                        egui::Align2::LEFT_BOTTOM,
+                        &second,
+                        11.0,
+                        Color32::WHITE,
+                    );
+                    y -= 14.0;
+                }
                 lp.text(
                     pos2(r.left() + 4.0, y + 1.0),
                     egui::Align2::LEFT_BOTTOM,
@@ -924,6 +935,9 @@ impl WorldMapUi {
             .map(|i| (i.id, i.asset_id, i.name.clone()))
             .collect();
         lms.sort_by_key(|l| crate::natural_order::key(&l.2));
+        if self.unique_landmarks {
+            keep_first_landmarks(&mut lms, |l| l.1, &mut HashSet::new());
+        }
         let current = self
             .landmark
             .as_ref()
@@ -1167,9 +1181,17 @@ impl WorldMapUi {
     }
 }
 
+/// WorldmapFilterDuplicateLandmarks (LLFloaterWorldMap::buildLandmarkIDLists):
+/// only the first landmark of each place (its asset) stays, in the list's
+/// order; `seen` carries the places across several lists.
+fn keep_first_landmarks<T>(items: &mut Vec<T>, asset: impl Fn(&T) -> Uuid, seen: &mut HashSet<Uuid>) {
+    items.retain(|i| seen.insert(asset(i)));
+}
+
 /// A region's label in the full-frame layout, at its bottom left: the
 /// rating's badge before its name, then its people or its state, the grid
-/// position above when asked.
+/// position above when asked; the name alone without `info`
+/// (FSAdvancedWorldmapRegionInfo off).
 fn region_label(
     painter: &egui::Painter,
     p: &Palette,
@@ -1177,11 +1199,12 @@ fn region_label(
     s: &crate::world::worldmap::SimInfo,
     people: i32,
     coords: Option<(u32, u32)>,
+    info: bool,
 ) {
     let mid = r.bottom() - 12.0;
     let mut x = r.left() + 5.0;
     let badge = Rect::from_center_size(pos2(x + 6.5, mid), Vec2::splat(13.0));
-    if !s.is_down() && widgets::paint_maturity_badge(painter, p, super::bars::maturity_name(s.access), badge, 2) {
+    if info && !s.is_down() && widgets::paint_maturity_badge(painter, p, super::bars::maturity_name(s.access), badge, 2) {
         x = badge.right() + 4.0;
     }
     let font = egui::FontId::new(11.5, super::fonts::semibold(painter.ctx()));
@@ -1190,7 +1213,9 @@ fn region_label(
     painter.galley_with_override_text_color(pos2(x, top + 1.0), name.clone(), Color32::from_black_alpha(200));
     let end = x + name.size().x;
     painter.galley(pos2(x, top), name, Color32::WHITE);
-    let state = if s.is_down() {
+    let state = if !info {
+        String::new()
+    } else if s.is_down() {
         format!(" · {}", s.access_label())
     } else if people > 0 {
         format!(" · {people}")
