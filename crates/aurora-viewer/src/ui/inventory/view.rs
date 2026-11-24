@@ -65,6 +65,75 @@ fn my_suitcase_sorts_with_the_system_folders() {
 }
 
 #[test]
+fn empty_system_folders_hide_only_when_asked_and_loaded() {
+    use aurora_net::inventory::{InvFolder, InvItem};
+    let mut inv = Inventory {
+        root: Uuid::from_u128(1),
+        ..Default::default()
+    };
+    let folder = |id: u128, name: &str, type_default: i32| InvFolder {
+        id: Uuid::from_u128(id),
+        parent: Uuid::from_u128(1),
+        name: name.into(),
+        type_default,
+        ..Default::default()
+    };
+    inv.created_folders(vec![InvFolder {
+        id: inv.root,
+        name: "Inventory".into(),
+        type_default: 8,
+        ..Default::default()
+    }]);
+    inv.created_folders(vec![
+        folder(2, "Empty", -1),
+        folder(3, "Objects", 6),
+        folder(4, "Sounds", 1),
+        folder(5, "Trash", 14),
+        folder(6, "Notecards", 7),
+    ]);
+    inv.add_items(vec![InvItem {
+        id: Uuid::from_u128(40),
+        parent: Uuid::from_u128(4),
+        name: "Ding".into(),
+        asset_type: 1,
+        ..Default::default()
+    }]);
+    for id in [2, 3, 4, 5] {
+        if let Some(f) = inv.folders.get_mut(&Uuid::from_u128(id)) {
+            f.state = crate::world::inventory::FetchState::Fetched;
+        }
+    }
+    // 6 (Notecards) is not loaded yet: it stays
+    if let Some(f) = inv.folders.get_mut(&Uuid::from_u128(6)) {
+        f.state = crate::world::inventory::FetchState::Unknown;
+    }
+    let shown = |hide: bool| {
+        let prefs = InventoryPreferences {
+            hide_empty_system_folders: hide,
+            ..Default::default()
+        };
+        let mut view = ViewCache::default();
+        view.search(
+            &inv,
+            inv.root,
+            "",
+            &prefs,
+            &Filters::default(),
+            0,
+            None,
+            &Facts::default(),
+            Uuid::from_u128(9),
+            now(),
+        );
+        let mut ids: Vec<u128> = view.children_iter(inv.root, true, inv.lib_root).map(|id| id.as_u128()).collect();
+        ids.sort_unstable();
+        ids
+    };
+    assert_eq!(shown(false), [2, 3, 4, 5, 6]);
+    assert_eq!(shown(true), [2, 4, 5, 6], "the empty Objects folder alone is hidden");
+}
+
+#[test]
 fn received_filing_view_pins_marketplace_and_scopes_sender_search_without_server_moves() {
     use aurora_net::inventory::{InvFolder, InvItem};
     let agent = Uuid::from_u128(1);
@@ -480,6 +549,16 @@ pub struct InventoryPreferences {
     /// The views of the folders, with `view_per_folder` (at most
     /// `FOLDER_VIEWS`); the others take `explorer.view`.
     pub folder_views: std::collections::BTreeMap<Uuid, ExplorerView>,
+    /// DebugHideEmptySystemFolders: system folders holding nothing are left
+    /// out of the tree. Off by default, as in the Legacy Viewer.
+    pub hide_empty_system_folders: bool,
+    /// The system folders left out of the trees, by the names of
+    /// `hidden_folders::HIDEABLE` (Preferences › Aurora › System folders).
+    /// Aurora's.
+    pub hidden_system_folders: Vec<String>,
+    /// Folders with no item anywhere inside, system folders too, are left
+    /// out of the trees (off). Aurora's.
+    pub hide_empty_folders: bool,
 }
 impl Default for InventoryPreferences {
     fn default() -> Self {
@@ -535,6 +614,9 @@ impl Default for InventoryPreferences {
             pinned: Vec::new(),
             view_per_folder: false,
             folder_views: Default::default(),
+            hide_empty_system_folders: false,
+            hidden_system_folders: Vec::new(),
+            hide_empty_folders: false,
         }
     }
 }
@@ -990,6 +1072,17 @@ pub struct ViewCache {
     /// With Always show folders, the folders that hold a matching item: the
     /// others it lists start closed (`TreeState::prepare`).
     holding: Option<IdSet>,
+    /// `InventoryPreferences::hide_empty_system_folders`, set by `search`.
+    hide_empty_system: bool,
+    /// The loaded, empty system folders of the kinds that hide when empty
+    /// (`hidden_when_empty`).
+    empty_system: IdSet,
+    /// The root's folders that System folders can hide, and their bit
+    /// (`hidden_folders::folder_bit`).
+    hideable: IdMap<u32>,
+    /// The folders that hold an item somewhere inside, or a folder not
+    /// loaded yet (it may: it stays until its contents are known).
+    filled: IdSet,
 }
 
 impl ViewCache {
@@ -1151,6 +1244,34 @@ impl ViewCache {
         }
         self.entries.par_sort_unstable_by(|a, b| compare(a, b, sort));
         self.folders = inv.folders.keys().copied().collect();
+        // Hide empty folders: each item, and each folder still loading,
+        // keeps its folder and the folders above it
+        let mut filled = IdSet::default();
+        let starts = inv.items.values().map(|it| it.parent).chain(
+            inv.folders
+                .iter()
+                .filter(|(_, f)| f.state != crate::world::inventory::FetchState::Fetched)
+                .map(|(id, _)| *id),
+        );
+        for start in starts {
+            let mut id = start;
+            for _ in 0..64 {
+                let Some(f) = inv.folders.get(&id) else { break };
+                if !filled.insert(id) {
+                    break;
+                }
+                id = f.info.parent;
+            }
+        }
+        self.filled = filled;
+        self.hideable = inv
+            .folders
+            .iter()
+            .filter_map(|(id, f)| {
+                super::hidden_folders::folder_bit(f.info.parent == inv.root, f.info.type_default, &f.info.name).map(|b| (*id, b))
+            })
+            .collect();
+        self.empty_system = inv.folders.keys().copied().filter(|id| hidden_when_empty(inv, *id)).collect();
         // Keep the lists' memory: a folder gone keeps an empty list.
         self.children.values_mut().for_each(Vec::clear);
         for entry in &self.entries {
@@ -1170,7 +1291,10 @@ impl ViewCache {
 
     /// Changes whenever the sorted children change (see `prepare`).
     pub fn built(&self) -> u64 {
+        // a change of the hidden folders lists the trees again
         self.built
+            .wrapping_add(super::hidden_folders::generation().wrapping_mul(0x9E37_79B9_7F4A_7C15))
+            .wrapping_add(u64::from(self.hide_empty_system))
     }
 
     /// The rendered sort, without the model generation: a late Delete respects
@@ -1191,11 +1315,19 @@ impl ViewCache {
     }
 
     pub fn children_iter(&self, parent: Uuid, show_library: bool, lib_root: Uuid) -> impl Iterator<Item = Uuid> + '_ {
+        let hidden = super::hidden_folders::mask();
+        let hide_empty = super::hidden_folders::hide_empty();
         self.children
             .get(&parent)
             .into_iter()
             .flatten()
             .filter(move |id| show_library || **id != lib_root)
+            // the system folders hidden in Preferences › Aurora › System folders
+            .filter(move |id| hidden == 0 || self.hideable.get(id).is_none_or(|b| hidden & (1u64 << b) == 0))
+            // Hide empty folders, system folders included
+            .filter(move |id| !hide_empty || !self.folders.contains(*id) || self.filled.contains(*id))
+            // Hide empty system folders (DebugHideEmptySystemFolders)
+            .filter(move |id| !self.hide_empty_system || !self.empty_system.contains(*id))
             .copied()
     }
 
@@ -1213,6 +1345,7 @@ impl ViewCache {
         agent: Uuid,
         time: i64,
     ) {
+        self.hide_empty_system = prefs.hide_empty_system_folders;
         self.prepare(inv, prefs.sort_for(tab));
         let age = if tab == 2 && filters.age == Age::Any {
             Age::SinceLogout
@@ -1798,6 +1931,24 @@ pub(super) fn within(inv: &Inventory, roots: &[Uuid]) -> IdSet {
         .filter_map(|(id, found)| found.then_some(id))
         .chain(roots.iter().copied())
         .collect()
+}
+
+/// LLViewerFolderType::lookupIsHiddenIfEmpty (indra/newview/
+/// llviewerfoldertype.cpp) with LLInventoryFilter's FILTERTYPE_EMPTYFOLDERS
+/// (llinventoryfilter.cpp): a system folder of a kind that hides when empty,
+/// once loaded with no folder and no item in it. A folder not yet loaded
+/// stays shown. Never the root, the Trash, the Current Outfit nor an outfit.
+pub(super) fn hidden_when_empty(inv: &Inventory, id: Uuid) -> bool {
+    inv.folders.get(&id).is_some_and(|f| {
+        matches!(
+            f.info.type_default,
+            0..=3 | 5..=7 | 10 | 13 | 15 | 16 | 20 | 21 | 23 | 48..=53 | 56 | 57 | 100
+        ) && id != inv.root
+            && id != inv.lib_root
+            && f.state == crate::world::inventory::FetchState::Fetched
+            && f.children.is_empty()
+            && f.items.is_empty()
+    })
 }
 
 fn compare(a: &Entry, b: &Entry, sort: Sort) -> Ordering {

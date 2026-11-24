@@ -18548,6 +18548,11 @@ impl App {
         let p = self.palette;
         let ctx = ui.ctx().clone();
         ui::inventory::view::set_picker_sort(&ctx, self.settings.inventory.sort);
+        // Preferences › Aurora › System folders, for the inventory trees
+        ui::inventory::hidden_folders::sync(
+            &self.settings.inventory.hidden_system_folders,
+            self.settings.inventory.hide_empty_folders,
+        );
         // a list's A–Z switch last frame, saved before it is published again
         if let Some(by_name) = ui::environment::take_lists_by_name_change(&ctx) {
             self.settings.env_lists_by_name = by_name;
