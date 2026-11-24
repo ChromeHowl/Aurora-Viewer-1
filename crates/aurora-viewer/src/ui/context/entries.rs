@@ -277,6 +277,16 @@ fn object_menu(ui: &mut Builder, f: &Facts, key: ObjKey, id: Uuid, offset: Vec3,
             ("player-play-filled", aurora_i18n::tr!("ui-context-run-scripts"), QueueKind::Run),
             ("player-stop-filled", aurora_i18n::tr!("ui-context-stop-scripts"), QueueKind::Stop),
             ("trash-filled", aurora_i18n::tr!("ui-context-remove-scripts"), QueueKind::Delete),
+            (
+                "file-code-filled",
+                aurora_i18n::tr!("ui-context-recompile-mono"),
+                QueueKind::Compile { mono: true },
+            ),
+            (
+                "file-code-filled",
+                aurora_i18n::tr!("ui-context-recompile-lsl"),
+                QueueKind::Compile { mono: false },
+            ),
         ] {
             ui.item_if(icon, label, o.scripts, CtxAction::Scripts { id, action });
         }
@@ -2049,6 +2059,8 @@ mod tests {
             ("ui-context-run-scripts", QueueKind::Run),
             ("ui-context-stop-scripts", QueueKind::Stop),
             ("ui-context-remove-scripts", QueueKind::Delete),
+            ("ui-context-recompile-mono", QueueKind::Compile { mono: true }),
+            ("ui-context-recompile-lsl", QueueKind::Compile { mono: false }),
         ] {
             let r = row(menu(&f), key);
             assert!(r.enabled);

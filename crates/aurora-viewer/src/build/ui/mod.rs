@@ -290,6 +290,8 @@ pub struct FloaterState {
     pub media_settings: Option<MediaSettingsState>,
     pub confirm: Option<Confirm>,
     pub link_error: Option<String>,
+    /// The prims of an unlink waiting for its confirmation.
+    pub unlink_ask: Option<Vec<crate::world::objects::ObjKey>>,
     pub picker: TexturePicker,
     pub pick_target: Option<PickTarget>,
     /// A texture or material dropped on a Texture tab slot, applied next
@@ -407,7 +409,7 @@ pub fn shortcuts(ctx: &egui::Context, tool: &mut BuildTool, world: &mut World, s
     if typing_before && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
         return;
     }
-    if tool.ui.link_error.is_some() {
+    if tool.ui.link_error.is_some() || tool.ui.unlink_ask.is_some() {
         return;
     }
     tool.ui.legacy_window = s.legacy_window;
@@ -481,6 +483,8 @@ pub fn show(
     env: &mut Env,
 ) -> bool {
     floaters::link_error(ctx, p, tool);
+    tool.options.clone_from(&s.tools);
+    floaters::unlink_confirm(ctx, p, tool, world);
     contents_selection::finish_if_hidden_or_blurred(ctx, tool, world);
     if !tool.open {
         tool.ui.status_notice = None;

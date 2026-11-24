@@ -4352,6 +4352,9 @@ impl App {
             self.task_notecard_saved(request, object, item, result);
             return;
         }
+        if self.recompile_reply(&ev) {
+            return;
+        }
         if let NetEvent::ScriptLoaded { request, target, result } = ev {
             self.script_editors.loaded(request, target, result);
             return;
@@ -12185,6 +12188,7 @@ impl App {
                 ctrl: self.ctrl,
                 alt: self.alt,
             };
+            self.build.caps_lock_held = self.down.contains(&Input::key(KeyCode::CapsLock));
             self.build.update(
                 &mut self.world,
                 &self.settings.build,
@@ -18268,6 +18272,7 @@ impl App {
         self.options_ui.login_favorites = self.login_favorites.key().map(|key| self.login_form.favorites.shown(key));
         self.options_ui.friends_only = (!self.world.agent_id.is_nil()).then_some(self.world.friends_only());
         self.options_ui.friends_only_keep = (!self.world.agent_id.is_nil()).then_some(self.world.friends_only.keep_after_teleport);
+        self.refresh_new_objects_view();
         let time_of_day = self.settings.time_of_day;
         self.options_ui.parcel_environments = self.world.parcel_env.saves.rows();
         if self.options_ui.anti_spam_version != self.world.anti_spam.version {

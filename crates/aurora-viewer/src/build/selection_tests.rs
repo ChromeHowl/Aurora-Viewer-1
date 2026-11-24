@@ -363,6 +363,15 @@ fn linked_three(world: &mut World, tool: &mut BuildTool, settings: &BuildSetting
     ids.to_vec()
 }
 
+/// Unlink a whole linkset: the Legacy Viewer asks first by default
+/// (FSUnlinkConfirmEnabled), then goes on as the dialog's "Unlink" does.
+fn unlink_confirmed(world: &mut World, tool: &mut BuildTool) {
+    tool.unlink(world);
+    assert!(!tool.out.iter().any(|c| matches!(c, NetCommand::Build(BuildCmd::Delink { .. }))));
+    let keys = tool.ui.unlink_ask.take().expect("the unlink is confirmed first");
+    tool.unlink_confirmed(world, &keys);
+}
+
 fn run_sim(world: &mut World, tool: &mut BuildTool, sim: &mut demo_sim::DemoSim) {
     for command in std::mem::take(&mut tool.out) {
         if let NetCommand::Build(command) = command {
@@ -378,7 +387,7 @@ fn unlink_keeps_every_former_prim_selected() {
     let (mut world, mut tool, settings) = fixture();
     let mut sim = demo_sim::DemoSim::default();
     linked_three(&mut world, &mut tool, &settings, &mut sim);
-    tool.unlink(&mut world);
+    unlink_confirmed(&mut world, &mut tool);
     // nothing changes before the simulator answers
     tool.prune(&world, &settings, Instant::now());
     assert_eq!(selected(&tool), [99882]);
@@ -403,7 +412,7 @@ fn unlink_leaves_a_selection_changed_before_the_reply_alone() {
     let (mut world, mut tool, settings) = fixture();
     let mut sim = demo_sim::DemoSim::default();
     linked_three(&mut world, &mut tool, &settings, &mut sim);
-    tool.unlink(&mut world);
+    unlink_confirmed(&mut world, &mut tool);
     let delink = std::mem::take(&mut tool.out);
     tool.deselect_all(&world);
     tool.out = delink;
