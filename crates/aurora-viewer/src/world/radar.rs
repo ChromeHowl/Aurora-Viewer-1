@@ -189,6 +189,8 @@ pub struct Radar {
     sync_asked: bool,
     /// Number of the last alert to scripts (mRadarFrameCount).
     script_frame: u32,
+    /// The resident the tracking beacon follows (FSRadar::mTrackedAvatarId).
+    pub tracked: Option<Tracked>,
 }
 
 /// A nearby chat line said at `position` (region-local, in the region whose
@@ -540,6 +542,46 @@ pub fn sightings(world: &World) -> Vec<Sighting> {
     out
 }
 
+/// LLTracker's DESTINATION_REACHED_RADIUS.
+pub const TRACK_REACHED: f32 = 3.0;
+
+/// A resident of the radar followed by the tracking beacon ("Track",
+/// FSRadar::startTracking): the global position last given to the map's
+/// track, to tell it from a track chosen since.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Tracked {
+    pub id: Uuid,
+    pub at: glam::DVec3,
+}
+
+/// What a sweep does with the followed resident.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TrackStep {
+    /// The beacon stays where it is.
+    Keep,
+    /// The beacon moves to this global position.
+    Move(glam::DVec3),
+    /// Tracking ends (the resident left the radar, or we reached them).
+    Stop,
+}
+
+/// FSRadar::updateTracking and LLTracker::render3D for the followed
+/// resident: `seen` is where the radar sees them now (global), `me` our
+/// global position. Within `TRACK_REACHED` (heights counted half,
+/// getDistanceToDestination's z attenuation) the beacon goes away when
+/// `clear_close_in` (FSDisableAvatarTrackerAtCloseIn), else it stays.
+pub fn track_step(tracked: &Tracked, seen: Option<glam::DVec3>, me: glam::DVec3, clear_close_in: bool) -> TrackStep {
+    let Some(at) = seen else {
+        return TrackStep::Stop;
+    };
+    let mut gap = at - me;
+    gap.z *= 0.5;
+    if clear_close_in && gap.length() < f64::from(TRACK_REACHED) {
+        return TrackStep::Stop;
+    }
+    if at == tracked.at { TrackStep::Keep } else { TrackStep::Move(at) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -865,5 +907,27 @@ mod tests {
         assert_eq!(Event::RegionEnter(id(1), None).sound(), S::RadarRegionEnter);
         assert_eq!(Event::ChatLeave(id(1)).sound(), S::RadarChatLeave);
         assert_eq!(Event::AgeAlert(id(1), 2).sound(), S::RadarAgeAlert);
+    }
+
+    #[test]
+    fn the_tracking_beacon_follows_the_resident_and_stops_close_in() {
+        use glam::DVec3;
+        let t = Tracked {
+            id: id(1),
+            at: DVec3::new(100.0, 100.0, 20.0),
+        };
+        let me = DVec3::new(50.0, 100.0, 20.0);
+        assert_eq!(track_step(&t, Some(t.at), me, true), TrackStep::Keep);
+        let moved = DVec3::new(110.0, 100.0, 20.0);
+        assert_eq!(track_step(&t, Some(moved), me, true), TrackStep::Move(moved));
+        // gone from the radar
+        assert_eq!(track_step(&t, None, me, true), TrackStep::Stop);
+        // reached: within 3 m, heights counting half
+        let near = DVec3::new(52.0, 100.0, 24.0);
+        assert_eq!(track_step(&t, Some(near), me, true), TrackStep::Stop);
+        // the option off: the beacon stays on them
+        assert_eq!(track_step(&t, Some(near), me, false), TrackStep::Move(near));
+        let above = DVec3::new(50.0, 100.0, 27.0);
+        assert_eq!(track_step(&t, Some(above), me, true), TrackStep::Move(above));
     }
 }

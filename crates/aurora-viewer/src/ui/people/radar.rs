@@ -146,6 +146,9 @@ pub struct RadarSettings {
     pub color_names: bool,
     /// FSMilkshakeRadarToasts: alerts as notifications instead of chat lines.
     pub toasts: bool,
+    /// FSDisableAvatarTrackerAtCloseIn: the tracking beacon of a resident
+    /// followed from the radar goes away within 3 m of them.
+    pub track_clear_close_in: bool,
     /// RadarReportChatRangeEnter / Leave, RadarReportDrawRangeEnter / Leave,
     /// RadarReportSimRangeEnter / Leave.
     pub chat_enter: bool,
@@ -191,6 +194,7 @@ impl Default for RadarSettings {
             name_format: 0,
             color_names: false,
             toasts: false,
+            track_clear_close_in: true,
             chat_enter: false,
             chat_leave: false,
             draw_enter: false,

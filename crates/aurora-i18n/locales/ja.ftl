@@ -16158,3 +16158,18 @@ phototools-director-lens = ディレクターのウィンドウが開いてい�
 phototools-view-angle-viewfinder = 視野角はファインダーが管理しています。ファインダーを閉じると元の値に戻ります。
 ui-options-dof-show-focus-point = フォーカス点を表示
 ui-options-dof-show-focus-point-help = レンズがピントを合わせている点に小さな十字を表示します。自由なときは黄色、ロック中は赤です。
+
+# Radar: enter / leave reports and tracking (task radar)
+radar-track = Track
+radar-track-not-possible = Cannot track this resident: they are beyond radar range.
+ui-options-radar-reports = Residents coming and going
+ui-options-radar-region-enter = Entering the region
+ui-options-radar-region-enter-hint = Say when a resident enters your region. Off by default.
+ui-options-radar-region-leave = Leaving the region
+ui-options-radar-chat-enter = Entering chat range
+ui-options-radar-chat-enter-hint = Say when a resident comes within chat range. Off by default.
+ui-options-radar-chat-leave = Leaving chat range
+ui-options-radar-as-toasts = Show as notifications
+ui-options-radar-as-toasts-hint = A notification instead of a line of nearby chat. The same setting as the radar's Report to menu.
+ui-options-radar-track-close-in = Stop tracking within 3 m
+ui-options-radar-track-close-in-hint = The beacon of a resident tracked from the radar goes away once you reach them.
