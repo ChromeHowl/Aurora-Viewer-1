@@ -16158,3 +16158,16 @@ phototools-director-lens = ディレクターのウィンドウが開いてい�
 phototools-view-angle-viewfinder = 視野角はファインダーが管理しています。ファインダーを閉じると元の値に戻ります。
 ui-options-dof-show-focus-point = フォーカス点を表示
 ui-options-dof-show-focus-point-help = レンズがピントを合わせている点に小さな十字を表示します。自由なときは黄色、ロック中は赤です。
+# Hide a friend: a friend hidden in this viewer only (People › Hidden)
+hidefriend-hide = Hide this friend
+hidefriend-hide-tip = Hides this friend in this viewer only: they stay your friend and are not told. Their messages, calls and offers still arrive.
+hidefriend-unhide = Un-hide this friend
+hidefriend-unhide-short = Un-hide
+hidefriend-tab = Hidden
+hidefriend-list-hint = Friends hidden in this viewer only. They stay your friends and are not told; their messages, calls and offers still arrive.
+hidefriend-list-empty = No friend is hidden.
+hidefriend-row-sub = Hidden friend
+hidefriend-show-greyed = Show them greyed in Friends
+hidefriend-show-greyed-tip = Lists the hidden friends, greyed, under your friends, for this session only. They stay hidden everywhere else.
+hidefriend-section = Hidden ({ $count })
+hidefriend-status = Hidden friend

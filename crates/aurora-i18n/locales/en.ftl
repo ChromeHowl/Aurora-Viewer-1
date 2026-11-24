@@ -16319,3 +16319,16 @@ phototools-director-lens = The Director's lens is shown while its window is open
 phototools-view-angle-viewfinder = The viewfinder owns the view angle: yours comes back when it closes.
 ui-options-dof-show-focus-point = Show focus point
 ui-options-dof-show-focus-point-help = A small crosshair on the point the lens focuses on: yellow when it is free, red when it is locked.
+# Hide a friend: a friend hidden in this viewer only (People › Hidden)
+hidefriend-hide = Hide this friend
+hidefriend-hide-tip = Hides this friend in this viewer only: they stay your friend and are not told. Their messages, calls and offers still arrive.
+hidefriend-unhide = Un-hide this friend
+hidefriend-unhide-short = Un-hide
+hidefriend-tab = Hidden
+hidefriend-list-hint = Friends hidden in this viewer only. They stay your friends and are not told; their messages, calls and offers still arrive.
+hidefriend-list-empty = No friend is hidden.
+hidefriend-row-sub = Hidden friend
+hidefriend-show-greyed = Show them greyed in Friends
+hidefriend-show-greyed-tip = Lists the hidden friends, greyed, under your friends, for this session only. They stay hidden everywhere else.
+hidefriend-section = Hidden ({ $count })
+hidefriend-status = Hidden friend

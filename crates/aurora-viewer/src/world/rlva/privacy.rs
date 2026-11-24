@@ -501,7 +501,7 @@ impl World {
         if line.speaker == Speaker::Hidden {
             &PLAIN_APPEARANCE
         } else {
-            self.contact_sets.appearance(&line.source)
+            self.contact_appearance(&line.source)
         }
     }
 
@@ -511,7 +511,7 @@ impl World {
     /// The settings windows that edit the sets read `contact_sets` itself.
     pub fn rlva_contact_appearance(&self, id: &Uuid) -> &std::sync::Arc<Appearance> {
         if self.rlva_can_name(*id) {
-            self.contact_sets.appearance(id)
+            self.contact_appearance(id)
         } else {
             &PLAIN_APPEARANCE
         }
@@ -522,7 +522,7 @@ impl World {
     /// LLVOAvatar::idleUpdateNameTagText, llvoavatar.cpp; the same test in
     /// LGGContactSets::colorize for the chat, the tags and the mini-map).
     pub fn rlva_shown_friend(&self, id: &Uuid) -> bool {
-        self.rlva_can_name(*id) && self.social.is_friend(id)
+        self.rlva_can_name(*id) && self.social.is_friend_shown(id)
     }
 
     /// The mark of a resident (`world::avatar_marks`) as the maps and the

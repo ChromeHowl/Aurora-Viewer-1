@@ -93,8 +93,9 @@ fn is_linden_avatar(world: &World, id: &Uuid, name: &str) -> bool {
     }
 }
 
+/// A friend shown as one: a hidden friend takes the others' colours.
 fn is_friend(world: &World, id: &Uuid) -> bool {
-    world.social.friends.iter().any(|f| f.id == *id)
+    world.social.is_friend_shown(id)
 }
 
 /// Who a resident is to us, as far as a colour may tell it.

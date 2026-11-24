@@ -201,7 +201,7 @@ impl ConversationLogUi {
     fn sorted(world: &World, signature: Signature) -> Cache {
         let list = &world.chat_log.conversations.list;
         let names: Vec<String> = list.iter().map(|c| world.conversation_display_name(c)).collect();
-        let friends: HashSet<Uuid> = world.social.friends.iter().map(|f| f.id).collect();
+        let friends: HashSet<Uuid> = world.social.shown_friends().map(|f| f.id).collect();
         let blocked: HashSet<Uuid> = list
             .iter()
             .map(|c| c.participant)
@@ -342,7 +342,7 @@ impl ConversationLogUi {
 fn social_signature(world: &World, list: &[Conversation]) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hash = std::collections::hash_map::DefaultHasher::new();
-    world.social.friends.iter().for_each(|f| f.id.hash(&mut hash));
+    world.social.shown_friends().for_each(|f| f.id.hash(&mut hash));
     for c in list {
         if !c.participant.is_nil() {
             (world.is_avatar_blocked(&c.participant), world.rlva_can_name(c.participant)).hash(&mut hash);

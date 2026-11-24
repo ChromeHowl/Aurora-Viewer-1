@@ -369,7 +369,9 @@ impl App {
                 f.name_hidden = !w.rlva_can_name(*id);
                 f.names_hidden = w.rlva.has("shownames");
                 f.pay_blocked = !crate::ui::context::can_pay_resident(w) || !w.rlva_can_name(*id);
-                f.friend = w.social.friends.iter().any(|fr| fr.id == *id);
+                // the friendship itself: no offer to a hidden friend
+                f.friend = w.social.is_friend(id);
+                f.friend_hidden = w.social.is_friend_hidden(id);
                 f.voice_volume = crate::ui::context::voice_volume_of(w, *id);
                 f.worn = !super::inspect::worn_roots(w, id).is_empty();
                 f.moderation = self.moderation_rights(*id);
@@ -1123,6 +1125,12 @@ impl App {
             }
             CtxAction::AddFriend(id) => self.contacts_ui.ask_friendship(id),
             CtxAction::RemoveFriend(id) => self.contacts_ui.ask_remove_friend(id),
+            CtxAction::HideFriend(id) => {
+                self.world.hide_friend(id);
+            }
+            CtxAction::UnhideFriend(id) => {
+                self.world.unhide_friend(id);
+            }
             CtxAction::RemoveFriends(ids) => self.contacts_ui.ask_remove_friends(ids),
             CtxAction::Conference(ids) => {
                 self.world.start_text_conference(ids);

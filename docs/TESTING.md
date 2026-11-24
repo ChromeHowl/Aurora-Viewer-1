@@ -10090,7 +10090,7 @@ Human grid validation: remember MFA for account A and B, restart the viewer, the
   stay in place. Cancellation and invalid files leave the current contacts intact.
 
 - **`AURORA_DEMO_PEOPLE_FILTER=<text>`**: combine with a People scenario to prefill its search. With `rows` or `legacy`, `tesstouch` and `tesstouch Resident` must find the resident displayed as `Tess ✧`; `TESS` must find the same resident. An empty filter restores all rows; unrelated text shows no matches. This deliberately searches display, legacy and account names regardless of the chosen name format, while retaining contact aliases and RLVa anonymity.
-- **`AURORA_DEMO_PEOPLE=rows|crowd|sheet|legacy|friends|groups|sets|recent|blocked|blocked-empty`**: People › Near you in
+- **`AURORA_DEMO_PEOPLE=rows|crowd|sheet|legacy|friends|groups|sets|recent|blocked|blocked-empty|hidden`**: People › Near you in
   Aurora's look, with the residents of the People mock-up (names, ranges,
   states, arrivals), alone on screen. `rows`: the rich rows grouped by
   range (whisper 10 m, say 20 m, shout 100 m, beyond), Tess selected with
@@ -10134,7 +10134,11 @@ Human grid validation: remember MFA for account A and B, restart the viewer, the
   for its sounds); `blocked-empty` opens the same tab for a resident who
   blocks nobody: the demo server answers the request with the
   `emptymutelist` generic message, and the tab shows an empty list with no
-  "loading" nor "server did not respond" line. Each tab keeps its menu of several people (Ctrl /
+  "loading" nor "server did not respond" line; `hidden` (420 × 300) opens
+  People › Hidden with two friends of the demo list hidden in this viewer
+  (a list of the run only), the first one under the pointer with
+  "Un-hide" out; the switch "Show them greyed in Friends" lists them,
+  greyed, under the friends. Each tab keeps its menu of several people (Ctrl /
   Shift) and its sheet; a window too narrow for the six tabs shows the
   ones around the open tab beside "…".
   Append `:<width>` for a responsive check, for example `hover:300`,

@@ -110,8 +110,7 @@ impl AvatarPicker {
                 TAB_FRIENDS => {
                     let mut v: Vec<_> = world
                         .social
-                        .friends
-                        .iter()
+                        .shown_friends()
                         // (LLFloaterAvatarPicker has an RLVa test on its
                         // "near me" tab alone: a list of people known
                         // besides the world, `NameScope::Roster`)

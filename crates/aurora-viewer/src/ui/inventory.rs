@@ -395,8 +395,7 @@ impl Facts {
             pictures: Default::default(),
             online: world
                 .social
-                .friends
-                .iter()
+                .shown_friends()
                 .filter(|friend| friend.online)
                 .map(|friend| friend.id)
                 .collect(),

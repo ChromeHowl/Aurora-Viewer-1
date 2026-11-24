@@ -18,7 +18,9 @@
 //! (Family, Clubbing and Shop, a nickname and a non-friend, a row under the
 //! pointer), `recent` (four residents met lately) and `blocked` (a resident
 //! blocked in full, one for voice and text, an object for its sounds;
-//! `blocked-empty`: nobody blocked, the server's "emptymutelist" answer).
+//! `blocked-empty`: nobody blocked, the server's "emptymutelist" answer);
+//! `hidden`: two friends of the demo list hidden in this viewer, the first
+//! one under the pointer.
 
 use super::{DEMO_LOUP, HANDLE, IDLE_ANIM, floor_at, prim, shape, te};
 use crate::world::radar::{ANIM_AGENT_SIT_GROUND, ANIM_AGENT_TYPE};
@@ -45,6 +47,8 @@ pub enum Mode {
     Sets,
     Recent,
     Blocked,
+    /// People › Hidden: friends hidden in this viewer.
+    Hidden,
 }
 
 pub fn mode() -> Option<Mode> {
@@ -62,6 +66,7 @@ pub fn mode() -> Option<Mode> {
             "sets" | "sets-import" | "cercles" | "visuals" | "visuals-stack" | "visuals-legacy" => Some(Mode::Sets),
             "recent" | "récent" => Some(Mode::Recent),
             "blocked" | "bloqué" | "blocked-empty" => Some(Mode::Blocked),
+            "hidden" => Some(Mode::Hidden),
             name if name.starts_with("sets-") => Some(Mode::Sets),
             _ => Some(Mode::Rows),
         }
@@ -126,19 +131,20 @@ fn width_override() -> Option<f32> {
 fn contacts_mode() -> bool {
     matches!(
         mode(),
-        Some(Mode::Friends | Mode::Groups | Mode::Sets | Mode::Recent | Mode::Blocked)
+        Some(Mode::Friends | Mode::Groups | Mode::Sets | Mode::Recent | Mode::Blocked | Mode::Hidden)
     )
 }
 
 /// The tab People opens on (ui::people::TAB_*).
 pub fn tab() -> u8 {
-    use crate::ui::people::{TAB_BLOCKED, TAB_FRIENDS, TAB_GROUPS, TAB_NEARBY, TAB_RECENT, TAB_SETS};
+    use crate::ui::people::{TAB_BLOCKED, TAB_FRIENDS, TAB_GROUPS, TAB_HIDDEN, TAB_NEARBY, TAB_RECENT, TAB_SETS};
     match mode() {
         Some(Mode::Friends) => TAB_FRIENDS,
         Some(Mode::Groups) => TAB_GROUPS,
         Some(Mode::Sets) => TAB_SETS,
         Some(Mode::Recent) => TAB_RECENT,
         Some(Mode::Blocked) => TAB_BLOCKED,
+        Some(Mode::Hidden) => TAB_HIDDEN,
         _ => TAB_NEARBY,
     }
 }
@@ -152,7 +158,7 @@ pub fn window_size() -> Option<(f32, f32)> {
         Mode::Sheet | Mode::Friends => Some((860.0, 600.0)),
         Mode::Groups => Some((860.0, 500.0)),
         Mode::Sets => Some((560.0, 640.0)),
-        Mode::Recent | Mode::Blocked => Some((420.0, 300.0)),
+        Mode::Recent | Mode::Blocked | Mode::Hidden => Some((420.0, 300.0)),
         _ => None,
     }
 }
@@ -358,6 +364,13 @@ pub fn seed(world: &mut crate::world::World) {
     ] {
         let when = now - std::time::Duration::from_secs(minutes * 60);
         world.recent.add(world.agent_id, who, false, region, when);
+    }
+    if mode() == Some(Mode::Hidden) {
+        // a list of the run only: nothing is written to the account's file
+        world.social.hidden = Default::default();
+        for friend in [NOVA, buddy(101)] {
+            world.hide_friend(friend);
+        }
     }
 }
 
@@ -648,6 +661,7 @@ pub fn hovered() -> Option<Uuid> {
         Mode::CrowdHover => Some(id(100)),
         Mode::Sets => Some(NOVA),
         Mode::Blocked => Some(ZED),
+        Mode::Hidden => Some(NOVA),
         Mode::Groups => groups_hover(),
         _ => None,
     }

@@ -102,7 +102,7 @@ fn row(ui: &mut egui::Ui, c: &mut Ctx, data: &super::RadarData, st: &mut PeopleU
     let hot = (ui.rect_contains_pointer(rect) && !resp.dragged()) || st.row_menu == Some(id) || st.demo_hover == Some(id);
     rows::face(ui, p, rect, selected, hot);
     let left = rows::picture(ui, p, world, NameScope::Roster, rect, data.pics.get(&id), id, name, false);
-    let friend = world.social.is_friend(&id);
+    let friend = world.social.is_friend_shown(&id);
     // Near you's quick actions: profile, IM, a friendship offer, the menu
     let buttons: Option<Vec<(&str, &str)>> = hot.then(|| {
         let mut b = vec![
@@ -111,7 +111,8 @@ fn row(ui: &mut egui::Ui, c: &mut Ctx, data: &super::RadarData, st: &mut PeopleU
         ];
         // LLPanelPeople::updateButtons (llpanelpeople.cpp): no friendship
         // offer from this list to a resident `@shownames` hides
-        if !friend && world.rlva_can_name(id) {
+        // (no offer to a hidden friend: still a friend for the server)
+        if !friend && !world.social.is_friend_hidden(&id) && world.rlva_can_name(id) {
             b.push(("user-plus", aurora_i18n::tr!("radar-add-friend")));
         }
         b.push(("dots-filled", aurora_i18n::tr!("ui-chat-more")));

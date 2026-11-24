@@ -15619,3 +15619,16 @@ game-control-action-boom-down = 相机下移 ↓
 game-control-action-escape = Esc
 picker-local-newest = 最新优先
 picker-local-name = 名称 A–Z
+# Hide a friend: a friend hidden in this viewer only (People › Hidden)
+hidefriend-hide = Hide this friend
+hidefriend-hide-tip = Hides this friend in this viewer only: they stay your friend and are not told. Their messages, calls and offers still arrive.
+hidefriend-unhide = Un-hide this friend
+hidefriend-unhide-short = Un-hide
+hidefriend-tab = Hidden
+hidefriend-list-hint = Friends hidden in this viewer only. They stay your friends and are not told; their messages, calls and offers still arrive.
+hidefriend-list-empty = No friend is hidden.
+hidefriend-row-sub = Hidden friend
+hidefriend-show-greyed = Show them greyed in Friends
+hidefriend-show-greyed-tip = Lists the hidden friends, greyed, under your friends, for this session only. They stay hidden everywhere else.
+hidefriend-section = Hidden ({ $count })
+hidefriend-status = Hidden friend

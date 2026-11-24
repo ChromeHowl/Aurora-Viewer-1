@@ -112,11 +112,8 @@ impl QuickSort {
 
 /// The friends in no set, online first, then by name.
 fn queue(world: &World) -> Vec<Uuid> {
-    let friends: Vec<Uuid> = world.social.friends.iter().map(|f| f.id).collect();
-    let mut ids = world
-        .contact_sets
-        .members(contact_sets::NO_SETS, &friends, |id| world.social.is_friend(id));
-    let online = |id: &Uuid| world.social.friends.iter().any(|f| f.id == *id && f.online);
+    let mut ids = world.contact_set_members(contact_sets::NO_SETS);
+    let online = |id: &Uuid| world.social.shown_friend(id).is_some_and(|f| f.online);
     ids.sort_by_cached_key(|id| (!online(id), crate::natural_order::key(&world.social.name_in(NameScope::Roster, id))));
     ids
 }
@@ -308,7 +305,7 @@ fn current(
     let id = qs.current()?;
     let mut new_set = None;
     let name = world.social.name_in(NameScope::Roster, &id);
-    let online = world.social.friends.iter().any(|f| f.id == id && f.online);
+    let online = world.social.shown_friend(&id).is_some_and(|f| f.online);
     ui.spacing_mut().item_spacing.y = 0.0;
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 18.0;
