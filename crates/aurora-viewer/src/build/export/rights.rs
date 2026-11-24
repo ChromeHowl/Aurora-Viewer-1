@@ -579,7 +579,10 @@ mod tests {
             let mut mega = facts(MEGAPRIM_CREATOR, OTHER, Shape::Prim);
             mega.scale = Vec3::splat(1000.0);
             assert!(!backup(grid, mega));
-            assert!(!backup(grid, facts(ME, ME, Shape::Mesh { creator: Some(ME) })), "a mesh is never in a backup");
+            assert!(
+                !backup(grid, facts(ME, ME, Shape::Mesh { creator: Some(ME) })),
+                "a mesh is never in a backup"
+            );
         }
         let nobody = Context::new(Uuid::nil(), SL, 64.0, &inv, &HashSet::new());
         assert!(!backup_prim(&nobody, &facts(Uuid::nil(), Uuid::nil(), Shape::Prim)));
@@ -596,7 +599,10 @@ mod tests {
             let cx = cx(grid, &inv);
             let sculpt = |map, uploader| facts(ME, ME, Shape::Sculpt { map, uploader });
             assert!(backup_prim(&cx, &sculpt(MAP, None)));
-            assert!(!backup_prim(&cx, &sculpt(Uuid::from_u128(0x5D), None)), "an item made by someone else");
+            assert!(
+                !backup_prim(&cx, &sculpt(Uuid::from_u128(0x5D), None)),
+                "an item made by someone else"
+            );
             assert!(!backup_prim(&cx, &sculpt(Uuid::from_u128(0x5E), None)), "a Library item");
             assert!(backup_prim(&cx, &sculpt(Uuid::from_u128(0x77), Some(ME))), "its comment names us");
             assert!(!backup_prim(&cx, &sculpt(Uuid::from_u128(0x77), Some(OTHER))));

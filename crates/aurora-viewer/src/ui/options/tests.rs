@@ -844,7 +844,10 @@ fn the_radar_reports_are_in_the_chat_preferences_and_off_by_default() {
         "radar.toasts",
         "radar.track_clear_close_in",
     ] {
-        assert!(paths.iter().any(|(page, p)| *page == Page::Chat && p == path), "{path} on the Chat page");
+        assert!(
+            paths.iter().any(|(page, p)| *page == Page::Chat && p == path),
+            "{path} on the Chat page"
+        );
     }
 }
 

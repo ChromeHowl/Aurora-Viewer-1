@@ -669,7 +669,9 @@ impl App {
                 }
             })
             .collect();
-        let author = Some(self.world.own_name()).filter(|n| !n.is_empty()).unwrap_or_else(|| "Unknown".into());
+        let author = Some(self.world.own_name())
+            .filter(|n| !n.is_empty())
+            .unwrap_or_else(|| "Unknown".into());
         let meta = oxp::Meta {
             client: format!("Aurora Viewer {}", aurora_version::version()),
             date: chrono::Utc::now().format("%Y-%m-%d").to_string(),

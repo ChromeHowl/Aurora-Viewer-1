@@ -629,7 +629,7 @@ pub fn teleport_overlay(
 /// foot of the world. True when Cancel is pressed.
 pub fn mini_progress(ctx: &egui::Context, p: &Palette, text: &str, fraction: f32, cancel: bool) -> bool {
     let mut pressed = false;
-    egui::Area::new(egui::Id::new("progress_mini"))
+    egui::Area::new(egui::Id::unique("progress_mini"))
         .order(egui::Order::Foreground)
         .anchor(egui::Align2::CENTER_BOTTOM, Vec2::new(0.0, -96.0))
         .show(ctx, |ui| {

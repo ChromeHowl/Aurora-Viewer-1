@@ -19,8 +19,8 @@ pub mod registry;
 pub mod shadow_realm;
 pub mod status_share;
 pub mod stream_list;
-pub mod text_tuning;
 pub mod teleport;
+pub mod text_tuning;
 
 /// Where a contact-set marker stands on an avatar (`ui/contact_markers.rs`).
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]

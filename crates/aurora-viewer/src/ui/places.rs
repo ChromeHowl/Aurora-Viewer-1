@@ -108,7 +108,10 @@ pub enum PlacesAction {
     HistoryZone(HistoryZone),
     /// The history's position and date columns, from its gear menu
     /// (FSTeleportHistoryShowPosition, FSTeleportHistoryShowDate).
-    HistoryColumns { position: bool, date: bool },
+    HistoryColumns {
+        position: bool,
+        date: bool,
+    },
 }
 
 /// One line of a landmarks tab.
@@ -299,16 +302,10 @@ fn history_zone_menu(ui: &mut egui::Ui, p: &Palette, zone: HistoryZone, actions:
 fn history_show_menu(ui: &mut egui::Ui, p: &Palette, position: bool, date: bool, actions: &mut Vec<PlacesAction>) {
     super::menu::submenu(ui, p, "eye-filled", aurora_i18n::tr!("tpmap-show"), true, |ui| {
         if super::menu::check(ui, p, "map-pin-filled", aurora_i18n::tr!("tpmap-show-position"), position, true) {
-            actions.push(PlacesAction::HistoryColumns {
-                position: !position,
-                date,
-            });
+            actions.push(PlacesAction::HistoryColumns { position: !position, date });
         }
         if super::menu::check(ui, p, "clock-filled", aurora_i18n::tr!("tpmap-show-date"), date, true) {
-            actions.push(PlacesAction::HistoryColumns {
-                position,
-                date: !date,
-            });
+            actions.push(PlacesAction::HistoryColumns { position, date: !date });
         }
     });
 }
@@ -1443,10 +1440,7 @@ fn list_row(
         let galley = painter.layout_no_wrap(n.figure(), egui::FontId::proportional(11.5), p.muted);
         let icon = 13.0;
         let width = galley.size().x + icon + 2.0;
-        let slot = egui::Rect::from_min_size(
-            egui::pos2(right - width, rect.center().y - 8.0),
-            Vec2::new(width, 16.0),
-        );
+        let slot = egui::Rect::from_min_size(egui::pos2(right - width, rect.center().y - 8.0), Vec2::new(width, 16.0));
         // the name keeps at least a third of the row
         if slot.left() > x + (right - x) / 3.0 {
             painter.galley(egui::pos2(slot.left(), rect.center().y - galley.size().y * 0.5), galley, p.muted);

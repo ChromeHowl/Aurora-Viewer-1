@@ -419,31 +419,6 @@ fn linkset_prims(w: &crate::world::World, root: usize) -> Vec<usize> {
         .collect()
 }
 
-/// The resident who owns a prim as its row names them, and whose profile
-/// "See Owner Profile" opens. Under RLVa's `@shownames` the owner is their
-/// stand-in and the button is off (LLFloaterInspect::refresh,
-/// onSelectObject and onClickOwnerProfile, indra/newview/llfloaterinspect.cpp).
-fn owner_shown(world: &crate::world::World, owner: Uuid) -> (String, Option<Uuid>) {
-    let scope = NameScope::Owner;
-    (
-        world.social.name_in(scope, &owner),
-        world.rlva_shows_name(scope, owner).then_some(owner),
-    )
-}
-
-/// `owner_shown` for the creator of a prim `owner` owns. The same sources:
-/// the creator is hidden only when they also own the object or stand
-/// around, and "See Creator Profile" follows the name, so it opens the
-/// profile of a creator the world hides (`button creator` is enabled by
-/// `(idOwner != idCreator && !isNearbyAgent(idCreator)) || canShowName`).
-fn creator_shown(world: &crate::world::World, owner: Uuid, creator: Uuid) -> (String, Option<Uuid>) {
-    let scope = NameScope::Creator { owner };
-    (
-        world.social.name_in(scope, &creator),
-        world.rlva_shows_name(scope, creator).then_some(creator),
-    )
-}
-
 /// The root prims of what avatar `id` wears, as the world has them.
 pub(super) fn worn_roots(world: &crate::world::World, id: &Uuid) -> Vec<Uuid> {
     let Some(avatar) = world.objects.index_of_uuid(id).and_then(|i| world.objects.get(i)) else {

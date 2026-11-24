@@ -418,7 +418,8 @@ impl WorldMapUi {
                     );
                 }
                 if region_info {
-                    let n: i32 = world.map.agents.get(key).map(|v| v.iter().map(|a| a.2).sum()).unwrap_or(0) + i32::from(my_sim == Some(*key));
+                    let n: i32 =
+                        world.map.agents.get(key).map(|v| v.iter().map(|a| a.2).sum()).unwrap_or(0) + i32::from(my_sim == Some(*key));
                     let second = if s.is_down() || n == 0 {
                         format!("({})", s.access_label())
                     } else {

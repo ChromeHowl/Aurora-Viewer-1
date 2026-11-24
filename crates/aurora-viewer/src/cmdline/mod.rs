@@ -600,9 +600,18 @@ mod tests {
 
     #[test]
     fn inventory_commands_are_recognised() {
-        assert!(matches!(cmd("zdrop"), Some(Command::Take(take::TakeCommand::Help(take::Verb::Zdrop)))));
-        assert!(matches!(cmd("ztake off"), Some(Command::Take(take::TakeCommand::Off(take::Verb::Ztake)))));
-        assert!(matches!(cmd("kcopy Box"), Some(Command::Take(take::TakeCommand::Packager { copy: true, .. }))));
+        assert!(matches!(
+            cmd("zdrop"),
+            Some(Command::Take(take::TakeCommand::Help(take::Verb::Zdrop)))
+        ));
+        assert!(matches!(
+            cmd("ztake off"),
+            Some(Command::Take(take::TakeCommand::Off(take::Verb::Ztake)))
+        ));
+        assert!(matches!(
+            cmd("kcopy Box"),
+            Some(Command::Take(take::TakeCommand::Packager { copy: true, .. }))
+        ));
         let off = ChatCommandSettings {
             enabled: false,
             ..Default::default()

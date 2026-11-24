@@ -539,7 +539,11 @@ pub fn draw(
     // objects for a few dozen of these
     for (idx, o) in world.objects.avatars().chain(world.objects.texted()) {
         // the animation editor's mirror of us has no name tag
-        if !world.parcel_object_visible(idx) || !crate::snapshot::isolate::object_visible(world, idx) || world.is_mirror(&o.full_id) || world.shadow_hides_index(idx) {
+        if !world.parcel_object_visible(idx)
+            || !crate::snapshot::isolate::object_visible(world, idx)
+            || world.is_mirror(&o.full_id)
+            || world.shadow_hides_index(idx)
+        {
             continue;
         }
         if !o.is_avatar() && !world.rlva.hover_visible(o.full_id, scene.gpu.get(idx).is_some_and(|g| g.hud)) {

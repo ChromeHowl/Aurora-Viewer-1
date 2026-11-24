@@ -194,7 +194,7 @@ impl ExportWindow {
                         if gltf {
                             row.response.on_hover_text(aurora_i18n::tr!("object-export-gltf-png"));
                         }
-                        }
+                    }
                     if textures && (settings.textures || backup) {
                         ui.add_space(8.0);
                         section(ui, p, aurora_i18n::tr!("object-export-texture-list"));

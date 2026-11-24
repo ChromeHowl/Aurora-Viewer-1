@@ -1014,7 +1014,12 @@ mod tests {
             rights_given: 0,
             rights_has: 0,
         };
-        let icons = |online| quick_actions(&friend(online), None).iter().map(|(icon, _)| *icon).collect::<Vec<_>>();
+        let icons = |online| {
+            quick_actions(&friend(online), None)
+                .iter()
+                .map(|(icon, _)| *icon)
+                .collect::<Vec<_>>()
+        };
         for icon in ["send-filled", "car-filled"] {
             assert!(icons(true).contains(&icon), "{icon} online");
             assert!(!icons(false).contains(&icon), "{icon} offline");
@@ -1022,7 +1027,10 @@ mod tests {
         assert_eq!(quick_actions(&friend(true), None).len(), action_count(&friend(true), false));
         assert_eq!(quick_actions(&friend(false), None).len(), action_count(&friend(false), false));
         // a poke goes to a friend online, after the IM
-        let poke = crate::ui::poke::Button { enabled: true, tip: "Poke" };
+        let poke = crate::ui::poke::Button {
+            enabled: true,
+            tip: "Poke",
+        };
         assert_eq!(quick_actions(&friend(true), Some(&poke)).len(), action_count(&friend(true), true));
         assert_eq!(quick_actions(&friend(true), Some(&poke))[2].0, crate::ui::poke::ICON);
     }

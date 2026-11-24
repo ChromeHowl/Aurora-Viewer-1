@@ -175,8 +175,8 @@ pub mod wearable;
 pub mod weather_window;
 pub mod web_browser;
 pub mod web_view;
-pub mod window_size;
 pub mod widgets;
+pub mod window_size;
 
 #[cfg(test)]
 mod uri_restore_tests;

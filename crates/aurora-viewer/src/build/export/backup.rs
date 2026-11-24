@@ -121,7 +121,11 @@ pub fn inputs(world: &World, keys: &[ObjKey], props: &dyn Fn(Uuid) -> Option<Obj
                 material: o.prim_material,
                 click_action: o.click_action,
                 flags: o.update_flags,
-                attachment_point: if root.is_none_or(|r| r == o.full_id) { o.attachment_point() } else { 0 },
+                attachment_point: if root.is_none_or(|r| r == o.full_id) {
+                    o.attachment_point()
+                } else {
+                    0
+                },
                 position: o.position,
                 rotation: o.rotation,
                 scale: o.scale,
@@ -277,14 +281,14 @@ fn apply_textures(prim: &mut PrimInput, texture_ok: &dyn Fn(Uuid) -> bool, out: 
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::oxp;
+    use super::*;
     use crate::world::inventory::Inventory;
     use crate::world::inventory::actions::{COPY, ExportGrid, FULL, MODIFY};
+    use aurora_llsd::Llsd;
     use aurora_net::inventory::InvItem;
     use aurora_prim::params::{LL_SCULPT_TYPE_MESH, SculptParams};
     use aurora_prim::particles::{LL_PART_EMISSIVE_MASK, LL_PART_SRC_PATTERN_EXPLODE};
-    use aurora_llsd::Llsd;
     use std::collections::HashSet;
 
     const ME: Uuid = Uuid::from_u128(2);
@@ -400,17 +404,18 @@ mod tests {
         assert_eq!(plan.replaced_faces, 2);
         assert_eq!(plan.linksets[0][0].te.faces[1].texture, DEFAULT_TEXTURE);
         assert_eq!(plan.linksets[0][1].te.faces[0].texture, DEFAULT_TEXTURE);
-        assert!(plan.linksets[0].iter().flat_map(|p| &p.te.faces).all(|f| f.texture != THEIR_TEXTURE));
+        assert!(
+            plan.linksets[0]
+                .iter()
+                .flat_map(|p| &p.te.faces)
+                .all(|f| f.texture != THEIR_TEXTURE)
+        );
     }
 
     #[test]
     fn a_refused_root_refuses_the_whole_linkset() {
         let inv = inventory();
-        let plan = plan_of(
-            &inv,
-            vec![prim(500, OTHER, FULL, &[]), prim(501, ME, FULL, &[])],
-            &HashMap::new(),
-        );
+        let plan = plan_of(&inv, vec![prim(500, OTHER, FULL, &[]), prim(501, ME, FULL, &[])], &HashMap::new());
         assert!(plan.linksets.is_empty());
         assert_eq!(plan.left_out, 2);
         // properties that never came count as not ours
@@ -446,7 +451,10 @@ mod tests {
         assert_eq!(plan.prims(), 2);
         // a comment naming someone else does not
         let theirs = HashMap::from([(unknown, Some(OTHER))]);
-        assert_eq!(plan_of(&inv, vec![prim(500, ME, FULL, &[]), sculpted(501, unknown)], &theirs).prims(), 1);
+        assert_eq!(
+            plan_of(&inv, vec![prim(500, ME, FULL, &[]), sculpted(501, unknown)], &theirs).prims(),
+            1
+        );
     }
 
     #[test]
@@ -457,10 +465,20 @@ mod tests {
         b.parent = Some(other_root);
         let mut root_b = prim(600, ME, FULL, &[]);
         root_b.parent = None;
-        let plan = plan_of(&inv, vec![prim(500, ME, FULL, &[]), b, root_b, prim(501, ME, FULL, &[])], &HashMap::new());
+        let plan = plan_of(
+            &inv,
+            vec![prim(500, ME, FULL, &[]), b, root_b, prim(501, ME, FULL, &[])],
+            &HashMap::new(),
+        );
         assert_eq!(plan.linksets.len(), 2);
-        assert_eq!(plan.linksets[0].iter().map(|p| p.id).collect::<Vec<_>>(), [500, 501].map(Uuid::from_u128));
-        assert_eq!(plan.linksets[1].iter().map(|p| p.id).collect::<Vec<_>>(), [600, 601].map(Uuid::from_u128));
+        assert_eq!(
+            plan.linksets[0].iter().map(|p| p.id).collect::<Vec<_>>(),
+            [500, 501].map(Uuid::from_u128)
+        );
+        assert_eq!(
+            plan.linksets[1].iter().map(|p| p.id).collect::<Vec<_>>(),
+            [600, 601].map(Uuid::from_u128)
+        );
     }
 
     #[test]
@@ -536,7 +554,11 @@ mod tests {
         let child = &manifest["prim"][Uuid::from_u128(501).to_string().as_str()]["particle"];
         assert_eq!(child["PartImageID"].to_string_value(), Uuid::nil().to_string());
         // the sculpt's map id is written with the prim, since the rule let it pass
-        let manifest = oxp::manifest(&plan_of(&inv, vec![prim(500, ME, FULL, &[]), sculpted(501, MY_TEXTURE)], &HashMap::new()), &[], &meta());
+        let manifest = oxp::manifest(
+            &plan_of(&inv, vec![prim(500, ME, FULL, &[]), sculpted(501, MY_TEXTURE)], &HashMap::new()),
+            &[],
+            &meta(),
+        );
         assert_eq!(
             manifest["prim"][Uuid::from_u128(501).to_string().as_str()]["sculpt"]["texture"].as_uuid(),
             MY_TEXTURE
