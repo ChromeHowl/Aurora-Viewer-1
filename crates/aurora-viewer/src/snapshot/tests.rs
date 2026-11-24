@@ -872,3 +872,25 @@ fn a_photo_waits_while_the_drawing_is_paused_then_starts_over_once_the_textures_
     );
     assert_eq!(w.next(at(700) + quality::DETAIL_WAIT, false, 5, 9), PausedPart::Draw);
 }
+
+#[test]
+fn a_worker_that_ended_is_told_from_one_still_working() {
+    let (tx, rx) = crossbeam_channel::unbounded::<u32>();
+    assert_eq!(drain(&rx), (Vec::new(), false), "nothing yet, the worker still runs");
+    tx.send(1).expect("open channel");
+    tx.send(2).expect("open channel");
+    assert_eq!(drain(&rx), (vec![1, 2], false));
+    tx.send(3).expect("open channel");
+    drop(tx);
+    assert_eq!(drain(&rx), (vec![3], true), "its last messages, then gone");
+}
+
+#[test]
+fn the_gpu_time_of_a_photo_is_estimated_once_a_frame_was_timed() {
+    let mut cost = GpuCost::default();
+    assert_eq!(cost.estimate(10_000_000), None);
+    cost.note(Some(10.0), 2_000_000);
+    // 5 ns a pixel: 10 Mpx take 50 ms
+    let e = cost.estimate(10_000_000).expect("measured");
+    assert!((e.as_secs_f32() - 0.05).abs() < 1e-4, "{e:?}");
+}
