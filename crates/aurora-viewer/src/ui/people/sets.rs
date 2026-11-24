@@ -85,14 +85,12 @@ pub(super) struct Members {
 /// column counts its members each frame, and a scan of the friends per
 /// member would grow with members × friends.
 fn online_friends(world: &World) -> HashSet<Uuid> {
-    world.social.friends.iter().filter(|f| f.online).map(|f| f.id).collect()
+    world.social.shown_friends().filter(|f| f.online).map(|f| f.id).collect()
 }
 
 /// The members of `set` (generateAvatarList) and how many are online.
 pub(super) fn members(world: &World, set: &str) -> Members {
-    let friends: HashSet<Uuid> = world.social.friends.iter().map(|f| f.id).collect();
-    let list: Vec<Uuid> = world.social.friends.iter().map(|f| f.id).collect();
-    let ids = world.contact_sets.members(set, &list, |id| friends.contains(id));
+    let ids = world.contact_set_members(set);
     let on = online_friends(world);
     let online = ids.iter().filter(|id| on.contains(id)).count();
     Members { ids, online }
@@ -413,7 +411,7 @@ fn row(ui: &mut egui::Ui, c: &mut Ctx, data: &super::RadarData, st: &mut PeopleU
         color,
         &second_line(world, &id),
         &chips,
-        world.social.is_friend(&id),
+        world.social.is_friend_shown(&id),
         crate::world::staff::mark(world, &id),
     );
     let action = rows::select(ui, &resp, &mut st.sel, &mut st.anchor, order, id);
@@ -463,7 +461,7 @@ fn member_content_width(
         .layout_no_wrap(name.to_owned(), rows::semibold(ui, 13.0, p.ink).font_id, p.ink)
         .size()
         .x;
-    let heart = if world.social.is_friend(id) { 6.0 + 12.0 } else { 0.0 };
+    let heart = if world.social.is_friend_shown(id) { 6.0 + 12.0 } else { 0.0 };
     let staff = crate::ui::staff::width(ui, p, crate::world::staff::mark(world, id), 13.0);
     let staff = if staff > 0.0 { staff + 6.0 } else { 0.0 };
     let second_w = ui
@@ -549,7 +547,7 @@ fn carried_card(ui: &mut egui::Ui, c: &Ctx, data: &super::RadarData, st: &People
         color,
         &second,
         &chips,
-        world.social.is_friend(&id),
+        world.social.is_friend_shown(&id),
         crate::world::staff::mark(world, &id),
     );
     // the others chosen go along: their number on the card's corner
@@ -618,7 +616,7 @@ fn hover_actions(ui: &mut egui::Ui, c: &mut Ctx, st: &mut PeopleUi, set: &str, i
         match *icon {
             "circle-minus" if resp.clicked() => c.contacts.ask_remove_from_set(set, targets(st, id)),
             "dots-filled" => {
-                let kind = if world.social.is_friend(&id) {
+                let kind = if world.social.is_friend_shown(&id) {
                     AvatarList::Friend
                 } else {
                     AvatarList::Name

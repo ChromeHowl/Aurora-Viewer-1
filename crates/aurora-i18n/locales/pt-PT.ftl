@@ -16062,3 +16062,16 @@ ui-options-radar-as-toasts = Show as notifications
 ui-options-radar-as-toasts-hint = A notification instead of a line of nearby chat. The same setting as the radar's Report to menu.
 ui-options-radar-track-close-in = Stop tracking within 3 m
 ui-options-radar-track-close-in-hint = The beacon of a resident tracked from the radar goes away once you reach them.
+# Hide a friend: a friend hidden in this viewer only (People › Hidden)
+hidefriend-hide = Hide this friend
+hidefriend-hide-tip = Hides this friend in this viewer only: they stay your friend and are not told. Their messages, calls and offers still arrive.
+hidefriend-unhide = Un-hide this friend
+hidefriend-unhide-short = Un-hide
+hidefriend-tab = Hidden
+hidefriend-list-hint = Friends hidden in this viewer only. They stay your friends and are not told; their messages, calls and offers still arrive.
+hidefriend-list-empty = No friend is hidden.
+hidefriend-row-sub = Hidden friend
+hidefriend-show-greyed = Show them greyed in Friends
+hidefriend-show-greyed-tip = Lists the hidden friends, greyed, under your friends, for this session only. They stay hidden everywhere else.
+hidefriend-section = Hidden ({ $count })
+hidefriend-status = Hidden friend

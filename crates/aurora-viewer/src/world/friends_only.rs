@@ -47,7 +47,7 @@ pub struct State {
 impl World {
     /// Whether this avatar's update is dropped (isNonFriendDerendered).
     pub(super) fn hides_non_friend(&self, u: &aurora_net::objects::ObjectUpdate) -> bool {
-        self.derender.friends_only() && u.is_avatar() && u.full_id != self.agent_id && !self.social.is_friend(&u.full_id)
+        self.derender.friends_only() && u.is_avatar() && u.full_id != self.agent_id && !self.social.is_friend_shown(&u.full_id)
     }
 
     pub fn friends_only(&self) -> bool {
@@ -55,8 +55,11 @@ impl World {
     }
 
     fn friends_signature(&self) -> (usize, u128) {
-        let fold = self.social.friends.iter().fold(0u128, |a, f| a ^ f.id.as_u128());
-        (self.social.friends.len(), fold)
+        // the friends shown: hiding one or bringing one back is followed
+        // like a friendship lost or formed
+        self.social
+            .shown_friends()
+            .fold((0, 0u128), |(count, fold), f| (count + 1, fold ^ f.id.as_u128()))
     }
 
     /// handleRenderFriendsOnlyChanged: on takes out every avatar present
@@ -89,7 +92,7 @@ impl World {
         let strangers: Vec<_> = self
             .objects
             .iter()
-            .filter(|(_, o)| o.is_avatar() && o.full_id != me && !self.social.is_friend(&o.full_id))
+            .filter(|(_, o)| o.is_avatar() && o.full_id != me && !self.social.is_friend_shown(&o.full_id))
             .map(|(_, o)| o.full_id)
             .collect();
         for id in strangers {
@@ -112,7 +115,7 @@ impl World {
         }
         self.friends_only.seen = signature;
         for id in self.derender.friends_only_hidden() {
-            if self.social.is_friend(&id) {
+            if self.social.is_friend_shown(&id) {
                 let restore = self.derender.friends_only_spares(id);
                 self.put_back(restore);
             }
@@ -326,6 +329,29 @@ mod tests {
         world.social.end_friendship(&wolf);
         world.follow_friends_for_friends_only();
         assert!(!present(&world, &wolf) && !present(&world, &hat));
+    }
+
+    /// A hidden friend is a non-friend for "Show Friends Only"
+    /// (`hidden_friends.rs`), and comes back when shown again.
+    #[test]
+    fn a_hidden_friend_goes_like_a_stranger_and_comes_back_un_hidden() {
+        let (mut world, _) = demo_world();
+        let (wolf, hat) = (crate::demo::DEMO_LOUP, crate::demo::wolf_hat());
+        world.social.friends.push(friend(wolf));
+        world.set_friends_only(true);
+        assert!(present(&world, &wolf));
+        // hidden while it is on: gone at once, with what it wears
+        assert!(world.hide_friend(wolf));
+        assert!(!present(&world, &wolf) && !present(&world, &hat));
+        assert!(world.unhide_friend(wolf));
+        assert!(present(&world, &wolf) && present(&world, &hat));
+        // hidden before it is switched on: taken out like a stranger
+        world.set_friends_only(false);
+        world.hide_friend(wolf);
+        world.set_friends_only(true);
+        assert!(!present(&world, &wolf));
+        world.set_friends_only(false);
+        assert!(present(&world, &wolf));
     }
 
     #[test]

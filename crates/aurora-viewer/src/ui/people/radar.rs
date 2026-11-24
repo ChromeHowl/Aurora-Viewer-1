@@ -449,7 +449,7 @@ pub(super) fn rows(world: &World, data: &RadarData, filter: &str) -> Vec<Row> {
             Some(Row {
                 id: e.id,
                 name,
-                friend: !anonymous && world.social.is_friend(&e.id),
+                friend: !anonymous && world.social.is_friend_shown(&e.id),
                 muted,
                 // a blocked resident shows no voice state (FSRadarEntry)
                 voice: data.voice.get(&e.id).filter(|_| !muted).map(|(_, speaking)| *speaking),
