@@ -333,6 +333,15 @@ pub fn apply_motion(ctx: &egui::Context, reduce: bool) {
     }
 }
 
+/// ToolTipDelay (Preferences › Layout): seconds before a tooltip of the
+/// interface shows. Checked every frame, like `apply_motion`.
+pub fn apply_tooltip_delay(ctx: &egui::Context, seconds: f32) {
+    let wanted = if seconds.is_finite() { seconds.max(0.0) } else { 0.0 };
+    if ctx.global_style().interaction.tooltip_delay != wanted {
+        ctx.all_styles_mut(|s| s.interaction.tooltip_delay = wanted);
+    }
+}
+
 /// The size of the text fields: egui 0.37 makes them as high as a button
 /// (`interact_size`, 26 points here) with a button's padding; they keep egui
 /// 0.36's, 4 × 2 points around their text (stroke included) and no minimum

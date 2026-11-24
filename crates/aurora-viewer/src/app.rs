@@ -180,6 +180,7 @@ mod update_notice;
 mod viewer_stats;
 mod viewfinder;
 mod wearable_editor;
+mod window_size;
 mod wearable_favorites;
 mod world_click_demo;
 mod world_look;
@@ -431,6 +432,11 @@ pub struct App {
     gfx: Option<Gfx>,
     /// The restored size, position and maximize state before fullscreen.
     fullscreen_restore: Option<WindowedGeometry>,
+    /// Advanced › Set Window Size: the inside size asked, applied once the
+    /// window left full screen.
+    pending_window_size: Option<(u32, u32)>,
+    /// Advanced › Set Window Size › Custom size… (`ui/window_size.rs`).
+    window_size_ui: ui::window_size::WindowSizeUi,
     /// `settings.window_fullscreen` as last applied to the window.
     fullscreen_applied: bool,
     /// The window of a lost GPU device, kept on screen until the new one has
@@ -1938,6 +1944,8 @@ impl App {
             net,
             gfx: None,
             fullscreen_restore: None,
+            pending_window_size: None,
+            window_size_ui: Default::default(),
             fullscreen_applied: false,
             retired_window: None,
             current_window: Weak::new(),
@@ -7561,6 +7569,35 @@ impl App {
         }
     }
 
+    /// Advanced › Set Window Size (LLFloaterWindowSize::onClickSet,
+    /// LLViewerWindow::movieSize): out of full screen first, then the
+    /// window's inside to the size asked, in pixels; the window keeps it at
+    /// the next start (record_window_geometry).
+    fn apply_window_size(&mut self) {
+        if self.pending_window_size.is_none() || self.capture.is_some() || forced_window_size().is_some() {
+            self.pending_window_size = None;
+            return;
+        }
+        if self.settings.window_fullscreen {
+            self.settings.window_fullscreen = false;
+            return;
+        }
+        let Some(window) = self.gfx.as_ref().map(|g| g.window.clone()) else {
+            return;
+        };
+        if window.fullscreen().is_some() {
+            return;
+        }
+        let Some((width, height)) = self.pending_window_size.take() else {
+            return;
+        };
+        let monitor = window.current_monitor().map(|m| (m.size().width, m.size().height));
+        let (width, height) = crate::ui::window_size::clamp_size(width, height, monitor);
+        window.set_maximized(false);
+        let _ = window.request_inner_size(winit::dpi::PhysicalSize::new(width, height));
+        log::info!("window size: {width} x {height}");
+    }
+
     /// Apply the saved setting after Preferences changes, or after a shortcut.
     /// Runs only when the setting moved away from what was last applied: a
     /// full screen the system entered or left by itself (the macOS green
@@ -11220,6 +11257,8 @@ impl App {
             };
             self.world.group_titles = self.settings.group_titles;
             self.world.show_back_slurl = self.settings.show_back_slurl;
+            self.world.hud_scale_factor = self.settings.legacy_prefs.hud_scale;
+            self.world.scripts_can_show_ui = self.settings.legacy_prefs.scripts_can_show_ui;
             self.world.fly_after_teleport = self.settings.fly_after_teleport && !(self.demo && crate::demo::friend_join_flight_scenario());
             self.world.region_alerts.cfg = crate::world::region_alerts::Config {
                 script_count: self.settings.script_count_alert,
@@ -13851,6 +13890,8 @@ impl App {
             self.egui_ctx.set_zoom_factor(ui_scale(&self.settings));
         }
         crate::theme::apply_motion(&self.egui_ctx, self.settings.reduce_motion);
+        crate::theme::apply_tooltip_delay(&self.egui_ctx, self.settings.legacy_prefs.tooltip_delay);
+        ui::text_tuning::apply(&self.egui_ctx, &self.settings.text_tuning);
         self.demo_gains_tick(Instant::now());
         if actions.settings_changed || std::mem::take(&mut self.snapshots.settings_changed) {
             crate::language_file::select(&self.settings.language, self.settings.custom_language);
@@ -17027,6 +17068,15 @@ impl App {
                 log::info!("slow motion animations: {}", self.scene.slow_motion_animations);
             }
             BarAction::ReleaseKeys => self.release_keys(),
+            BarAction::WindowSize(width, height) => self.pending_window_size = Some((width, height)),
+            BarAction::WindowSizeCustom => {
+                let current = self.gfx.as_ref().map(|g| g.window.inner_size()).map(|s| (s.width, s.height));
+                self.window_size_ui.open_with(current);
+            }
+            BarAction::ClearGroupCache => {
+                self.world.group_data.clear_all();
+                log::info!("group cache cleared");
+            }
             BarAction::ToggleWaterWalk => self.toggle_water_walk(),
             BarAction::ToggleSwimming => self.toggle_swimming(),
             BarAction::MoveLockOptions => self.movelock_ui.open = true,
@@ -19072,6 +19122,11 @@ impl App {
                     } else {
                         &self.world.region_name()
                     },
+                    sim_version: if self.settings.legacy_prefs.sim_version_in_bar && !self.world.rlva.has("showloc") {
+                        crate::world::region_alerts::short_version(self.world.region_alerts.channel()).unwrap_or("")
+                    } else {
+                        ""
+                    },
                     parcel: if self.world.rlva.has("showloc") {
                         aurora_i18n::tr!("rlva-hidden-parcel")
                     } else {
@@ -21030,6 +21085,7 @@ impl App {
                 self.controls_window(&ctx, &p);
                 self.camera_position_window(&ctx, &p);
                 self.movelock_window(&ctx, &p);
+                self.window_size_window(&ctx, &p);
                 self.follow_window(&ctx, &p);
                 self.second_camera_window(&ctx, &p);
                 self.portals_window(&ctx, &p);
@@ -25997,6 +26053,7 @@ impl ApplicationHandler for App {
         if self.settings.window_fullscreen != self.fullscreen_applied {
             self.apply_fullscreen_setting();
         }
+        self.apply_window_size();
         self.record_window_geometry();
         self.attention_window();
         self.external_links();

@@ -1282,6 +1282,8 @@ a server-wide parcel inventory. Reference: `FSAreaSearch::findObjects`,
 `isSearchableObject`, `matchObject`, `processRequestQueue`, `requestObjectProperties`
 (`indra/newview/fsareasearch.cpp`).
 
+`settings/legacy_prefs.rs` (tooltip delay, HUD size, scripts opening the map, simulator version in the top bar) and `settings/text_tuning.rs` (line spacing, notecard font, inventory picture tooltip delay) hold the small Legacy preferences; their rows are `ui/options/pages/legacy_prefs.rs` and `text_tuning.rs`, and `ui/text_tuning.rs` applies them to egui's style and shares them with the chat, the notecard editor and the inventory tooltips. `ui/window_size.rs` and `app/window_size.rs` are Advanced › Set Window Size › Custom size…, next to the presets of `ui/bars.rs` (`WINDOW_SIZES`) that `App::apply_window_size` applies.
+
 `blender_live/` implements LiveMesh: the opt-in loopback Blender transport, bounded v1 rest-mesh
 snapshots and UI. `blender_live/token.rs` draws the key each start of the preview
 writes to the user's data folder, which the add-on must send before it is greeted. Both matching Blender package layouts are bundled by

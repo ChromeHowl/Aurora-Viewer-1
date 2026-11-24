@@ -593,8 +593,8 @@ FSFocusPointFollowsPointer,Boolean,in-aurora,,dof.focus,Allows the Depth of Fiel
 FSFocusPointLocked,Boolean,check,,named in dof.rs: may be session state,Whether the focus point used for DoF is currently Locked in place
 FSFocusPointRender,Boolean,to-add,low,,Draw a small crosshair where the DoF focus is
 FSFolderViewItemHeight,S32,not-applicable,,"a look of the Legacy interface (opacity, spacing, cursors); Aurora's interface has its own design (docs/BRANDING.md)","Controls the height of folder items, for instance in inventory"
-FSFontChatLineSpacingPixels,S32,to-add,low,,Line spacing pixels for chat text (requires restart)
-FSFontLineSpacingAdjustment,S32,not-applicable,,"a look of the Legacy interface (opacity, spacing, cursors); Aurora's interface has its own design (docs/BRANDING.md)",Line spacing pixels for UI text (requires restart
+FSFontChatLineSpacingPixels,S32,in-aurora,,field `text_tuning.chat_line_spacing`; 0..36 px,Line spacing pixels for chat text (requires restart)
+FSFontLineSpacingAdjustment,S32,in-aurora,,field `text_tuning.ui_line_spacing`; 0..10 px (the Legacy Viewer goes down to -10),Line spacing pixels for UI text (requires restart
 FSFontSettingsFile,String,in-aurora,,font,The font settings file with the font currently being used.
 FSFontSizeAdjustment,F32,in-aurora,,font_scale,Number of points to add to the defualt font sizes
 FSForcedVideoMemory,U32,not-listed,,HideFromEditor in the Legacy Viewer,Overrides the video memory detection on Windows if a value greater 0 is passed (in case DirectX memory detection fails or is wrong)
@@ -639,7 +639,7 @@ FSInternalShowNavbarFavoritesPanel,Boolean,not-listed,,HideFromEditor in the Leg
 FSInternalShowNavbarNavigationPanel,Boolean,not-listed,,HideFromEditor in the Legacy Viewer,Internal control to show/hide navigation bar navigation panel
 FSInternalSkinCurrent,String,not-listed,,HideFromEditor in the Legacy Viewer,The currently selected skin in the current session.
 FSInternalSkinCurrentTheme,String,not-listed,,HideFromEditor in the Legacy Viewer,The selected theme for the current skin in the current session.
-FSInventoryThumbnailTooltipsDelay,F32,to-add,low,,Sets the delay of the inventory item thumbnail tooltip
+FSInventoryThumbnailTooltipsDelay,F32,in-aurora,,field `text_tuning.thumbnail_tooltip_delay`,Sets the delay of the inventory item thumbnail tooltip
 FSKeepUnpackedCacheFiles,Boolean,not-applicable,,the Legacy cache's files,"If TRUE, the viewer won't delete unpacked cache files when logging out (improves overall performance and fixes sound bugs)"
 FSLandmarkCreatedNotification,Boolean,to-add,low,,Display a notification if a landmark is added to your inventory.
 FSLargeOutfitsWarningInThisSession,Boolean,not-listed,,HideFromEditor in the Legacy Viewer,Internal; Suppresses the 'too many outfits' warning (does not persist across sessions)
@@ -723,8 +723,8 @@ FSNetMapScripted,Boolean,in-aurora,,maps.mini_scripted,Accent scripted objects o
 FSNetMapTempOnRez,Boolean,in-aurora,,maps.mini_temp_on_rez,Accent temp on rez objects on netmap in different colors.
 FSNoScreenShakeOnRegionRestart,Boolean,in-aurora,,region_restart.shake (inverted),Don't shake my screen when region restart alert message is shown
 FSNoVersionPopup,Boolean,not-listed,,HideFromEditor in the Legacy Viewer,Disables version popup on the the Legacy Viewer Login page
-FSNotecardFontName,String,to-add,low,,The name of the font used for the notecard editor
-FSNotecardFontSize,String,to-add,low,,The size of the font used for the notecard editor
+FSNotecardFontName,String,in-aurora,,field `text_tuning.notecard_font`; sans serif or monospace,The name of the font used for the notecard editor
+FSNotecardFontSize,String,in-aurora,,field `text_tuning.notecard_size`,The size of the font used for the notecard editor
 FSNotifyIMFlash,Boolean,in-aurora,,flash_conversations_button,Flash FUI button if new (group) IMs arrived and conversations floater is closed (IM floater must be docked to conversations floater and IMs 
 FSNotifyIncomingObjectSpam,Boolean,to-add,low,,Notify about throttled incoming object offers from objects.
 FSNotifyIncomingObjectSpamFrom,Boolean,to-add,low,,Notify about throttled incoming object offers from named sources.
@@ -878,7 +878,7 @@ FSStatusBarMenuButtonPopupOnRollover,Boolean,not-applicable,,"a look of the Lega
 FSStatusBarShowFPS,Boolean,in-aurora,,system_island.fps,"If enabled, shows the current FPS in the main menu bar"
 FSStatusBarShowFPSColors,Boolean,to-add,low,,"If enabled, display FPS number in a color based on the current status."
 FSStatusBarTimeFormat,String,in-aurora,,system_island.clock_format,"Which time format to use for the status bar clock, e.g. 12 Hours, 24 Hours, etc. The default ""Language"" restores the original behavior of ch"
-FSStatusbarShowSimulatorVersion,Boolean,to-add,low,,"If enabled, the simulator version is included in the V1-like statusbar."
+FSStatusbarShowSimulatorVersion,Boolean,in-aurora,,field `legacy_prefs.sim_version_in_bar`,"If enabled, the simulator version is included in the V1-like statusbar."
 FSStreamList,LLSD,in-aurora,,"audio.saved_streams (a list, not listed in Debug Settings)",Saved list of media streams
 FSStreamtitleHistoryLength,U32,in-aurora,,audio.stream_title_history,The maximum number of stream titles shown in the history
 FSSupportGroupChatPrefix3,Boolean,not-applicable,,the Legacy Viewer's support groups,Adds (FS 1.2.3) to support group chat
@@ -1027,7 +1027,7 @@ GroupListShowIcons,Boolean,unreviewed,,,Show/hide group icons in the group list
 GroupMembersSortOrder,String,unreviewed,,,The order by which group members will be sorted (name|donated|online)
 GroupSnoozeTime,S32,unreviewed,,field `group_snooze_minutes`,Amount of time (in seconds) group chat will be snoozed for
 GroupTitlesTagMode,S32,unreviewed,,field `group_titles`,"Select Group Titles tag mode: 0 - no group tags, 1 - only my group tag, 2 - all group tags"
-HUDScaleFactor,F32,unreviewed,,,Scale of HUD attachments
+HUDScaleFactor,F32,in-aurora,,field `legacy_prefs.hud_scale`,Scale of HUD attachments
 HeadlessClient,Boolean,unreviewed,,,"Run in headless mode by disabling GL rendering, keyboard, etc"
 HeightUnits,Boolean,unreviewed,,,Determines which metric units are used: 1(TRUE) for meter and 0(FALSE) for foot.
 HelpFloaterOpen,Boolean,unreviewed,,,Show Help Floater on login?
@@ -1966,7 +1966,7 @@ ScriptDialogsPosition,S32,unreviewed,,,"Holds the position where script llDialog
 ScriptEditorDisableSyntaxHighlight,Boolean,unreviewed,,,Disable syntax highlighting in script editor for performance testing
 ScriptHelpFollowsCursor,Boolean,unreviewed,,,Scripting help window updates contents based on script editor contents under text cursor
 ScriptToastButtonWidth,S32,unreviewed,,,Default width of buttons in the Script dialog toast.
-ScriptsCanShowUI,Boolean,unreviewed,,,Allow LSL calls (such as LLMapDestination) to spawn viewer UI
+ScriptsCanShowUI,Boolean,in-aurora,,field `legacy_prefs.scripts_can_show_ui`,Allow LSL calls (such as LLMapDestination) to spawn viewer UI
 ScriptsEveryoneCopy,Boolean,unreviewed,,,Everyone can copy the newly created script
 ScriptsNextOwnerCopy,Boolean,unreviewed,,,Newly created scripts can be copied by next owner
 ScriptsNextOwnerModify,Boolean,unreviewed,,,Newly created scripts can be modified by next owner
@@ -2140,7 +2140,7 @@ TipToastMessageLineCount,S32,unreviewed,,,Max line count of text message on tip 
 ToastButtonWidth,S32,unreviewed,,,"Default width of buttons in the toast. Notes: If required width will be less than this one, a button will be reshaped to default size , othe"
 ToastFadingTime,S32,unreviewed,,,Number of seconds while a toast is fading
 ToastGap,S32,unreviewed,,,Gap between toasts on a screen (min. value is 5)
-ToolTipDelay,F32,unreviewed,,,Seconds before displaying tooltip when mouse stops over UI element
+ToolTipDelay,F32,in-aurora,,field `legacy_prefs.tooltip_delay`,Seconds before displaying tooltip when mouse stops over UI element
 ToolTipFadeTime,F32,unreviewed,,,Seconds over which tooltip fades away
 ToolTipFastDelay,F32,unreviewed,,,Seconds before displaying tooltip when mouse stops over UI element (when a tooltip is already visible)
 ToolTipVisibleTimeFar,F32,unreviewed,,,Fade tooltip after time passes (seconds) while mouse not near tooltip

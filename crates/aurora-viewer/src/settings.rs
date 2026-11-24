@@ -9,8 +9,10 @@ pub mod autotune;
 pub mod backup;
 pub mod draw_stepping;
 mod hover_height;
+pub mod legacy_prefs;
 pub mod registry;
 pub mod stream_list;
+pub mod text_tuning;
 
 /// Where a contact-set marker stands on an avatar (`ui/contact_markers.rs`).
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -598,6 +600,13 @@ pub struct Settings {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub update_grace: Option<crate::updater::GraceStart>,
     pub area_search: area_search::AreaSearch,
+    /// Small preferences of the Legacy Viewer: tooltip delay, HUD size,
+    /// scripts opening the map, simulator version in the top bar
+    /// (`settings/legacy_prefs.rs`).
+    pub legacy_prefs: legacy_prefs::LegacyPrefs,
+    /// Line spacing, the notecard editor's font and the inventory's picture
+    /// tooltip delay (Preferences › Layout, `settings/text_tuning.rs`).
+    pub text_tuning: text_tuning::TextTuning,
     pub crash_reports: CrashReports,
     /// Firestorm Language: default follows the OS.
     pub language: String,
@@ -2467,6 +2476,8 @@ impl Default for Settings {
             ignored_update: String::new(),
             update_grace: None,
             area_search: Default::default(),
+            legacy_prefs: Default::default(),
+            text_tuning: Default::default(),
             crash_reports: CrashReports::Ask,
             language: "default".into(),
             language_is_public: true,
@@ -3749,6 +3760,8 @@ impl Settings {
         self.max_particles = self.max_particles.min(8192);
         self.max_avatars = self.max_avatars.clamp(1, 100);
         self.autotune.sanitize();
+        self.legacy_prefs.sanitize();
+        self.text_tuning.sanitize();
         self.local_light_count = self.local_light_count.min(crate::scene::lights::MAX_LIGHTS as u32);
         self.complexity_mode = self.complexity_mode.min(2);
         self.avatar_physics_detail = if self.avatar_physics_detail.is_finite() {
