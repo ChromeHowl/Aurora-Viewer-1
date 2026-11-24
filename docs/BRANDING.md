@@ -14,9 +14,31 @@ from Preferences › Appearance › Skin › Interface colours
 background (`panel`) and the text (`ink`), and the other accent, surface
 and text roles follow from those three. So never pick a role for its
 violet: a teal or pink accent, or a light background, must still read.
+Follow the system theme (`system_theme.rs`) fills the same three from the
+desktop's light or dark mode and accent colour, so a light interface is
+as common as a dark one.
 On a chosen background the states and `teal` move in lightness to read
 4.5:1, their hue kept; a configured chat colour goes through
 `ui::colors::text` for the same reason.
+
+### Themes
+
+Preferences › Appearance › Theme (`theme_presets.rs`) offers named colour
+themes: Aurora (the brand palette above, the default), Graphite (neutral
+greys), Legacy Dark and Legacy Vintage (after the Legacy Viewer's own
+skins), Dragon, Light, and the single-accent Ocean, Forest, Ember and Rose.
+A theme is **colours only**: the layout, the radii, the glass and the
+font scale stay those of `Theme::default`, and no window changes its
+structure. A theme fills every role of the `Palette` (a new one must pass
+the readability test of `theme_presets/tests.rs`, which runs the rules of
+`interface_colors` over all of them), is the skin's base, and the user's
+accent, background and text picks, the system theme, high contrast and the
+colour blindness adaptation work over it as they do over the default. A
+`theme.json` of one's own still wins over it. Everything that reads the
+palette follows a theme, including the brand gradient (`teal`,
+`indigo_light`, `violet`) and the borealis of the staff marks, which then
+run along the theme's accent; the Aurora logo and the login backdrop's
+artwork stay as they are.
 
 ### Brand colours
 

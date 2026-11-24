@@ -6682,6 +6682,8 @@ before (`amis`, `groupes`, `repere`, `historique`…) are still accepted.
 | `AURORA_DEMO_CONTRAST=1\|0` | High contrast palette on or off for this run (Preferences › Accessibility), never saved |
 | `AURORA_DEMO_GLASS=0\|1` | Glass off or on for this run (Preferences › Accessibility › Disable glass), never saved |
 | `AURORA_DEMO_COLORS=accent:<hex>,surface:<hex>,text:<hex>` | Interface colours of this run (Preferences › Appearance › Skin), never saved |
+| `AURORA_DEMO_THEME=<id>` | Named colour theme of this run (Preferences › Appearance › Theme), never saved; `aurora`, `graphite`, `legacy-dark`, `legacy-vintage`, `dragon`, `light`, `ocean`, `forest`, `ember`, `rose` |
+| `AURORA_DEMO_SYSTEM_THEME=<look>[;<look>…][;secs=<n>]` or `system` | Follows a made-up system theme, or the real one, in this run, never saved |
 | `AURORA_DEMO_OPACITY=active:<0-1>,inactive:…,conversations:…,bars:…,menus:…,console:…,tags:…,minimap:…` | See-through surfaces of this run (Preferences › Appearance › Skin), never saved |
 | `AURORA_DEMO_PERF=compact`, `full`, `network` or `monitor-<section>` | Opens the Performance window: compact, the resource monitor, or one of its sections |
 | `AURORA_DEMO_AUTOTUNE=1\|slow\|once` | The target frame rate (Autotune) running: on the real frames, or on a simulated heavy scene (with `AURORA_DEMO_CROWD=20`), with or without "Continuous" |
@@ -8623,6 +8625,33 @@ failure. Grid validation and any paid upload are performed by the human.
   faces in the background's hue; the secondary text in the text's hue;
   text that still reads on its background. `AURORA_DEMO_CONTRAST=1`
   ignores them. Combine with `AURORA_DEMO_OPTIONS=appearance/2` (the page).
+- **`AURORA_DEMO_THEME=<id>`**: the named colour theme for this run, as
+  Preferences › Appearance › Theme does (colours only), without touching the
+  saved settings. The ids are `aurora` (the default look), `graphite`,
+  `legacy-dark`, `legacy-vintage`, `dragon`, `light`, `ocean`, `forest`,
+  `ember` and `rose`; an unknown id is logged and the saved theme stays.
+  One capture per theme: `AURORA_DEMO=1 AURORA_DEMO_THEME=light
+  AURORA_CAPTURE=light.png AURORA_CAPTURE_EXIT=1 AURORA_CAPTURE_FRAMES=620`.
+  What to look for: the windows, bars, fields, button faces, the accent
+  (selection, switches, the main buttons) and the text all in the theme's
+  colours, text readable everywhere (on `light`, dark text on light
+  windows; on the single-accent themes only the accent changes), the
+  Aurora logo and login artwork unchanged. `AURORA_DEMO_COLORS` applies on
+  top of it, `AURORA_DEMO_CONTRAST=1` ignores it. Combine with
+  `AURORA_DEMO_OPTIONS=appearance/2` (the Theme list and its colour strip).
+- **`AURORA_DEMO_SYSTEM_THEME=<look>[;<look>…][;secs=<n>]`**: follows the
+  system theme for this run, as Preferences › Appearance › Skin › Follow
+  the system theme does, without touching the saved settings, on looks
+  made up by the demo. A look is `light` or `dark`, with an optional
+  `accent:<hex>`: `light,accent:#2563EB;dark,accent:#E11D48;secs=3` changes
+  every 3 seconds (4 by default), and a single look stays. `system` follows
+  the real system instead. What to look for: the windows, bars, name
+  plates and chat change at once, with no restart; on `light`, counts,
+  selected rows and initials still read; on `dark`, the skin's own
+  background and text come back. `AURORA_DEMO_COLORS` wins over it,
+  `AURORA_DEMO_CONTRAST=1` ignores it. Combine with
+  `AURORA_DEMO_OPTIONS=appearance/2` (the swatches show the colours in
+  use; a look with no accent shows the note that the desktop gives none).
 - **`AURORA_DEMO_COLORPICK=1`**: at frame 300, opens the compact colour
   picker (`widgets::color_button`) of the first colour swatch
   drawn. To be combined with `AURORA_DEMO_OPTIONS=5` (Appearance ›
