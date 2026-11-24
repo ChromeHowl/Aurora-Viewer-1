@@ -3767,6 +3767,8 @@ impl App {
         self.photo_reel_end();
         if !self.demo {
             self.settings.release_hover_account();
+            self.settings.release_autoresponse_account();
+            self.settings.release_prefs_account();
         }
         // a parcel's saved preset goes with the session
         self.panels.time_of_day = self.settings.time_of_day;
@@ -4585,6 +4587,10 @@ impl App {
                         root,
                     );
                     self.settings.select_hover_account(l.agent_id);
+                    self.settings.select_autoresponse_account(l.agent_id);
+                    self.settings.select_prefs_account(l.agent_id);
+                    // the alerts follow a settings change only: this one is not
+                    crate::keywords::set(&self.keyword_settings());
                     self.settings.save();
                 }
                 self.bridge_runtime = Default::default();
