@@ -84,6 +84,7 @@ mod double_click;
 mod driver_check;
 mod egui_shadow;
 mod env_apply;
+mod env_bulk;
 mod env_day_editor;
 mod env_editor;
 mod external_links;
@@ -1257,6 +1258,8 @@ pub struct App {
     env_editor: ui::env_editor::EnvEditorUi,
     /// A Windlight preset being read for "Import" (bytes and preset name).
     env_import: Option<std::sync::mpsc::Receiver<Option<(Vec<u8>, String)>>>,
+    /// World › Environment › Import Windlight (`app/env_bulk.rs`).
+    env_bulk: env_bulk::EnvBulk,
     /// Day cycle editor (LLFloaterEditExtDayCycle).
     day_editor: ui::env_day_editor::DayEditorUi,
     /// A sky, water or day item the day editor waits for, and what for.
@@ -2458,6 +2461,7 @@ impl App {
             night_sky_unsaved: false,
             env_editor: Default::default(),
             env_import: None,
+            env_bulk: Default::default(),
             day_editor: Default::default(),
             day_fetch: None,
             day_import: None,
@@ -3847,6 +3851,7 @@ impl App {
         self.panels.personal_lighting = false;
         self.env_editor.close();
         self.env_import = None;
+        self.env_bulk = Default::default();
         self.day_editor.close();
         self.day_fetch = None;
         self.day_import = None;
@@ -4138,6 +4143,9 @@ impl App {
             }
             if self.texture_library.material_save_pending(request) {
                 self.resource_material_saved(request, result);
+                return;
+            }
+            if self.env_bulk_saved(request, &result) {
                 return;
             }
             if self.env_editor.saving == Some(request) {
@@ -17002,6 +17010,7 @@ impl App {
             BarAction::ResumeClouds => self.snapshots.ui.light.clouds_paused = false,
             BarAction::AuroraWeather => self.env_ui.weather_open = !self.rlva_environment_windows_locked(),
             BarAction::NewEnvironment(kind) => self.open_new_environment(kind),
+            BarAction::ImportWindlight(kind) => self.env_bulk_import(kind),
             BarAction::TeleportHistory => self.toggle_teleport_history(),
             BarAction::CreateLandmark => self.open_create_landmark(None),
             BarAction::PhotoToDisk => self.photo_to_disk(),
