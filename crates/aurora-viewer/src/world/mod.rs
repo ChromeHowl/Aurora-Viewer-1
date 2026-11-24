@@ -6,6 +6,7 @@ pub mod appearance;
 pub mod appearance_xml;
 pub mod attachment_inventory;
 pub mod attention;
+pub mod avatar_status;
 pub mod avatar_marks;
 pub mod blocking;
 pub mod body;
@@ -90,6 +91,7 @@ pub mod payments;
 pub mod place_details;
 pub mod place_snapshots;
 pub mod pointat;
+pub mod pokes;
 pub mod portals;
 pub mod poser_consent;
 pub mod profiles;
@@ -623,6 +625,9 @@ pub struct World {
     pub point_at: pointat::PointAts,
     /// Selection and give beams, ours and the others' (`beams`).
     pub beams: beams::Beams,
+    /// The statuses beside the name plates, ours and the other Aurora
+    /// viewers' (`avatar_status`).
+    pub avatar_status: avatar_status::AvatarStatuses,
     /// Object messages from elsewhere (Preferences › Privacy, issue #623).
     pub object_im_filter: object_im_filter::Settings,
     /// The Omnifilter's rules (`crate::omnifilter`, `world/omnifilter.rs`).
@@ -845,6 +850,8 @@ pub struct World {
     pub inventory_offers: inventory_offers::InventoryOffers,
     /// Residents' direct payments, as cards in their conversations.
     pub payments: payments::Payments,
+    /// Pokes sent and received (`pokes.rs`).
+    pub pokes: pokes::Pokes,
     /// The content rating chosen during the session and its sync with the
     /// server.
     pub maturity: maturity::MaturityPreference,
@@ -1122,6 +1129,7 @@ impl World {
             look_at: lookat::LookAts::default(),
             point_at: pointat::PointAts::default(),
             beams: beams::Beams::default(),
+            avatar_status: avatar_status::AvatarStatuses::default(),
             object_im_filter: object_im_filter::Settings::default(),
             omnifilter: Default::default(),
             omnifilter_replies: Vec::new(),
@@ -1256,6 +1264,7 @@ impl World {
             teleport_invites: teleport_invites::TeleportInvites::default(),
             inventory_offers: inventory_offers::InventoryOffers::default(),
             payments: payments::Payments::default(),
+            pokes: pokes::Pokes::default(),
             maturity: maturity::MaturityPreference::default(),
             teleport_access: Default::default(),
             set_home: home::SetHome::default(),
@@ -5170,6 +5179,14 @@ impl World {
                 }
                 None
             }
+            NetEvent::AvatarStatus { source, status, duration } => {
+                // our own echo, if a region relays one, is not applied: ours
+                // is set from what we share
+                if source != self.agent_id {
+                    self.avatar_status.receive(source, status, duration, std::time::Instant::now());
+                }
+                None
+            }
             NetEvent::ResetSkeleton {
                 source,
                 target,
@@ -5502,6 +5519,8 @@ impl World {
                 session: im.from_agent_id,
                 new_session: !self.social.has_session(&im.from_agent_id),
                 mention: crate::ui::chat::mentions(&im.message, &self.agent_id),
+                // a poke's card takes the place of its toast (pokes.rs)
+                poke: self.takes_poke(&im.message, im.offline),
             });
             // named whatever `@shownames`: an instant message is not the
             // nearby chat (process_improved_im tests nothing for it)
@@ -6117,6 +6136,12 @@ impl World {
     /// Answer a notification: messages to send and a URL to open.
     pub fn respond_notification(&mut self, id: u64, r: notifications::Response) -> (Vec<aurora_net::NetCommand>, Option<String>) {
         let data = self.notifications.list.iter().find(|n| n.id == id).map(|n| n.data.clone());
+        // a poke card closed: the next poke starts a new count
+        if let Some(notifications::Data::Poke { from, .. }) = data
+            && matches!(r, notifications::Response::Dismiss)
+        {
+            self.pokes.forget(&from);
+        }
         if let Some(notifications::Data::RlvaQuery { from, exceptions }) = data {
             self.rlva_answer_im_query(from, exceptions, &r);
             self.notifications.respond(id, r, |_| Uuid::nil(), Uuid::nil());
@@ -6527,6 +6552,15 @@ impl World {
     /// disturb with the Legacy Viewer's toasts, group chats by their own
     /// preference.
     pub fn notify_message(&mut self, m: &ImMessage, in_sight: bool) {
+        // a poke: its card, in sight or not, whatever the toast preferences
+        // (Poke back is what it is for); its line is in the conversation
+        if m.poke {
+            if let Some(line) = self.resident_line(m) {
+                let (from, name) = (line.source, line.from.clone());
+                self.notify_poke(from, name);
+            }
+            return;
+        }
         let prefs = self.notifications.toasts;
         let wanted = match m.kind {
             ImKind::Group => prefs.group_im,
@@ -6589,6 +6623,12 @@ impl World {
                 who
             }
             notifications::Data::Message { session, .. } => session,
+            // a poke's Send IM: their conversation, and the streak ends
+            notifications::Data::Poke { from, .. } => {
+                self.social.session_mut(from);
+                self.pokes.forget(&from);
+                from
+            }
             _ => return None,
         };
         self.notifications.list.retain(|n| n.id != id);

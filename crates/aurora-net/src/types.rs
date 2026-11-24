@@ -653,6 +653,15 @@ pub enum NetEvent {
         target: Uuid,
         animations: bool,
     },
+    /// The status another Aurora viewer shows beside its name plate
+    /// (ViewerEffect of Aurora's own type, `avatar_status`): `source` is the
+    /// effect's sender id, which any client can forge; `duration` the
+    /// seconds it stays without a refresh.
+    AvatarStatus {
+        source: Uuid,
+        status: crate::avatar_status::AvatarStatus,
+        duration: f32,
+    },
     /// A selection or give beam (ViewerEffect, LLHUDEffectSpiral of type
     /// LL_HUD_EFFECT_BEAM): from `source` to the `target` object, or to the
     /// global `position` when the target is nil; the sender's RGBA colour,
@@ -1888,6 +1897,14 @@ pub enum NetCommand {
         effect: Uuid,
         target: Uuid,
         animations: bool,
+    },
+    /// Our status for the other Aurora viewers nearby (ViewerEffect of
+    /// Aurora's own type, `avatar_status`), lasting `duration` seconds
+    /// unless sent again.
+    AvatarStatus {
+        effect: Uuid,
+        status: crate::avatar_status::AvatarStatus,
+        duration: f32,
     },
     /// Our selection or give beam (LLHUDEffectSpiral::packData, type
     /// LL_HUD_EFFECT_BEAM): to the `target` object, or to the global

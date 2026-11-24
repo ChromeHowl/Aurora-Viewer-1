@@ -6742,6 +6742,7 @@ before (`amis`, `groupes`, `repere`, `historique`…) are still accepted.
 | `AURORA_DEMO_BUSY_PAUSE=<frame>` | From that frame, the window counts as behind on a busy card: the Render pauses, with its notice and window title, until a click |
 | `AURORA_DEMO_GAMING_MODE=<frame>` | From that frame, gaming mode is on as from its toolbar button: the Render pauses, the loop slows, with its notice and window title, until the window comes back in front |
 | `AURORA_DEMO_IM_ANNOUNCE=1\|prefs` | Residents start typing IMs to us, then send them: the conversation announced before the message, and the unread count in the window title |
+| `AURORA_DEMO_POKE=<n>` | Nova pokes us `n` times (3 by default): the poke card, its jiggle and its count; a poke we send to a demo resident is poked back |
 | `AURORA_DEMO_MENTION=list\|names` | The chat bar's `@` list of residents to mention, or the prediction of a nearby resident's name |
 | `AURORA_DEMO_KEYWORDS=1\|prefs` | Keyword alerts on for the run: nearby chat, IM, group chat and object lines holding a keyword, coloured and with their sound; or the preferences' settings, the lines sent again and again |
 | `AURORA_DEMO_NOTIFS=1\|dnd\|list\|history\|legacy\|legacy-history\|object\|object-own\|object-group\|object-history\|legacy-object\|group-notice\|legacy-group-notice\|group-notice-saved\|group-notice-chat\|purchase\|purchase-open\|fees\|fees-answered\|fees-short\|pie-toasts\|legacy-pie-toasts` | Notification center: cards, burst, paused bell, history, Legacy toasts, object inventory offers, group notices, a delivered purchase, a group fee and a question to take L$, toasts a wider gap apart under a more transparent pie |
@@ -8310,6 +8311,19 @@ failure. Grid validation and any paid upload are performed by the human.
   then `(2)` with her message, until the conversation is read. A
   conversation closed is announced again at its resident's next turn.
   `prefs` leaves both switches to Preferences › Chat, to try them by hand.
+- **`AURORA_DEMO_POKE=<n>`**: from frame 700, every 120 frames (two
+  seconds at 60 fps), Nova (shown under the display name "Tess ✨" the
+  demo gives her) sends the poke IM `/me pokes you 👉`, `n` times (3 when
+  the value is not a number). With Preferences › Chat ›
+  Conversations › "Pokes" on (the default), her line is in the
+  conversation and a poke card comes out instead of the IM toast: "👉 poked
+  you", then "(2 times)", "(3 times)", jiggling at each poke (still with
+  Reduce animations), with Poke back, Send IM and its cross. Any poke we
+  send to a demo resident (Poke back, a friend's row in People › Friends,
+  a conversation's head, a profile) is poked back 1.5 s later, so a poke
+  war plays offline; the buttons rest 2 s after each poke. With "Pokes"
+  off, her pokes are ordinary IMs with their toast and no Poke button
+  shows.
 - **`AURORA_DEMO_BUSY_PAUSE=<frame>`**: from that frame on, the window is
   taken as behind with GPU frames of 300 ms (another program keeping the
   card busy, #2355): after two of them the world is no longer drawn, its
@@ -12577,6 +12591,7 @@ What the inventory must show with these scenarios:
 | `AURORA_DEMO_CONTACT_MARKERS=region`, `parcel`, `fade` or `body` | Contact-set markers in the world, on loaded and coarse residents |
 | `AURORA_DEMO_CHAT_BUBBLES=1`, `typing` or `talk` | With `AURORA_DEMO_TAGS`: the residents talk, chat bubbles above the heads for this run; `typing`: the typing dots too; `talk`: as Preferences say |
 | `AURORA_DEMO_STAFF=1` | A few demo residents count as Aurora team members or Linden Lab employees: their plate's light and their tag |
+| `AURORA_DEMO_STATUS=1`, `cycle`, `music`, `program`, `custom`, `long`, `open`, `hostile`, `expire` or `self` | Status chips beside the full name plates (brings the plates of `AURORA_DEMO_TAGS`): music, programs, games and text shared by other Aurora viewers, or ours |
 | `AURORA_DEMO_VOICE_MENU=1`, `louder` or `muted` | The world menu of a resident in our voice channel, with their voice volume row first |
 | `AURORA_DEMO_VOICE_MODERATION=1` or `self` | Nearby voice moderation: the estate manager's entries, or a moderator muting us |
 | `AURORA_VOICE_LEVEL_LOG=1` | Our own plate's voice level in the log, once a second (demo or grid) |
@@ -12677,6 +12692,30 @@ What the inventory must show with these scenarios:
   Lindens: the wolf (nearby chat, `AURORA_DEMO_PROFILE=wolf`), Lune of
   People › Near you, and with `AURORA_DEMO_TAGS=voice` Lune (full plate,
   typing) and Iris (compact pill).
+- **`AURORA_DEMO_STATUS`** (`demo_status.rs`): the residents of the plates
+  scenario share a status as if other Aurora viewers had sent it, through
+  the same event path as the network (`NetEvent::AvatarStatus`); the
+  variable brings the row of plates itself. At frame 600 the five full
+  plates (Nova, Tess, Orion, Lune, Brume) get a round chip beside them
+  (Tabler `headphones`, `app-window`, `device-gamepad`, `message-circle`);
+  under the pointer the plate's chip slides out to a pill with its line.
+  `1`: music, Blender, a game, a text and a very long track (elided with
+  "…"); `music`, `program`, `custom` and `long`: that kind on all five;
+  `cycle`: the kinds in turn every six seconds, each round with a new
+  sequence number; `open`: as `1` with every chip opened, to capture the
+  pills without the pointer; `hostile`: packets made by hand, with a
+  bidirectional override, a control character, tabs and zero-width
+  characters (drawn plain, without them), a program id the table does not
+  know (the generic "Using an app", never the packet's text), a text of 100
+  bytes, and a packet with a bad category (refused, logged as "demo status:
+  a packet the decoder refused"); `expire`: one packet of 6 s that is not
+  sent again, to see the chips fade over their last second and go; `self`:
+  our own chip, as sharing it would show it. The compact (Sol, Iris) and far
+  (Vega, Atlas) plates have no chip. Hide the chips of the others with
+  Preferences › Privacy › My status › "Show the status of others". Real
+  sharing (the master switch, the music, programs and text, the packets
+  sent on change, on a 60 s heartbeat and for arrivals, cleared twice when
+  it stops) needs two viewers on a grid.
 - **`AURORA_DEMO_CONTACT_MARKERS`** (`demo_contact_markers.rs`): three
   contact sets with a marker, for this run only: Family (heart, circles),
   Shop (star, diamonds) and Clubbing (no symbol, diamonds), Family with a

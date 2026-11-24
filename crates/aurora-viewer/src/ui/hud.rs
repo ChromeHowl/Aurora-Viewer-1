@@ -434,6 +434,13 @@ fn plate_content(
         blocked,
         mark: crate::world::staff::mark_named(&id, &legacy).filter(|_| named),
         distance: Distance::of(agent_distance, own, settings.tag_distance, settings.tag_distance_colors),
+        // the status other Aurora viewers share (and ours): text to draw,
+        // whoever the effect claims to come from; the others' only when
+        // asked for (Preferences › Privacy)
+        status: (own || settings.status_share.show_others)
+            .then(|| world.avatar_status.get(&id, std::time::Instant::now()))
+            .flatten()
+            .and_then(|(status, fade)| crate::status_share::line(status, fade)),
     }
 }
 

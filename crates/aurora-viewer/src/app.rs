@@ -167,6 +167,7 @@ mod social_menu_demo;
 mod spinning_cat;
 mod stand_fidget;
 mod stand_fly;
+mod status_sharing;
 mod stream_list;
 mod suggest_demo;
 mod task_notecards;
@@ -579,6 +580,8 @@ pub struct App {
     demo_bubble_chat: f64,
     /// AURORA_DEMO_PEOPLE: the states of its residents were sent.
     demo_people_states: bool,
+    /// Our status for the other Aurora viewers (`status_share`).
+    status_sharing: status_sharing::Sharing,
     /// Interface parts of the frame's profile (`u_*`).
     ui_parts: Parts,
     /// The interface's shapes leave for the render thread, which
@@ -2039,6 +2042,7 @@ impl App {
             demo_tag_states: None,
             demo_bubble_chat: 0.0,
             demo_people_states: false,
+            status_sharing: Default::default(),
             ui_parts: Parts::default(),
             egui_hand_over: EguiHandOver::default(),
             outside,
@@ -3362,6 +3366,8 @@ impl App {
                 }
                 return;
             }
+            // a poke to a demo resident is poked back (AURORA_DEMO_POKE)
+            crate::demo::poke::sent(&cmd);
             // a new classified is paid when it is published, as the
             // simulator does on the grid
             if let Some(price) = crate::demo::classifieds::price_of_new(&cmd)
@@ -11214,6 +11220,7 @@ impl App {
             self.world.groups.mute_when_notices_off = self.settings.mute_groups_without_notices;
             self.world.groups.report_blocks = self.settings.report_blocks;
             self.world.groups.show_joined_invitations = self.settings.show_joined_group_invitations;
+            self.world.pokes.enabled = self.settings.pokes;
             self.world.groups.notices_in_chat = crate::world::groups::NoticesInChat {
                 on: self.settings.group_notices_in_chat,
                 subjects: self.settings.group_notice_subjects_in_chat,
@@ -11967,6 +11974,7 @@ impl App {
             }
             self.tick_poser_consent();
             self.tick_portals();
+            self.tick_status_sharing();
             // Persist a sensitivity drag once it rests, like the other sliders.
             if !self.egui_ctx.input(|i| i.pointer.any_down()) && self.ik_editor.sync_poser_settings(&mut self.settings.poser) {
                 self.settings.save();
@@ -14662,6 +14670,14 @@ impl App {
         if self.demo && crate::demo::im_announce::active() {
             let agent = self.world.agent_id;
             for event in crate::demo::im_announce::events(self.frame_count, agent) {
+                if let Some(e) = self.world.apply(event) {
+                    self.on_app_event(e);
+                }
+            }
+        }
+        if self.demo && crate::demo::poke::active() {
+            let agent = self.world.agent_id;
+            for event in crate::demo::poke::events(self.frame_count, agent) {
                 if let Some(e) = self.world.apply(event) {
                     self.on_app_event(e);
                 }
@@ -20843,6 +20859,7 @@ impl App {
                     presence_at,
                     classic_bars,
                     toast_gap: crate::settings::toast_gap(self.settings.toast_gap),
+                    still: self.settings.reduce_motion,
                 };
                 // the cards read the world for their links' names (#898): the
                 // lists leave it while they are drawn, then come back
@@ -20899,6 +20916,16 @@ impl App {
                         continue;
                     }
                     self.update_notice_answer(id, &r);
+                    // a poke card's Poke back: the card stays for the next one
+                    if matches!(r, crate::world::notifications::Response::Poke) {
+                        if let Some(from) = self.world.notifications.list.iter().find_map(|n| match n.data {
+                            crate::world::notifications::Data::Poke { from, .. } if n.id == id => Some(from),
+                            _ => None,
+                        }) {
+                            self.on_ctx_action(ui::context::CtxAction::Poke(from));
+                        }
+                        continue;
+                    }
                     if matches!(r, crate::world::notifications::Response::Open)
                         && let Some(object) = self.world.notifications.list.iter().find_map(|n| match n.data {
                             crate::world::notifications::Data::Delivery { object } if n.id == id => Some(object),
@@ -20942,6 +20969,8 @@ impl App {
                     }
                 }
                 self.world.record_notification_history();
+                // the jabs of the pokes sent, over everything
+                ui::poke::paint_jabs(&ctx, &p, &self.skin.icons, self.settings.reduce_motion);
                 t = self.ui_parts.lap(Part::UiMenus, t);
                 let mut open = self.panels.about_land && self.world.rlva_can_view_parcel();
                 // the mini-map's image of the selection's region, for the header

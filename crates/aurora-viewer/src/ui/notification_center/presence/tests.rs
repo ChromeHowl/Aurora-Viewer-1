@@ -387,6 +387,7 @@ fn frames_with(size: Vec2, classic: bool, at: PresencePosition, center: Center) 
                 presence_at: at,
                 classic_bars: classic,
                 toast_gap: crate::settings::TOAST_GAP,
+                still: false,
             };
             crate::ui::notification_center::show(ui.ctx(), &p, &icons, &world, &mut list, &mut history, &mut notif, &mut env, false);
         });
@@ -504,6 +505,7 @@ impl Clicks {
                 presence_at: at,
                 classic_bars: false,
                 toast_gap: crate::settings::TOAST_GAP,
+                still: false,
             };
             answers = crate::ui::notification_center::show(
                 ui.ctx(),

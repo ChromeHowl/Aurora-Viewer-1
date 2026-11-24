@@ -10,6 +10,7 @@ pub mod backup;
 pub mod draw_stepping;
 mod hover_height;
 pub mod registry;
+pub mod status_share;
 pub mod stream_list;
 
 /// Where a contact-set marker stands on an avatar (`ui/contact_markers.rs`).
@@ -654,6 +655,9 @@ pub struct Settings {
     /// Game Controls: GameControlData and the controller's action mappings
     /// (the LL viewer's "GameControl" setting).
     pub game_control: crate::game_control::Settings,
+    /// The status beside the name plate, shared with the other Aurora
+    /// viewers nearby (settings/status_share.rs).
+    pub status_share: status_share::StatusShare,
     /// Pre-split profile awaiting device classification after an upgrade.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pending_legacy_gamepad: Option<crate::joystick::Settings>,
@@ -931,6 +935,11 @@ pub struct Settings {
     /// The former switch, read once: on was any resident we paid.
     #[serde(rename = "payment_sent_opens_conversation", skip_serializing)]
     pub(crate) former_payment_sent_opens_conversation: Option<bool>,
+    /// Preferences › Chat › Conversations: send and receive pokes
+    /// (`world/pokes.rs`). On by default: a poke needs both viewers to
+    /// read it. Off, no Poke button shows and a poke arrives as an
+    /// ordinary IM.
+    pub pokes: bool,
     /// Preferences › Chat › Notifications: sales, objects paid, a group's
     /// money and other L$ that are not a resident's direct payment show a
     /// toast (#2675). Off by default, where the Legacy Viewer's
@@ -2490,6 +2499,7 @@ impl Default for Settings {
             joystick: Default::default(),
             gamepad: crate::joystick::Settings::gamepad_defaults(),
             game_control: Default::default(),
+            status_share: Default::default(),
             pending_legacy_gamepad: None,
             auto_hover_height: false,
             second_camera_framing: Default::default(),
@@ -2601,6 +2611,7 @@ impl Default for Settings {
             former_payment_opens_conversation: None,
             payment_sent_opens: crate::world::payments::Opens::Never,
             former_payment_sent_opens_conversation: None,
+            pokes: true,
             notify_money_received: false,
             notify_direct_payment: true,
             notify_direct_above: false,
@@ -3803,6 +3814,7 @@ impl Settings {
         crate::snapshot::looks::sanitize(&mut self.world_look.looks);
         self.dof.sanitize();
         self.game_control.sanitize();
+        self.status_share.sanitize();
         self.exposure = self.exposure.clamp(0.25, 4.0);
         self.screen_indirect_intensity = if self.screen_indirect_intensity.is_finite() {
             self.screen_indirect_intensity.clamp(0.0, 4.0)

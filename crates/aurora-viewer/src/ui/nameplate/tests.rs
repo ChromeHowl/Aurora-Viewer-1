@@ -18,6 +18,7 @@ fn content() -> Content {
         blocked: false,
         mark: None,
         distance: None,
+        status: None,
     }
 }
 

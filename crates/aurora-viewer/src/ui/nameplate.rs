@@ -18,13 +18,14 @@ use uuid::Uuid;
 
 pub(crate) mod aurora;
 pub(crate) mod combo;
-mod fidget;
+pub(crate) mod fidget;
 mod linden;
 pub(crate) mod mark;
 mod mesh;
 mod paint;
 pub(crate) use paint::{plain_border, readable_on, set_background};
 pub(crate) mod playground;
+mod status_chip;
 #[cfg(test)]
 mod tests;
 
@@ -306,6 +307,9 @@ pub struct Content {
     pub mark: Option<crate::world::staff::Mark>,
     /// The distance to us, when the options show it.
     pub distance: Option<Distance>,
+    /// What the resident listens to, uses or wrote, as the chip beside a
+    /// full plate reads it (`status_chip`, `crate::status_share`).
+    pub status: Option<crate::status_share::StatusLine>,
 }
 
 /// The distance from us to the avatar (FSTagShowDistance,
@@ -365,6 +369,7 @@ pub fn preview(ui: &mut egui::Ui, p: &Palette, appearance: std::sync::Arc<crate:
         blocked: false,
         mark: None,
         distance: None,
+        status: None,
     };
     let tag = Tag {
         id: Uuid::nil(),

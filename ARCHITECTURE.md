@@ -1907,6 +1907,22 @@ layer, hidden by the scene: Aurora's thread from the left wrist to the
 side of the target, or the Legacy Viewer's particles. `demo_beams.rs` is
 `AURORA_DEMO_BEAMS`.
 
+The status beside the name plate is an Aurora extension, not a Legacy Viewer
+feature. `aurora-net/src/avatar_status.rs` is its wire format (a ViewerEffect
+of Aurora's own type 0xA7 with a small versioned payload, sent unreliably,
+cleaned on receive: plain text, 100 bytes, no control or bidirectional
+characters); `session.rs` sends `NetCommand::AvatarStatus` and raises
+`NetEvent::AvatarStatus`. `world/avatar_status.rs` holds the statuses by sender
+id with their expiry and sequence rule. `status_share/` decides what we
+share: `mod.rs` the table of programs and the choice among text, music and
+programs, `sender.rs` when a packet goes out (change, heartbeat, arrivals,
+clears), `collect.rs` the thread that reads the Windows media session and the
+process list, only while the master switch is on; `app/status_sharing.rs` runs
+it once a frame. `settings/status_share.rs` and Preferences › Privacy › My
+status are its settings, all off by default. `ui/nameplate/status_chip.rs`
+places the chip beside a full plate and `paint::status` draws it.
+`demo_status.rs` is `AURORA_DEMO_STATUS`.
+
 `world/anti_spam.rs` owns session-local counters and source/category blocks,
 following NACLAntiSpamQueue::checkEntry and the incoming message handlers in
 `indra/newview/NACLantispam.cpp`, `llimprocessing.cpp` and `llviewermessage.cpp`.
@@ -3052,6 +3068,7 @@ Scripts use a shared editor (`ui/scripts.rs`, actions in `app/scripts.rs`) for i
 | `app/contents_copy.rs` | "Copy to inventory" of an object's contents: the move warning of no-copy items, a new folder named after the object (under Clothing to wear it), MoveTaskInventory of each item, then the folder worn once all its items arrived |
 | `ui/controls.rs`, `app/controls.rs` | The Controls window (LLFloaterCamera, LLFloaterMove): camera and movement tabs whose joysticks and buttons are held keys (`App::update_move_input`), the four views, object view, saved camera positions (`camera::CameraShot`), the Position button, or Firestorm's two windows (`Settings::classic_controls`); while the photo window's free camera flies, its camera tab drives it (`App::photo_free_camera` / `photo_free_move` in `app/snapshot.rs`: the movement keys and the window's buttons move the camera instead of the avatar) |
 | `game_control/`, `app/game_control.rs`, `ui/options/pages/game_controls.rs` | Game Controls, like the LL viewer 26.5 (LLGameControl, llgamecontrol.cpp): `mappings.rs` the actions of each mode (avatar, mouselook, flycam, seated, mouse cursor) and their default and saved bindings; `device.rs` each controller's options (offset, invert, dead zone, axis and button remapping, Auto calibrate) in LL's saved string; `engine.rs` the canonical and semantic state, the keyboard's share of it and the resend schedule of GameControlData (`aurora-net` `NetCommand::GameControlData`, sent only where the region's SimulatorFeatures carry `GameControlEnabled`); `actions.rs` what the controller does this frame; `flycam.rs` LLFlycam's flight. `app/game_control.rs` reads the joystick worker's gamepads each frame, sends the data and, while the Aurora gamepad profile is off, drives the avatar, the flycam, the cursor and simulated clicks; Preferences › Controls › Game Controls has LL's four tabs; `AURORA_DEMO_GAME_CONTROL` |
+| `ui/poke.rs`, `world/pokes.rs` | Aurora's pokes: a poke is the private IM `/me pokes you 👉` (`world/pokes.rs`: the exact text, the 2 s cooldown, the streak count, the refusals for offline, blocked and RLVa-restricted residents, the poke card pushed as a toast-only `Data::Poke`); `ui/poke.rs` is the Poke button shared by People › Friends, both conversation heads and both profile styles (hidden, or greyed out with its reason), the card's jiggle (the plates' springs from `nameplate/fidget.rs`; still with Reduce animations) and the finger that jabs from a click. The card itself is a `person_card` of `ui/notifications.rs`, in both notification styles |
 | `ui/pay.rs`, `app/pay.rs` | Paying a resident, a group or (Aurora look) an object (LLFloaterPay): quick and free amounts, message, confirmation above a threshold, Buy L$ for what is missing, the server's answer; Firestorm's window as the classic look of Preferences › Aurora |
 | `ui/money_tracker.rs`, `ui/money_tracker/`, `app/money_tracker.rs` | Money tracker (FSMoneyTracker): the L$ received and paid during the session from MoneyBalanceReply's TransactionInfo, while open or always (Track when closed); its list, totals, selection, CSV copy and undo in `money_tracker.rs`, the Aurora look in `aurora.rs`, the Legacy Viewer's window in `legacy.rs`; what is recorded and when, the actions and the demo in the app bridge |
 | `ui/buy_currency.rs`, `app/buy_currency.rs`, `aurora-net/src/currency.rs`, `aurora-net/src/session/currency.rs` | Buying L$, opened from the balance of the top bar: window and estimate / confirmation / purchase cycle (LLFloaterBuyCurrency, LLCurrencyUIManager), choice of the grid's help page, end notification and simulated service of the demo; XML-RPC calls `getCurrencyQuote` / `buyCurrency` (sent only once, parameters never logged) |
@@ -3098,6 +3115,7 @@ Scripts use a shared editor (`ui/scripts.rs`, actions in `app/scripts.rs`) for i
 | `demo_seat_kill.rs` | `AURORA_DEMO_SEAT_KILL` scenario (issue #746): a resident's seat deleted before the simulator stands them up; they stay where they sat, with what they wear |
 | `demo_presence.rs` | `AURORA_DEMO_PRESENCE` scenario: the friends' online / offline toasts at one of their six places, above the nearby chat lines, waiting at the top right under an IM card and the open list (shown, or dropped after 3.5 s) |
 | `demo_attention.rs` | `AURORA_DEMO_ATTENTION` scenario: the window to the taskbar, then an IM, mentions in nearby and group chat, an object's message, a teleport offer and a script dialog |
+| `demo_poke.rs` | `AURORA_DEMO_POKE` scenario: Nova pokes us a few times, and a demo resident pokes back each poke we send |
 | `demo_im_announce.rs` | `AURORA_DEMO_IM_ANNOUNCE` scenario: Nova and Tess in turn start typing IMs to us, then send them; both settings on for the run, or `prefs` |
 | `demo_conv_button.rs` | `AURORA_DEMO_CONV_BUTTON` scenario: the Conversations button flashing for a nearby chat line and an IM, nearby chat left out, Reduce motion, its right-click menu |
 | `demo_conv_options.rs` | `AURORA_DEMO_CONV_OPTIONS` scenario: tabs of every type (a friend, a group with a moderator, a conference), our lines, a system line, transcript history and offline messages at login, in one chat style; every option on with `on` |
