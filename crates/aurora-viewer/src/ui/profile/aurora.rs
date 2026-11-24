@@ -1061,6 +1061,7 @@ fn more_menu(resp: &Response, env: &Env, w: &Window, f: &Facts, compact: bool) {
             menu::separator(ui, p);
             crate::ui::chat::moderation::ban_all_entries(ui, p, world, id, true);
         }
+        context::shadow_realm_item(ui, p, world, id);
         menu::separator(ui, p);
         if menu::item_if(
             ui,

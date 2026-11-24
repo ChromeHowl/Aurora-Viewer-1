@@ -1,6 +1,6 @@
 //! A list of resident ids kept by this viewer for one account, in a file of
-//! the account's folder (a JSON array of ids), such as the hidden friends
-//! (`hidden_friends.rs`).
+//! the account's folder (a JSON array of ids): the hidden friends
+//! (`hidden_friends.rs`) and the Shadow Realm (`shadow_realm.rs`).
 //!
 //! Local only: nothing of it is sent to the server, unlike the block list.
 

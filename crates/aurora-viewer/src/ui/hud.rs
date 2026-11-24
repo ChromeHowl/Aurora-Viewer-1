@@ -413,7 +413,15 @@ fn plate_content(
         })
     });
     Content {
-        appearance: world.rlva_contact_appearance(&id).clone(),
+        // the Shadow Realm's red takes the place of the set's plate-name colour
+        appearance: match super::colors::shadow_red_set_color(world, &id) {
+            Some(red) => {
+                let mut appearance = (**world.rlva_contact_appearance(&id)).clone();
+                appearance.nameplate_name = Some(red);
+                std::sync::Arc::new(appearance)
+            }
+            None => world.rlva_contact_appearance(&id).clone(),
+        },
         name,
         username,
         title: o.group_title().filter(|_| named && world.group_titles.shows(own)),
@@ -531,7 +539,7 @@ pub fn draw(
     // objects for a few dozen of these
     for (idx, o) in world.objects.avatars().chain(world.objects.texted()) {
         // the animation editor's mirror of us has no name tag
-        if !world.parcel_object_visible(idx) || !crate::snapshot::isolate::object_visible(world, idx) || world.is_mirror(&o.full_id) {
+        if !world.parcel_object_visible(idx) || !crate::snapshot::isolate::object_visible(world, idx) || world.is_mirror(&o.full_id) || world.shadow_hides_index(idx) {
             continue;
         }
         if !o.is_avatar() && !world.rlva.hover_visible(o.full_id, scene.gpu.get(idx).is_some_and(|g| g.hud)) {
@@ -694,6 +702,8 @@ pub fn draw(
                 Some(band) if settings.tag_distance_colors && !super::colors::relation_tag(world, &o.full_id, &legacy) => band,
                 _ => super::colors::tag_color(world, &o.full_id, &legacy, custom),
             };
+            // the Shadow Realm's red beats a mark and the distance's colour
+            let col = super::colors::shadow_red(world, &o.full_id).unwrap_or(col);
             lines.push((name, col, 13.0));
             if let Some(u) = username {
                 let dim = |v: u8| (v as f32 * 0.83) as u8;

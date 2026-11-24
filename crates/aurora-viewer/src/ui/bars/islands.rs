@@ -1190,6 +1190,7 @@ mod tests {
             double_click: Default::default(),
             quickjump: false,
             friends_only: false,
+            shadow_realm: false,
             show_name_tags: true,
             fly_override: false,
             quiet_snapshots: false,

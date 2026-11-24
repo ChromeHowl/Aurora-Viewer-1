@@ -16,6 +16,7 @@ mod hover_height;
 pub mod legacy_prefs;
 pub mod new_objects;
 pub mod registry;
+pub mod shadow_realm;
 pub mod status_share;
 pub mod stream_list;
 pub mod text_tuning;
@@ -2036,6 +2037,8 @@ pub struct Settings {
     /// credential store (`credentials::store_proxy`), never here.
     pub proxy: aurora_proxy::ProxySettings,
     pub parcel_visibility: crate::world::parcel_visibility::Settings,
+    /// World › Shadow Realm: its switch and distance (`settings/shadow_realm.rs`).
+    pub shadow_realm: shadow_realm::ShadowRealm,
     /// Width of the local chat input in the bottom bar (px, 0 = skin default).
     pub chat_bar_width: f32,
     /// Width of the chat island of the bottom islands (px, 0 = the default
@@ -3036,6 +3039,7 @@ impl Default for Settings {
             no_neighbour_regions: false,
             proxy: Default::default(),
             parcel_visibility: Default::default(),
+            shadow_realm: Default::default(),
             chat_bar_width: 0.0,
             chat_island_width: 0.0,
             toolbar: Default::default(),
@@ -4012,6 +4016,7 @@ impl Settings {
         }
         self.im_toast_seconds = self.im_toast_seconds.clamp(3.0, 60.0);
         self.conversation_options.sanitize();
+        self.shadow_realm.sanitize();
         self.tip_toast_seconds = if self.tip_toast_seconds.is_finite() {
             self.tip_toast_seconds.clamp(1.0, 30.0)
         } else {

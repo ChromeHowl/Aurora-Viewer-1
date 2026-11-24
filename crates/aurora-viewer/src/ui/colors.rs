@@ -48,11 +48,39 @@ pub fn set_color(v: [f32; 4]) -> Color32 {
     )
 }
 
+/// A resident of the Shadow Realm in range (`world/shadow_realm.rs`): red
+/// wherever their name is written, over the marks and the contact sets,
+/// never while RLVa hides their name. The theme's danger colour,
+/// daltonised like the others.
+pub fn shadow_red(world: &World, id: &Uuid) -> Option<Color32> {
+    world.shadow_red(id).then(shadow_red_color)
+}
+
+/// The Shadow Realm's red itself (its window draws it from its own rows).
+pub fn shadow_red_color() -> Color32 {
+    crate::colorblind::adapt(shadow_red_base(), crate::colorblind::current())
+}
+
+/// The theme's danger colour, before the colour-blind adaptation.
+fn shadow_red_base() -> Color32 {
+    crate::interface_colors::skin().map_or_else(|| crate::theme::Theme::default().skin_palette().danger, |p| p.danger)
+}
+
+/// The same red as a contact set's colour (linear RGBA, adapted when it is
+/// painted by `set_color`), for the name plates: it takes the place of the
+/// set's plate-name colour.
+pub fn shadow_red_set_color(world: &World, id: &Uuid) -> Option<[f32; 4]> {
+    world.shadow_red(id).then(|| egui::Rgba::from(shadow_red_base()).to_array())
+}
+
 // The colours a contact set gives go through `World::rlva_contact_appearance`:
 // none for a resident whose name RLVa hides
 // (LGGContactSets::hasFriendColorThatShouldShow, lggcontactsets.cpp).
 
 pub fn resident_name(world: &World, id: &Uuid, fallback: Color32) -> Color32 {
+    if let Some(red) = shadow_red(world, id) {
+        return crate::interface_colors::on_panel(red);
+    }
     world
         .rlva_contact_appearance(id)
         .ui_name
@@ -68,6 +96,11 @@ pub fn contact_chat_color(line: &ChatLine, world: &World) -> Option<Color32> {
 }
 
 pub fn contact_sender_color(line: &ChatLine, world: &World) -> Option<Color32> {
+    if matches!(line.kind, ChatKind::Local(_) | ChatKind::Im)
+        && let Some(red) = shadow_red(world, &line.source)
+    {
+        return Some(crate::interface_colors::on_panel(red));
+    }
     matches!(line.kind, ChatKind::Local(_) | ChatKind::Im | ChatKind::Own(_))
         .then(|| {
             let a = world.rlva_line_appearance(line);
@@ -298,6 +331,9 @@ pub fn tag_color(world: &World, id: &Uuid, name: &str, custom_display_name: bool
 /// name RLVa hides, whoever it is and whatever mark it has (LLNetMap::draw,
 /// llnetmap.cpp: `canShowName(…) ? color : map_avatar_color`).
 pub fn map_color(world: &World, id: &Uuid, name: &str) -> Color32 {
+    if let Some(red) = shadow_red(world, id) {
+        return red;
+    }
     if let Some(color) = mark_color(world, id) {
         return color;
     }

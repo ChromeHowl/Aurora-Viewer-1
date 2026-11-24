@@ -109,6 +109,8 @@ pub enum BarAction {
     ToggleChatBar,
     /// Show Friends Only switched (RFO, FSRenderFriendsOnly).
     ToggleFriendsOnly,
+    /// World › Shadow Realm enabled.
+    ToggleShadowRealm,
     ToggleNameTags,
     /// The toolbar's HUDs button: Show HUDs switched.
     ToggleHuds,
@@ -355,6 +357,8 @@ pub struct StatusInfo<'a> {
     pub quickjump: bool,
     /// Show Friends Only is on (World › Show Friends only).
     pub friends_only: bool,
+    /// The Shadow Realm is on (World › Shadow Realm enabled).
+    pub shadow_realm: bool,
     pub show_name_tags: bool,
     /// The fly override is on (Me › Fly override).
     pub fly_override: bool,
@@ -1547,6 +1551,26 @@ fn main_menus(ui: &mut egui::Ui, p: &Palette, panels: &mut Panels, st: &StatusIn
         ) {
             *action = BarAction::ToggleFriendsOnly;
         }
+        // the Shadow Realm beside it (`world/shadow_realm.rs`): its switch
+        // and its window
+        if menu::check(
+            ui,
+            p,
+            crate::ui::context::SHADOW_REALM_ICON,
+            aurora_i18n::tr!("sr-menu-enabled"),
+            st.shadow_realm,
+            true,
+        ) {
+            *action = BarAction::ToggleShadowRealm;
+        }
+        flip_window(
+            ui,
+            p,
+            crate::ui::context::SHADOW_REALM_ICON,
+            aurora_i18n::tr!("sr-menu-window"),
+            super::shadow_realm::WINDOW,
+            &mut panels.shadow_realm,
+        );
         if menu::check(
             ui,
             p,

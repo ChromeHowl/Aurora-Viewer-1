@@ -706,6 +706,34 @@ mod tests {
         }
     }
 
+    /// Someone the Shadow Realm shows again: everything of theirs is built
+    /// again and their impostor takes a new picture (they were never
+    /// removed, only left out).
+    #[test]
+    fn a_resident_shown_again_rebuilds_what_they_wear() {
+        let (mut world, mut scene, _, _) = crate::scene::picking::tests::scene_with_two_objects();
+        let wolf = crate::demo::DEMO_LOUP;
+        let avatar = world.objects.index_of_uuid(&wolf).unwrap();
+        let worn: Vec<usize> = world.objects.children_of(&world.objects.get(avatar).unwrap().key).to_vec();
+        assert!(!worn.is_empty());
+        scene.gpu.resize_with(world.objects.slots.len(), Default::default);
+        let objects = world.objects.slots.iter().flatten().count();
+        world.shadow_realm_add(wolf);
+        assert!(world.shadow_hides_index(avatar) && worn.iter().all(|&i| world.shadow_hides_index(i)));
+        scene.sync_shadow_realm_revealed(&mut world);
+        assert!(!scene.sets.dirty.contains(avatar), "nothing to rebuild while hidden");
+        for idx in std::iter::once(avatar).chain(worn.iter().copied()) {
+            world.objects.get_mut_untracked(idx).unwrap().render.needs_records = false;
+        }
+        world.shadow_realm_remove(&wolf);
+        scene.sync_shadow_realm_revealed(&mut world);
+        for idx in std::iter::once(avatar).chain(worn.iter().copied()) {
+            assert!(scene.sets.dirty.contains(idx));
+            assert!(world.objects.get(idx).unwrap().render.needs_records);
+        }
+        assert_eq!(world.objects.slots.iter().flatten().count(), objects, "nothing was removed");
+    }
+
     fn volume(path: u8, profile: u8, sculpt: Option<u8>) -> VolumeParams {
         let mut v = VolumeParams::default();
         v.path.curve_type = path;

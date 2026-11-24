@@ -395,6 +395,7 @@ fn action_key(action: &CtxAction) -> String {
         CtxAction::RemoveFriend(..) => "RemoveFriend",
         CtxAction::HideFriend(..) => "HideFriend",
         CtxAction::UnhideFriend(..) => "UnhideFriend",
+        CtxAction::ShadowRealm { .. } => "ShadowRealm",
         CtxAction::RemoveFriends(..) => "RemoveFriends",
         CtxAction::Conference(..) => "Conference",
         CtxAction::ConferenceCall(..) => "ConferenceCall",
@@ -418,6 +419,7 @@ fn action_key(action: &CtxAction) -> String {
     match action {
         CtxAction::TakeOffClothing(kind) | CtxAction::DetachAt(kind) => format!("{base}:{kind}"),
         CtxAction::Derender { permanent, .. } => format!("{base}:{permanent}"),
+        CtxAction::ShadowRealm { add, .. } => format!("{base}:{add}"),
         CtxAction::SetRender(_, mode) | CtxAction::OpenPeople(mode) => format!("{base}:{mode}"),
         CtxAction::SetOwnerSoundBlock { flag, .. } => format!("{base}:{flag}"),
         CtxAction::SetParticleBlock { owner, .. } => format!("{base}:{owner}"),

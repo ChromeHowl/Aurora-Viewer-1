@@ -276,6 +276,7 @@ impl Effects {
                     || world.particles_blocked(&o.full_id)
                     || !world.parcel_object_visible(idx)
                     || !crate::snapshot::isolate::object_visible(world, idx)
+                    || world.shadow_hides_index(idx)
                 {
                     return samples;
                 }
@@ -347,6 +348,7 @@ impl Effects {
                 || world.particles_blocked(&owner)
                 || !world.parcel_object_visible(idx)
                 || !crate::snapshot::isolate::object_visible(world, idx)
+                || world.shadow_hides_index(idx)
             {
                 continue;
             }
