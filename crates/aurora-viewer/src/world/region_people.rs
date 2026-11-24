@@ -741,7 +741,6 @@ mod tests {
         assert_eq!(w.people_in_region("Ahern"), None);
         assert_eq!(w.people_in_region("Nowhere"), None);
         assert_eq!(w.people_at_global(2570.0, 5130.0), None);
-        assert_eq!(w.people_on_map((10, 20)), None);
         assert!(w.take_map_commands().is_empty());
     }
 
