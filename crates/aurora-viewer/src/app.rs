@@ -12238,6 +12238,9 @@ impl App {
                 for (idx, current) in self.inspect_outline() {
                     selection_wire.entry(idx).or_insert(current);
                 }
+                for idx in self.profile_worn_outline() {
+                    selection_wire.entry(idx).or_insert(true);
+                }
             }
             self.scene.set_wire_selection(&mut self.world, selection_wire);
             self.scene.selection_silhouettes = if bare {
@@ -21376,6 +21379,7 @@ impl App {
                     profile_base: profile_base.as_deref(),
                 };
                 self.profile_ui.prepare_photos(&ctx, &mut self.scene, &self.world);
+                self.feed_profile_worn();
                 let acts = self.profile_ui.show(
                     &ctx,
                     &p,
@@ -21455,6 +21459,7 @@ impl App {
                             self.panels.world_map = true;
                         }
                         ui::profile::ProfileAction::Teleport(g) => self.world.map.track_location(g.x, g.y, g.z as f32, true),
+                        ui::profile::ProfileAction::Worn(action) => self.profile_worn_action(action),
                     }
                 }
                 // place profiles: standalone windows and "Places"

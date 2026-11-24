@@ -4,6 +4,7 @@
 //! LLFloaterInspect::onOpen / refresh (indra/newview/llfloaterinspect.cpp).
 use super::*;
 use crate::ui::inspect::{Row, Totals};
+use crate::ui::profile::worn::Row as WornRow;
 use crate::world::names::NameScope;
 use aurora_net::RegionHandle;
 use aurora_net::build::BuildCmd;
@@ -71,12 +72,7 @@ impl App {
             .roots
             .iter()
             .filter_map(|id| w.objects.index_of_uuid(id))
-            .flat_map(|root| {
-                crate::build::family(w, root)
-                    .into_iter()
-                    .filter(|&i| w.objects.get(i).is_some_and(|o| !o.is_avatar()))
-                    .map(move |i| (i, i == root))
-            })
+            .flat_map(|root| linkset_prims(w, root).into_iter().map(move |i| (i, i == root)))
             .collect()
     }
 
@@ -202,6 +198,225 @@ impl App {
         totals.textures = textures.len() as u32;
         (rows, totals)
     }
+}
+
+/// The resident who owns a prim as its row names them, and whose profile
+/// "See Owner Profile" opens. Under RLVa's `@shownames` the owner is their
+/// stand-in and the button is off (LLFloaterInspect::refresh,
+/// onSelectObject and onClickOwnerProfile, indra/newview/llfloaterinspect.cpp).
+fn owner_shown(world: &crate::world::World, owner: Uuid) -> (String, Option<Uuid>) {
+    let scope = NameScope::Owner;
+    (
+        world.social.name_in(scope, &owner),
+        world.rlva_shows_name(scope, owner).then_some(owner),
+    )
+}
+
+/// `owner_shown` for the creator of a prim `owner` owns. The same sources:
+/// the creator is hidden only when they also own the object or stand
+/// around, and "See Creator Profile" follows the name, so it opens the
+/// profile of a creator the world hides (`button creator` is enabled by
+/// `(idOwner != idCreator && !isNearbyAgent(idCreator)) || canShowName`).
+fn creator_shown(world: &crate::world::World, owner: Uuid, creator: Uuid) -> (String, Option<Uuid>) {
+    let scope = NameScope::Creator { owner };
+    (
+        world.social.name_in(scope, &creator),
+        world.rlva_shows_name(scope, creator).then_some(creator),
+    )
+}
+
+impl App {
+    /// The Worn tab of the profile windows (ui/profile/worn.rs): what each
+    /// avatar wears, twice a second while a tab shows. An avatar that is
+    /// not in a connected region, or whose name RLVa hides, has no list.
+    pub(super) fn feed_profile_worn(&mut self) {
+        let wanted = self.profile_ui.worn_wanted();
+        if wanted.is_empty() {
+            self.profile_ui.worn.clear();
+            return;
+        }
+        let now = Instant::now();
+        if !self.profile_ui.worn.due(now) {
+            return;
+        }
+        let mut lists = HashMap::new();
+        // RLVa hides who they are: no list, not even the last one
+        let hidden: HashSet<Uuid> = wanted.iter().copied().filter(|id| !self.world.rlva_can_name(*id)).collect();
+        // the names not known yet, a few each time, as a hover asks for one
+        // (RequestObjectPropertiesFamily, which selects nothing)
+        let mut asks = 4;
+        // the creators: the full properties of two objects a round at most,
+        // selected then deselected as Area Search does
+        // (FSAreaSearch::requestObjectProperties)
+        let mut creator_asks = 2;
+        let mut out_of_view = HashSet::new();
+        for avatar in wanted {
+            if let Some(rows) = self.worn_rows(avatar, &mut asks, &mut creator_asks) {
+                lists.insert(avatar, rows);
+            } else if !hidden.contains(&avatar) && self.world.resident_place(avatar).is_some() {
+                // in a region of ours, beyond what we are sent
+                out_of_view.insert(avatar);
+            }
+        }
+        self.profile_ui
+            .worn
+            .set(lists, hidden, out_of_view, now, std::time::SystemTime::now());
+    }
+
+    /// One row per object avatar `id` wears, with the figures of Inspect
+    /// (prim_stats, linkset_complexity), then what the derender list keeps
+    /// out of the world. No texture or other asset id leaves here.
+    fn worn_rows(&mut self, id: Uuid, asks: &mut usize, creator_asks: &mut usize) -> Option<Vec<WornRow>> {
+        let w = &self.world;
+        // the profile itself is not shown either (RlvActions::canShowName)
+        if !w.rlva_can_name(id) {
+            return None;
+        }
+        let wearer = w
+            .objects
+            .index_of_uuid(&id)
+            .and_then(|i| w.objects.get(i))
+            .filter(|o| o.is_avatar())?;
+        if !w.regions.contains_key(&wearer.key.region) {
+            return None;
+        }
+        let wearer_key = wearer.key;
+        let point_of = |point: u8| {
+            let name = w
+                .avatar_lib
+                .attach_names
+                .get(&point)
+                .map(|name| crate::ui::appearance::items::point_name(name).to_owned())
+                .unwrap_or_else(|| aurora_i18n::tr!("attachment-point", point = point));
+            (name, w.avatar_lib.attach_points.get(&point).is_some_and(|ap| ap.hud))
+        };
+        let mut rows = Vec::new();
+        let mut unnamed = Vec::new();
+        let mut creators = Vec::new();
+        let mut no_creator = Vec::new();
+        for root in worn_roots(w, &id) {
+            let Some((idx, o)) = w.objects.index_of_uuid(&root).and_then(|i| Some((i, w.objects.get(i)?))) else {
+                continue;
+            };
+            let prims = linkset_prims(w, idx);
+            let props = self.build.props.get(&root).or_else(|| self.interactions.props.get(&root));
+            let name = props.map(|p| p.name.clone()).filter(|n| !n.is_empty());
+            // the creator only with the full properties (the family subset
+            // has none): a name, never the id
+            let creator = props.filter(|p| p.full && !p.creator_id.is_nil()).map(|p| {
+                creators.push(p.creator_id);
+                // as Inspect names them, under @shownames too
+                creator_shown(w, p.owner_id, p.creator_id).0
+            });
+            // animesh (EXTENDED_MESH_ANIMATED on the root), else rigged when
+            // a prim of it is skinned to the skeleton
+            let kind = if o.extra.extended_mesh_flags.unwrap_or(0) & aurora_prim::extra::EXTENDED_MESH_ANIMATED != 0 {
+                crate::ui::profile::worn::Kind::Animesh
+            } else if prims.iter().any(|&i| self.scene.gpu.get(i).is_some_and(|g| g.rigged)) {
+                crate::ui::profile::worn::Kind::Rigged
+            } else {
+                crate::ui::profile::worn::Kind::Attached
+            };
+            if name.is_none() {
+                unnamed.push((o.key.region, root));
+            }
+            if creator.is_none() {
+                no_creator.push((o.key, root));
+            }
+            let (point_name, hud) = point_of(o.attachment_point());
+            rows.push(WornRow {
+                id: root,
+                name,
+                point: o.attachment_point(),
+                point_name,
+                hud,
+                complexity: self.scene.linkset_complexity(w, &prims),
+                triangles: prims.iter().map(|&i| self.scene.prim_stats(w, i).triangles).sum(),
+                derendered: false,
+                kind,
+                creator,
+            });
+        }
+        for (object, point, name) in w.derender.hidden_worn(wearer_key) {
+            let (point_name, hud) = point_of(point);
+            rows.push(WornRow {
+                id: object,
+                name: Some(name).filter(|n| !n.is_empty()),
+                point,
+                point_name,
+                hud,
+                derendered: true,
+                ..WornRow::default()
+            });
+        }
+        for creator in creators {
+            self.world.social.want_name(creator);
+        }
+        for (key, root) in no_creator {
+            if *creator_asks == 0 {
+                break;
+            }
+            if self.profile_ui.worn.ask_once(root) {
+                *creator_asks -= 1;
+                for cmd in self.build.prim_properties_query(&self.world, key) {
+                    self.send(cmd);
+                }
+            }
+        }
+        for (handle, root) in unnamed {
+            if *asks == 0 {
+                break;
+            }
+            if let Some(cmd) = self.interactions.tip_request(handle, root) {
+                *asks -= 1;
+                self.send(cmd);
+            }
+        }
+        Some(rows)
+    }
+
+    /// Object `id` is worn by avatar `wearer`, who is not us: the row
+    /// actions of the Worn tab are for other avatars' objects only.
+    fn worn_by_other(&self, wearer: Uuid, id: Uuid) -> bool {
+        wearer != self.world.agent_id && worn_roots(&self.world, &wearer).contains(&id)
+    }
+
+    /// "Derender", "Derender + blacklist" and "Re-render" of a row: the
+    /// menus' own derender (app/derender.rs) and the blacklist's removal.
+    pub(super) fn profile_worn_action(&mut self, action: crate::ui::profile::worn::Action) {
+        use crate::ui::profile::worn::Action;
+        match action {
+            Action::Derender { object, permanent } => {
+                let ours = worn_roots(&self.world, &self.world.agent_id).contains(&object);
+                if !ours {
+                    self.derender(object, permanent);
+                }
+            }
+            Action::Rerender { object } => self.world.underender(&[object]),
+        }
+    }
+
+    /// The prims "Highlight in world" outlines, as Inspect outlines its
+    /// highlighted row; never a HUD, never something of ours.
+    pub(super) fn profile_worn_outline(&self) -> Vec<usize> {
+        self.profile_ui
+            .worn_highlights()
+            .into_iter()
+            .filter(|(wearer, object)| self.worn_by_other(*wearer, *object))
+            .filter_map(|(_, object)| self.world.objects.index_of_uuid(&object))
+            .flat_map(|root| crate::build::family(&self.world, root))
+            .filter(|i| self.scene.gpu.get(*i).is_some_and(|g| !g.hud))
+            .collect()
+    }
+}
+
+/// The prims of the linkset of root `root`, root first; an avatar sitting
+/// on it is not part of it.
+fn linkset_prims(w: &crate::world::World, root: usize) -> Vec<usize> {
+    crate::build::family(w, root)
+        .into_iter()
+        .filter(|&i| w.objects.get(i).is_some_and(|o| !o.is_avatar()))
+        .collect()
 }
 
 /// The resident who owns a prim as its row names them, and whose profile

@@ -12,6 +12,7 @@
 //! default one is drawn by `aurora`, on the same state, data and actions.
 
 mod aurora;
+pub mod worn;
 
 pub use aurora::banner_image;
 
@@ -83,6 +84,8 @@ pub enum ProfileAction {
     /// (LLFloaterWorldMap::trackLocation, gAgent.teleportViaLocation).
     ShowOnMap(DVec3),
     Teleport(DVec3),
+    /// A row action of the Worn tab (`worn`).
+    Worn(worn::Action),
     /// Inventory dropped on the window: the Share confirmation, then the
     /// give (`give_drop`).
     Give {
@@ -111,6 +114,8 @@ const TAB_PICKS: usize = 2;
 const TAB_CLASSIFIEDS: usize = 3;
 const TAB_RL: usize = 4;
 const TAB_NOTES: usize = 5;
+/// What the avatar wears (`worn`): not a tab of the Legacy Viewer.
+const TAB_WORN: usize = 6;
 
 /// Left column of the labels ("Name:", "Key:", "Info:"...), right-aligned.
 const LABEL_W: f32 = 60.0;
@@ -231,6 +236,8 @@ struct Window {
     demo_classified: Option<bool>,
     /// Open a photo once the demo profile reply arrives.
     demo_photo: Option<(PictureSlot, bool)>,
+    /// The Worn tab's selection and outlined rows.
+    worn: worn::State,
     /// Demo captures: the classic Picks tab clicks New once it shows.
     demo_new_pick: bool,
 }
@@ -282,6 +289,7 @@ impl Window {
             demo_classified: None,
             demo_photo: None,
             demo_new_pick: false,
+            worn: worn::State::default(),
         }
     }
 
@@ -429,9 +437,26 @@ pub struct ProfileUi {
     /// Banners of the Aurora window by profile picture (`banner_image`),
     /// made by the viewer when it decodes the picture.
     pub banners: HashMap<Uuid, egui::TextureHandle>,
+    /// What the avatars of the windows on their Worn tab wear, filled by
+    /// the app (`App::feed_profile_worn`).
+    pub worn: worn::Feed,
 }
 
 impl ProfileUi {
+    /// The avatars whose window shows its Worn tab.
+    pub fn worn_wanted(&self) -> Vec<Uuid> {
+        self.windows.iter().filter(|w| w.open && w.tab == TAB_WORN).map(|w| w.id).collect()
+    }
+
+    /// The worn objects "Highlight in world" outlines, with their wearer.
+    pub fn worn_highlights(&self) -> Vec<(Uuid, Uuid)> {
+        self.windows
+            .iter()
+            .filter(|w| w.open && w.tab == TAB_WORN)
+            .flat_map(|w| w.worn.lit.iter().map(move |lit| (w.id, *lit)))
+            .collect()
+    }
+
     /// Decode the selected photo on the scene workers, just like an inventory
     /// texture preview. UI thumbnails alone cannot supply native pixels.
     pub(crate) fn prepare_photos(&mut self, ctx: &egui::Context, scene: &mut crate::scene::Scene, world: &World) {
@@ -653,7 +678,7 @@ impl ProfileUi {
                     let pos = ctx.content_rect().center() - size * 0.5;
                     widgets::place_floater(ctx, &aurora::window_id(id), pos, size);
                 }
-                tab => w.tab = tab.parse::<usize>().unwrap_or(TAB_SL).min(TAB_NOTES),
+                tab => w.tab = tab.parse::<usize>().unwrap_or(TAB_SL).min(TAB_WORN),
             }
         }
     }
@@ -745,6 +770,7 @@ impl ProfileUi {
                     web,
                     wanted_pics: &mut self.wanted_pics,
                     wanted_images: &mut self.wanted_images,
+                    worn: &self.worn,
                     actions: &mut actions,
                     pick_picture: &mut pick_picture,
                     friend_rights,
@@ -796,6 +822,7 @@ impl ProfileUi {
                         (aurora_i18n::tr!("ui-profile-classifieds"), true),
                         (aurora_i18n::tr!("ui-profile-real-life"), true),
                         (aurora_i18n::tr!("common-notes"), true),
+                        (aurora_i18n::tr!("common-worn"), true),
                     ],
                 );
                 if before == TAB_FEED && w.tab != TAB_FEED {
@@ -835,6 +862,16 @@ impl ProfileUi {
                         &mut pick_picture,
                     ),
                     TAB_NOTES => notes_tab(ui, &c, w, profile, &mut actions),
+                    TAB_WORN => {
+                        let mut asked = Vec::new();
+                        egui::ScrollArea::vertical()
+                            .id_salt(("profile-worn", w.id))
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                worn::show(ui, p, &mut w.worn, self.worn.seen(&w.id), c.own, &name, &mut asked)
+                            });
+                        actions.extend(asked.into_iter().map(ProfileAction::Worn));
+                    }
                     _ => second_life_tab(
                         ui,
                         &c,
