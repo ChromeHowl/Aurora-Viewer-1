@@ -650,6 +650,9 @@ pub enum CtxAction {
     /// Mark ▸ a colour of the radar and mini-map menus
     /// (Nearby.People.SetAvatarMarkColor, Minimap.Mark).
     MarkAvatars(Vec<Uuid>, crate::world::avatar_marks::Rgb),
+    /// Track (Nearby.People.TrackAvatar): the beacon follows a resident of
+    /// the radar.
+    TrackAvatar(Uuid),
     /// Mark ▸ Custom color…: the colour picker opens for these residents.
     MarkCustom {
         ids: Vec<Uuid>,
@@ -1191,6 +1194,17 @@ fn avatar_menu_reporting(
             zoom(ui);
             if menu::item_if(ui, p, "map", aurora_i18n::tr!("common-show-on-map-2"), mappable) {
                 act(CtxAction::ShowOnMap(id));
+            }
+            // Nearby.People.TrackAvatar: the beacon follows them while the
+            // radar sees them
+            if menu::item_if(
+                ui,
+                p,
+                "map-pin-filled",
+                aurora_i18n::tr!("radar-track"),
+                world.avatar_map_position(id).is_some(),
+            ) {
+                act(CtxAction::TrackAvatar(id));
             }
             // menu_fs_radar.xml's MarkAvatar, before Share
             crate::ui::avatar_marks::submenu(ui, p, world, &[id], kind);

@@ -69,6 +69,7 @@ mod describe;
 mod dev_toolbox;
 mod folders;
 mod hover_pick;
+mod people_actions;
 mod texture_picker;
 mod typing_pointer;
 use folders::chat_log_root;
@@ -7998,6 +7999,7 @@ impl App {
         let mut events = self
             .radar
             .sweep(seen, self.world.agent.position, my_region, &gaps, self.settings.draw_distance, now);
+        self.update_radar_track();
         // AURORA_DEMO_PEOPLE: its residents arrived before the session
         if self.demo {
             for (id, ago) in crate::demo::people::arrivals() {

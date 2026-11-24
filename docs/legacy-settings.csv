@@ -531,7 +531,7 @@ FSCreateOctreeLog,Boolean,not-applicable,,a log of the Legacy renderer's octree,
 FSDefaultObjectTexture,String,in-aurora,,"ported (2026-11), `build.new_objects.texture` (an asset id: only a full-permission texture; the permission rules apply)",Default texture that will be applied to rezzed prims. (UUID texture reference)
 FSDestroyGLTexturesImmediately,Boolean,not-applicable,,read nowhere in the Legacy sources,"If enabled, GL textures will be removed from memory immediately when its fetched texture is removed. This might result in textures behind yo"
 FSDestroyGLTexturesThreshold,F32,not-applicable,,read nowhere in the Legacy sources,"Threshold, at what texture memory load level GL textures will be removed from memory if FSDestroyGLTexturesImmediately is set to TRUE."
-FSDisableAvatarTrackerAtCloseIn,Boolean,to-add,low,,Disables the tracking beacon if distance to target avatar is less than 3m.
+FSDisableAvatarTrackerAtCloseIn,Boolean,in-aurora,,field `track_clear_close_in`,Disables the tracking beacon if distance to target avatar is less than 3m.
 FSDisableBeaconAfterTeleport,Boolean,to-add,low,,Disables the beacon of the teleport destination after a teleport.
 FSDisableBlockListAutoOpen,Boolean,to-add,low,,Disables automatic opening of the block list when muting people or objects.
 FSDisableIMChiclets,Boolean,check,,named in settings.rs: Aurora's interface has no chiclets,"If enabled, the Legacy Viewer will not show any group / IM chat chiclets (notifications envelope and sum of IMs will remain on the screen)."
@@ -1643,11 +1643,11 @@ RadarLeaveChannelAlert,Boolean,unreviewed,,field `enter_scripts`,Toggles whether
 RadarLegacyChannelAlertRefreshUUID,String,unreviewed,,named in Aurora: aurora-viewer/src/world/radar.rs:87,"UUID of sound asset that when detected, will request a full radar channel alert update"
 RadarNameFormat,U32,unreviewed,,field `name_format`,"0=DisplayName,1=Username,2=Displayname/Username,3=Username/Displayname"
 RadarReportChatRangeEnter,Boolean,unreviewed,,field `chat_enter`,Display a chat message when avatar enters chat distance
-RadarReportChatRangeLeave,Boolean,unreviewed,,,Display a chat message when avatar leaves chat distance
-RadarReportDrawRangeEnter,Boolean,unreviewed,,field `chat_enter`,Display a chat message when avatar enters draw distance
-RadarReportDrawRangeLeave,Boolean,unreviewed,,,Display a chat message when avatar leaves draw distance
-RadarReportSimRangeEnter,Boolean,unreviewed,,field `chat_enter`,Display a chat message when avatar enteres local region
-RadarReportSimRangeLeave,Boolean,unreviewed,,,Display a chat message when avatar leaves local region
+RadarReportChatRangeLeave,Boolean,unreviewed,,field `chat_leave`,Display a chat message when avatar leaves chat distance
+RadarReportDrawRangeEnter,Boolean,unreviewed,,field `draw_enter`,Display a chat message when avatar enters draw distance
+RadarReportDrawRangeLeave,Boolean,unreviewed,,field `draw_leave`,Display a chat message when avatar leaves draw distance
+RadarReportSimRangeEnter,Boolean,unreviewed,,field `region_enter`,Display a chat message when avatar enteres local region
+RadarReportSimRangeLeave,Boolean,unreviewed,,field `region_leave`,Display a chat message when avatar leaves local region
 RadioLandBrushAction,S32,unreviewed,,field `land_action`,"Last selected land modification operation (0 = flatten, 1 = raise, 2 = lower, 3 = smooth, 4 = roughen, 5 = revert)"
 RecentItemsSortOrder,U32,unreviewed,,,"Specifies sort key for recent inventory items (+0 = name, +1 = date, +2 = folders always by name, +4 = system folders to top)"
 RecentJumpThresholdSecs,F32,unreviewed,,named in Aurora: aurora-viewer/src/agent.rs:197,Seconds after jump input during which landing finish-anim is suppressed to avoid interrupting rapid successive jumps.
