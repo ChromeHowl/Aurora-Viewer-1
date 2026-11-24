@@ -48,10 +48,6 @@ impl PrimInput {
         self.parent.unwrap_or(self.id)
     }
 
-    pub fn name(&self) -> &str {
-        self.props.as_ref().map_or("", |p| p.name.as_str())
-    }
-
     fn sculpt(&self) -> Option<aurora_prim::params::SculptParams> {
         self.volume.sculpt.or(self.extra.sculpt)
     }
@@ -216,7 +212,7 @@ pub fn plan(cx: &Context, prims: Vec<PrimInput>, comments: &HashMap<Uuid, Option
     for root in order {
         let set = sets.remove(&root).unwrap_or_default();
         let allowed = |p: &PrimInput| p.facts(comments).is_some_and(|f| rights::backup_prim(cx, &f));
-        let Some(root_prim) = set.iter().find(|p| p.id == root).filter(|p| allowed(*p)) else {
+        let Some(root_prim) = set.iter().find(|p| p.id == root).filter(|p| allowed(p)) else {
             out.left_out += set.len();
             continue;
         };

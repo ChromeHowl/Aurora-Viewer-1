@@ -175,13 +175,6 @@ pub(super) struct InventoryLoad {
     candidates: Vec<Candidate>,
 }
 
-impl InventoryLoad {
-    #[cfg(test)]
-    pub fn pending(&self) -> bool {
-        self.request.is_some()
-    }
-}
-
 impl Editor {
     /// Asks for the animation of the item `id` for the selected subject, in
     /// the compact window's load mode. The rule is asked again each frame

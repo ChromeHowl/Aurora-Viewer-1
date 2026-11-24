@@ -59,16 +59,6 @@ impl Builder {
         }
     }
 
-    fn todo(&mut self, icon: &'static str, label: &str) {
-        self.0.push(Entry {
-            icon,
-            label: label.into(),
-            enabled: false,
-            checked: None,
-            kind: Kind::Unavailable,
-        });
-    }
-
     fn disabled(&mut self, icon: &'static str, label: &str) {
         self.0.push(Entry {
             icon,

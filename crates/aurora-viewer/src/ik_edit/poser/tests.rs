@@ -3423,8 +3423,7 @@ fn save_animation_holds_every_joint_and_round_trips_the_upload_reader() {
     let bytes = total::encode(&animation).unwrap();
     let decoded = aurora_assets::anim::parse_animation_upload(&bytes).unwrap();
     let driven: Vec<&str> = decoded.joints.iter().map(|j| j.joint_name.as_str()).collect();
-    for bone in 0..rig.len() {
-        let name = &rig.canonical_names[bone];
+    for name in &rig.canonical_names {
         if name.starts_with('m') {
             assert!(driven.contains(&name.as_str()), "{name} has a key, edited or not");
         }

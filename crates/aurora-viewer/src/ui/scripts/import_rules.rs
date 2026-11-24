@@ -72,7 +72,6 @@ pub enum Skip {
     NotUtf8,
     Binary,
     Empty,
-    TooMany,
     TooMuch,
     NoSlua,
 }
@@ -85,7 +84,6 @@ impl Skip {
             Skip::NotUtf8 => aurora_i18n::tr!("script-import-skip-utf8").into(),
             Skip::Binary => aurora_i18n::tr!("script-import-skip-binary").into(),
             Skip::Empty => aurora_i18n::tr!("script-import-skip-empty").into(),
-            Skip::TooMany => aurora_i18n::tr!("script-import-skip-too-many").into(),
             Skip::TooMuch => aurora_i18n::tr!("script-import-skip-too-much").into(),
             Skip::NoSlua => aurora_i18n::tr!("script-import-skip-no-slua").into(),
         }

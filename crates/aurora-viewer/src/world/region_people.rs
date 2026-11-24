@@ -25,7 +25,7 @@
 //! named regions only, `apply_items` adds no region).
 //!
 //! The world map's own labels do not go through the lanes: the map asks the
-//! regions it shows itself, as the Legacy Viewer's (`World::people_on_map`).
+//! regions it shows itself, as the Legacy Viewer's.
 
 use super::region_tracker::status_at;
 use super::worldmap::WorldMap;
@@ -313,23 +313,6 @@ impl super::World {
         let grid = ((x / 256.0) as u32, (y / 256.0) as u32);
         Some(self.region_people.by_grid(&self.map, grid, self.own_grid(), Instant::now()))
     }
-
-    /// The figure of a region the world map shows, read without joining
-    /// the lanes: the map asks the regions it shows itself, each once a
-    /// minute, as the Legacy Viewer's (LLWorldMapView::draw calling
-    /// LLSimInfo::updateAgentCount), so its many regions never take the
-    /// turn of a list's rows. The same rule as everywhere (the Region
-    /// Tracker's), and nothing under RLVa @showloc.
-    pub fn people_on_map(&self, key: (u32, u32)) -> Option<People> {
-        if !self.show_region_people || self.rlva.has("showloc") {
-            return None;
-        }
-        Some(
-            status_at(&self.map, Some(key), self.own_grid())
-                .agents
-                .map_or(People::Waiting, People::Count),
-        )
-    }
 }
 
 #[cfg(test)]
@@ -608,26 +591,6 @@ mod tests {
         people.by_grid(&map, (300, 400), None, secs(t0, 12.0));
         people.pump(&mut map, secs(t0, 12.0));
         assert!(matches!(&map.take_commands()[..], [NetCommand::MapItemRequest { .. }]));
-    }
-
-    #[test]
-    fn the_world_map_reads_the_figure_without_taking_a_lane() {
-        let mut w = crate::world::World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
-        w.map.sims.insert((10, 20), sim("Ahern"));
-        w.map.sims.insert((11, 20), sim("Morris"));
-        w.map.agents.insert((10, 20), vec![(2560, 5120, 4)]);
-        assert_eq!(w.people_on_map((10, 20)), Some(People::Count(4)));
-        assert_eq!(w.people_on_map((11, 20)), Some(People::Waiting));
-        assert_eq!(
-            w.people_on_map((10, 20)).map(People::figure),
-            w.people_in_region("Ahern").map(People::figure)
-        );
-        w.take_map_commands();
-        // the map's reads queue nothing of the lanes
-        for _ in 0..10 {
-            w.people_on_map((11, 20));
-        }
-        assert!(w.take_map_commands().is_empty());
     }
 
     #[test]

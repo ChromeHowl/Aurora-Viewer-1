@@ -4464,6 +4464,7 @@ fn the_scene_hands_the_editor_the_pose_under_its_edits() {
     assert!(pose.edit_base.is_none(), "no base outside an edit session");
 }
 
+#[test]
 fn spline_interpolation_goes_through_the_keys_and_survives_a_project_round_trip() {
     let lib = AvatarLibrary::load();
     let rig = &lib.rig;
