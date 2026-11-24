@@ -17,6 +17,7 @@ pub mod graphics;
 pub mod inventory;
 pub mod joystick;
 pub mod layout;
+pub mod legacy_prefs;
 pub mod media;
 pub mod network;
 pub mod privacy;
@@ -27,6 +28,7 @@ pub mod shortcuts;
 pub mod sound;
 pub mod spelling;
 pub mod system;
+pub mod text_tuning;
 pub mod vr;
 
 use super::Page;

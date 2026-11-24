@@ -126,6 +126,14 @@ pub enum BarAction {
     ToggleSlowMotionAnimations,
     /// Advanced › Release Keys (Tools.ReleaseKeys).
     ReleaseKeys,
+    /// Advanced › Set Window Size (floater_window_size.xml): the window's
+    /// inside to this many pixels.
+    WindowSize(u32, u32),
+    /// Advanced › Set Window Size › Custom size…: opens the width and
+    /// height window.
+    WindowSizeCustom,
+    /// Advanced › Clear Group Cache (LLGroupMgr::debugClearAllGroups).
+    ClearGroupCache,
     /// Advanced › Request Admin Status (true) / Leave Admin Status (false).
     AdminStatus(bool),
     Admin(AdminAction),
@@ -257,6 +265,25 @@ pub enum BarAction {
     LindenHome,
 }
 
+/// floater_window_size.xml's sizes, with their kind (not translated there
+/// either).
+pub const WINDOW_SIZES: &[(u32, u32, &str)] = &[
+    (1000, 700, ""),
+    (1024, 768, "4:3 XGA"),
+    (1280, 720, "16:9 HD"),
+    (1280, 800, "16:10 WXGA"),
+    (1360, 768, "16:9 WXGA"),
+    (1366, 768, "16:9 WXGA"),
+    (1440, 900, "16:10 WXGA+"),
+    (1536, 864, "16:9"),
+    (1600, 900, "16:9 HD+"),
+    (1680, 1050, "16:10 WSXGA+"),
+    (1920, 1080, "16:9 FHD"),
+    (1920, 1200, "16:10 WUXGA"),
+    (2560, 1440, "16:9 QHD"),
+    (3840, 2160, "16:9 4K UHD"),
+];
+
 /// How the islands of Aurora's top bar are set (Preferences › Interface).
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct IslandsLook {
@@ -272,6 +299,9 @@ pub struct StatusInfo<'a> {
     pub show_huds: bool,
     pub hud_zoom: f32,
     pub region: &'a str,
+    /// The simulator's short version after the region's name
+    /// (FSStatusbarShowSimulatorVersion), empty when off or unknown.
+    pub sim_version: &'a str,
     /// Parcel the agent stands on (may be empty).
     pub parcel: &'a str,
     /// Destinations of the back / forward arrows (None = disabled).
@@ -1709,6 +1739,26 @@ fn main_menus(ui: &mut egui::Ui, p: &Palette, panels: &mut Panels, st: &StatusIn
                     }
                 },
             );
+            // Advanced › Set Window Size (floater_window_size.xml's sizes)
+            menu::submenu(ui, p, "app-window-filled", aurora_i18n::tr!("b9-window-size"), true, |ui| {
+                for &(w, h, kind) in WINDOW_SIZES {
+                    let label = if kind.is_empty() {
+                        format!("{w} × {h}")
+                    } else {
+                        format!("{w} × {h} ({kind})")
+                    };
+                    if menu::item(ui, p, "aspect-ratio-filled", &label) {
+                        *action = BarAction::WindowSize(w, h);
+                    }
+                }
+                if menu::item(ui, p, "edit-filled", aurora_i18n::tr!("ui-bars-window-size-custom")) {
+                    *action = BarAction::WindowSizeCustom;
+                }
+            });
+            // Advanced › Clear Group Cache (menu_viewer.xml)
+            if menu::item(ui, p, "users-group", aurora_i18n::tr!("b9-clear-group-cache")) {
+                *action = BarAction::ClearGroupCache;
+            }
             // Advanced › Release Keys (Tools.ReleaseKeys), greyed while no
             // script holds a control (Tools.EnableReleaseKeys); no shortcut
             let release = aurora_i18n::tr!("ui-bars-release-keys");
@@ -2663,10 +2713,13 @@ pub fn top_bars(
                                 loc.push_str(st.parcel);
                                 loc.push_str(", ");
                             }
-                            loc.push_str(&format!(
-                                "{} ({:.0}, {:.0}, {:.0})",
-                                st.region, st.position.x, st.position.y, st.position.z
-                            ));
+                            loc.push_str(st.region);
+                            // the Legacy Viewer's "region - version - (x, y, z)"
+                            if !st.sim_version.is_empty() {
+                                loc.push_str(" - ");
+                                loc.push_str(st.sim_version);
+                            }
+                            loc.push_str(&format!(" ({:.0}, {:.0}, {:.0})", st.position.x, st.position.y, st.position.z));
                             // LLAgentUI::buildLocationString (llagentui.cpp): "(Hidden
                             // parcel), (Hidden region)" under @showloc; the field still
                             // opens on the SLURL, hidden in its turn

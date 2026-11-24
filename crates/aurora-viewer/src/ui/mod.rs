@@ -156,6 +156,7 @@ pub mod stand_fly;
 pub mod stream_title;
 pub mod surface_opacity;
 pub(crate) mod text_menu;
+pub mod text_tuning;
 pub mod texture_library;
 pub mod texture_picker;
 #[cfg(test)]
@@ -169,6 +170,7 @@ pub mod wearable;
 pub mod weather_window;
 pub mod web_browser;
 pub mod web_view;
+pub mod window_size;
 pub mod widgets;
 
 #[cfg(test)]
