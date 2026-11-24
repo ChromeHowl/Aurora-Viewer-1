@@ -7,7 +7,7 @@
 
 use super::SearchAction;
 use super::aurora::{linden, pill, sale_pill, started_pill};
-use super::details::{Btn, agent_link, field, muted, pane, rating, text_box, text_field};
+use super::details::{Btn, agent_link, field, muted, pane, people, rating, text_box, text_field};
 use crate::theme::Palette;
 use crate::ui::context::{self, CtxAction};
 use crate::ui::place_details::{self, Ctx};
@@ -367,6 +367,7 @@ fn place(ui: &mut egui::Ui, c: &mut Ctx, parcel: Uuid, tab: Tab, row: Option<&Ro
         let region = place_details::region_name_pos(&d.sim_name, place.region_pos, d.global, &c.world.map);
         let maturity = place_details::maturity(d.flags);
         head(ui, p, &d.name, None, Some(maturity), &region);
+        people(ui, p, c.world, &d.sim_name);
         stats(
             ui,
             p,
@@ -444,6 +445,7 @@ fn classified(ui: &mut egui::Ui, c: &mut Ctx, id: Uuid, row_name: &str, actions:
             aurora_i18n::tr!("ui-profile-location-2"),
             &aurora_net::profile::location_text(&[&info.parcel_name, &info.sim_name], info.pos_global),
         );
+        people(ui, p, world, &info.sim_name);
         field(ui, p, aurora_i18n::tr!("search-classified-creator"), |ui| {
             agent_link(ui, c, info.creator)
         });
@@ -516,6 +518,7 @@ fn event(ui: &mut egui::Ui, c: &mut Ctx, id: u32, row_name: &str, row: Option<&R
                 context::request(ui.ctx(), CtxAction::ShowPlaceInfo(e.sim_name.clone(), pos));
             }
         });
+        people(ui, p, c.world, &e.sim_name);
         let fee = match e.cover {
             Some(amount) => format!("{}{amount}", aurora_i18n::currency()),
             None => aurora_i18n::tr!("search-none-fee").to_owned(),

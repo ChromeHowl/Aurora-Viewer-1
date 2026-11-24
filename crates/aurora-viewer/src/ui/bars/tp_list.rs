@@ -104,10 +104,25 @@ fn body(ui: &mut egui::Ui, p: &Palette, st: &StatusInfo, released_held: bool) ->
                 let time = super::clock::time_of(st.system_island, e.at);
                 let here = i == session.current;
                 let row = menu::current_row(ui, p, icon, &title, &time, here);
+                // the people of the place's region, for the row under the
+                // pointer only
+                let tip = |text: &str| {
+                    if row.hovered() {
+                        crate::ui::region_people::with_line(ui.ctx(), &e.region, text)
+                    } else {
+                        text.to_owned()
+                    }
+                };
                 if here {
-                    row.on_hover_text(aurora_i18n::tr!("ui-bars-tp-list-here"));
-                } else if row.clicked() || (release && ui.rect_contains_pointer(row.rect)) {
-                    action = Some(BarAction::TeleportHistoryItem(i));
+                    row.clone().on_hover_text(tip(aurora_i18n::tr!("ui-bars-tp-list-here")));
+                } else {
+                    let tip = tip("");
+                    if !tip.is_empty() {
+                        row.clone().on_hover_text(tip);
+                    }
+                    if row.clicked() || (release && ui.rect_contains_pointer(row.rect)) {
+                        action = Some(BarAction::TeleportHistoryItem(i));
+                    }
                 }
             }
         });
