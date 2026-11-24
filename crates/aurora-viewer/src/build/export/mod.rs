@@ -11,14 +11,19 @@
 //! - `model.rs`: the faces gathered per prim, with materials and options.
 //! - `collada.rs`, `obj.rs`: the file formats.
 //! - `textures.rs`: the texture files beside the model.
+//! - `backup.rs`, `oxp.rs`, `j2c.rs`: Backup (.oxp), the linkset kept for its
+//!   creator (FSFloaterObjectExport), with the JPEG 2000 data of its textures.
 //!
 //! The window is `build/ui/export.rs`, the steps on the app's side
 //! `app/object_export.rs`.
 
+pub mod backup;
 pub mod collada;
 pub mod gather;
+pub mod j2c;
 pub mod model;
 pub mod obj;
+pub mod oxp;
 pub mod rights;
 pub mod textures;
 
@@ -32,6 +37,8 @@ pub enum Format {
     #[default]
     Collada,
     Obj,
+    /// The Legacy Viewer's linkset backup (`.oxp`), for its creator only.
+    Backup,
 }
 
 impl Format {
@@ -39,6 +46,7 @@ impl Format {
         match self {
             Format::Collada => "dae",
             Format::Obj => "obj",
+            Format::Backup => "oxp",
         }
     }
 }

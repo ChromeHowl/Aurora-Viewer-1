@@ -4,7 +4,8 @@
 //! 2.1) in the Aurora skin. The object's name and how many of its prims and
 //! textures may be written, the options, the textures that will be saved,
 //! then Save as. The format (Collada or OBJ) is chosen here too: the Legacy
-//! Viewer has Collada only. The work is `app/object_export.rs`.
+//! Viewer has Collada only; Backup (.oxp) is the Legacy Viewer's linkset
+//! backup, for its creator, with its textures inside the file. The work is `app/object_export.rs`.
 
 use super::common::{self, combo, label, section};
 use crate::build::export::{Format, ImageFormat, Settings};
@@ -109,7 +110,7 @@ impl ExportWindow {
             .show(ui, |ui| {
                 ui.add_enabled_ui(!busy, |ui| {
                     section(ui, p, aurora_i18n::tr!("object-export-format"));
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         widgets::radio_value(
                             ui,
                             p,
@@ -119,6 +120,14 @@ impl ExportWindow {
                         );
                         ui.add_space(12.0);
                         widgets::radio_value(ui, p, &mut settings.format, Format::Obj, aurora_i18n::tr!("object-export-obj"));
+                        ui.add_space(12.0);
+                        widgets::radio_value(
+                            ui,
+                            p,
+                            &mut settings.format,
+                            Format::Backup,
+                            aurora_i18n::tr!("object-export-backup"),
+                        );
                     });
                     ui.add_space(8.0);
                     section(ui, p, aurora_i18n::tr!("object-export-object-info"));
@@ -134,43 +143,50 @@ impl ExportWindow {
                         ui.add(egui::Label::new(RichText::new(aurora_i18n::tr!("object-export-nothing")).size(11.0).color(p.muted)).wrap());
                     }
                     ui.add_space(8.0);
-                    section(ui, p, aurora_i18n::tr!("object-export-options"));
+                    let backup = settings.format == Format::Backup;
                     let textures = !s.textures.is_empty();
-                    ui.add_enabled_ui(textures, |ui| {
-                        widgets::checkbox(ui, p, &mut settings.textures, aurora_i18n::tr!("object-export-save-textures"));
-                    });
-                    widgets::checkbox(ui, p, &mut settings.consolidate, aurora_i18n::tr!("object-export-consolidate"));
-                    widgets::checkbox(
-                        ui,
-                        p,
-                        &mut settings.skip_transparent,
-                        aurora_i18n::tr!("object-export-skip-transparent"),
-                    );
-                    widgets::checkbox(
-                        ui,
-                        p,
-                        &mut settings.texture_params,
-                        aurora_i18n::tr!("object-export-texture-params"),
-                    );
-                    ui.add_enabled_ui(settings.format == Format::Collada, |ui| {
-                        widgets::checkbox(ui, p, &mut settings.single_uv_map, aurora_i18n::tr!("object-export-single-uv"))
-                            .on_hover_text(aurora_i18n::tr!("object-export-single-uv-tip"));
-                    });
-                    ui.horizontal(|ui| {
-                        label(ui, p, aurora_i18n::tr!("object-export-texture-format"));
-                        let formats: Vec<_> = ImageFormat::ALL.iter().map(|f| (f.label(), *f)).collect();
-                        if let Some(f) = combo(
+                    if backup {
+                        // the file holds the textures' data and the prims' own
+                        // parameters: no model options
+                        common::small(ui, p, aurora_i18n::tr!("object-export-backup-note"));
+                    } else {
+                        section(ui, p, aurora_i18n::tr!("object-export-options"));
+                        ui.add_enabled_ui(textures, |ui| {
+                            widgets::checkbox(ui, p, &mut settings.textures, aurora_i18n::tr!("object-export-save-textures"));
+                        });
+                        widgets::checkbox(ui, p, &mut settings.consolidate, aurora_i18n::tr!("object-export-consolidate"));
+                        widgets::checkbox(
                             ui,
-                            "object_export_image_format",
-                            Some(settings.texture_format),
-                            &formats,
-                            120.0,
-                            textures && settings.textures,
-                        ) {
-                            settings.texture_format = f;
+                            p,
+                            &mut settings.skip_transparent,
+                            aurora_i18n::tr!("object-export-skip-transparent"),
+                        );
+                        widgets::checkbox(
+                            ui,
+                            p,
+                            &mut settings.texture_params,
+                            aurora_i18n::tr!("object-export-texture-params"),
+                        );
+                        ui.add_enabled_ui(settings.format == Format::Collada, |ui| {
+                            widgets::checkbox(ui, p, &mut settings.single_uv_map, aurora_i18n::tr!("object-export-single-uv"))
+                                .on_hover_text(aurora_i18n::tr!("object-export-single-uv-tip"));
+                        });
+                        ui.horizontal(|ui| {
+                            label(ui, p, aurora_i18n::tr!("object-export-texture-format"));
+                            let formats: Vec<_> = ImageFormat::ALL.iter().map(|f| (f.label(), *f)).collect();
+                            if let Some(f) = combo(
+                                ui,
+                                "object_export_image_format",
+                                Some(settings.texture_format),
+                                &formats,
+                                120.0,
+                                textures && settings.textures,
+                            ) {
+                                settings.texture_format = f;
+                            }
+                        });
                         }
-                    });
-                    if textures && settings.textures {
+                    if textures && (settings.textures || backup) {
                         ui.add_space(8.0);
                         section(ui, p, aurora_i18n::tr!("object-export-texture-list"));
                         self.previews(ui, p, images);

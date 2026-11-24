@@ -21,7 +21,7 @@
 //!   the file takes that item's name. The blank texture is never written.
 
 use crate::world::inventory::Inventory;
-use crate::world::inventory::actions::{ExportGrid, asset_export_allowed};
+use crate::world::inventory::actions::{ExportGrid, FULL, asset_export_allowed};
 use aurora_net::inventory::InvItem;
 use glam::Vec3;
 use std::collections::{HashMap, HashSet};
@@ -136,6 +136,49 @@ pub fn prim(cx: &Context, p: &PrimFacts) -> bool {
             (grid == ExportGrid::SecondLife && *uploader == Some(agent)) || cx.some_item_allows(*map)
         }
     }
+}
+
+/// Whether the prim may go into a linkset backup (`.oxp`), for its creator
+/// only: FSExportPermsCheck::canExportNode with `dae` false
+/// (indra/newview/fsexportperms.cpp, Cinder Biscuits, LGPL 2.1), applied on
+/// every grid as Second Life applies it. The prim must be owned by the agent
+/// (never by a group) and created by the agent, who must also hold copy,
+/// modify and transfer on it. A mesh is never written to a backup, and a
+/// sculpt needs a map the agent uploaded or holds an item of the agent's
+/// creation for. Stricter than the Legacy Viewer: the owner's full
+/// permissions are required, and neither the megaprim case nor OpenSim's
+/// Export bit is used.
+pub fn backup_prim(cx: &Context, p: &PrimFacts) -> bool {
+    let agent = cx.agent;
+    if agent.is_nil() || p.owner != agent || p.group_owned || p.creator != agent {
+        return false;
+    }
+    if p.owner_mask & FULL != FULL {
+        return false;
+    }
+    match &p.shape {
+        Shape::Prim => true,
+        Shape::Mesh { .. } => false,
+        Shape::Sculpt { map, uploader } => backup_asset_allowed(cx, *map, *uploader),
+    }
+}
+
+/// Whether an asset (a texture, a sculpt map) may keep its id in a backup:
+/// FSExportPermsCheck::canExportAsset for Second Life, on every grid. The
+/// agent made it (the J2C comment's uploader) or holds an item of the
+/// agent's own creation that carries it.
+pub fn backup_asset_allowed(cx: &Context, id: Uuid, uploader: Option<Uuid>) -> bool {
+    !id.is_nil() && !cx.agent.is_nil() && (uploader == Some(cx.agent) || backup_item(cx, id).is_some())
+}
+
+/// The inventory item that lets a backup carry the asset `id`: the first
+/// one the agent created (by name then id), whose name and description go
+/// into the file next to the texture's data.
+pub fn backup_item<'a>(cx: &Context<'a>, id: Uuid) -> Option<&'a InvItem> {
+    cx.items_of(id)
+        .iter()
+        .copied()
+        .find(|i| asset_export_allowed(i, cx.agent, ExportGrid::SecondLife))
 }
 
 /// The name a texture is written under, when it may be: the first item
@@ -506,6 +549,60 @@ mod tests {
             item(1, "apple", tex, ME, ME, FULL, 0, false),
         ]);
         assert_eq!(texture(&cx(SL, &inv), tex, None).as_deref(), Some("apple"));
+    }
+
+    #[test]
+    fn a_backup_is_for_the_creator_on_every_grid() {
+        let inv = inventory(vec![]);
+        let backup = |grid, p: PrimFacts| backup_prim(&cx(grid, &inv), &p);
+        for grid in [SL, OS_EXPORT, OS_DENIED] {
+            assert!(backup(grid, facts(ME, ME, Shape::Prim)), "ours and made by us");
+            assert!(!backup(grid, facts(OTHER, ME, Shape::Prim)), "bought");
+            assert!(!backup(grid, facts(ME, OTHER, Shape::Prim)), "made by us, owned by someone else");
+            let mut group = facts(ME, ME, Shape::Prim);
+            group.group_owned = true;
+            assert!(!backup(grid, group), "deeded to a group");
+            let mut no_transfer = facts(ME, ME, Shape::Prim);
+            no_transfer.owner_mask = FULL & !TRANSFER;
+            assert!(!backup(grid, no_transfer), "no transfer");
+            let mut no_copy = facts(ME, ME, Shape::Prim);
+            no_copy.owner_mask = FULL & !COPY;
+            assert!(!backup(grid, no_copy), "no copy");
+            let mut no_modify = facts(ME, ME, Shape::Prim);
+            no_modify.owner_mask = FULL & !MODIFY;
+            assert!(!backup(grid, no_modify), "no modify");
+            // neither the Export bit nor a megaprim opens a backup
+            let mut export_bit = facts(OTHER, OTHER, Shape::Prim);
+            export_bit.owner_mask = FULL | EXPORT;
+            export_bit.everyone_mask = EXPORT;
+            assert!(!backup(grid, export_bit));
+            let mut mega = facts(MEGAPRIM_CREATOR, OTHER, Shape::Prim);
+            mega.scale = Vec3::splat(1000.0);
+            assert!(!backup(grid, mega));
+            assert!(!backup(grid, facts(ME, ME, Shape::Mesh { creator: Some(ME) })), "a mesh is never in a backup");
+        }
+        let nobody = Context::new(Uuid::nil(), SL, 64.0, &inv, &HashSet::new());
+        assert!(!backup_prim(&nobody, &facts(Uuid::nil(), Uuid::nil(), Shape::Prim)));
+    }
+
+    #[test]
+    fn a_backup_carries_a_sculpt_map_only_when_the_creator_made_it() {
+        let inv = inventory(vec![
+            item(1, "mine", MAP, ME, ME, FULL, 0, false),
+            item(2, "bought", Uuid::from_u128(0x5D), ME, OTHER, FULL | EXPORT, 0, false),
+            item(3, "library", Uuid::from_u128(0x5E), LIBRARY, LIBRARY, FULL | EXPORT, COPY, false),
+        ]);
+        for grid in [SL, OS_EXPORT, OS_DENIED] {
+            let cx = cx(grid, &inv);
+            let sculpt = |map, uploader| facts(ME, ME, Shape::Sculpt { map, uploader });
+            assert!(backup_prim(&cx, &sculpt(MAP, None)));
+            assert!(!backup_prim(&cx, &sculpt(Uuid::from_u128(0x5D), None)), "an item made by someone else");
+            assert!(!backup_prim(&cx, &sculpt(Uuid::from_u128(0x5E), None)), "a Library item");
+            assert!(backup_prim(&cx, &sculpt(Uuid::from_u128(0x77), Some(ME))), "its comment names us");
+            assert!(!backup_prim(&cx, &sculpt(Uuid::from_u128(0x77), Some(OTHER))));
+            assert_eq!(backup_item(&cx, MAP).map(|i| i.name.as_str()), Some("mine"));
+            assert!(!backup_asset_allowed(&cx, Uuid::nil(), Some(ME)));
+        }
     }
 
     #[test]
