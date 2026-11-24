@@ -167,32 +167,40 @@ impl Theme {
         crate::colorblind::palette(base, vision)
     }
 
-    /// The colors as the skin writes them.
+    /// The colors as the skin writes them, or the chosen theme's
+    /// (`crate::theme_presets`) when the skin's own are Aurora's.
     pub fn skin_palette(&self) -> Palette {
+        self.skin_palette_with(crate::theme_presets::current())
+    }
+
+    /// `skin_palette` for a given preset instead of the chosen one.
+    pub fn skin_palette_with(&self, preset: &crate::theme_presets::Preset) -> Palette {
+        let skin = crate::theme_presets::resolve_with(preset, self);
+        let this = skin.as_ref();
         Palette {
-            violet: hex(&self.violet),
-            indigo: hex(&self.indigo),
-            teal: hex(&self.teal),
-            navy: hex(&self.navy),
-            panel: hex(&self.panel),
-            bar: hex(&self.bar),
-            field: hex(&self.field),
-            raised: hex(&self.raised),
-            violet_light: hex(&self.violet_light),
-            violet_pale: hex(&self.violet_pale),
-            ink: hex(&self.ink),
-            muted: hex(&self.muted),
-            muted_dim: hex(&self.muted_dim),
-            amber: hex(&self.amber),
-            rose: hex(&self.rose),
-            danger: hex(&self.danger),
-            success: hex(&self.success),
-            warn: hex(&self.warn),
-            danger_dim: hex(&self.danger_dim),
-            indigo_light: hex(&self.indigo_light),
-            axis_z: hex(&self.indigo_light),
-            on_accent: hex(&self.on_accent),
-            panel_alpha: self.panel_alpha,
+            violet: hex(&this.violet),
+            indigo: hex(&this.indigo),
+            teal: hex(&this.teal),
+            navy: hex(&this.navy),
+            panel: hex(&this.panel),
+            bar: hex(&this.bar),
+            field: hex(&this.field),
+            raised: hex(&this.raised),
+            violet_light: hex(&this.violet_light),
+            violet_pale: hex(&this.violet_pale),
+            ink: hex(&this.ink),
+            muted: hex(&this.muted),
+            muted_dim: hex(&this.muted_dim),
+            amber: hex(&this.amber),
+            rose: hex(&this.rose),
+            danger: hex(&this.danger),
+            success: hex(&this.success),
+            warn: hex(&this.warn),
+            danger_dim: hex(&this.danger_dim),
+            indigo_light: hex(&this.indigo_light),
+            axis_z: hex(&this.indigo_light),
+            on_accent: hex(&this.on_accent),
+            panel_alpha: this.panel_alpha,
             high_contrast: false,
         }
     }
@@ -207,7 +215,11 @@ impl Theme {
         // blurrier); sub-pixel binning on, which keeps the letter spacing
         // even at 11–12 points. The hinting target changes nothing for Inter
         // and Roboto, which ship their own TrueType hinting.
-        let mut v = Visuals::dark();
+        // a light panel (the Light theme, or a light surface picked in the
+        // preferences) starts from egui's light visuals, so what the palette
+        // does not name (the caret, widget states it leaves alone) reads on it
+        let light = crate::interface_colors::contrast(p.panel, Color32::WHITE) < crate::interface_colors::contrast(p.panel, Color32::BLACK);
+        let mut v = if light { Visuals::light() } else { Visuals::dark() };
         let br = CornerRadius::same(self.button_radius);
         let panel = Color32::from_rgba_unmultiplied(p.panel.r(), p.panel.g(), p.panel.b(), p.panel_alpha);
         v.override_text_color = Some(p.ink);

@@ -87,6 +87,7 @@ mod env_day_editor;
 mod env_editor;
 mod external_links;
 mod follow;
+mod follow_system;
 mod game_control;
 mod gestures;
 mod give_demo;
@@ -1579,15 +1580,30 @@ fn wanted_disable_glass(settings: &Settings) -> bool {
     settings.disable_glass
 }
 
-/// The interface colours: the preferences', or in demo mode
-/// `AURORA_DEMO_COLORS` (a capture's, never saved).
+/// The interface colours: the preferences', with the system's when they
+/// are followed, or in demo mode `AURORA_DEMO_COLORS` (a capture's, never
+/// saved).
 fn wanted_interface_colors(settings: &Settings) -> crate::interface_colors::InterfaceColors {
     if std::env::var_os("AURORA_DEMO").is_some()
         && let Some(colors) = crate::interface_colors::demo_override()
     {
         return colors;
     }
+    if crate::system_theme::following(settings) {
+        return crate::system_theme::colors(crate::system_theme::current(), &settings.interface_colors);
+    }
     settings.interface_colors.clone()
+}
+
+/// The colour theme: the preferences', or in demo mode `AURORA_DEMO_THEME`
+/// (a capture's, never saved).
+fn wanted_interface_theme(settings: &Settings) -> String {
+    if std::env::var_os("AURORA_DEMO").is_some()
+        && let Some(id) = crate::theme_presets::demo_override()
+    {
+        return id.to_owned();
+    }
+    settings.interface_theme.clone()
 }
 
 /// Volumetric clouds for a launch: `AURORA_CLOUDS=aurora|legacy` chooses,
@@ -1893,7 +1909,11 @@ impl App {
         crate::colorblind::set(wanted_vision(&settings));
         crate::high_contrast::set(wanted_high_contrast(&settings));
         crate::disable_glass::set(wanted_disable_glass(&settings));
+        if crate::system_theme::following(&settings) {
+            crate::system_theme::start(true);
+        }
         crate::interface_colors::set(wanted_interface_colors(&settings));
+        crate::theme_presets::set(&wanted_interface_theme(&settings));
         ui::surface_opacity::set(wanted_opacity(&settings));
         let skin = Skin::load(&egui_ctx, "aurora", text_scale(&settings));
         apply_chat_text_scale(&egui_ctx, &settings);
@@ -11051,6 +11071,7 @@ impl App {
             self.cursors.set_palette(&self.palette);
             self.egui_ctx.set_zoom_factor(ui_scale(&self.settings));
         }
+        self.follow_system_theme();
 
         self.frame_profile.lap(Lap::Start);
         // ---- network events (time-boxed)
@@ -13907,15 +13928,18 @@ impl App {
             let high_contrast = wanted_high_contrast(&self.settings);
             let disable_glass = wanted_disable_glass(&self.settings);
             let interface_colors = wanted_interface_colors(&self.settings);
+            let interface_theme = wanted_interface_theme(&self.settings);
             if vision != crate::colorblind::current()
                 || high_contrast != crate::high_contrast::current()
                 || disable_glass != crate::disable_glass::current()
                 || interface_colors != crate::interface_colors::current()
+                || interface_theme != crate::theme_presets::current().id
             {
                 crate::colorblind::set(vision);
                 crate::high_contrast::set(high_contrast);
                 crate::disable_glass::set(disable_glass);
                 crate::interface_colors::set(interface_colors);
+                crate::theme_presets::set(&interface_theme);
                 self.palette = self.skin.theme.palette();
                 self.cursors.set_palette(&self.palette);
             }
@@ -25550,6 +25574,7 @@ impl ApplicationHandler for App {
                     self.build.reset_selection_wheel();
                 }
             }
+            WindowEvent::ThemeChanged(theme) => crate::system_theme::window_theme(Some(*theme)),
             WindowEvent::Occluded(hidden) => {
                 self.occluded = *hidden;
             }
