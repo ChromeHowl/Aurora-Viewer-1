@@ -234,12 +234,24 @@ the previous file whole.
 Opening `.anim`, `.bvh` or `.auroraanim` files reads at most 64 MiB before
 decoding, matching the parser limits.
 
+## Autosaved draft
+
+While the animation editor is open and the draft has authored keys, it is
+written every 5 seconds, when it changed, to the account's
+`animation_drafts/recovery.auroraanim` (the project format, so priorities,
+interpolation and curves are kept). After a crash, File > Open the autosaved
+draft opens it as a new draft. The first write of a session moves an unopened
+recovery file to `recovery.previous.auroraanim` (kept, not replaced by the new
+draft). Off in the demo.
+
 ## Save or import
 
 **Save .anim** opens a native file dialog and writes the validated file.
 Stepped tracks use adjacent native time buckets at each change so exported
 playback holds the pose and changes at the same point as the editor preview.
-Smooth and Bézier tracks are sampled at up to 60 Hz, independently of the
+Spline tracks (a Catmull-Rom curve through the keys and their neighbours,
+rotations along the shortest arc) are written the same way as Smooth and
+Bézier ones. These tracks are sampled at up to 60 Hz, independently of the
 timeline FPS, while authored key times are retained. The exporter reduces its
 extra samples only when needed to fit the native per-joint key limit. This
 keeps low-FPS timelines from flattening eased motion in the exported animation.
