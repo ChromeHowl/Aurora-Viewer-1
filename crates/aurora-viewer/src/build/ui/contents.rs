@@ -115,6 +115,18 @@ pub fn show(ui: &mut egui::Ui, p: &Palette, tool: &mut BuildTool, world: &mut Wo
         {
             tool.new_notecard(world, idx);
         }
+        // Aurora addition: several script files of the disk at once, enabled
+        // like "New script" (the app asks the same drop rules before it makes
+        // anything). Both layouts share this row.
+        if ui
+            .add_enabled(
+                editable && single,
+                egui::Button::new(RichText::new(aurora_i18n::tr!("script-import-menu")).size(font_size)),
+            )
+            .clicked()
+        {
+            tool.ui.requests.push(super::Request::ImportScripts { object: object_id });
+        }
         if ui
             .button(RichText::new(aurora_i18n::tr!("common-rights")).size(font_size))
             .on_hover_text(aurora_i18n::tr!("build-ui-contents-change-content-permissions"))
